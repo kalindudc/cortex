@@ -8,3 +8,7 @@ bin/
 
 # transient body buffers used by edit/show flows
 .cortex-body-*.tmp
+
+# UI bundler output (produced by `pnpm run ui:build`)
+out/
+*.tsbuildinfo

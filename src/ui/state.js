@@ -10,7 +10,7 @@
 // helpers are densely cross-referenced, and splitting further would force
 // every component import to grow without reducing real coupling.
 
-import { signal, computed, effect } from "https://esm.sh/@preact/signals@1.3?deps=preact@10.24";
+import { signal, computed, effect } from "@preact/signals";
 
 // ---------- signals ----------
 export const tasks         = signal([]);

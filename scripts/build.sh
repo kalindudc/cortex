@@ -17,6 +17,10 @@ set -euo pipefail
 
 pnpm install --frozen-lockfile
 
+# UI bundle MUST exist before the server build embeds it via
+# `with { type: "file" }` imports of out/bundle.{js,css}.
+pnpm run ui:build
+
 TARGET="bun-$(uname | tr '[:upper:]' '[:lower:]')-$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/')"
 
 pnpm exec bun build index.ts --compile --minify --bytecode \

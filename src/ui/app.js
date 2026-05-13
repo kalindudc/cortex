@@ -6,8 +6,8 @@
 // keydown for global shortcuts). Imports App from components.js and the
 // state/helpers it needs from state.js. No business logic lives here.
 
-import { h, render } from "https://esm.sh/preact@10.24";
-import htm from "https://esm.sh/htm@3.1";
+import { h, render } from "preact";
+import htm from "htm";
 
 import App from "./components.js";
 import {

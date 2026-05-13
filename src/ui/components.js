@@ -6,19 +6,20 @@
 // every action; ModalRoot dispatches to LaneEditModal). Splitting further
 // would mean threading the same imports through 6+ files for no win.
 
-import { h } from "https://esm.sh/preact@10.24";
-import { useEffect, useRef } from "https://esm.sh/preact@10.24/hooks";
+import { h } from "preact";
+import { useEffect, useRef } from "preact/hooks";
 // useSignal returns a signal that's stable across re-renders. With plain
 // signal() in render the value is replaced every keystroke and inputs freeze.
-import { useSignal } from "https://esm.sh/@preact/signals@1.3?deps=preact@10.24";
-import htm from "https://esm.sh/htm@3.1";
+import { useSignal } from "@preact/signals";
+import htm from "htm";
 // CodeMirror 6 — single editor used for BOTH display (readonly) and edit
 // modes of the task description. Gives us a built-in line-number gutter,
 // active-line highlight, scroll-sync, and soft-wrap for free, themed with
-// cortex's design tokens via EditorView.theme(). Loaded from esm.sh so the
-// compiled binary stays the same size; replaces the previous custom gutter +
-// overlay implementation AND the highlight.js-based markdown source view.
-import { EditorState } from "https://esm.sh/@codemirror/state@6";
+// cortex's design tokens via EditorView.theme(). Bundled into out/bundle.js
+// by Bun's bundler (resolved from node_modules); replaces the previous
+// custom gutter + overlay implementation AND the highlight.js-based markdown
+// source view.
+import { EditorState } from "@codemirror/state";
 import {
   EditorView,
   keymap,
@@ -27,11 +28,11 @@ import {
   highlightActiveLineGutter,
   drawSelection,
   placeholder,
-} from "https://esm.sh/@codemirror/view@6";
-import { defaultKeymap, history, historyKeymap } from "https://esm.sh/@codemirror/commands@6";
-import { markdown } from "https://esm.sh/@codemirror/lang-markdown@6";
-import { syntaxHighlighting, HighlightStyle } from "https://esm.sh/@codemirror/language@6";
-import { tags as t } from "https://esm.sh/@lezer/highlight@1";
+} from "@codemirror/view";
+import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
+import { markdown } from "@codemirror/lang-markdown";
+import { syntaxHighlighting, HighlightStyle } from "@codemirror/language";
+import { tags as t } from "@lezer/highlight";
 
 // Auto-resize a textarea to fit its content. Attached as a ref callback so it
 // works without re-rendering on every keystroke (which would fight htm). The

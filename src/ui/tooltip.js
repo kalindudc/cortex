@@ -19,10 +19,10 @@
 //
 //   <${Tooltip}/>                        → mount once inside App's render tree.
 
-import { h } from "https://esm.sh/preact@10.24";
-import { useEffect, useRef } from "https://esm.sh/preact@10.24/hooks";
-import { signal } from "https://esm.sh/@preact/signals@1.3?deps=preact@10.24";
-import htm from "https://esm.sh/htm@3.1";
+import { h } from "preact";
+import { useEffect, useRef } from "preact/hooks";
+import { signal } from "@preact/signals";
+import htm from "htm";
 
 const html = htm.bind(h);
 

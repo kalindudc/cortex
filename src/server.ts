@@ -9,25 +9,25 @@ import pkg from "../package.json" with { type: "json" };
 // `with { type: "file" }` returns a string PATH (not file contents) that
 // `bun build --compile` rewrites to point at the embedded blob. Read the
 // contents at request time via Bun.file(...).text() (or .bytes() for
-// non-text). The UI is split into 4 modules — see ui/README-ish comment
-// chain in ui/app.js — and each is embedded individually so the binary
-// stays a single file while the source remains properly modular.
+// non-text). The UI is shipped as a single bundle.js + bundle.css produced
+// by `pnpm run ui:build` (Bun bundler over src/ui/index.tsx). Source still
+// lives in modular files under src/ui/; the bundler is what fuses them.
+//
+// Build order is enforced by scripts/build.sh: it runs `pnpm run ui:build`
+// FIRST so out/bundle.{js,css} exist on disk before this server file is
+// embedded by `bun build --compile`. If the bundler outputs are missing at
+// server-build time, `bun build --compile` fails loudly with a missing-file
+// error — which is the desired behavior (it surfaces a broken build).
 import indexHtmlPath  from "./ui/index.html"   with { type: "file" };
-import stylesCssPath  from "./ui/styles.css"   with { type: "file" };
-import appJsPath      from "./ui/app.js"       with { type: "file" };
-import componentsJsPath from "./ui/components.js" with { type: "file" };
-import stateJsPath    from "./ui/state.js"     with { type: "file" };
-import tooltipJsPath  from "./ui/tooltip.js"   with { type: "file" };
+import bundleJsPath   from "../out/bundle.js"  with { type: "file" };
+import bundleCssPath  from "../out/bundle.css" with { type: "file" };
 
 // Map browser route -> embedded file path + content type. Each entry is
 // served with Cache-Control: no-store so dev edits never sit invisible behind
 // a stale cache, and so any shipped fix is picked up on the next reload.
 const UI_ASSETS: Record<string, { path: string; type: string }> = {
-  "/styles.css":   { path: stylesCssPath,   type: "text/css; charset=utf-8" },
-  "/app.js":       { path: appJsPath,       type: "application/javascript; charset=utf-8" },
-  "/components.js":{ path: componentsJsPath,type: "application/javascript; charset=utf-8" },
-  "/state.js":     { path: stateJsPath,     type: "application/javascript; charset=utf-8" },
-  "/tooltip.js":   { path: tooltipJsPath,   type: "application/javascript; charset=utf-8" },
+  "/bundle.js":  { path: bundleJsPath,  type: "application/javascript; charset=utf-8" },
+  "/bundle.css": { path: bundleCssPath, type: "text/css; charset=utf-8" },
 };
 
 /**
