@@ -1,0 +1,48 @@
+version: '3'
+
+tasks:
+  # Development setup
+  up:
+    desc: "Install development dependencies (dev tools + Ruby gems)"
+    cmds:
+      - |
+        pnpm install
+
+  build:
+    desc: "Compile cortex CLI to a single binary bin/"
+    silent: false
+    cmds:
+      - pnpm install --frozen-lockfile
+      - |
+        BUN="${HOME}/.bun/bin/bun"
+        TARGET="bun-$(uname | tr '[:upper:]' '[:lower:]')-$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/')"
+        "$BUN" build cli.ts --compile --minify --bytecode \
+          --target="$TARGET" --outfile bin/cortex
+      - chmod +x bin/cortex && echo "✓ Built bin/cortex"
+
+  test:
+    desc: "Run cortex unit + integration tests"
+    cmds:
+      - ${HOME}/.bun/bin/bun test
+
+  dev:
+    desc: "Run cortex from source via bun. Use CLI_ARGS to pass args."
+    cmds:
+      - ${HOME}/.bun/bin/bun cli.ts {{.CLI_ARGS}}
+
+  serve:dev:
+    desc: "Run the cortex API server from source with hot-reload (bun --watch). HTML is served fresh per request, so UI edits show on browser refresh; .ts changes restart the server. Pass PORT to override."
+    cmds:
+      - |
+        # Stop any background daemon first so the watch server owns 7777.
+        ${HOME}/.bun/bin/bun cli.ts stop 2>/dev/null || true
+      - ${HOME}/.bun/bin/bun --watch cli.ts serve --foreground --no-open --port {{.PORT | default "7777"}}
+    interactive: true
+
+  deploy:
+    desc: "Re-generate .zshrc and completions"
+    deps:
+      - build
+    cmds:
+      - rm -rf ~/bin/cortex
+      - cp bin/cortex ~/bin/
