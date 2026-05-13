@@ -3,7 +3,7 @@ import readline from "node:readline";
 import fs from "node:fs";
 import { Store } from "../store.ts";
 import { dbPath, pidPath, urlPath, ensureConfigDir } from "../paths.ts";
-import { writeSkill, skillDir } from "../skill.ts";
+import { writeAllSkills, skillDir, skillsRoot, listSkills } from "../skills.ts";
 
 const CONFIRM = "RESET";
 
@@ -85,7 +85,9 @@ export default defineCommand({
     console.log(`  • delete ${db}`);
     console.log(`  • delete ${db}-wal, ${db}-shm (SQLite WAL sidecars, if present)`);
     console.log(`  • delete ${pidPath()}, ${urlPath()} (daemon state, if present)`);
-    console.log(`  • wipe and regenerate the cortex skill at ${skillDir()}`);
+    console.log(
+      `  • wipe and regenerate ${listSkills().length} skill dir(s) under ${skillsRoot()}`,
+    );
     console.log(`  • re-initialize an empty database with the default 'now' lane`);
     const answer = await prompt(`Type ${CONFIRM} to confirm: `);
     if (answer.trim() !== CONFIRM) {
@@ -113,12 +115,15 @@ export default defineCommand({
     s.close();
     console.log(`✓ re-initialized ${db}`);
 
-    // 4. Wipe + regenerate the skill dir. We rmSync first (rather than just
-    // overwriting via writeSkill) so files removed in a binary upgrade are
-    // dropped, not stranded. Hand-edits are LOST — documented in cli/reset.md.
-    fs.rmSync(skillDir(), { recursive: true, force: true });
-    await writeSkill();
-    console.log(`✓ regenerated skill at ${skillDir()}`);
+    // 4. Wipe + regenerate every skill dir. We rmSync first (rather than
+    // just overwriting via writeAllSkills) so files removed in a binary
+    // upgrade are dropped, not stranded. Hand-edits are LOST — documented
+    // in cli/reset.md.
+    for (const name of listSkills()) {
+      fs.rmSync(skillDir(name), { recursive: true, force: true });
+    }
+    await writeAllSkills();
+    console.log(`✓ regenerated ${listSkills().length} skill(s)`);
 
     console.log("✓ reset complete");
   },

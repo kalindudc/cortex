@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import { defineCommand } from "citty";
 import { Store, type Task } from "../store.ts";
 import { Client, daemonUrl } from "../client.ts";
@@ -33,6 +34,11 @@ export default defineCommand({
       valueHint: "text",
       description: "new body (use empty string to clear)",
     },
+    bodyFile: {
+      type: "string",
+      valueHint: "path",
+      description: "read new body from file (mutually exclusive with -b)",
+    },
     priority: {
       type: "string",
       alias: "p",
@@ -46,9 +52,23 @@ export default defineCommand({
       console.error("error: id must be a number");
       process.exit(1);
     }
+    if (args.bodyFile && args.body !== undefined) {
+      console.error("error: use --body-file OR -b, not both");
+      process.exit(1);
+    }
     const patch: { title?: string; body?: string | null; priority?: number } = {};
     if (args.title) patch.title = args.title;
-    if (args.body !== undefined && args.body !== "") patch.body = args.body;
+    if (args.bodyFile) {
+      try {
+        patch.body = fs.readFileSync(args.bodyFile, "utf8");
+      } catch (e) {
+        console.error(`error: --body-file: ${(e as Error).message}`);
+        process.exit(1);
+      }
+    } else if (args.body !== undefined && args.body !== "") {
+      // Preserve existing semantic: empty -b is a no-op (cf. Plan-1 add.ts).
+      patch.body = args.body;
+    }
     if (args.priority) patch.priority = parsePriority(args.priority);
     if (Object.keys(patch).length === 0) {
       console.error("error: provide at least one of --title, --body, --priority");

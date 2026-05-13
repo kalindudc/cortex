@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import { defineCommand } from "citty";
 import { Store, type Task } from "../store.ts";
 import { Client, daemonUrl } from "../client.ts";
@@ -41,13 +42,31 @@ export default defineCommand({
       valueHint: "text",
       description: "longer description shown by `cortex show`",
     },
+    bodyFile: {
+      type: "string",
+      valueHint: "path",
+      description: "read body from file (mutually exclusive with -b)",
+    },
   },
   async run({ args }) {
+    if (args.bodyFile && args.body) {
+      console.error("error: use --body-file OR -b, not both");
+      process.exit(1);
+    }
+    let body: string | null = args.body || null;
+    if (args.bodyFile) {
+      try {
+        body = fs.readFileSync(args.bodyFile, "utf8");
+      } catch (e) {
+        console.error(`error: --body-file: ${(e as Error).message}`);
+        process.exit(1);
+      }
+    }
     const payload = {
       title: args.title,
       lane: args.lane,
       priority: parsePriority(args.priority),
-      body: args.body || null,
+      body,
     };
     const url = daemonUrl();
     if (url) {
