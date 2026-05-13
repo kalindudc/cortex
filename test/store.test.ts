@@ -133,6 +133,92 @@ describe("Store: migrate", () => {
   });
 });
 
+describe("Store: tags", () => {
+  test("addTag/listTags/editTag/removeTag round-trip; rename cascades to task_tags", () => {
+    const s = open();
+    s.addTag({ name: "foo", color: "#abc" });
+    let listed = s.listTags();
+    expect(listed.find((t) => t.name === "foo")?.color).toBe("#abc");
+    expect(listed.find((t) => t.name === "foo")?.task_count).toBe(0);
+    // attach to a task to validate task_count + cascade-on-rename
+    const task = s.addTask({ title: "x" });
+    s.setTaskTags(task.id, ["foo"]);
+    listed = s.listTags();
+    expect(listed.find((t) => t.name === "foo")?.task_count).toBe(1);
+    s.editTag("foo", { rename: "foobar" });
+    expect(s.getTask(task.id)?.tags).toEqual(["foobar"]);
+    expect(s.listTags().some((t) => t.name === "foo")).toBe(false);
+    s.removeTag("foobar", { force: true });
+    expect(s.listTags().some((t) => t.name === "foobar")).toBe(false);
+    expect(s.getTask(task.id)?.tags).toEqual([]);
+    s.close();
+  });
+
+  test("setTaskTags is replace semantics; auto-creates missing tags; validates names", () => {
+    const s = open();
+    const t = s.addTask({ title: "t" });
+    s.setTaskTags(t.id, ["a", "b"]);
+    expect(s.getTask(t.id)?.tags).toEqual(["a", "b"]);
+    // replace, not merge
+    s.setTaskTags(t.id, ["c"]);
+    expect(s.getTask(t.id)?.tags).toEqual(["c"]);
+    // tags auto-created on first reference
+    expect(s.listTags().map((x) => x.name).sort()).toEqual(["a", "b", "c"]);
+    expect(() => s.setTaskTags(t.id, ["BAD!"])).toThrow(/invalid tag name/);
+    s.close();
+  });
+
+  test("listTasks({ tags: [a, b] }) returns AND intersection only", () => {
+    const s = open();
+    const ta = s.addTask({ title: "ta" });
+    const tab = s.addTask({ title: "tab" });
+    const tb = s.addTask({ title: "tb" });
+    s.setTaskTags(ta.id, ["a"]);
+    s.setTaskTags(tab.id, ["a", "b"]);
+    s.setTaskTags(tb.id, ["b"]);
+    const both = s.listTasks({ tags: ["a", "b"] }).map((t) => t.title);
+    expect(both).toEqual(["tab"]);
+    const onlyA = s.listTasks({ tags: ["a"] }).map((t) => t.title).sort();
+    expect(onlyA).toEqual(["ta", "tab"]);
+    s.close();
+  });
+
+  test("removeTask cascades task_tags rows", () => {
+    const s = open();
+    const t = s.addTask({ title: "t" });
+    s.setTaskTags(t.id, ["a", "b"]);
+    expect(s.listTags().find((x) => x.name === "a")?.task_count).toBe(1);
+    s.removeTask(t.id);
+    // tag rows survive removeTask; only join rows are dropped
+    expect(s.listTags().find((x) => x.name === "a")?.task_count).toBe(0);
+    expect(s.listTags().find((x) => x.name === "b")?.task_count).toBe(0);
+    s.close();
+  });
+
+  test("removeTag refuses while a task uses it; force succeeds and drops join rows", () => {
+    const s = open();
+    const t = s.addTask({ title: "t" });
+    s.setTaskTags(t.id, ["keep"]);
+    expect(() => s.removeTag("keep")).toThrow(/task\(s\) reference it/);
+    s.removeTag("keep", { force: true });
+    expect(s.listTags().some((x) => x.name === "keep")).toBe(false);
+    expect(s.getTask(t.id)?.tags).toEqual([]);
+    s.close();
+  });
+
+  test("every Task carries tags: [] (alphabetical when populated)", () => {
+    const s = open();
+    const fresh = s.addTask({ title: "untagged" });
+    expect(fresh.tags).toEqual([]);
+    expect(s.getTask(fresh.id)?.tags).toEqual([]);
+    expect(s.listTasks()[0]?.tags).toEqual([]);
+    s.setTaskTags(fresh.id, ["zeta", "alpha", "mu"]);
+    // GROUP_CONCAT(... ORDER BY tag_name) yields deterministic alphabetical order
+    expect(s.getTask(fresh.id)?.tags).toEqual(["alpha", "mu", "zeta"]);
+    s.close();
+  });
+});
+
 describe("Store: lanes", () => {
   test("add/list/edit/remove lifecycle", () => {
     const s = open();

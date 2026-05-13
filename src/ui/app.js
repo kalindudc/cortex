@@ -17,8 +17,6 @@ import {
   paletteOpen,
   modal,
   editing,
-  statusPopover,
-  newLaneOpen,
 } from "./state.js";
 
 const html = htm.bind(h);
@@ -53,8 +51,15 @@ const debounceRefresh = () => {
   pending = setTimeout(() => { pending = null; refresh(); }, 50);
 };
 const ev = new EventSource("/events");
-["task.added","task.updated","task.removed","update.posted","lane.changed"]
-  .forEach(k => ev.addEventListener(k, debounceRefresh));
+// Each kind here MUST also be present in src/events.ts EventKind union and
+// emitted by some write handler in src/server.ts. New event kinds added to
+// the server but missing here are silently ignored — the dashboard goes
+// stale until a manual reload. (Last instance: tag.changed shipped from the
+// server but was forgotten here, so TagsPane didn't refresh on tag CRUD.)
+[
+  "task.added","task.updated","task.removed",
+  "update.posted","lane.changed","tag.changed",
+].forEach(k => ev.addEventListener(k, debounceRefresh));
 
 // Separate listener (does NOT replace the debounceRefresh above) that fires
 // a browser Notification when a task transitions INTO blocked. Wrapped in
@@ -130,9 +135,15 @@ window.addEventListener("keydown", (e) => {
   }
 
   if (e.key === "Escape") {
+    // Cascade: palette → modal → popovers → editing. Each step short-circuits
+    // if it caught the Esc; the next step only fires if nothing was open at
+    // this level. closeAllPopovers() returns true iff it closed at least one
+    // popover signal — don't enumerate popover signals here so adding new
+    // ones (tagsPopover, newTagOpen, etc.) doesn't require touching this
+    // handler.
     if (paletteOpen.value) { paletteOpen.value = false; return; }
     if (modal.value)       { modal.value = null;        return; }
-    if (statusPopover.value || newLaneOpen.value) { closeAllPopovers(); return; }
+    if (closeAllPopovers())                              return;
     if (editing.value)     { editing.value = false;     return; }
   }
 });

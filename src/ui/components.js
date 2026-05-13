@@ -52,8 +52,9 @@ const autosizeRef = (el) => {
 
 import {
   // signals
-  tasks, lanes, selectedLane, selectedId, editing, statusPopover, newLaneOpen,
+  tasks, lanes, tags, selectedLane, selectedId, editing, statusPopover, newLaneOpen,
   paletteOpen, modal, errorMsg, meAuthor, tab, authors,
+  sidebarView, selectedTag, newTagOpen, tagsPopover,
   // computed
   tasksInLane, activeTask, inboxList, blockedTasks,
   // api + error helpers
@@ -62,7 +63,7 @@ import {
   kbd,
   // pure helpers
   fmtTime, initial, STATUS, STATUS_LABEL, nextStatusFor, nextActionLabel,
-  priorityClass, laneColor, LANE_COLORS,
+  priorityClass, laneColor, LANE_COLORS, tagColor, tagPillStyleFromHex, isValidTagName,
   // navigation
   moveSelection,
   // theme
@@ -107,6 +108,11 @@ const ICONS = {
   monitor:       '<rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>',
   keyboard:      '<rect x="2" y="6" width="20" height="12" rx="2"/><line x1="6" y1="10" x2="6" y2="10"/><line x1="10" y1="10" x2="10" y2="10"/><line x1="14" y1="10" x2="14" y2="10"/><line x1="18" y1="10" x2="18" y2="10"/><line x1="6" y1="14" x2="18" y2="14"/>',
   x:             '<line x1="6" y1="6" x2="18" y2="18"/><line x1="6" y1="18" x2="18" y2="6"/>',
+  // Lucide hash & home: tag-mode and back-to-lanes buttons in .pane-system.
+  hash:          '<line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/><line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/>',
+  home:          '<path d="M3 12l9-9 9 9"/><path d="M5 10v10a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V10"/>',
+  // Used by TagPicker to mark currently-attached tags. Lucide check.
+  check:         '<polyline points="20 6 9 17 4 12"/>',
 };
 function Icon({ name, size = 14, className = "" }) {
   const inner = ICONS[name] || "";
@@ -118,6 +124,244 @@ function Icon({ name, size = 14, className = "" }) {
 function PriorityChip({ priority }) {
   return html`<span class=${"priority-chip " + priorityClass(priority)}
     title=${`Priority ${priority} (0 = highest)`}>P${priority}</span>`;
+}
+
+// Single tag rendered as a Primer-IssueLabelToken-style pill: pill shape,
+// per-tag background color derived from a hex via the GitHub luminance
+// algorithm in styles.css (see .tag-pill). Inline style sets --label-r/g/b
+// + --label-h/s/l from the hex; CSS derives perceived-lightness, text
+// color (black/white), and border from those. When `color` is missing the
+// inline style is empty and the pill falls through to the neutral CSS rule.
+//
+// `interactive` adds hover affordance + cursor when the pill is itself a
+// button (TagsPane rows). Default is non-interactive (popover preview).
+function TagPill({ name, color, interactive = false }) {
+  const c = color !== undefined ? color : tagColor(name);
+  const style = tagPillStyleFromHex(c);
+  const cls = "tag-pill" + (c ? " tag-pill-colored" : "") + (interactive ? " tag-pill-interactive" : "");
+  return html`<span class=${cls} style=${style}>${name}</span>`;
+}
+
+// Always-rendered chip in the active-task header showing 'tags: N'. Click
+// opens the TagPicker (replaces the prior read-only popover — the picker is
+// now the single source of truth for editing a task's tags, including in
+// edit mode). Even at zero tags the chip stays visible so users have a
+// discoverable affordance to add the first tag.
+//
+// Mount discipline: TagPicker is rendered ONLY when tagsPopover.value is
+// true (ternary below, NOT a self-gate inside the child). This guarantees a
+// fresh mount per open so:
+//   - autoFocus on the search input fires every time
+//   - useSignal state (cursor, attached snapshot) is fresh per open
+// Same pattern as CommandPalette in App() — see the comment block above
+// CommandPalette for the full failure mode of the self-gate alternative.
+function TagsHeaderChip({ task }) {
+  const count = (task.tags || []).length;
+  // Tooltip preview of attached tags (if any) so quick hover-inspection works
+  // without opening the picker.
+  const titleAttr = count > 0
+    ? task.tags.map(n => "#" + n).join(" ") + " \u2014 click to manage"
+    : "Click to add tags";
+  return html`<div style="position:relative" data-pop>
+    <button class="tags-chip" data-pop
+      title=${titleAttr}
+      onClick=${e => { e.stopPropagation(); tagsPopover.value = !tagsPopover.value; }}>
+      <span class="tags-chip-label">tags:</span>
+      <span class="tags-chip-count">${count}</span>
+    </button>
+    ${tagsPopover.value ? html`<${TagPicker} task=${task}/>` : null}
+  </div>`;
+}
+
+// GitHub-labels-style picker: search input + scrollable list with checkmarks
+// for attached tags + footer 'Create #<name>' row when the search has text,
+// no exact match, and the name is a valid tag name.
+//
+// Behavior:
+//   - Click a row → toggles the tag on the task (api.setTags with the new set)
+//   - Type to filter; case-insensitive substring match. Cursor resets to row 0.
+//   - Arrow Down/Up moves a keyboard cursor through (filtered + create row);
+//     wraps at edges. Cursor highlight is a subtle bg + accent left-border —
+//     visually distinct from the (unhighlighted) attached state.
+//   - Enter triggers the cursor row's action (toggle or create).
+//   - Outside click / Esc close via app.js's global popover handler.
+//
+// Layout: attached tags are sorted to the TOP of the list at MOUNT time and
+// stay there for the lifetime of this picker open (snapshot in `attachedAtOpen`).
+// Toggling a tag does NOT immediately reshuffle the list — next open
+// recomputes. Mirrors GitHub's labels picker: stable visual order while open.
+//
+// Critical: container is .tag-picker (fresh flex/scroll layout). NEVER reuse
+// .popover-row here — that's the rigid grid that clamped tag pills to 14px in
+// the v3 bug.
+function TagPicker({ task }) {
+  const search = useSignal("");
+  const cursor = useSignal(0);
+  // Ref to the scrollable list container so the cursor effect (below) can
+  // scoped-querySelector the highlighted row without leaking out of THIS
+  // picker instance (defensive against multiple pickers, even though only
+  // one mounts at a time today).
+  const listRef = useRef(null);
+  // Ref + explicit focus on the search input. `autoFocus` alone is NOT
+  // reliable in this Preact + htm setup when the picker is mounted as a
+  // direct result of a click — the browser focuses the clicked chip button
+  // AFTER the picker mounts, stomping on the autoFocus. The setTimeout
+  // belt-and-suspenders is the same pattern used by CommandPalette
+  // (search there for `inputRef.current?.focus()`); it survives that race.
+  // Without this, ArrowDown / Enter inside the search input never fire on
+  // first open because the input never had focus to begin with.
+  const searchRef = useRef(null);
+  useEffect(() => {
+    searchRef.current?.focus();
+    const t = setTimeout(() => searchRef.current?.focus(), 0);
+    return () => clearTimeout(t);
+  }, []);
+  // Snapshot of attached tag names at THIS picker open. Used only for the
+  // partition (attached-first sort), NOT for selection state — selection
+  // reads `task.tags` live so the checkmark reflects the latest server state.
+  // useSignal initializer runs once per mount; the parent's mount-gate
+  // (TagsHeaderChip) guarantees one mount per open.
+  const attachedAtOpen = useSignal(new Set(task.tags || []));
+
+  // Partition: attached-first (alphabetical), then everyone else (alphabetical).
+  // Computed every render but cheap (≤50 tags). The `attachedAtOpen` set keeps
+  // ordering stable while the picker is open; live selection state comes from
+  // `attached` below.
+  const allByName = [...tags.value].sort((a, b) => a.name.localeCompare(b.name));
+  const sorted = [
+    ...allByName.filter(t => attachedAtOpen.value.has(t.name)),
+    ...allByName.filter(t => !attachedAtOpen.value.has(t.name)),
+  ];
+  const q = search.value.trim().toLowerCase();
+  const filtered = q
+    ? sorted.filter(t => t.name.toLowerCase().includes(q))
+    : sorted;
+  const attached = new Set(task.tags || []);
+  const trimmedRaw = search.value.trim();
+  const exactMatch = allByName.some(t => t.name === trimmedRaw);
+  const canCreate = trimmedRaw.length > 0 && !exactMatch && isValidTagName(trimmedRaw);
+
+  // The list rendered to the user, indexable by cursor. The optional create
+  // row is appended; cursor.value addresses both list rows and the create row
+  // uniformly.
+  const items = canCreate
+    ? [...filtered, { __create: true, name: trimmedRaw }]
+    : filtered;
+  // Clamp cursor in case items shrank (e.g. user typed a more-specific filter).
+  if (cursor.value > items.length - 1) cursor.value = Math.max(0, items.length - 1);
+
+  const apply = async (nextSet) => {
+    await tryApi(() => api.setTags(task.id, Array.from(nextSet)));
+    // Don't close the picker — multi-edit UX. Outside-click handles dismiss.
+  };
+
+  const toggle = (name) => {
+    const next = new Set(attached);
+    if (next.has(name)) next.delete(name); else next.add(name);
+    return apply(next);
+  };
+
+  const create = async (name) => {
+    const n = (name ?? trimmedRaw).trim();
+    if (!n || !isValidTagName(n)) return;
+    // setTaskTags auto-creates the tag row via INSERT OR IGNORE in store.ts.
+    const next = new Set(attached);
+    next.add(n);
+    await apply(next);
+    // Keep the newly-attached tag visible at the top for the rest of this
+    // picker session by adding it to the attachedAtOpen snapshot.
+    const snap = new Set(attachedAtOpen.value);
+    snap.add(n);
+    attachedAtOpen.value = snap;
+    search.value = "";
+    cursor.value = 0;
+  };
+
+  const triggerCursor = () => {
+    const item = items[cursor.value];
+    if (!item) return;
+    if (item.__create) create(item.name);
+    else toggle(item.name);
+  };
+
+  const onSearchKey = (e) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (items.length === 0) return;
+      cursor.value = (cursor.value + 1) % items.length;
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      if (items.length === 0) return;
+      cursor.value = (cursor.value - 1 + items.length) % items.length;
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      triggerCursor();
+    }
+  };
+
+  const onSearchInput = (e) => {
+    search.value = e.target.value;
+    // Reset to top whenever the filter changes so the cursor doesn't sit on
+    // a row that just scrolled out of view.
+    cursor.value = 0;
+  };
+
+  // Auto-scroll the cursor row into view whenever cursor.value changes (or
+  // items.length shrinks and clamps the cursor). `block: 'nearest'` only
+  // scrolls if the row is actually outside the viewport, so it never causes
+  // a jarring jump when the row is already visible. Without this, ArrowDown
+  // past the visible window leaves the highlight invisibly off-screen.
+  useEffect(() => {
+    const root = listRef.current;
+    if (!root) return;
+    const el = root.querySelector(".tag-picker-row.cursor");
+    el?.scrollIntoView({ block: "nearest" });
+  }, [cursor.value, items.length]);
+
+  return html`<div class="popover tag-picker" data-pop style="top: 32px; left: 0">
+    <div class="tag-picker-search">
+      <input ref=${searchRef} autoFocus
+        placeholder="Search or create tag\u2026"
+        value=${search.value}
+        onInput=${onSearchInput}
+        onKeyDown=${onSearchKey}/>
+    </div>
+    <div class="tag-picker-list" ref=${listRef}>
+      ${items.length === 0
+        ? html`<p class="tag-picker-empty meta">no tags match\u2014type a new name to create one</p>`
+        : items.map((it, i) => {
+            const isCursor = i === cursor.value;
+            if (it.__create) {
+              return html`<button
+                class=${"tag-picker-row tag-picker-create-row" + (isCursor ? " cursor" : "")}
+                onClick=${() => create(it.name)}
+                title=${`Create the tag '${it.name}' and attach it to this task`}>
+                <span class="tag-picker-check"><${Icon} name="plus" size=${12}/></span>
+                <span class="tag-picker-create-label">Create</span>
+                <${TagPill} name=${it.name} color=${null}/>
+              </button>`;
+            }
+            const sel = attached.has(it.name);
+            return html`<button
+              class=${"tag-picker-row" + (sel ? " selected" : "") + (isCursor ? " cursor" : "")}
+              onClick=${() => toggle(it.name)}
+              onMouseMove=${() => { if (cursor.value !== i) cursor.value = i; }}
+              title=${sel ? "Click to remove" : "Click to add"}>
+              <span class="tag-picker-check">
+                ${sel ? html`<${Icon} name="check" size=${12}/>` : null}
+              </span>
+              <${TagPill} name=${it.name} color=${it.color}/>
+              <span class="grow"></span>
+              <span class="tag-picker-count meta">${it.task_count}</span>
+            </button>`;
+          })}
+    </div>
+    ${trimmedRaw && !canCreate && !exactMatch ? html`<div class="tag-picker-foot">
+      <p class="meta" style="margin:0; padding:6px 10px">
+        invalid tag name (must match [a-z0-9_@-]{1,32})
+      </p>
+    </div>` : null}
+  </div>`;
 }
 
 // ---------- theme toggle ----------
@@ -133,6 +377,26 @@ function ThemeToggle() {
     aria-label=${`Switch to ${next} mode`}>
     <${Icon} name=${iconName}/>
   </button>`;
+}
+
+// Shared system-control strip rendered at the top of EVERY sidebar pane so
+// the toolbar reads identically whether you are in lanes mode or tags mode.
+// Order: home (back to lanes) | tag-mode | theme. The home button is hidden
+// in lanes mode — it would be a no-op since we're already home — and the
+// tag-mode button is hidden in tags mode for the same reason. This keeps the
+// strip from advertising affordances that do nothing.
+function SidebarSystemBar() {
+  const inTags = sidebarView.value === "tags";
+  return html`<div class="pane-system">
+    ${inTags ? html`<button class="btn-icon" title="Home (back to lanes)"
+      aria-label="Home" onClick=${() => { sidebarView.value = "lanes"; }}>
+      <${Icon} name="home"/>
+    </button>` : html`<button class="btn-icon" title="Manage tags"
+      aria-label="Manage tags" onClick=${() => { sidebarView.value = "tags"; }}>
+      <${Icon} name="hash"/>
+    </button>`}
+    <${ThemeToggle}/>
+  </div>`;
 }
 
 // ---------- lanes pane ----------
@@ -152,9 +416,7 @@ function LanesPane() {
          level toggles (theme today, settings/profile later) sit above any
          domain content. Right-aligned bare icon buttons; no eyebrow label
          because position + treatment already convey "app chrome". */ ""}
-    <div class="pane-system">
-      <${ThemeToggle}/>
-    </div>
+    <${SidebarSystemBar}/>
     <div class="pane-section" style="padding-bottom: 8px">
       <button class=${"view-row" + (selectedLane.value === null ? " selected" : "")}
         onClick=${() => { selectedLane.value = null; selectedId.value = null; }}
@@ -277,6 +539,121 @@ function LanesPane() {
   </aside>`;
 }
 
+// ---------- tags pane ----------
+// Sidebar swap-target when sidebarView==="tags". Mirrors LanesPane structure:
+//   .pane-system | All-tags view-row | Tags section (list + new-tag form) |
+//   pane-foot (Commands palette button).
+// Click a tag row → toggle selectedTag (filters the right-pane task list).
+// Hover a tag row → reveals an edit affordance that opens TagEditModal.
+function TagsPane() {
+  const newTagName = useSignal("");
+  // Sort tags alphabetically (server already does, but be defensive in case
+  // a future tag.changed payload arrives in a different order).
+  const sortedTags = [...tags.value].sort((a, b) => a.name.localeCompare(b.name));
+  const totalTagged = tasks.value.filter(t => Array.isArray(t.tags) && t.tags.length > 0).length;
+  return html`<aside class="pane pane-lanes pane-tags">
+    <${SidebarSystemBar}/>
+    <div class="pane-section" style="padding-bottom: 8px">
+      <button class=${"view-row" + (selectedTag.value === null ? " selected" : "")}
+        onClick=${() => { selectedTag.value = null; selectedId.value = null; }}
+        title="Show every tagged task across all tags">
+        <${Icon} name="hash"/>
+        <span class="view-name">All tags</span>
+        <span class="view-count">${totalTagged}</span>
+      </button>
+    </div>
+    <div class="pane-section lanes-section">
+      <div class="section-head">
+        <div class="row">
+          <h1 class="eyebrow grow">Tags</h1>
+          <button class="btn-icon" data-pop title="New tag"
+            onClick=${e => { e.stopPropagation(); newTagOpen.value = !newTagOpen.value; }}>
+            <${Icon} name="plus"/>
+          </button>
+        </div>
+        ${newTagOpen.value ? (() => {
+          const submitNewTag = async () => {
+            const n = newTagName.value.trim(); if (!n) return;
+            await tryApi(() => api.addTag({ name: n }));
+            newTagName.value = ""; newTagOpen.value = false;
+          };
+          return html`<form data-pop style="margin-top:8px"
+            onSubmit=${e => { e.preventDefault(); submitNewTag(); }}
+            onKeyDown=${onSubmitKeys(submitNewTag)}>
+            <input autoFocus placeholder="tag name (a-z, 0-9, _ @ -)"
+              style="width:100%; height:28px; padding:4px 8px"
+              value=${newTagName.value} onInput=${e => newTagName.value = e.target.value}/>
+          </form>`;
+        })() : null}
+      </div>
+      <div class="section-body">
+        ${sortedTags.length === 0
+          ? html`<p class="meta">no tags yet</p>`
+          : sortedTags.map(tg => {
+              const sel = selectedTag.value === tg.name;
+              return html`<button
+                class=${"lane-row" + (sel ? " selected" : "")}
+                onClick=${() => { selectedTag.value = sel ? null : tg.name; selectedId.value = null; }}
+                title=${`${tg.task_count} task${tg.task_count === 1 ? "" : "s"} carry #${tg.name}`}>
+                <${TagPill} name=${tg.name} color=${tg.color} interactive=${true}/>
+                <span class="grow"></span>
+                <span class="lane-count num">${tg.task_count}</span>
+                <span class="lane-edit-btn" title="Edit tag"
+                  onClick=${e => { e.stopPropagation(); modal.value = { kind: "tag-edit", name: tg.name }; }}>
+                  <${Icon} name="moreHorizontal" size=${12}/>
+                </span>
+              </button>`;
+            })}
+      </div>
+    </div>
+    ${/* Tasks section: same shape and CSS as LanesPane's tasks-section so a
+         tag click in the row above shows the matching tasks in-place. The
+         tasksInLane computed already AND-filters by selectedTag, so this is
+         pure presentation. Header label adapts: '#tagname' when filtered,
+         'All tagged tasks' when not (matches the All-tags view-row above). */ ""}
+    ${tasks.value.length > 0 ? html`<div class="pane-section tasks-section">
+      <div class="section-head">
+        <h1 class="eyebrow">${selectedTag.value
+          ? html`Tasks \u00b7 #${selectedTag.value}`
+          : html`All tagged tasks`}</h1>
+      </div>
+      <div class="section-body">
+        ${(() => {
+          // When no tag is selected, show only tasks that carry at least one
+          // tag — "All tagged tasks" should never list untagged ones.
+          const list = selectedTag.value
+            ? tasksInLane.value
+            : tasksInLane.value.filter(t => Array.isArray(t.tags) && t.tags.length > 0);
+          if (list.length === 0) {
+            return html`<p class="meta">${selectedTag.value
+              ? html`no tasks carry #${selectedTag.value}`
+              : html`no tagged tasks yet`}</p>`;
+          }
+          return list.map(t => html`<button
+            class=${"task-row" + (activeTask.value && t.id === activeTask.value.id ? " active" : "")}
+            draggable="true"
+            onDragStart=${e => e.dataTransfer.setData("application/x-cortex-task-id", String(t.id))}
+            onClick=${() => selectedId.value = t.id}>
+            <span class=${"dot dot-status-" + t.status}></span>
+            <span class="task-title">${t.title}</span>
+            <${PriorityChip} priority=${t.priority}/>
+          </button>`);
+        })()}
+      </div>
+    </div>` : null}
+    <div class="pane-foot">
+      <div class="row" style="justify-content:space-between">
+        <button class="btn" style="height:24px; padding:0 8px"
+          onClick=${() => paletteOpen.value = true}>
+          <${Icon} name="keyboard" size=${12}/>
+          <span>Commands</span>
+          <span class="kbd">${kbd("P")}</span>
+        </button>
+      </div>
+    </div>
+  </aside>`;
+}
+
 // ---------- status popover ----------
 function StatusPopover({ task }) {
   if (!statusPopover.value) return null;
@@ -318,6 +695,7 @@ function ActiveTaskPane() {
         <span>${at.lane}</span>
       </span>
       <${PriorityChip} priority=${at.priority}/>
+      <${TagsHeaderChip} task=${at}/>
       <span class="grow"></span>
       <div style="position:relative" data-pop>
         <button class="status-pill" data-pop
@@ -551,6 +929,11 @@ function EditTaskForm({ task }) {
   const b = useSignal(task.body || "");
   const p = useSignal(String(task.priority));
   const ln = useSignal(task.lane);
+  // Tag editing is owned by the TagPicker reachable from the 'tags: N' chip
+  // in the active-task header (visible in both display and edit modes). The
+  // picker writes via api.setTags directly; this form only handles
+  // title/body/priority/lane. Removed the prior comma-separated input — the
+  // picker is the single source of truth.
   const submit = async () => {
     await tryApi(async () => {
       await api.editTask(task.id, { title: t.value, body: b.value || null, priority: parseInt(p.value, 10) });
@@ -751,6 +1134,18 @@ function buildCommands() {
         action: () => api.editTask(at.id, { priority: p }),
       })),
     });
+    cmds.push({ id: "edit-task-tags", label: "Tags\u2026", hint: `[${at.id}]`, icon: "hash",
+      action: () => {
+        paletteOpen.value = false;
+        // Open the picker on the current active task. The TagsHeaderChip
+        // mounts the picker freshly when tagsPopover flips true (see the
+        // mount-discipline note above TagsHeaderChip).
+        tagsPopover.value = true;
+        // Refocus the search input on next tick so keyboard flow stays
+        // continuous (palette → picker, no mouse needed).
+        setTimeout(() => document.querySelector(".tag-picker-search input")?.focus(), 0);
+      },
+    });
     cmds.push({ id: "delete-task", label: "Delete task\u2026", hint: `[${at.id}]`, icon: "trash",
       action: () => modal.value = { kind: "confirm-delete", id: at.id } });
   }
@@ -788,6 +1183,39 @@ function buildCommands() {
   }
   cmds.push({ id: "new-lane", label: "New lane\u2026", hint: "", icon: "plus",
     action: () => { newLaneOpen.value = true; setTimeout(() => document.querySelector(".pane-lanes input")?.focus(), 0); } });
+
+  // ----- tag scoped (sidebar mode + filter + edit + new) -----
+  cmds.push({
+    id: "sidebar-mode",
+    label: sidebarView.value === "tags" ? "Switch to lane mode" : "Switch to tag mode",
+    hint: "", icon: sidebarView.value === "tags" ? "home" : "hash",
+    action: () => { sidebarView.value = sidebarView.value === "tags" ? "lanes" : "tags"; },
+  });
+  if (tags.value.length > 0) {
+    cmds.push({ id: "filter-tag", label: "Filter by tag\u2026", hint: "", icon: "hash",
+      submenu: () => [
+        { id: "tag-all", label: "All tags", hint: "", icon: "hash",
+          action: () => { selectedTag.value = null; selectedId.value = null; } },
+        ...[...tags.value].sort((a, b) => a.name.localeCompare(b.name)).map(tg => ({
+          id: `tag-${tg.name}`, label: `#${tg.name}`, hint: `${tg.task_count}`, icon: "hash",
+          action: () => { selectedTag.value = tg.name; selectedId.value = null; },
+        })),
+      ],
+    });
+    cmds.push({ id: "edit-tag", label: "Edit tag\u2026", hint: "", icon: "eye",
+      submenu: () => [...tags.value].sort((a, b) => a.name.localeCompare(b.name)).map(tg => ({
+        id: `tag-edit-${tg.name}`, label: `#${tg.name}`, hint: "", icon: "eye",
+        action: () => modal.value = { kind: "tag-edit", name: tg.name },
+      })),
+    });
+  }
+  cmds.push({ id: "new-tag", label: "New tag\u2026", hint: "", icon: "plus",
+    action: () => {
+      sidebarView.value = "tags";
+      newTagOpen.value = true;
+      setTimeout(() => document.querySelector(".pane-tags input")?.focus(), 0);
+    },
+  });
 
   // ----- system -----
   cmds.push({
@@ -924,6 +1352,27 @@ function ModalRoot() {
   if (m.kind === "lane-edit") {
     return html`<${LaneEditModal} name=${m.name} close=${close}/>`;
   }
+  if (m.kind === "tag-edit") {
+    return html`<${TagEditModal} name=${m.name} close=${close}/>`;
+  }
+  if (m.kind === "confirm-tag-delete") {
+    return html`<div class="overlay" onClick=${e => { if (e.target.classList.contains("overlay")) close(); }}>
+      <div class="modal">
+        <h2>Delete tag <span class="meta">#${m.name}</span>?</h2>
+        <p class="meta" style="margin:0">${m.taskCount > 0
+          ? `${m.taskCount} task${m.taskCount === 1 ? " carries" : "s carry"} this tag. Deleting will remove the tag from those tasks (the tasks themselves are NOT deleted).`
+          : "This tag is not used by any task."}</p>
+        <div class="modal-actions">
+          <button class="btn" onClick=${close}>Cancel</button>
+          <button class="btn btn-primary" style="background:var(--err)" onClick=${async () => {
+            await tryApi(() => api.delTag(m.name, m.taskCount > 0));
+            if (selectedTag.value === m.name) selectedTag.value = null;
+            close();
+          }}>Delete tag</button>
+        </div>
+      </div>
+    </div>`;
+  }
   if (m.kind === "confirm-lane-delete") {
     return html`<div class="overlay" onClick=${e => { if (e.target.classList.contains("overlay")) close(); }}>
       <div class="modal">
@@ -1004,6 +1453,67 @@ function LaneEditModal({ name, close }) {
   </div>`;
 }
 
+// ---------- tag edit modal ----------
+// Mirrors LaneEditModal: rename, color picker (reuses LANE_COLORS palette and
+// .color-grid CSS), delete (cascades join rows when in-use; the confirm step
+// gives the user the impact count). Tag names are validated server-side
+// against TAG_NAME_RE; we display the resulting error via the existing toast.
+function TagEditModal({ name, close }) {
+  const tg = tags.value.find(t => t.name === name);
+  if (!tg) { close(); return null; }
+  const renameTo = useSignal(tg.name);
+  const color    = useSignal(tg.color || null);
+  const taskCount = tg.task_count ?? 0;
+  const save = async () => {
+    const fields = {};
+    if (color.value !== (tg.color || null)) fields.color = color.value;
+    if (renameTo.value && renameTo.value !== tg.name) fields.rename = renameTo.value.trim();
+    if (Object.keys(fields).length === 0) { close(); return; }
+    await tryApi(() => api.editTag(tg.name, fields));
+    // Follow the rename if this tag was the active filter.
+    if (fields.rename && selectedTag.value === tg.name) selectedTag.value = fields.rename;
+    close();
+  };
+  return html`<div class="overlay" onClick=${e => { if (e.target.classList.contains("overlay")) close(); }}>
+    <div class="modal" style="max-width: 420px" onKeyDown=${onSubmitKeys(save)}>
+      <div class="row">
+        <h2 class="grow">Edit tag</h2>
+        <button class="btn-icon" onClick=${close}><${Icon} name="x"/></button>
+      </div>
+      <label class="col" style="gap:4px">
+        <span class="meta">Name</span>
+        <input value=${renameTo.value}
+          onInput=${e => renameTo.value = e.target.value}
+          placeholder="a-z, 0-9, _ @ - (1-32 chars)"/>
+      </label>
+      <div class="col" style="gap:4px">
+        <span class="meta">Color</span>
+        <div class="color-grid">
+          ${LANE_COLORS.map(c => html`<button
+            class=${"color-swatch" + (color.value === c ? " selected" : "") + (c === null ? " clear" : "")}
+            style=${c ? `background: ${c}` : ""}
+            title=${c || "no color"}
+            onClick=${e => { e.preventDefault(); color.value = c; }}/>`)}
+        </div>
+      </div>
+      <div class="row" style="justify-content:space-between">
+        <button class="btn btn-danger"
+          title=${taskCount > 0
+            ? `${taskCount} task${taskCount === 1 ? " carries" : "s carry"} this tag (delete cascades)`
+            : "delete tag"}
+          onClick=${() => modal.value = { kind: "confirm-tag-delete", name: tg.name, taskCount }}>
+          <${Icon} name="trash" size=${12}/>
+          <span>Delete tag</span>
+        </button>
+        <div class="row">
+          <button class="btn" onClick=${close}>Cancel</button>
+          <button class="btn btn-primary" onClick=${save}>Save</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
 // ---------- root ----------
 // Wraps the three panes + overlays in a transparent (display:contents) div so
 // the panes are direct children of the <main> grid.
@@ -1015,7 +1525,7 @@ function App() {
   // the comment above CommandPalette for the full failure mode.
   return html`<div class="contents">
     <${TopBar}/>
-    <${LanesPane}/>
+    ${sidebarView.value === "tags" ? html`<${TagsPane}/>` : html`<${LanesPane}/>`}
     <${ActiveTaskPane}/>
     <${InboxPane}/>
     ${paletteOpen.value ? html`<${CommandPalette}/>` : null}

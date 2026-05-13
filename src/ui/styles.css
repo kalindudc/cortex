@@ -797,6 +797,215 @@ input:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 .lane-chip .lane-color { width: 6px; height: 6px; border-radius: 50%; }
 
+/* ===== Tag pill (Primer IssueLabelToken-style) =====
+   Pill shape, semibold, line-height 1, height 20px (matches Primer 'medium'
+   Label). Background color is set by inline CSS custom properties on the
+   element (--label-r/g/b plus --label-h/s/l) computed by tagPillStyleFromHex
+   in state.js from a single hex. The light / dark theme rule blocks below
+   then derive perceived-lightness, switch the text color to black or white,
+   and pick a border tone. Mirrors /tmp/gh-research/IssueLabelToken.module.css.
+   When no color is supplied (.tag-pill without .tag-pill-colored) the pill
+   falls through to the neutral var(--tint) background. */
+.tag-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-1);
+  font-weight: 600;
+  line-height: 1;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border);
+  background: var(--tint);
+  color: var(--text-2);
+  white-space: nowrap;     /* names never break mid-word */
+  flex-shrink: 0;          /* survive tight flex parents (TagsPane rows) */
+  user-select: none;
+}
+.tag-pill-interactive {
+  cursor: pointer;
+  transition: filter var(--dur-1) var(--ease);
+}
+.tag-pill-interactive:hover { filter: brightness(1.05); }
+
+/* When a color IS supplied: derive perceived-lightness, text color, border.
+   The luminance formula (W3C) is multiplied 0.2126/0.7152/0.0722 onto RGB.
+   --lightness-switch is a step function: 1 when bg is dark (text → white),
+   0 when bg is light (text → black). */
+.tag-pill-colored {
+  --lightness-threshold: 0.6;
+  --perceived-lightness: calc(
+    ((var(--label-r) * 0.2126) + (var(--label-g) * 0.7152) + (var(--label-b) * 0.0722)) / 255
+  );
+  --lightness-switch: max(0, min(calc((var(--lightness-threshold) - var(--perceived-lightness)) * 1000), 1));
+  background: rgb(var(--label-r), var(--label-g), var(--label-b));
+  color: hsl(0deg, 0%, calc(var(--lightness-switch) * 100%));
+  border-color: hsl(
+    var(--label-h), calc(var(--label-s) * 1%), calc((var(--label-l) - 12) * 1%)
+  );
+}
+/* Dark theme: dampen the background to 22% alpha, brighten the text via
+   computed lighten-by, soften the border. Mirrors Primer's dark mixin. */
+:root[data-theme="dark"] .tag-pill-colored {
+  --lightness-threshold: 0.6;
+  --background-alpha: 0.22;
+  --border-alpha: 0.4;
+  --lighten-by: calc(((var(--lightness-threshold) - var(--perceived-lightness)) * 100) * var(--lightness-switch));
+  background: rgba(var(--label-r), var(--label-g), var(--label-b), var(--background-alpha));
+  color: hsl(
+    var(--label-h), calc(var(--label-s) * 1%), calc((var(--label-l) + var(--lighten-by)) * 1%)
+  );
+  border-color: hsla(
+    var(--label-h), calc(var(--label-s) * 1%), calc((var(--label-l) + var(--lighten-by)) * 1%), var(--border-alpha)
+  );
+}
+
+/* ===== Tag list (popover content + anywhere a wrapping pill grid is needed) =====
+   Fresh container — explicitly NOT .popover-row (which is display:grid with
+   rigid columns and was the cause of the v3 char-by-char render bug). */
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding: 8px;
+  max-width: 320px;
+}
+
+/* ===== Active-header "tags: N" count chip =====
+   Width-invariant to tag count: always 'tags: N' so the status pill never
+   gets pushed off-canvas. Visually distinct from .tag-pill (different shape,
+   no per-tag color, plain text label) so users don't mistake it for a tag. */
+.tags-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 20px; padding: 0 8px;
+  border-radius: var(--r-1);
+  background: var(--tint); color: var(--text-3);
+  font-size: var(--fs-1); font-weight: 600; line-height: 1;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+  transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
+}
+.tags-chip:hover { background: var(--tint-strong, var(--accent-tint)); color: var(--text); }
+.tags-chip .tags-chip-label { color: var(--text-3); text-transform: lowercase; }
+.tags-chip:hover .tags-chip-label { color: var(--text); }
+.tags-chip .tags-chip-count { color: var(--text); font-family: var(--font-mono); }
+
+/* ===== Tag picker (GitHub labels-style dropdown) =====
+   Fixed-width, scrollable, keyboard-driven multi-select. Replaces the
+   previous read-only TagsPopover and the comma-separated input that lived
+   in EditTaskForm — single source of truth for editing a task's tags. */
+.tag-picker {
+  width: 280px;
+  padding: 0;            /* sections own their own padding */
+  display: flex;
+  flex-direction: column;
+  /* The list scrolls; the search header and create footer stay pinned. */
+  max-height: 360px;
+}
+.tag-picker-search {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.tag-picker-search input {
+  width: 100%;
+  height: 28px;
+  padding: 4px 8px;
+  font-size: var(--fs-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  background: var(--bg);
+  color: var(--text);
+}
+.tag-picker-search input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-tint);
+}
+.tag-picker-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px;
+}
+.tag-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: var(--r-2);
+  background: transparent;
+  /* Reserve 2px on the left so the cursor accent doesn't shift other rows. */
+  border: 0;
+  border-left: 2px solid transparent;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text-2);
+  transition: background var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease);
+}
+.tag-picker-row:hover { background: var(--tint); color: var(--text); }
+/* `.selected` (currently-attached) intentionally has NO background — the
+   checkmark in the leading slot is the only selection indicator. Avoids the
+   prior "too prominent" complaint where attached rows looked like the
+   keyboard cursor. */
+.tag-picker-row.cursor {
+  background: var(--tint);
+  border-left-color: var(--accent);
+  color: var(--text);
+}
+.tag-picker-check {
+  width: 14px; height: 14px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.tag-picker-count {
+  font-size: var(--fs-1);
+  font-variant-numeric: tabular-nums;
+}
+.tag-picker-empty {
+  margin: 0;
+  padding: 16px 12px;
+  text-align: center;
+  font-size: var(--fs-2);
+}
+.tag-picker-foot {
+  border-top: 1px solid var(--border);
+  padding: 4px;
+  flex: 0 0 auto;
+}
+/* The Create row now lives INSIDE .tag-picker-list as the last item, so the
+   keyboard cursor can land on it via ArrowDown. Distinct .tag-picker-create-row
+   styling so the user can tell it's a different action (creating, not
+   toggling). */
+.tag-picker-create-row .tag-picker-check { color: var(--accent); }
+.tag-picker-create-row .tag-picker-create-label {
+  font-size: var(--fs-2);
+  font-weight: 600;
+  color: var(--text);
+}
+.tag-picker-create-row .icon { color: var(--accent); flex-shrink: 0; }
+
+/* ===== TagsPane row layout override =====
+   Base .lane-row is `display: grid; grid-template-columns: 8px 1fr auto auto`,
+   designed for `.lane-color | .lane-name | .lane-count | .lane-edit-btn`.
+   In a tags row the first child is a TagPill (variable-width) instead of an
+   8px square, so the grid clamped the pill to 8px and the text overflowed
+   onto the empty .grow span looking like it overlapped. Switch to flex so
+   each child owns its natural width and `<span class="grow">` does its job. */
+.pane-tags .lane-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* grid-template-columns is irrelevant in flex; explicit reset for safety. */
+  grid-template-columns: none;
+}
+.pane-tags .lane-row .lane-count { color: var(--text-3); font-size: var(--fs-2); }
+
 /* drag & drop visual */
 [draggable="true"] { cursor: grab; }
 [draggable="true"]:active { cursor: grabbing; }

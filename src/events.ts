@@ -8,7 +8,8 @@ export type EventKind =
   | "task.updated"
   | "task.removed"
   | "update.posted"
-  | "lane.changed";
+  | "lane.changed"
+  | "tag.changed";
 
 export type CortexEvent = {
   kind: EventKind;

@@ -15,12 +15,31 @@ import { signal, computed, effect } from "https://esm.sh/@preact/signals@1.3?dep
 // ---------- signals ----------
 export const tasks         = signal([]);
 export const lanes         = signal([]);
+// Tag rollups: { name, color, created, task_count } from /api/tags. Refreshed
+// in the same Promise.all as tasks/lanes so chip colors stay in sync after
+// any tag.changed / task.updated SSE event.
+export const tags          = signal([]);
+// Sidebar mode: "lanes" (default LanesPane) or "tags" (TagsPane). The home
+// button + a tag-mode button live in the sidebar's .pane-system strip.
+// Switching is non-destructive: it does NOT clear selectedLane/selectedTag/
+// selectedId so the right-hand active task pane keeps its context.
+export const sidebarView   = signal("lanes");
+// Optional single-tag filter applied to the visible task list. Combined with
+// selectedLane via AND. Set by clicking a tag row in TagsPane (or via the
+// command palette's "Filter by tag…" entry); cleared by clicking the same
+// tag again or by the "All tags" entry.
+export const selectedTag   = signal(null);
+// New-tag inline form open/closed (mirrors newLaneOpen).
+export const newTagOpen    = signal(false);
 export const updates       = signal({});
 export const selectedLane  = signal(null);
 export const selectedId    = signal(null);
 export const editing       = signal(false);
 export const statusPopover = signal(false);
 export const newLaneOpen   = signal(false);
+// Active-task tags-chip popover. Mirrors statusPopover: click chip to toggle,
+// outside-click closes via app.js's global handler + closeAllPopovers().
+export const tagsPopover   = signal(false);
 export const paletteOpen   = signal(false);
 // modal kinds: 'confirm-delete' | 'lane-edit' | 'confirm-lane-delete'
 export const modal         = signal(null);
@@ -93,8 +112,11 @@ if (typeof document !== "undefined") setTheme(theme.value);
 // ---------- computed ----------
 export const tasksInLane = computed(() => {
   const lane = selectedLane.value;
-  const all = tasks.value;
-  return lane ? all.filter(t => t.lane === lane) : all;
+  const tag  = selectedTag.value;
+  let out = tasks.value;
+  if (lane) out = out.filter(t => t.lane === lane);
+  if (tag)  out = out.filter(t => Array.isArray(t.tags) && t.tags.includes(tag));
+  return out;
 });
 export const activeTask = computed(() => {
   const list = tasksInLane.value;
@@ -134,6 +156,13 @@ export const api = {
   addLane:  (b)               => j("/api/lanes",            { method:"POST",   headers:{"content-type":"application/json"}, body: JSON.stringify(b) }),
   editLane: (n, b)            => j(`/api/lanes/${encodeURIComponent(n)}`, { method:"PATCH",  headers:{"content-type":"application/json"}, body: JSON.stringify(b) }),
   delLane:  (n)               => j(`/api/lanes/${encodeURIComponent(n)}`, { method:"DELETE" }),
+  // ---- tags ----
+  tags:     ()                => j("/api/tags"),
+  setTags:  (id, ns)          => j(`/api/tasks/${id}/tags`, { method:"PATCH", headers:{"content-type":"application/json"}, body: JSON.stringify({ set: ns }) }),
+  addTag:   (b)               => j("/api/tags",            { method:"POST",   headers:{"content-type":"application/json"}, body: JSON.stringify(b) }),
+  editTag:  (n, b)            => j(`/api/tags/${encodeURIComponent(n)}`, { method:"PATCH",  headers:{"content-type":"application/json"}, body: JSON.stringify(b) }),
+  // `force` cascades the join rows. Mirrors the CLI's `cortex tag rm -f`.
+  delTag:   (n, force)        => j(`/api/tags/${encodeURIComponent(n)}${force ? "?force=1" : ""}`, { method:"DELETE" }),
 };
 
 // ---------- error surfacing ----------
@@ -163,8 +192,8 @@ export const fetchAuthors = async () => {
 // Called at boot and on every SSE event from the daemon (debounced in app.js).
 export async function refresh() {
   try {
-    const [ts, ls] = await Promise.all([api.tasks(), api.lanes()]);
-    tasks.value = ts; lanes.value = ls;
+    const [ts, ls, tg] = await Promise.all([api.tasks(), api.lanes(), api.tags()]);
+    tasks.value = ts; lanes.value = ls; tags.value = tg;
     const at = activeTask.value;
     if (at) updates.value = { ...updates.value, [at.id]: await api.updates(at.id) };
   } catch (err) {
@@ -204,6 +233,81 @@ export const priorityClass = (p) => p === 0 ? "urgent" : p === 1 ? "high" : "";
 
 // Lookup a lane's color (or null). Used by lane chip + color dot in lists.
 export const laneColor = (name) => lanes.value.find(l => l.name === name)?.color || null;
+// Lookup a tag's color (or null). Used by TagPill in the active-task popover
+// and TagsPane rows. Returns null when the tag has no color OR is not yet
+// present in the rollup (e.g. just-created via SSE round-trip) — the pill
+// falls back to the neutral .tag-pill background defined in styles.css.
+export const tagColor = (name) => tags.value.find(t => t.name === name)?.color || null;
+
+// Client-side mirror of TAG_NAME_RE in src/store.ts. Used to gate the
+// "Create '<search>' tag" affordance in TagPicker before sending a request
+// the server would just 400 anyway. Keep the regex in lockstep with the
+// server-side one — if you change one, change both.
+export const TAG_NAME_RE = /^[a-z0-9_@-]{1,32}$/;
+export const isValidTagName = (s) =>
+  typeof s === "string" && TAG_NAME_RE.test(s.trim());
+
+// ---------- color algorithm (GitHub IssueLabelToken-style) ----------
+// One hex → readable pill in BOTH themes, no per-pill text-color tuning.
+// Mirrors Primer's IssueLabelToken.module.css algorithm: parse hex to RGB +
+// HSL, expose them as CSS custom properties on the pill element, let the
+// stylesheet derive perceived-lightness, switch text to black/white, and
+// pick a border tone. See /tmp/gh-research/IssueLabelToken.module.css for
+// the source we mirrored.
+//
+// Returns null when input is missing/malformed; callers fall through to the
+// neutral .tag-pill background.
+export function parseHex(hex) {
+  if (!hex || typeof hex !== "string" || hex[0] !== "#") return null;
+  let h = hex.slice(1);
+  // Accept #rgb shorthand by doubling each nibble (#abc → #aabbcc).
+  if (h.length === 3) h = h.split("").map(c => c + c).join("");
+  if (h.length !== 6) return null;
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  if ([r, g, b].some(n => Number.isNaN(n))) return null;
+  return { r, g, b };
+}
+
+// Standard RGB → HSL conversion (W3C / colorjs). Inputs in 0-255, outputs
+// h: 0-360, s: 0-100, l: 0-100 — matching Primer's expected variable units.
+export function rgbToHsl(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  let h, s; const l = (max + min) / 2;
+  if (max === min) { h = 0; s = 0; }
+  else {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+      case g: h = (b - r) / d + 2; break;
+      case b: h = (r - g) / d + 4; break;
+    }
+    h /= 6;
+  }
+  return { h: Math.round(h * 360), s: Math.round(s * 100), l: Math.round(l * 100) };
+}
+
+// Build the inline style object a TagPill applies when a color is present.
+// Returns {} when hex is null/invalid so the pill cleanly falls through to
+// the neutral CSS rule. The CSS-side rules in styles.css consume these
+// six custom properties and derive perceived-lightness / text-color / border.
+export function tagPillStyleFromHex(hex) {
+  const rgb = parseHex(hex);
+  if (!rgb) return {};
+  const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
+  return {
+    "--label-r": String(rgb.r),
+    "--label-g": String(rgb.g),
+    "--label-b": String(rgb.b),
+    "--label-h": String(hsl.h),
+    "--label-s": String(hsl.s),
+    "--label-l": String(hsl.l),
+  };
+}
 
 // Curated swatch palette for the lane color picker. null = "no color".
 export const LANE_COLORS = [
@@ -228,8 +332,17 @@ export function moveSelection(delta) {
 
 // ---------- popover bookkeeping ----------
 // Centralised so the outside-click listener (app.js) and Esc handler (app.js)
-// don't have to know which popover signals exist.
+// don't have to know which popover signals exist. Returns true iff at least
+// one signal was actually open (and got closed) so the Esc cascade in app.js
+// can branch on "did anything happen?" without enumerating signals at the
+// call site — future-proofs against new popovers being added without the
+// Esc handler being updated (the bug that hid Esc-closes-tag-picker for one
+// release of this feature).
 export function closeAllPopovers() {
-  statusPopover.value = false;
-  newLaneOpen.value = false;
+  let closed = false;
+  if (statusPopover.value) { statusPopover.value = false; closed = true; }
+  if (newLaneOpen.value)   { newLaneOpen.value   = false; closed = true; }
+  if (tagsPopover.value)   { tagsPopover.value   = false; closed = true; }
+  if (newTagOpen.value)    { newTagOpen.value    = false; closed = true; }
+  return closed;
 }

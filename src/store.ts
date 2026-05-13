@@ -13,7 +13,15 @@ export type Task = {
   priority: number;
   created: number;
   updated: number;
+  tags: string[];
 };
+
+/**
+ * Internal SQL row shape: a `Task` with `tags` replaced by the
+ * GROUP_CONCAT'd CSV string returned from the LEFT JOIN. Lives module-scope
+ * (not exported) so the public `Task` type stays clean.
+ */
+type TaskRow = Omit<Task, "tags"> & { tag_csv: string | null };
 
 export type Update = {
   id: number;
@@ -30,6 +38,28 @@ export type Lane = {
   color: string | null;
   sort: number;
 };
+
+export type Tag = {
+  name: string;
+  color: string | null;
+  created: number;
+};
+
+/**
+ * Tag-name regex: lowercase letters, digits, `_`, `@`, `-`, length 1-32.
+ * The trailing `-` inside the character class is literal (no escape needed).
+ * Single source of truth — exported so the CLI flag parsers and HTTP route
+ * handlers all gate through validateTagName() instead of duplicating the
+ * regex.
+ */
+export const TAG_NAME_RE = /^[a-z0-9_@-]{1,32}$/;
+export function validateTagName(s: string): string {
+  const v = s.trim();
+  if (!TAG_NAME_RE.test(v)) {
+    throw new Error(`invalid tag name '${s}': must match [a-z0-9_@-]{1,32}`);
+  }
+  return v;
+}
 
 export type AddTaskInput = {
   title: string;
@@ -95,6 +125,8 @@ export type EditLaneFields = {
 export type ListTasksFilter = {
   lane?: string;
   status?: TaskStatus;
+  /** AND semantics: task must carry every listed tag. */
+  tags?: string[];
 };
 
 const now = (): number => Date.now();
@@ -163,6 +195,24 @@ export class Store {
           "cortex: updates table has the old 200-char limit; run `cortex reset` to enable the 1024-char limit (existing data lost).",
         );
       }
+      // Tag tables (Plan 5). `task_tags` cascades from BOTH parents:
+      //   ON DELETE on tasks  -> mirrors `updates` so removeTask drops join rows
+      //   ON DELETE on tags   -> `cortex tag rm -f` drops join rows but never tasks
+      //   ON UPDATE on tags   -> rename via editTag propagates without manual updates
+      this.db.run(`
+        CREATE TABLE IF NOT EXISTS tags (
+          name    TEXT PRIMARY KEY,
+          color   TEXT,
+          created INTEGER NOT NULL
+        );
+      `);
+      this.db.run(`
+        CREATE TABLE IF NOT EXISTS task_tags (
+          task_id  INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          tag_name TEXT    NOT NULL REFERENCES tags(name) ON UPDATE CASCADE ON DELETE CASCADE,
+          PRIMARY KEY(task_id, tag_name)
+        );
+      `);
       this.db.run(
         `INSERT OR IGNORE INTO lanes (name, color, sort) VALUES ('now', '#fe8019', 0);`,
       );
@@ -187,6 +237,20 @@ export class Store {
     );
   }
 
+  /**
+   * Internal row shape for the LEFT JOIN that materialises a task plus its
+   * comma-separated tag list. `tag_csv` is alphabetically sorted at the SQL
+   * level via GROUP_CONCAT(... ORDER BY tt.tag_name) so JSON output is
+   * deterministic; the CLI/UI never re-sort.
+   */
+  private rowToTask(row: TaskRow): Task {
+    const { tag_csv, ...rest } = row;
+    return {
+      ...rest,
+      tags: tag_csv ? tag_csv.split(",") : [],
+    };
+  }
+
   addTask(input: AddTaskInput): Task {
     const ts = now();
     const lane = input.lane ?? "now";
@@ -196,68 +260,105 @@ export class Store {
     return this.db.transaction(() => {
       this.ensureLane(lane);
       const row = this.db
-        .query<Task, [string, string, string | null, TaskStatus, number, number, number]>(
+        .query<{ id: number }, [string, string, string | null, TaskStatus, number, number, number]>(
           `INSERT INTO tasks (lane, title, body, status, priority, created, updated)
            VALUES (?, ?, ?, ?, ?, ?, ?)
-           RETURNING *;`,
+           RETURNING id;`,
         )
         .get(lane, input.title, body, status, priority, ts, ts);
       if (!row) throw new Error("failed to insert task");
-      return row;
+      const full = this.getTask(row.id);
+      if (!full) throw new Error("failed to materialise inserted task");
+      return full;
     })();
   }
 
   listTasks(filter: ListTasksFilter = {}): Task[] {
     const clauses: string[] = [];
-    const params: Array<string> = [];
+    const params: Array<string | number> = [];
     if (filter.lane) {
-      clauses.push("lane = ?");
+      clauses.push("t.lane = ?");
       params.push(filter.lane);
     }
     if (filter.status) {
-      clauses.push("status = ?");
+      clauses.push("t.status = ?");
       params.push(filter.status);
+    }
+    if (filter.tags && filter.tags.length > 0) {
+      // AND filter: a task must carry every listed tag. Counting DISTINCT
+      // matches against the IN list yields the intersection without an N-way
+      // self-join. `validateTagName` is NOT called here — callers (CLI flag
+      // parsers, HTTP route handlers) gate input; this method trusts its
+      // inputs the same way `lane` and `status` are trusted.
+      const placeholders = filter.tags.map(() => "?").join(",");
+      clauses.push(
+        `t.id IN (SELECT task_id FROM task_tags WHERE tag_name IN (${placeholders}) GROUP BY task_id HAVING COUNT(DISTINCT tag_name) = ?)`,
+      );
+      params.push(...filter.tags, filter.tags.length);
     }
     const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
     // priority ASC so 0 (highest) sorts first; tie-break by oldest-created.
-    const sql = `SELECT * FROM tasks ${where} ORDER BY priority ASC, created ASC;`;
-    return this.db.query<Task, string[]>(sql).all(...params);
+    // GROUP_CONCAT(... ORDER BY tag_name) gives deterministic alphabetical
+    // output. COALESCE turns the empty join (no tags) into '' so the TS split
+    // produces [] uniformly.
+    const sql = `
+      SELECT t.*,
+             COALESCE(GROUP_CONCAT(tt.tag_name, ',' ORDER BY tt.tag_name), '') AS tag_csv
+        FROM tasks t
+        LEFT JOIN task_tags tt ON tt.task_id = t.id
+        ${where}
+       GROUP BY t.id
+       ORDER BY t.priority ASC, t.created ASC;
+    `;
+    const rows = this.db.query<TaskRow, (string | number)[]>(sql).all(...params);
+    return rows.map((r) => this.rowToTask(r));
   }
 
   getTask(id: number): Task | null {
     const row = this.db
-      .query<Task, [number]>(`SELECT * FROM tasks WHERE id = ?;`)
+      .query<TaskRow, [number]>(
+        `SELECT t.*,
+                COALESCE(GROUP_CONCAT(tt.tag_name, ',' ORDER BY tt.tag_name), '') AS tag_csv
+           FROM tasks t
+           LEFT JOIN task_tags tt ON tt.task_id = t.id
+          WHERE t.id = ?
+          GROUP BY t.id;`,
+      )
       .get(id);
-    return row ?? null;
+    return row ? this.rowToTask(row) : null;
   }
 
   editTask(id: number, fields: EditTaskFields): Task {
-    const sets: string[] = [];
-    const params: Array<string | number | null> = [];
-    if (fields.title !== undefined) {
-      sets.push("title = ?");
-      params.push(fields.title);
-    }
-    if (fields.body !== undefined) {
-      sets.push("body = ?");
-      params.push(fields.body);
-    }
-    if (fields.priority !== undefined) {
-      sets.push("priority = ?");
-      params.push(fields.priority);
-    }
-    if (sets.length === 0) {
-      const existing = this.getTask(id);
-      if (!existing) throw new Error(`task ${id} not found`);
-      return existing;
-    }
-    sets.push("updated = ?");
-    params.push(now());
-    params.push(id);
-    const sql = `UPDATE tasks SET ${sets.join(", ")} WHERE id = ? RETURNING *;`;
-    const row = this.db.query<Task, (string | number | null)[]>(sql).get(...params);
-    if (!row) throw new Error(`task ${id} not found`);
-    return row;
+    return this.db.transaction(() => {
+      const sets: string[] = [];
+      const params: Array<string | number | null> = [];
+      if (fields.title !== undefined) {
+        sets.push("title = ?");
+        params.push(fields.title);
+      }
+      if (fields.body !== undefined) {
+        sets.push("body = ?");
+        params.push(fields.body);
+      }
+      if (fields.priority !== undefined) {
+        sets.push("priority = ?");
+        params.push(fields.priority);
+      }
+      if (sets.length === 0) {
+        const existing = this.getTask(id);
+        if (!existing) throw new Error(`task ${id} not found`);
+        return existing;
+      }
+      sets.push("updated = ?");
+      params.push(now());
+      params.push(id);
+      const sql = `UPDATE tasks SET ${sets.join(", ")} WHERE id = ? RETURNING id;`;
+      const row = this.db.query<{ id: number }, (string | number | null)[]>(sql).get(...params);
+      if (!row) throw new Error(`task ${id} not found`);
+      const full = this.getTask(row.id);
+      if (!full) throw new Error(`task ${id} not found`);
+      return full;
+    })();
   }
 
   moveTask(id: number, lane: string): Task {
@@ -267,12 +368,14 @@ export class Store {
     return this.db.transaction(() => {
       this.ensureLane(lane);
       const row = this.db
-        .query<Task, [string, number, number]>(
-          `UPDATE tasks SET lane = ?, updated = ? WHERE id = ? RETURNING *;`,
+        .query<{ id: number }, [string, number, number]>(
+          `UPDATE tasks SET lane = ?, updated = ? WHERE id = ? RETURNING id;`,
         )
         .get(lane, ts, id);
       if (!row) throw new Error(`task ${id} not found`);
-      return row;
+      const full = this.getTask(row.id);
+      if (!full) throw new Error(`task ${id} not found`);
+      return full;
     })();
   }
 
@@ -293,19 +396,22 @@ export class Store {
     const ts = now();
     return this.db.transaction(() => {
       const row = this.db
-        .query<Task, [TaskStatus, number, number]>(
-          `UPDATE tasks SET status = ?, updated = ? WHERE id = ? RETURNING *;`,
+        .query<{ id: number }, [TaskStatus, number, number]>(
+          `UPDATE tasks SET status = ?, updated = ? WHERE id = ? RETURNING id;`,
         )
         .get(status, ts, id);
       if (!row) throw new Error(`task ${id} not found`);
       // Audit-trail: an append-only marker row in `updates` so the inbox
-      // surfaces every status flip, attributed to its caller.
+      // surfaces every status flip, attributed to its caller. Preserved
+      // verbatim from Plan 3 — setStatus's audit-row write is load-bearing.
       this.db.run(
         `INSERT INTO updates (task_id, author, summary, body, severity, created)
          VALUES (?, ?, ?, NULL, 'progress', ?);`,
         [id, opts.author ?? "system", `status \u2192 ${status}`, ts],
       );
-      return row;
+      const full = this.getTask(row.id);
+      if (!full) throw new Error(`task ${id} not found`);
+      return full;
     })();
   }
 
@@ -313,6 +419,138 @@ export class Store {
     const existing = this.getTask(id);
     if (!existing) throw new Error(`task ${id} not found`);
     this.db.run(`DELETE FROM tasks WHERE id = ?;`, [id]);
+  }
+
+  // ---------- tag methods ----------
+
+  /**
+   * Create a tag explicitly (CLI `cortex tag add`). Note that tags are
+   * auto-created on first reference via `setTaskTags()`, so this is for
+   * pre-creating a tag with a custom color.
+   */
+  addTag(input: { name: string; color?: string | null }): Tag {
+    const name = validateTagName(input.name);
+    const color = input.color ?? null;
+    const ts = now();
+    const row = this.db
+      .query<Tag, [string, string | null, number]>(
+        `INSERT INTO tags (name, color, created)
+         VALUES (?, ?, ?)
+         RETURNING *;`,
+      )
+      .get(name, color, ts);
+    if (!row) throw new Error("failed to insert tag");
+    return row;
+  }
+
+  /**
+   * List every tag with the count of tasks currently carrying it. Powers
+   * `cortex tag ls` and the dashboard's tag picker. Sorted alphabetically.
+   */
+  listTags(): (Tag & { task_count: number })[] {
+    return this.db
+      .query<Tag & { task_count: number }, []>(
+        `SELECT g.name, g.color, g.created,
+                COALESCE(COUNT(tt.task_id), 0) AS task_count
+           FROM tags g
+           LEFT JOIN task_tags tt ON tt.tag_name = g.name
+          GROUP BY g.name
+          ORDER BY g.name ASC;`,
+      )
+      .all();
+  }
+
+  editTag(name: string, fields: { color?: string | null; rename?: string }): Tag {
+    return this.db.transaction(() => {
+      const sets: string[] = [];
+      const params: Array<string | number | null> = [];
+      if (fields.color !== undefined) {
+        sets.push("color = ?");
+        params.push(fields.color);
+      }
+      if (fields.rename !== undefined) {
+        // Validate the new name BEFORE writing; ON UPDATE CASCADE on
+        // task_tags propagates the change to join rows automatically.
+        sets.push("name = ?");
+        params.push(validateTagName(fields.rename));
+      }
+      if (sets.length === 0) {
+        const existing = this.db
+          .query<Tag, [string]>(`SELECT * FROM tags WHERE name = ?;`)
+          .get(name);
+        if (!existing) throw new Error(`tag ${name} not found`);
+        return existing;
+      }
+      params.push(name);
+      const sql = `UPDATE tags SET ${sets.join(", ")} WHERE name = ? RETURNING *;`;
+      const row = this.db
+        .query<Tag, (string | number | null)[]>(sql)
+        .get(...params);
+      if (!row) throw new Error(`tag ${name} not found`);
+      return row;
+    })();
+  }
+
+  /**
+   * Remove a tag. Refuses if any task still uses it unless `force: true`,
+   * mirroring `removeLane`. With force, FK ON DELETE CASCADE drops join
+   * rows automatically; tasks themselves are never touched.
+   */
+  removeTag(name: string, opts: { force?: boolean } = {}): void {
+    const existing = this.db
+      .query<Tag, [string]>(`SELECT * FROM tags WHERE name = ?;`)
+      .get(name);
+    if (!existing) throw new Error(`tag ${name} not found`);
+    if (!opts.force) {
+      const refs = this.db
+        .query<{ n: number }, [string]>(
+          `SELECT COUNT(*) AS n FROM task_tags WHERE tag_name = ?;`,
+        )
+        .get(name);
+      if (refs && refs.n > 0) {
+        throw new Error(
+          `cannot remove tag '${name}': ${refs.n} task(s) reference it (use --force)`,
+        );
+      }
+    }
+    this.db.run(`DELETE FROM tags WHERE name = ?;`, [name]);
+  }
+
+  /**
+   * Replace a task's tag set. The CLI computes the new set in TS for
+   * `--add-tag`/`--rm-tag`/`--set-tags` and calls this once — single
+   * transaction, no partial-failure states. Auto-creates any tag rows
+   * referenced for the first time (`INSERT OR IGNORE`).
+   */
+  setTaskTags(id: number, names: string[]): Task {
+    // Validate every name BEFORE opening the transaction so a bad input
+    // can't leave the DB half-modified.
+    const validated = names.map((n) => validateTagName(n));
+    const unique = Array.from(new Set(validated));
+    return this.db.transaction(() => {
+      const existing = this.getTask(id);
+      if (!existing) throw new Error(`task ${id} not found`);
+      const ts = now();
+      // Auto-create missing tag rows. INSERT OR IGNORE so existing tags
+      // (with their custom colors) are preserved.
+      for (const n of unique) {
+        this.db.run(
+          `INSERT OR IGNORE INTO tags (name, color, created) VALUES (?, NULL, ?);`,
+          [n, ts],
+        );
+      }
+      // Replace semantics: drop everything, then re-insert.
+      this.db.run(`DELETE FROM task_tags WHERE task_id = ?;`, [id]);
+      for (const n of unique) {
+        this.db.run(
+          `INSERT INTO task_tags (task_id, tag_name) VALUES (?, ?);`,
+          [id, n],
+        );
+      }
+      const full = this.getTask(id);
+      if (!full) throw new Error(`task ${id} not found`);
+      return full;
+    })();
   }
 
   // ---------- update methods ----------

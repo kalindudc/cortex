@@ -1,7 +1,14 @@
 import fs from "node:fs";
 import { defineCommand } from "citty";
-import { Store, type Task } from "../store.ts";
+import { Store, validateTagName, type Task } from "../store.ts";
 import { Client, daemonUrl } from "../client.ts";
+
+/** Parse a comma-separated tag list and validate each name. Empty/blank entries
+ *  are silently dropped (e.g. `-t a,,b` becomes `["a","b"]`). */
+function parseTags(raw: string): string[] {
+  const names = raw.split(",").map((s) => s.trim()).filter(Boolean);
+  return names.map((n) => validateTagName(n));
+}
 
 function parsePriority(raw: string): number {
   const n = Number.parseInt(raw, 10);
@@ -47,6 +54,12 @@ export default defineCommand({
       valueHint: "path",
       description: "read body from file (mutually exclusive with -b)",
     },
+    tags: {
+      type: "string",
+      alias: "t",
+      valueHint: "a,b,c",
+      description: "comma-separated tag names; auto-creates missing tags",
+    },
   },
   async run({ args }) {
     if (args.bodyFile && args.body) {
@@ -62,6 +75,17 @@ export default defineCommand({
         process.exit(1);
       }
     }
+    // Parse + validate tags BEFORE opening the daemon connection or store
+    // so a bad tag name fails fast without persisting a half-tagged task.
+    let tagNames: string[] = [];
+    if (args.tags) {
+      try {
+        tagNames = parseTags(args.tags);
+      } catch (e) {
+        console.error(`error: ${(e as Error).message}`);
+        process.exit(1);
+      }
+    }
     const payload = {
       title: args.title,
       lane: args.lane,
@@ -71,7 +95,10 @@ export default defineCommand({
     const url = daemonUrl();
     if (url) {
       try {
-        const task = (await Client.addTask(url, payload)) as Task;
+        let task = (await Client.addTask(url, payload)) as Task;
+        if (tagNames.length > 0) {
+          task = (await Client.setTaskTags(url, task.id, tagNames)) as Task;
+        }
         console.log(`[${task.id}] ${task.title}`);
         return;
       } catch (err) {
@@ -81,7 +108,10 @@ export default defineCommand({
     }
     const store = Store.open();
     try {
-      const task = store.addTask(payload);
+      let task = store.addTask(payload);
+      if (tagNames.length > 0) {
+        task = store.setTaskTags(task.id, tagNames);
+      }
       console.log(`[${task.id}] ${task.title}`);
     } catch (err) {
       console.error(`error: ${(err as Error).message}`);

@@ -59,6 +59,7 @@ async function request<T>(
 
 export const Client = {
   addTask: (url: string, b: unknown) => request(url, "POST", "/api/tasks", b),
+  getTask: (url: string, id: number) => request(url, "GET", `/api/tasks/${id}`),
   editTask: (url: string, id: number, b: unknown) =>
     request(url, "PATCH", `/api/tasks/${id}`, b),
   setStatus: (url: string, id: number, status: string, author?: string) =>
@@ -75,4 +76,16 @@ export const Client = {
     request(url, "PATCH", `/api/lanes/${encodeURIComponent(name)}`, b),
   removeLane: (url: string, name: string) =>
     request(url, "DELETE", `/api/lanes/${encodeURIComponent(name)}`),
+  setTaskTags: (url: string, id: number, names: string[]) =>
+    request(url, "PATCH", `/api/tasks/${id}/tags`, { set: names }),
+  listTags: (url: string) => request(url, "GET", "/api/tags"),
+  addTag: (url: string, b: unknown) => request(url, "POST", "/api/tags", b),
+  editTag: (url: string, name: string, b: unknown) =>
+    request(url, "PATCH", `/api/tags/${encodeURIComponent(name)}`, b),
+  removeTag: (url: string, name: string, force?: boolean) =>
+    request(
+      url,
+      "DELETE",
+      `/api/tags/${encodeURIComponent(name)}${force ? "?force=1" : ""}`,
+    ),
 };

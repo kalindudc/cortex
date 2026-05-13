@@ -46,13 +46,24 @@ Plans are stored in cortex — not as files. Three cortex specifics apply.
    ```
    Override only when the user explicitly names a different lane.
 
+4. TAGS — every plan task MUST carry the `plan` tag. Plans inside a stack MUST also carry a stack-slug tag derived automatically from the feature title (NEVER prompt the user):
+  ```bash
+  STACK_SLUG=$(printf '%s' "<feature title>" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9_@-' | cut -c1-32)
+  # fallback if STACK_SLUG is empty (all-punctuation title): STACK_SLUG="stack-$(openssl rand -hex 3)"
+  # single plan:  cortex add "<title>" --lane "$LANE" --priority 0 --body-file "$PLAN" -t plan
+  # plan stack:   cortex add "<title>" --lane "$LANE" --priority <n> --body-file "$PLAN" -t "plan,$STACK_SLUG"
+  ```
+  The stack tag lets `cortex ls -t <stack-slug>` enumerate the whole stack across lanes. The `cut -c1-32` enforces the [a-z0-9_@-]{1,32} tag-name cap.
+
+  CRITICAL: keep the stack-slug tag name short and derived, keep it in memory for future deviations and other related plans
+
 After `cortex add`, attribute the plan immediately:
 ```bash
 cortex update <id> --as "$SESSION_ID" -m "plan written"
 ```
 This is MANDATORY — `cortex add` is anonymous; the update records WHO planned it.
 
-PLAN STACKS: when a single plan exceeds the size limits and cannot be consolidated, split into a stack — N tasks in ONE lane with sequential priorities `0, 1, 2, ..., N-1`. Title each task `NN: <title>` for visual ordering in `cortex ls`. After writing the whole stack, post a summary update on plan #0 listing every task ID. STOP and confirm with the user before creating a plan stack.
+PLAN STACKS: when a single plan exceeds the size limits and cannot be consolidated, split into a stack — N tasks under a single stack-slug tag with sequential priorities. Title each task `NN: <title>` for visual ordering in `cortex ls`. After writing the whole stack, post a summary update on plan #0 listing every task ID. STOP and confirm with the user before creating a plan stack.
 
 REVISIONS: re-fetch the body, edit it locally, write it back, then attribute the revision:
 ```bash
@@ -279,6 +290,7 @@ STOP. Before writing the plan to cortex, complete every item. Do NOT skip this.
    - [ ] Constraint enforcement completed
    - [ ] $SESSION_ID generated and held in working memory
    - [ ] LANE resolved (default = repo dir name, or user-specified)
+   - [ ] TAGS computed: `plan` always; `<stack-slug>` if writing a plan stack (auto-derived from title, never prompt the user)
 
 ## Post-Write Review
 
@@ -312,6 +324,7 @@ Plans always produce working software. Research informs Implementation Notes; Lo
 - ALWAYS track the core protocol with TODOs or Quests, if the tooling supports it
 - ALWAYS persist the plan via `cortex add --body-file`; NEVER inline `-b "..."` for multi-KB plans
 - ALWAYS attribute the plan immediately after `cortex add` with `cortex update <id> --as "$SESSION_ID" -m "plan written"`
+- ALWAYS pass `-t plan` to `cortex add` for any plan; for a plan stack, pass `-t plan,<stack-slug>` on every task in the stack
 - ONLY generate the plan and DO NOT implement any code changes
 - DO NOT generate any other documents like PR descriptions
 - NEVER create multiple plans for the same feature / task

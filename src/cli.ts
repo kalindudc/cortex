@@ -17,6 +17,7 @@ const main = defineCommand({
     mv: () => import("./commands/mv.ts").then((m) => m.default),
     rm: () => import("./commands/rm.ts").then((m) => m.default),
     lane: () => import("./commands/lane.ts").then((m) => m.default),
+    tag: () => import("./commands/tag.ts").then((m) => m.default),
     serve: () => import("./commands/serve.ts").then((m) => m.default),
     stop: () => import("./commands/stop.ts").then((m) => m.default),
     reset: () => import("./commands/reset.ts").then((m) => m.default),

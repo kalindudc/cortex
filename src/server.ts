@@ -3,7 +3,7 @@ import { streamSSE } from "hono/streaming";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { Store, validateAuthorTag, type TaskStatus } from "./store.ts";
+import { Store, validateAuthorTag, validateTagName, type TaskStatus } from "./store.ts";
 import { emit, subscribe, type CortexEvent } from "./events.ts";
 import pkg from "../package.json" with { type: "json" };
 // `with { type: "file" }` returns a string PATH (not file contents) that
@@ -114,11 +114,25 @@ export function buildApp(store: Store): Hono {
       body?: string | null;
       priority?: number;
       status?: TaskStatus;
+      tags?: string[];
     };
     if (!body.title || typeof body.title !== "string") {
       return c.json({ error: "title is required" }, 400);
     }
-    const task = store.addTask(body as { title: string });
+    // Validate tag names BEFORE addTask so a malformed tag short-circuits
+    // with a 400 (not a 500) and never persists a task we'd then have to
+    // roll back.
+    if (Array.isArray(body.tags)) {
+      try {
+        body.tags.forEach((n) => validateTagName(n));
+      } catch (e) {
+        return c.json({ error: (e as Error).message }, 400);
+      }
+    }
+    let task = store.addTask(body as { title: string });
+    if (Array.isArray(body.tags) && body.tags.length > 0) {
+      task = store.setTaskTags(task.id, body.tags);
+    }
     emit({ kind: "task.added", payload: task, ts: Date.now() });
     return c.json(task, 201);
   });
@@ -189,6 +203,48 @@ export function buildApp(store: Store): Hono {
       return c.json(task);
     } catch (err) {
       return c.json({ error: (err as Error).message }, 400);
+    }
+  });
+
+  app.patch("/api/tasks/:id/tags", async (c) => {
+    const id = Number(c.req.param("id"));
+    const body = (await c.req.json().catch(() => ({}))) as {
+      set?: string[];
+      add?: string[];
+      remove?: string[];
+    };
+    // Exactly one mode per request: keeps the resolution rule trivial and
+    // matches the CLI's mutually-exclusive `--set-tags` / `--add-tag` /
+    // `--rm-tag` flags.
+    const modes = [body.set, body.add, body.remove].filter(Array.isArray).length;
+    if (modes !== 1) {
+      return c.json(
+        { error: "exactly one of 'set', 'add', or 'remove' must be provided" },
+        400,
+      );
+    }
+    try {
+      let next: string[];
+      if (Array.isArray(body.set)) {
+        next = body.set.map((n) => validateTagName(n));
+      } else {
+        const existing = store.getTask(id);
+        if (!existing) return c.json({ error: `task ${id} not found` }, 404);
+        if (Array.isArray(body.add)) {
+          const adds = body.add.map((n) => validateTagName(n));
+          next = Array.from(new Set([...existing.tags, ...adds]));
+        } else {
+          const rms = new Set((body.remove ?? []).map((n) => validateTagName(n)));
+          next = existing.tags.filter((n) => !rms.has(n));
+        }
+      }
+      const task = store.setTaskTags(id, next);
+      emit({ kind: "task.updated", payload: task, ts: Date.now() });
+      return c.json(task);
+    } catch (err) {
+      const msg = (err as Error).message;
+      const code = msg.includes("not found") ? 404 : 400;
+      return c.json({ error: msg }, code);
     }
   });
 
@@ -288,6 +344,58 @@ export function buildApp(store: Store): Hono {
     try {
       store.removeLane(name);
       emit({ kind: "lane.changed", payload: { removed: name }, ts: Date.now() });
+      return c.json({ ok: true });
+    } catch (err) {
+      return c.json({ error: (err as Error).message }, 400);
+    }
+  });
+
+  // ---------- tags ----------
+  // Mirrors /api/lanes: GET list, POST add, PATCH edit, DELETE remove.
+  // Every write emits `tag.changed`; the dashboard's refresh() re-fetches
+  // /api/tags on every event, so no per-event handler is needed in v1.
+  app.get("/api/tags", (c) => c.json(store.listTags()));
+
+  app.post("/api/tags", async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as {
+      name?: string;
+      color?: string | null;
+    };
+    if (!body.name || typeof body.name !== "string") {
+      return c.json({ error: "name is required" }, 400);
+    }
+    try {
+      const tag = store.addTag(body as { name: string });
+      emit({ kind: "tag.changed", payload: tag, ts: Date.now() });
+      return c.json(tag, 201);
+    } catch (err) {
+      return c.json({ error: (err as Error).message }, 400);
+    }
+  });
+
+  app.patch("/api/tags/:name", async (c) => {
+    const name = c.req.param("name");
+    const fields = (await c.req.json().catch(() => ({}))) as {
+      color?: string | null;
+      rename?: string;
+    };
+    try {
+      const tag = store.editTag(name, fields);
+      emit({ kind: "tag.changed", payload: tag, ts: Date.now() });
+      return c.json(tag);
+    } catch (err) {
+      const msg = (err as Error).message;
+      const code = msg.includes("not found") ? 404 : 400;
+      return c.json({ error: msg }, code);
+    }
+  });
+
+  app.delete("/api/tags/:name", (c) => {
+    const name = c.req.param("name");
+    const force = c.req.query("force") === "1";
+    try {
+      store.removeTag(name, { force });
+      emit({ kind: "tag.changed", payload: { removed: name }, ts: Date.now() });
       return c.json({ ok: true });
     } catch (err) {
       return c.json({ error: (err as Error).message }, 400);

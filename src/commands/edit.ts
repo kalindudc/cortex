@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import { defineCommand } from "citty";
-import { Store, type Task } from "../store.ts";
+import { Store, validateTagName, type Task } from "../store.ts";
 import { Client, daemonUrl } from "../client.ts";
 
 function parsePriority(raw: string): number {
@@ -45,6 +45,21 @@ export default defineCommand({
       valueHint: "int",
       description: "new priority (non-negative integer; 0 = highest)",
     },
+    setTags: {
+      type: "string",
+      valueHint: "a,b,c",
+      description: "replace all tags with this comma-separated list",
+    },
+    addTag: {
+      type: "string",
+      valueHint: "name",
+      description: "add a single tag (use --set-tags for bulk replace)",
+    },
+    rmTag: {
+      type: "string",
+      valueHint: "name",
+      description: "remove a single tag",
+    },
   },
   async run({ args }) {
     const id = Number.parseInt(args.id, 10);
@@ -70,15 +85,59 @@ export default defineCommand({
       patch.body = args.body;
     }
     if (args.priority) patch.priority = parsePriority(args.priority);
-    if (Object.keys(patch).length === 0) {
-      console.error("error: provide at least one of --title, --body, --priority");
+    // Tag mutations: exactly one of --set-tags / --add-tag / --rm-tag may be
+    // present per invocation. Mirrors the HTTP route's `set | add | remove`
+    // exclusivity check; any combination yields a hard exit.
+    const tagModes = [args.setTags, args.addTag, args.rmTag].filter(
+      (v) => v !== undefined,
+    ).length;
+    if (tagModes > 1) {
+      console.error(
+        "error: --set-tags, --add-tag, and --rm-tag are mutually exclusive",
+      );
+      process.exit(1);
+    }
+    let tagOp: { mode: "set" | "add" | "rm"; names: string[] } | null = null;
+    try {
+      if (args.setTags !== undefined) {
+        const names = args.setTags
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .map((n) => validateTagName(n));
+        tagOp = { mode: "set", names };
+      } else if (args.addTag !== undefined) {
+        tagOp = { mode: "add", names: [validateTagName(args.addTag)] };
+      } else if (args.rmTag !== undefined) {
+        tagOp = { mode: "rm", names: [validateTagName(args.rmTag)] };
+      }
+    } catch (e) {
+      console.error(`error: ${(e as Error).message}`);
+      process.exit(1);
+    }
+    if (Object.keys(patch).length === 0 && tagOp === null) {
+      console.error(
+        "error: provide at least one of --title, --body, --priority, --set-tags, --add-tag, --rm-tag",
+      );
       process.exit(1);
     }
     const url = daemonUrl();
     if (url) {
       try {
-        const task = (await Client.editTask(url, id, patch)) as Task;
+        let task: Task | null = null;
+        if (Object.keys(patch).length > 0) {
+          task = (await Client.editTask(url, id, patch)) as Task;
+        }
+        if (tagOp) {
+          const newSet = await resolveTagSet(
+            tagOp,
+            async () => (await Client.getTask(url, id)) as Task,
+          );
+          task = (await Client.setTaskTags(url, id, newSet)) as Task;
+        }
+        if (!task) throw new Error("no fields changed");
         console.log(`✓ edited [${task.id}] ${task.title}`);
+        if (tagOp) console.log(`✓ tags: ${task.tags.join(",")}`);
         return;
       } catch (err) {
         console.error(`error: ${(err as Error).message}`);
@@ -87,8 +146,21 @@ export default defineCommand({
     }
     const store = Store.open();
     try {
-      const task = store.editTask(id, patch);
+      let task: Task | null = null;
+      if (Object.keys(patch).length > 0) {
+        task = store.editTask(id, patch);
+      }
+      if (tagOp) {
+        const newSet = await resolveTagSet(tagOp, async () => {
+          const t = store.getTask(id);
+          if (!t) throw new Error(`task ${id} not found`);
+          return t;
+        });
+        task = store.setTaskTags(id, newSet);
+      }
+      if (!task) throw new Error("no fields changed");
       console.log(`✓ edited [${task.id}] ${task.title}`);
+      if (tagOp) console.log(`✓ tags: ${task.tags.join(",")}`);
     } catch (err) {
       console.error(`error: ${(err as Error).message}`);
       process.exit(1);
@@ -97,3 +169,21 @@ export default defineCommand({
     }
   },
 });
+
+/** Compute the new tag set for a single edit invocation.
+ *  - set: caller-supplied list IS the new set.
+ *  - add: existing ∪ {name} (deduped via Set).
+ *  - rm:  existing ∖ {name}.
+ *  Reads existing tags only when needed (add/rm), never in set mode. */
+async function resolveTagSet(
+  op: { mode: "set" | "add" | "rm"; names: string[] },
+  fetchExisting: () => Promise<Task>,
+): Promise<string[]> {
+  if (op.mode === "set") return op.names;
+  const existing = await fetchExisting();
+  if (op.mode === "add") {
+    return Array.from(new Set([...existing.tags, ...op.names]));
+  }
+  const drop = new Set(op.names);
+  return existing.tags.filter((n) => !drop.has(n));
+}
