@@ -72,8 +72,45 @@ export type AddTaskInput = {
 export type EditTaskFields = {
   title?: string;
   body?: string | null;
+  /** Anchor-based partial body edit. Mutually exclusive with `body`.
+   *  Both `bodySearch` and `bodyReplace` MUST be present together; the
+   *  search anchor must match exactly once in the current body or the
+   *  operation throws BodySearchError (server returns 409). Empty string
+   *  for `bodyReplace` is allowed (deletion). */
+  bodySearch?: string;
+  bodyReplace?: string;
   priority?: number;
 };
+
+/** Thrown when a bodySearch/bodyReplace operation cannot apply because
+ *  the anchor matches zero or multiple times. The server dispatches both
+ *  cases to HTTP 409 Conflict; agents read `kind` (and `matches` when
+ *  ambiguous) to decide whether to re-read + retry or refine the anchor. */
+export class BodySearchError extends Error {
+  readonly kind: "not_found" | "ambiguous";
+  readonly matches?: number;
+  constructor(kind: "not_found" | "ambiguous", message: string, matches?: number) {
+    super(message);
+    this.name = "BodySearchError";
+    this.kind = kind;
+    if (matches !== undefined) this.matches = matches;
+  }
+}
+
+/** Count occurrences of `needle` in `haystack` without overlap. Used by
+ *  the bodySearch path to detect ambiguous anchors. Empty needle is
+ *  caller-rejected upstream so we don't guard against the infinite loop
+ *  that would produce here. */
+function countOccurrences(haystack: string, needle: string): number {
+  let count = 0;
+  let from = 0;
+  for (;;) {
+    const i = haystack.indexOf(needle, from);
+    if (i === -1) return count;
+    count++;
+    from = i + needle.length;
+  }
+}
 
 export type AddUpdateInput = {
   task_id: number;
@@ -330,15 +367,53 @@ export class Store {
 
   editTask(id: number, fields: EditTaskFields): Task {
     return this.db.transaction(() => {
+      // Resolve bodySearch/bodyReplace into a concrete body string FIRST,
+      // inside the same transaction so the read-then-splice-then-write is
+      // atomic against any concurrent writer. Mutual-exclusion with
+      // `body` is enforced at the API layer (server.ts); the store throws
+      // a generic Error if both are passed (defensive belt + braces).
+      let resolvedBody: string | null | undefined = fields.body;
+      if (fields.bodySearch !== undefined || fields.bodyReplace !== undefined) {
+        if (fields.body !== undefined) {
+          throw new Error("editTask: bodySearch/bodyReplace cannot be combined with body");
+        }
+        if (fields.bodySearch === undefined || fields.bodyReplace === undefined) {
+          throw new Error("editTask: bodySearch and bodyReplace must be provided together");
+        }
+        if (fields.bodySearch.length === 0) {
+          throw new Error("editTask: bodySearch cannot be empty");
+        }
+        const existing = this.getTask(id);
+        if (!existing) throw new Error(`task ${id} not found`);
+        const current = existing.body ?? "";
+        const matches = countOccurrences(current, fields.bodySearch);
+        if (matches === 0) {
+          throw new BodySearchError(
+            "not_found",
+            "body-search anchor not found in body",
+          );
+        }
+        if (matches > 1) {
+          throw new BodySearchError(
+            "ambiguous",
+            `body-search anchor matched ${matches} times; refine for uniqueness`,
+            matches,
+          );
+        }
+        const idx = current.indexOf(fields.bodySearch);
+        resolvedBody = current.slice(0, idx)
+          + fields.bodyReplace
+          + current.slice(idx + fields.bodySearch.length);
+      }
       const sets: string[] = [];
       const params: Array<string | number | null> = [];
       if (fields.title !== undefined) {
         sets.push("title = ?");
         params.push(fields.title);
       }
-      if (fields.body !== undefined) {
+      if (resolvedBody !== undefined) {
         sets.push("body = ?");
-        params.push(fields.body);
+        params.push(resolvedBody);
       }
       if (fields.priority !== undefined) {
         sets.push("priority = ?");

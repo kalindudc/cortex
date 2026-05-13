@@ -405,17 +405,59 @@ input:disabled { opacity: 0.5; cursor: not-allowed; }
 .lane-row.selected .lane-edit-btn { opacity: 1; }
 .lane-edit-btn:hover { color: var(--text); background: var(--tint-strong); }
 
-/* Task priority chip — small monospace badge after the title */
+/* Task priority chip — small monospace badge after the title.
+   In list rows it stays a static <span> badge (PriorityChip).
+   In the active-task header it's promoted to a <button> via
+   PriorityChipButton; the button affordances (cursor + hover) below apply
+   to BOTH because the .priority-chip class is shared. */
 .priority-chip {
   display: inline-flex; align-items: center; justify-content: center;
-  height: 16px; min-width: 22px; padding: 0 5px;
+  height: 16px; min-width: 24px; padding: 0 6px;
   font: 600 var(--fs-1)/1 var(--font-mono);
   color: var(--text-3); background: var(--tint);
-  border-radius: var(--r-1); flex-shrink: 0;
+  border-radius: var(--r-pill); flex-shrink: 0;
   font-variant-numeric: tabular-nums;
+  cursor: pointer; border: 0;
+  transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
 }
+.priority-chip:hover { background: var(--tint-strong, var(--accent-tint)); color: var(--text); }
 .priority-chip.urgent { color: var(--accent-on); background: var(--accent); }
 .priority-chip.high   { color: var(--err);       background: transparent; border: 1px solid var(--err); }
+
+/* Inline edit state of .priority-chip in the active-task header. The pill
+   morphs into a number <input> that keeps the SAME shape + size (border-
+   radius / height / padding / font come from .priority-chip and the
+   .active-header sizing override). What changes when editing:
+     - cursor: text                 — signals "type here", not "click"
+     - paper-white bg + accent border  — lifts the surface off the chip
+                                          palette so urgent/high color
+                                          modifiers don't bleed through
+     - accent caret + focus glow    — makes the typing point unmissable
+   Selector uses .priority-chip.priority-chip-input (specificity 0,2,0)
+   so it beats .priority-chip.urgent / .priority-chip.high which would
+   otherwise repaint the editable surface red/orange. */
+.priority-chip.priority-chip-input {
+  width: 3.5em;
+  text-align: center;
+  cursor: text;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--accent);
+  caret-color: var(--accent);
+  -moz-appearance: textfield;
+  appearance: textfield;
+  transition: background var(--dur-1) var(--ease),
+              border-color var(--dur-1) var(--ease),
+              box-shadow   var(--dur-1) var(--ease);
+}
+.priority-chip.priority-chip-input::-webkit-outer-spin-button,
+.priority-chip.priority-chip-input::-webkit-inner-spin-button {
+  -webkit-appearance: none; margin: 0;
+}
+.priority-chip.priority-chip-input:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-tint);
+}
 
 /* Color swatch grid for lane edit modal */
 .color-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; }
@@ -740,17 +782,23 @@ input:disabled { opacity: 0.5; cursor: not-allowed; }
   display: flex; align-items: center; gap: 10px;
   padding: 16px 24px; border-bottom: 1px solid var(--border);
 }
+/* Header chip alignment: the priority chip stays compact (16px) in list
+   rows so the sidebar lane list keeps its density, but in the active-task
+   header it sits next to .lane-chip and .tags-chip which are 20px pills.
+   Bump priority-chip ONLY here so all three header chips share a baseline. */
+.active-header .priority-chip {
+  height: 20px; min-width: 28px; padding: 0 10px;
+}
 /* Active task body: ALWAYS a flex column whose only scroll surface is the
-   description region inside (the editor in both display and edit modes).
-   The header above and the form chrome / footer below stay pinned, so the
-   task title and the save/cancel row are always reachable regardless of
-   description length. Replaces the older nested scroll where the body
+   MdEditor inside (.editable-task-body > .md-editor owns internal scroll).
+   The header above and the post-update form / footer below stay pinned,
+   so the title input and the action row are always reachable regardless
+   of description length. Replaces the older nested scroll where the body
    itself owned overflow:auto and could push chrome past the viewport.
 
    Padding is ZERO here: the editor extends edge-to-edge of the pane so it
    doesn't read as a floating slab inside a padded frame. Padding is
-   redistributed to the title (display mode) and .edit-task-form (edit
-   mode) below — the editor itself stays flush. */
+   redistributed to the title input below — the editor itself stays flush. */
 .active-body {
   padding: 0;
   flex: 1;
@@ -759,32 +807,20 @@ input:disabled { opacity: 0.5; cursor: not-allowed; }
   display: flex;
   flex-direction: column;
 }
-/* In display mode, .stack wraps the title + the readonly editor. The
-   editor must take the remaining vertical space so it can scroll
-   internally instead of letting .active-body scroll — keeping behavior
-   parity with edit mode. */
-.active-body > .stack {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-/* Title gets its own padding + a bottom border that acts as the visual
-   separator from the editor below. The default 12px .stack sibling gap is
-   nulled inside .active-body so the border-bottom is the only divider. */
-.active-body > .stack > .title-2 {
-  padding: 16px 24px;
-  margin: 0;
+/* Always-editable title input that mirrors the old .title-2 heading
+   visually. Borderless by default; focus ring uses --accent-tint to
+   surface the editable affordance. The bottom border separates the title
+   from the MdEditor below — same role the previous .title-2 had. */
+.title-input {
+  display: block; width: 100%;
+  padding: 16px 24px; margin: 0;
+  border: 0; background: transparent;
+  font: 700 var(--fs-5)/1.2 var(--font-mono);
+  color: var(--text);
   border-bottom: 1px solid var(--border);
+  outline: none;
 }
-.active-body > .stack > * + * {
-  margin-top: 0;
-}
-/* Empty-body placeholder gets the same inset so it doesn't touch the
-   pane edges when there's no description yet. */
-.active-body > .stack > .muted {
-  padding: 16px 24px;
-}
+.title-input:focus { background: var(--accent-tint); }
 
 .active-foot {
   padding: 16px 24px; border-top: 1px solid var(--border); background: var(--panel);
@@ -792,9 +828,14 @@ input:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .lane-chip {
   display: inline-flex; align-items: center; gap: 6px;
-  padding: 2px 8px; border-radius: var(--r-pill);
-  background: var(--tint); color: var(--text-2); font-size: var(--fs-2);
+  height: 20px; padding: 0 10px;
+  border-radius: var(--r-pill);
+  background: var(--tint); color: var(--text-2);
+  font-size: var(--fs-1); font-weight: 600; line-height: 1;
+  border: 0; cursor: pointer;
+  transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
 }
+.lane-chip:hover { background: var(--tint-strong, var(--accent-tint)); color: var(--text); }
 .lane-chip .lane-color { width: 6px; height: 6px; border-radius: 50%; }
 
 /* ===== Tag pill (Primer IssueLabelToken-style) =====
@@ -879,8 +920,8 @@ input:disabled { opacity: 0.5; cursor: not-allowed; }
    no per-tag color, plain text label) so users don't mistake it for a tag. */
 .tags-chip {
   display: inline-flex; align-items: center; gap: 4px;
-  height: 20px; padding: 0 8px;
-  border-radius: var(--r-1);
+  height: 20px; padding: 0 10px;
+  border-radius: var(--r-pill);
   background: var(--tint); color: var(--text-3);
   font-size: var(--fs-1); font-weight: 600; line-height: 1;
   border: 1px solid var(--border);
@@ -893,10 +934,91 @@ input:disabled { opacity: 0.5; cursor: not-allowed; }
 .tags-chip:hover .tags-chip-label { color: var(--text); }
 .tags-chip .tags-chip-count { color: var(--text); font-family: var(--font-mono); }
 
+/* ===== Generic Picker (search + filtered list + keyboard nav) =====
+   Used by LanePicker today; designed to host other future pickers. Visual
+   conventions mirror .tag-picker so both feel like the same component
+   family — a future migration of TagPicker onto Picker would mostly mean
+   replacing the .tag-picker* class names with .picker* (and moving the
+   create-row + footer rendering into the createRow / footer props). */
+.picker {
+  width: 280px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  max-height: 360px;
+}
+.picker-search {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.picker-search input {
+  width: 100%;
+  height: 28px;
+  padding: 4px 8px;
+  font-size: var(--fs-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  background: var(--bg);
+  color: var(--text);
+}
+.picker-search input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-tint);
+}
+.picker-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px;
+}
+.picker-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: var(--r-2);
+  background: transparent;
+  border: 0;
+  border-left: 2px solid transparent;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text-2);
+  transition: background var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease);
+}
+.picker-row:hover { background: var(--tint); color: var(--text); }
+/* Selected: leading checkmark is the indicator (no row background) so it
+   stays distinguishable from the keyboard cursor. Same convention as
+   .tag-picker-row. */
+.picker-row.cursor {
+  background: var(--tint);
+  border-left-color: var(--accent);
+  color: var(--text);
+}
+.picker-check {
+  width: 14px; height: 14px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.picker-empty {
+  margin: 0;
+  padding: 16px 12px;
+  text-align: center;
+  font-size: var(--fs-2);
+}
+.picker-foot {
+  border-top: 1px solid var(--border);
+  padding: 4px;
+  flex: 0 0 auto;
+}
+
 /* ===== Tag picker (GitHub labels-style dropdown) =====
-   Fixed-width, scrollable, keyboard-driven multi-select. Replaces the
-   previous read-only TagsPopover and the comma-separated input that lived
-   in EditTaskForm — single source of truth for editing a task's tags. */
+   Fixed-width, scrollable, keyboard-driven multi-select. Single source of
+   truth for editing a task's tags (replaces the older read-only
+   TagsPopover and the prior comma-separated input). */
 .tag-picker {
   width: 280px;
   padding: 0;            /* sections own their own padding */
@@ -1006,9 +1128,17 @@ input:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 .pane-tags .lane-row .lane-count { color: var(--text-3); font-size: var(--fs-2); }
 
-/* drag & drop visual */
+/* drag & drop visual.
+   Generic draggable surfaces (sidebar task rows) get the grab cursor so
+   the drag affordance is discoverable. The lane chip in the active-task
+   header is BOTH clickable (opens lane popover) and draggable (drag-to-
+   lane in the sidebar) — click is the primary action there, so we
+   override back to pointer to signal "clickable button" rather than
+   "only draggable". */
 [draggable="true"] { cursor: grab; }
 [draggable="true"]:active { cursor: grabbing; }
+.lane-chip[draggable="true"]          { cursor: pointer; }
+.lane-chip[draggable="true"]:active   { cursor: pointer; }
 .status-pill.dragover { background: var(--accent-tint); color: var(--text); }
 
 /* ---------- autosize textarea (post-update compose only) ----------
@@ -1025,76 +1155,89 @@ textarea.autosize {
   resize: none;
 }
 
-/* ---------- edit-task-form (the in-place description editor) ----------
-   .active-body is always a flex column (see above), so the form just needs
-   to be a flex:1 child whose own children stack vertically. The MdEditor
-   inside is flex:1 1 auto so the title input, priority/lane row, and
-   cancel/save row stay at their natural height (always visible) and the
-   editor is the ONLY thing that scrolls when the description outgrows the
-   available space. */
-.edit-task-form {
+/* ---------- external-change banner ----------
+   Surfaced above a field (title or body) inside .editable-task-body when
+   another agent / the CLI wrote a different value to that field while the
+   user has unsaved local edits. Apply adopts the external value; Dismiss
+   keeps the user's version (the next autosave will explicitly overwrite
+   the agent's write). Compact, accent-tinted strip so the affordance is
+   visible without dominating the editing surface. */
+.external-change-banner {
+  display: flex; align-items: center; gap: 12px;
+  margin: 8px 24px; padding: 8px 12px;
+  background: var(--accent-tint);
+  border: 1px solid var(--accent);
+  border-left-width: 3px;
+  border-radius: var(--r-2);
+  font-size: var(--fs-2);
+  color: var(--text);
+}
+.external-change-icon {
+  font-size: var(--fs-4);
+  color: var(--accent);
+  flex-shrink: 0;
+  line-height: 1;
+}
+.external-change-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.external-change-text strong {
+  display: block;
+  font-weight: 600;
+  font-size: var(--fs-2);
+}
+.external-change-preview {
+  margin: 2px 0 0;
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.external-change-actions {
+  display: flex; gap: 6px;
+  flex-shrink: 0;
+}
+.external-change-actions .btn {
+  height: 24px; padding: 0 10px;
+  font-size: var(--fs-2);
+}
+
+/* ---------- editable-task-body (always-on title input + body editor) ----
+   .active-body is always a flex column (see above), so this wrapper just
+   needs to be a flex column whose MdEditor child takes the remaining
+   vertical space and owns internal scroll. The title input keeps its
+   natural height — always visible — and the editor scrolls when content
+   exceeds the available space. */
+.editable-task-body {
   display: flex;
   flex-direction: column;
   flex: 1;
-  min-height: 0;     /* let the textarea actually be constrained by parent */
+  min-height: 0;
   width: 100%;
-  gap: 10px;
-  /* Inherits the chrome inset since .active-body now has padding:0 — keeps
-     the title input, priority/lane row, and save/cancel button row from
-     touching the pane edges. */
-  padding: 16px 24px;
 }
 /* ---------- .md-editor (CodeMirror-backed task description) ----------
-   ONE component (MdEditor in components.js) renders both the readonly
-   display view and the live editor; this stylesheet only owns the
-   wrapper sizing/affordance — the editor's chrome (gutter colors, active
-   line, scrollbar) is themed inside the EditorView via cortex CSS
-   variables, so it follows light/dark mode automatically.
+   Single always-editable mode. This stylesheet only owns the wrapper
+   sizing/affordance — the editor's chrome (gutter colors, active line,
+   scrollbar) is themed inside EditorView.theme via cortex CSS variables,
+   so it follows light/dark mode automatically.
 
-   --edit  : bounded flex child of the form; CM owns internal scroll.
-             Border + radius live here so they wrap the gutter too.
-   --display: natural height; pointer cursor signals click-to-edit. */
+   Bounded so the header chrome above and the post-update form below stay
+   pinned; CodeMirror owns internal scroll. I-beam cursor across the
+   editable surface (gutter overrides back to default — line-number column
+   isn't editable). */
 .md-editor {
   width: 100%;
   display: block;
-}
-.md-editor--edit {
   flex: 1 1 auto;
   min-height: 120px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-2);
-  /* Transparent so the page's paper-dot pattern shows through the editor;
-   the border alone delimits the editable region. Painting a solid bg here
-   would defeat the same transparency we set inside cortexCmTheme. */
   background: transparent;
   overflow: hidden;
 }
-/* Native contenteditable shows the I-beam over actual text glyphs, but
-   browsers default to the arrow cursor over empty whitespace below the
-   last line and over the .cm-scroller padding. Force I-beam across the
-   entire editable surface so the whole region reads as "clickable text".
-   Gutter overrides back to default — line-number column isn't editable
-   and shouldn't pretend to be. */
-.md-editor--edit .cm-scroller,
-.md-editor--edit .cm-content {
-  cursor: text;
-}
-.md-editor--edit .cm-gutters {
-  cursor: default;
-}
-.md-editor--display {
-  /* Same bounded-fill treatment as edit mode: take whatever vertical space
-   the parent stack offers and let CodeMirror own the internal scroll.
-   Without this the .active-body would have to scroll, which makes the
-   task header drift away from the description and looks out of place
-   relative to edit mode. No border in display mode — the gutter's own
-   border-right and the page background carry the visual separation. */
-  flex: 1 1 auto;
-  min-height: 0;
-  cursor: pointer;
-  background: transparent;
-  overflow: hidden;
-}
+.md-editor .cm-scroller, .md-editor .cm-content { cursor: text; }
+.md-editor .cm-gutters { cursor: default; }
 /* CodeMirror's root is .cm-editor; fill our wrappers exactly in BOTH modes
    so the gutter + content area stretch to the available space and CM's
    internal .cm-scroller owns vertical scroll. */

@@ -16,7 +16,6 @@ import {
   closeAllPopovers,
   paletteOpen,
   modal,
-  editing,
 } from "./state.js";
 
 const html = htm.bind(h);
@@ -97,7 +96,7 @@ document.addEventListener("click", (e) => {
 //   ⌘/Ctrl + P  or  ⌘/Ctrl + K   -> toggle command palette
 //   ⌘/Ctrl + /                   -> jump cursor into the post-update textarea
 //   ⌘/Ctrl + Enter               -> post the update (works while focused in textarea)
-//   Esc                          -> close palette -> modal -> popover -> editing
+//   Esc                          -> close palette -> modal -> popover
 window.addEventListener("keydown", (e) => {
   const meta = e.metaKey || e.ctrlKey;
 
@@ -135,7 +134,7 @@ window.addEventListener("keydown", (e) => {
   }
 
   if (e.key === "Escape") {
-    // Cascade: palette → modal → popovers → editing. Each step short-circuits
+    // Cascade: palette → modal → popovers. Each step short-circuits
     // if it caught the Esc; the next step only fires if nothing was open at
     // this level. closeAllPopovers() returns true iff it closed at least one
     // popover signal — don't enumerate popover signals here so adding new
@@ -144,6 +143,5 @@ window.addEventListener("keydown", (e) => {
     if (paletteOpen.value) { paletteOpen.value = false; return; }
     if (modal.value)       { modal.value = null;        return; }
     if (closeAllPopovers())                              return;
-    if (editing.value)     { editing.value = false;     return; }
   }
 });

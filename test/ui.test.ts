@@ -46,14 +46,12 @@ describe("UI: served assets", () => {
     expect(t).toMatch(/--accent:\s+#[0-9a-f]{6};/);
     expect(t).toContain(".pane-active");
     expect(t).toContain("--paper-dot");
-    // Task description renders through the CodeMirror-backed MdEditor in
-    // BOTH display (readonly) and edit modes; the wrapper class is the
-    // stable contract this stylesheet owns. The editor's own chrome
-    // (gutter, active line, scrollbar) is themed inside EditorView.theme
-    // and lives in JS, not in styles.css.
+    // Task description renders through the CodeMirror-backed MdEditor
+    // (always-editable); the wrapper class is the stable contract this
+    // stylesheet owns. The editor's own chrome (gutter, active line,
+    // scrollbar) is themed inside EditorView.theme and lives in JS, not
+    // in styles.css.
     expect(t).toContain(".md-editor");
-    expect(t).toContain(".md-editor--edit");
-    expect(t).toContain(".md-editor--display");
   });
 
   test("GET /app.js returns the JS entry that imports App + state", async () => {

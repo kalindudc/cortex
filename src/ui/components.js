@@ -2,7 +2,7 @@
 //
 // Imports the data layer from ./state.js and presents it. Single file because
 // the components are densely cross-referenced (e.g. ActiveTaskPane embeds
-// EditTaskForm + PostUpdateForm + StatusPopover; CommandPalette references
+// EditableTaskBody + PostUpdateForm + StatusPopover; CommandPalette references
 // every action; ModalRoot dispatches to LaneEditModal). Splitting further
 // would mean threading the same imports through 6+ files for no win.
 
@@ -26,6 +26,7 @@ import {
   highlightActiveLine,
   highlightActiveLineGutter,
   drawSelection,
+  placeholder,
 } from "https://esm.sh/@codemirror/view@6";
 import { defaultKeymap, history, historyKeymap } from "https://esm.sh/@codemirror/commands@6";
 import { markdown } from "https://esm.sh/@codemirror/lang-markdown@6";
@@ -50,17 +51,64 @@ const autosizeRef = (el) => {
   requestAnimationFrame(fit);
 };
 
+// useAutosave — debounced + max-wait commit hook for always-editable inputs.
+// Every change calls schedule(); the commit fn fires on whichever comes
+// first: 600 ms idle (debounce) or 3000 ms since the first dirty change
+// (hard ceiling so a continuous typist still saves periodically). flush()
+// commits immediately and is invoked on blur and on unmount so a fast
+// task switch (parent key change) never drops the last keystroke.
+//
+// Errors are swallowed by the caller — commit functions are expected to
+// wrap their api call in tryApi at the call site, so this hook does not
+// need its own try/catch (matches the pattern in PostUpdateForm.submit).
+function useAutosave(commit, idleMs = 600, maxMs = 3000) {
+  // commitRef refreshes every render so the latest closure (with current
+  // signal values) is what fires when timers tick — mirrors the
+  // onChangeRef pattern inside MdEditor.
+  const commitRef  = useRef(commit);
+  commitRef.current = commit;
+  const idleTimer  = useRef(null);
+  const maxTimer   = useRef(null);
+  const dirty      = useRef(false);
+
+  const flush = () => {
+    if (!dirty.current) return;
+    if (idleTimer.current) { clearTimeout(idleTimer.current); idleTimer.current = null; }
+    if (maxTimer.current)  { clearTimeout(maxTimer.current);  maxTimer.current  = null; }
+    dirty.current = false;
+    commitRef.current?.();
+  };
+  const schedule = () => {
+    dirty.current = true;
+    if (idleTimer.current) clearTimeout(idleTimer.current);
+    idleTimer.current = setTimeout(flush, idleMs);
+    // Hard-ceiling timer arms only on the FIRST dirty change of a burst so
+    // a continuous typist still gets a periodic flush.
+    if (!maxTimer.current) maxTimer.current = setTimeout(flush, maxMs);
+  };
+
+  // Unmount-flush: guarantees the previous task's pending edits commit
+  // before the new task's EditableTaskBody mounts (parent key=task.id
+  // re-mounts on every task switch).
+  useEffect(() => () => flush(), []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return { schedule, flush };
+}
+
 import {
   // signals
-  tasks, lanes, tags, selectedLane, selectedId, editing, statusPopover, newLaneOpen,
+  tasks, lanes, tags, selectedLane, selectedId, statusPopover, newLaneOpen,
   paletteOpen, modal, errorMsg, meAuthor, tab, authors,
   sidebarView, selectedTag, newTagOpen, tagsPopover,
+  lanePopover,
   // computed
   tasksInLane, activeTask, inboxList, blockedTasks,
   // sentinel
   UNTAGGED,
   // api + error helpers
   api, showError, tryApi, fetchAuthors,
+  // popover bookkeeping
+  closeAllPopovers, togglePopover,
   // platform / hint helpers
   kbd,
   // pure helpers
@@ -123,9 +171,143 @@ function Icon({ name, size = 14, className = "" }) {
     dangerouslySetInnerHTML=${{ __html: inner }}></svg>`;
 }
 
+// Static priority badge. Used by list-row task surfaces (LanesPane,
+// TagsPane) where the chip lives INSIDE a <button class="task-row"> — a
+// nested <button> would be invalid HTML and would steal the row's click.
+// The active-task header instead uses PriorityChipButton (below), which
+// morphs into an inline <input> on click.
 function PriorityChip({ priority }) {
   return html`<span class=${"priority-chip " + priorityClass(priority)}
     title=${`Priority ${priority} (0 = highest)`}>P${priority}</span>`;
+}
+
+// Self-editing variant of PriorityChip used in the active-task header.
+// The pill IS the input: clicking the button morphs the same surface into
+// a number <input> styled identically to the pill (same border-radius,
+// height, padding via the shared .priority-chip class). Enter commits;
+// Esc and blur cancel — matches the user's spec for transient inline
+// editing without a separate popover.
+//
+// Why local editing signal instead of a global one: only one priority
+// chip is ever rendered (in ActiveTaskPane header), so a global signal
+// would be ceremony for nothing; local state also avoids the global
+// outside-click cascade re-opening logic that the old popover needed.
+function PriorityChipButton({ task }) {
+  const editing  = useSignal(false);
+  const val      = useSignal(String(task.priority));
+  const inputRef = useRef(null);
+
+  // Re-sync from prop when the task's priority changes externally (SSE
+  // echo, palette quick-action). Skip while editing so we don't stomp
+  // mid-typing.
+  useEffect(() => {
+    if (!editing.value) val.value = String(task.priority);
+  }, [task.priority]);
+
+  // Focus + select on entering edit mode so a single keystroke replaces
+  // the value (the common case: P2 → P0). Same setTimeout(0) defensive
+  // pattern TagPicker uses to win the race against the post-render paint.
+  useEffect(() => {
+    if (!editing.value) return;
+    setTimeout(() => { inputRef.current?.focus(); inputRef.current?.select(); }, 0);
+  }, [editing.value]);
+
+  const cancel = () => {
+    val.value = String(task.priority);
+    editing.value = false;
+  };
+  const commit = async () => {
+    const n = parseInt(val.value, 10);
+    editing.value = false;
+    if (Number.isNaN(n) || n < 0 || n === task.priority) {
+      val.value = String(task.priority);
+      return;
+    }
+    await tryApi(() => api.editTask(task.id, { priority: n }));
+  };
+
+  if (editing.value) {
+    return html`<input ref=${inputRef} type="number" min="0"
+      class=${"priority-chip priority-chip-input " + priorityClass(task.priority)}
+      value=${val.value}
+      onInput=${e => val.value = e.target.value}
+      onKeyDown=${e => {
+        if (e.key === "Enter")       { e.preventDefault(); commit(); }
+        else if (e.key === "Escape") { e.stopPropagation(); cancel(); }
+      }}
+      onBlur=${cancel}
+      title="Enter commits, Esc or click-out cancels"/>`;
+  }
+  return html`<button class=${"priority-chip " + priorityClass(task.priority)}
+    title=${`Priority ${task.priority} (0 = highest) — click to edit`}
+    onClick=${e => {
+      e.stopPropagation();
+      // Close any open popover so the editing surface is the only active
+      // transient UI — same single-popover-at-a-time invariant.
+      closeAllPopovers();
+      editing.value = true;
+    }}>
+    P${task.priority}
+  </button>`;
+}
+
+// Active-task lane chip. Renders the lane color dot + name as a button
+// that (a) opens a popover listing all lanes for one-click moves, and
+// (b) is the drag source for moving the active task into another lane via
+// the sidebar. The drag handler used to live on the title <h2>, but the
+// title is now an editable <input> — dragging text would interfere with
+// selection — so the gesture moved here onto a surface that already
+// visually represents lane membership.
+//
+// HTML5 DnD + onClick coexist: the browser does NOT fire `click` after a
+// successful drag, so the popover does not pop after a drag. Do NOT call
+// e.preventDefault() in either handler — that would break the coexistence.
+function LaneChipButton({ task }) {
+  return html`<div style="position:relative" data-pop>
+    <button class="lane-chip lane-chip-button" data-pop draggable="true"
+      title=${`Lane: ${task.lane} — click to move, drag to reorder`}
+      onDragStart=${e => e.dataTransfer.setData("application/x-cortex-task-id", String(task.id))}
+      onClick=${e => { e.stopPropagation(); togglePopover(lanePopover); }}>
+      ${laneColor(task.lane) ? html`<span class="lane-color" style=${`background: ${laneColor(task.lane)}`}></span>` : null}
+      <span>${task.lane}</span>
+    </button>
+    ${lanePopover.value ? html`<${LanePicker} task=${task}/>` : null}
+  </div>`;
+}
+
+// Lane picker built on the generic Picker primitive: search input + arrow
+// nav + Enter to select. Single-select (replace, not toggle); clicking or
+// Entering a row moves the task to that lane and closes the picker. No
+// create-row affordance — new lanes are managed via the sidebar's New Lane
+// flow; auto-creating from inside the picker would conflate "move to
+// existing" and "create new" intents on the same surface.
+function LanePicker({ task }) {
+  // Sort by name for predictable ordering. lanes.value is API-order
+  // (insertion); the picker uses alphabetical so search hits feel stable.
+  const sorted = [...lanes.value].sort((a, b) => a.name.localeCompare(b.name));
+  const select = (l) => {
+    lanePopover.value = false;
+    if (l.name === task.lane) return;
+    tryApi(() => api.moveLane(task.id, l.name));
+  };
+  return html`<${Picker}
+    items=${sorted}
+    filterText=${l => l.name}
+    isSelected=${l => l.name === task.lane}
+    onSelect=${select}
+    placeholder="Search lanes\u2026"
+    emptyText="no lanes match"
+    className="lane-picker"
+    renderRow=${({ item: l, isSelected, isCursor, onClick, onMouseMove }) => html`<button
+      class=${"picker-row" + (isSelected ? " selected" : "") + (isCursor ? " cursor" : "")}
+      onClick=${onClick}
+      onMouseMove=${onMouseMove}
+      title=${isSelected ? "Current lane" : `Move to ${l.name}`}>
+      <span class="picker-check">${isSelected ? html`<${Icon} name="check" size=${12}/>` : null}</span>
+      <span class="lane-color" style=${l.color ? `background: ${l.color}` : "background: var(--border)"}></span>
+      <span>${l.name}</span>
+    </button>`}
+  />`;
 }
 
 // Single tag rendered as a Primer-IssueLabelToken-style pill: pill shape,
@@ -167,7 +349,7 @@ function TagsHeaderChip({ task }) {
   return html`<div style="position:relative" data-pop>
     <button class="tags-chip" data-pop
       title=${titleAttr}
-      onClick=${e => { e.stopPropagation(); tagsPopover.value = !tagsPopover.value; }}>
+      onClick=${e => { e.stopPropagation(); togglePopover(tagsPopover); }}>
       <span class="tags-chip-label">tags:</span>
       <span class="tags-chip-count">${count}</span>
     </button>
@@ -176,6 +358,146 @@ function TagsHeaderChip({ task }) {
 }
 
 // GitHub-labels-style picker: search input + scrollable list with checkmarks
+// ---------- generic Picker primitive ------------------------------------
+//
+// Headless-ish search-and-select dropdown. Owns the search input, query
+// filtering, keyboard navigation (ArrowUp/Down, Enter), cursor scroll-into-
+// view, mouse-move row sync, and empty-state messaging. The CALLER owns
+// what items look like, what "selected" means, and what happens on Enter.
+//
+// Used today by LanePicker. TagPicker is a richer pre-existing variant
+// that COULD migrate later — it has more bespoke layout (attached-first
+// stable sort, custom create-row affordance, footer validation message)
+// but the core search+nav+cursor mechanics are the same. The optional
+// createRow / onCreate props on Picker exist specifically to leave room
+// for that migration.
+//
+// Props:
+//   items        : T[]                                          — already sorted by caller
+//   filterText   : (item: T) => string                          — returned string is .toLowerCase().includes(query)-matched
+//   onSelect     : (item: T) => void                            — fired on row click + Enter on cursor
+//   renderRow    : ({item, isSelected, isCursor, onClick, onMouseMove}) => vnode
+//   isSelected?  : (item: T) => boolean   (default: () => false)
+//   placeholder? : string                  (default: "Search…")
+//   emptyText?   : string                  (default: "no results")
+//   className?   : string                  — appended to root .popover.picker classes
+//   createRow?   : ({query, isCursor, onClick}) => vnode | null   — return non-null to show a create row at the END of the list
+//   onCreate?    : (query: string) => void                       — fired when create row is triggered (click or Enter on cursor)
+//   footer?      : vnode                                         — rendered below the list
+function Picker({
+  items,
+  filterText,
+  onSelect,
+  renderRow,
+  isSelected = () => false,
+  placeholder = "Search\u2026",
+  emptyText = "no results",
+  className = "",
+  createRow,
+  onCreate,
+  footer,
+}) {
+  const query    = useSignal("");
+  const cursor   = useSignal(0);
+  const searchRef = useRef(null);
+  const listRef   = useRef(null);
+
+  // Defensive focus — same setTimeout(0) pattern TagPicker uses. Without
+  // it, the click that mounted the picker re-focuses the trigger button
+  // after the picker's autoFocus runs, leaving keyboard nav broken on
+  // first open.
+  useEffect(() => {
+    searchRef.current?.focus();
+    const t = setTimeout(() => searchRef.current?.focus(), 0);
+    return () => clearTimeout(t);
+  }, []);
+
+  const q = query.value.trim().toLowerCase();
+  const filtered = q
+    ? items.filter(it => filterText(it).toLowerCase().includes(q))
+    : items;
+
+  // Optional create-row vnode. The CALLER decides whether the create
+  // affordance shows for THIS query (e.g. non-empty + no exact match +
+  // valid name) by returning null when not applicable. We just append it
+  // to the cursor-addressable items list.
+  const createNode = createRow
+    ? createRow({
+        query: query.value.trim(),
+        isCursor: cursor.value === filtered.length,
+        onClick: () => onCreate?.(query.value.trim()),
+      })
+    : null;
+  const totalRows = filtered.length + (createNode ? 1 : 0);
+
+  // Clamp cursor when the filtered list shrinks (e.g. user typed a more-
+  // specific filter and the previous cursor index is now out of bounds).
+  if (cursor.value > Math.max(0, totalRows - 1)) cursor.value = Math.max(0, totalRows - 1);
+
+  const triggerCursor = () => {
+    if (totalRows === 0) return;
+    if (createNode && cursor.value === filtered.length) {
+      onCreate?.(query.value.trim());
+    } else {
+      const it = filtered[cursor.value];
+      if (it != null) onSelect(it);
+    }
+  };
+
+  const onSearchKey = (e) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (totalRows === 0) return;
+      cursor.value = (cursor.value + 1) % totalRows;
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      if (totalRows === 0) return;
+      cursor.value = (cursor.value - 1 + totalRows) % totalRows;
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      triggerCursor();
+    }
+  };
+
+  const onSearchInput = (e) => {
+    query.value = e.target.value;
+    cursor.value = 0;
+  };
+
+  // Auto-scroll the cursor row into view. block:'nearest' avoids jarring
+  // jumps when the row is already visible. Same pattern as TagPicker.
+  useEffect(() => {
+    const root = listRef.current;
+    if (!root) return;
+    const el = root.querySelector(".picker-row.cursor");
+    el?.scrollIntoView({ block: "nearest" });
+  }, [cursor.value, totalRows]);
+
+  return html`<div class=${"popover picker " + className} data-pop style="top: 32px; left: 0">
+    <div class="picker-search">
+      <input ref=${searchRef} autoFocus
+        placeholder=${placeholder}
+        value=${query.value}
+        onInput=${onSearchInput}
+        onKeyDown=${onSearchKey}/>
+    </div>
+    <div class="picker-list" ref=${listRef}>
+      ${totalRows === 0
+        ? html`<p class="picker-empty meta">${emptyText}</p>`
+        : filtered.map((it, i) => renderRow({
+            item: it,
+            isSelected: isSelected(it),
+            isCursor:   i === cursor.value,
+            onClick:    () => onSelect(it),
+            onMouseMove: () => { if (cursor.value !== i) cursor.value = i; },
+          }))}
+      ${createNode}
+    </div>
+    ${footer ?? null}
+  </div>`;
+}
+
+// ---------- tag picker (richer, pre-existing) ---------------------------
 // for attached tags + footer 'Create #<name>' row when the search has text,
 // no exact match, and the name is a valid tag name.
 //
@@ -450,7 +772,7 @@ function LanesPane() {
         <div class="row">
           <h1 class="eyebrow grow">Lanes</h1>
           <button class="btn-icon" data-pop title="New lane"
-            onClick=${e => { e.stopPropagation(); newLaneOpen.value = !newLaneOpen.value; }}>
+            onClick=${e => { e.stopPropagation(); togglePopover(newLaneOpen); }}>
             <${Icon} name="plus"/>
           </button>
         </div>
@@ -579,7 +901,7 @@ function TagsPane() {
         <div class="row">
           <h1 class="eyebrow grow">Tags</h1>
           <button class="btn-icon" data-pop title="New tag"
-            onClick=${e => { e.stopPropagation(); newTagOpen.value = !newTagOpen.value; }}>
+            onClick=${e => { e.stopPropagation(); togglePopover(newTagOpen); }}>
             <${Icon} name="plus"/>
           </button>
         </div>
@@ -706,16 +1028,13 @@ function ActiveTaskPane() {
   return html`<section class="pane pane-active">
     <header class="active-header">
       <span class="meta num">[${at.id}]</span>
-      <span class="lane-chip">
-        ${laneColor(at.lane) ? html`<span class="lane-color" style=${`background: ${laneColor(at.lane)}`}></span>` : null}
-        <span>${at.lane}</span>
-      </span>
-      <${PriorityChip} priority=${at.priority}/>
+      <${LaneChipButton} task=${at}/>
+      <${PriorityChipButton} task=${at}/>
       <${TagsHeaderChip} task=${at}/>
       <span class="grow"></span>
       <div style="position:relative" data-pop>
         <button class="status-pill" data-pop
-          onClick=${e => { e.stopPropagation(); statusPopover.value = !statusPopover.value; }}
+          onClick=${e => { e.stopPropagation(); togglePopover(statusPopover); }}
           onDragOver=${e => { e.preventDefault(); e.currentTarget.classList.add("dragover"); }}
           onDragLeave=${e => e.currentTarget.classList.remove("dragover")}>
           <span class=${"dot dot-status-" + at.status}></span>
@@ -727,27 +1046,12 @@ function ActiveTaskPane() {
     </header>
 
     <div class="active-body">
-      ${editing.value ? html`<${EditTaskForm} task=${at}/>` : html`<div class="stack">
-        <h2 class="title-2"
-          draggable="true"
-          onDragStart=${e => e.dataTransfer.setData("application/x-cortex-task-id", String(at.id))}
-          onClick=${() => editing.value = true}
-          style="cursor:pointer"
-          title="Click to edit">${at.title}</h2>
-        ${/* Description display shows the raw markdown SOURCE with token-
-             level syntax coloring — we deliberately do NOT render markdown.
-             The user sees exactly what they typed (#, **, `, links, etc.) so
-             editing round-trips losslessly. Click anywhere to enter edit mode. */ ""}
-        ${at.body
-          ? html`<${MdEditor}
-              value=${at.body}
-              editable=${false}
-              onClick=${() => editing.value = true}/>`
-          : html`<p class="muted"
-              onClick=${() => editing.value = true}
-              style="margin:0; cursor:pointer; min-height:96px"
-              title="Click to edit">Add a description\u2026 (markdown syntax highlighted)</p>`}
-      </div>`}
+      ${/* key=${at.id} re-mounts EditableTaskBody on every task switch. The
+           previous instance's unmount-flush commits any pending autosave
+           before this fresh mount initializes its local title/body signals
+           from the new task — so a fast switch never drops keystrokes and
+           never lets stale state bleed across tasks. */ ""}
+      <${EditableTaskBody} key=${at.id} task=${at}/>
     </div>
 
     <footer class="active-foot">
@@ -773,20 +1077,19 @@ function ActiveTaskPane() {
 
 // ----- MdEditor: CodeMirror-backed description view --------------------
 //
-// One component, two modes (chosen via the `editable` prop, fixed for the
-// instance's lifetime — toggling edit/display swaps the parent component
-// tree, so each MdEditor instance is born already knowing its mode):
-//   editable=true  → full editor (active-line, history, Cmd+S submit)
-//   editable=false → readonly view (gutter + soft-wrap only, click-to-edit)
+// Always-editable. The editor is the source of truth for in-flight edits;
+// callers feed the initial doc via `value` and observe edits via onChange.
+// We never push `value` back into the editor after mount — SSE echoes are
+// handled at a higher level (EditableTaskBody owns local signals, and a
+// `key=${task.id}` on the wrapper re-mounts on task switch so each task
+// gets a fresh editor with the new document).
 //
 // Props:
-//   value     — string, initial document and external source-of-truth when
-//               !editable. Edits live INSIDE the editor while editable=true;
-//               we report changes via onChange, never push value back in.
-//   onChange  — (newDoc:string) => void; called on every doc edit.
-//   editable  — boolean (default true).
-//   onClick   — wrapper click handler; used in display mode for click-to-edit.
-//   onSubmit  — () => void; called on Cmd/Ctrl+S inside the editor.
+//   value       — string, INITIAL document only. Not re-applied after mount.
+//   onChange    — (newDoc:string) => void; called on every doc edit.
+//   onSubmit    — () => void; called on Cmd/Ctrl+S inside the editor.
+//   placeholder — string shown by CM6's placeholder extension when the
+//                 document is empty (hides on focus, per CM6 default).
 //
 // Theme: a single EditorView.theme() pulls every color/font from cortex CSS
 // variables (var(--bg), var(--text-content), var(--accent-tint), etc.), so
@@ -899,7 +1202,7 @@ const cortexCmTheme = EditorView.theme({
   "&.cm-focused": { outline: "none" },
 });
 
-function MdEditor({ value, onChange, editable = true, onClick, onSubmit }) {
+function MdEditor({ value, onChange, onSubmit, placeholder: phText }) {
   const hostRef = useRef(null);
   const viewRef = useRef(null);
   // Refs for callbacks so the editor (mounted once) always sees the latest
@@ -917,28 +1220,22 @@ function MdEditor({ value, onChange, editable = true, onClick, onSubmit }) {
       syntaxHighlighting(cortexHighlight),
       cortexCmTheme,
       EditorView.lineWrapping,
+      highlightActiveLine(),
+      highlightActiveLineGutter(),
+      drawSelection(),
+      history(),
+      keymap.of([
+        { key: "Mod-s", preventDefault: true, run: () => { onSubmitRef.current?.(); return true; } },
+        ...defaultKeymap,
+        ...historyKeymap,
+      ]),
+      EditorView.updateListener.of((u) => {
+        if (u.docChanged) onChangeRef.current?.(u.state.doc.toString());
+      }),
     ];
-    if (editable) {
-      exts.push(
-        highlightActiveLine(),
-        highlightActiveLineGutter(),
-        drawSelection(),
-        history(),
-        keymap.of([
-          { key: "Mod-s", preventDefault: true, run: () => { onSubmitRef.current?.(); return true; } },
-          ...defaultKeymap,
-          ...historyKeymap,
-        ]),
-        EditorView.updateListener.of((u) => {
-          if (u.docChanged) onChangeRef.current?.(u.state.doc.toString());
-        }),
-      );
-    } else {
-      exts.push(
-        EditorState.readOnly.of(true),
-        EditorView.editable.of(false),
-      );
-    }
+    // CodeMirror's placeholder hides on focus, not on non-empty content —
+    // acceptable since focus is the moment the user is committing to edit.
+    if (phText) exts.push(placeholder(phText));
 
     const view = new EditorView({
       state: EditorState.create({ doc: value || "", extensions: exts }),
@@ -947,75 +1244,184 @@ function MdEditor({ value, onChange, editable = true, onClick, onSubmit }) {
     viewRef.current = view;
     return () => { view.destroy(); viewRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // mount once; editable is fixed per instance
+  }, []); // mount once; the editor is the source of truth for in-flight edits.
 
-  // When NOT editable, sync external value changes into the editor (e.g.
-  // task body refreshed via API). When editable, the editor is the source
-  // of truth and we never overwrite the user's in-progress edits.
-  useEffect(() => {
-    if (editable) return;
-    const view = viewRef.current;
-    if (!view) return;
-    const next = value || "";
-    if (view.state.doc.toString() !== next) {
-      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: next } });
-    }
-  }, [value, editable]);
-
-  return html`<div class=${"md-editor" + (editable ? " md-editor--edit" : " md-editor--display")}
-    ref=${hostRef}
-    onClick=${onClick}></div>`;
+  return html`<div class="md-editor" ref=${hostRef}></div>`;
 }
 
-function EditTaskForm({ task }) {
-  // useSignal so typing actually accumulates instead of resetting per render.
-  const t = useSignal(task.title);
-  const b = useSignal(task.body || "");
-  const p = useSignal(String(task.priority));
-  const ln = useSignal(task.lane);
-  // Tag editing is owned by the TagPicker reachable from the 'tags: N' chip
-  // in the active-task header (visible in both display and edit modes). The
-  // picker writes via api.setTags directly; this form only handles
-  // title/body/priority/lane. Removed the prior comma-separated input — the
-  // picker is the single source of truth.
-  const submit = async () => {
-    await tryApi(async () => {
-      await api.editTask(task.id, { title: t.value, body: b.value || null, priority: parseInt(p.value, 10) });
-      if (ln.value !== task.lane) await api.moveLane(task.id, ln.value);
-    });
-    editing.value = false;
-  };
-  /* edit-task-form turns the form into a flex column whose .edit-body
-    textarea owns the only scroll context in edit mode. The title input,
-    priority/lane row, and cancel/save row stay at their natural height
-    so they're always visible — the textarea takes the remaining space
-    and scrolls internally when content exceeds it. NOT the autosize
-    behaviour: in edit mode we deliberately want a bounded scroll surface
-    so the form chrome is always reachable. */
-  return html`<form class="edit-task-form"
-    onSubmit=${e => { e.preventDefault(); submit(); }}
-    onKeyDown=${onSubmitKeys(submit)}>
-    <input value=${t.value} onInput=${e => t.value = e.target.value} placeholder="Task title"/>
-    <${MdEditor}
-      value=${b.value}
-      onChange=${v => b.value = v}
-      editable=${true}
-      onSubmit=${submit}/>
-    <div class="row">
-      <label class="row meta" style="gap:6px">priority
-        <input type="number" min="0" style="width:64px; height:28px" value=${p.value}
-          onInput=${e => p.value = e.target.value}/>
-      </label>
-      <label class="row meta" style="gap:6px">lane
-        <select style="height:28px" value=${ln.value} onChange=${e => ln.value = e.target.value}>
-          ${lanes.value.map(l => html`<option value=${l.name}>${l.name}</option>`)}
-        </select>
-      </label>
-      <span class="grow"></span>
-      <button type="button" class="btn" onClick=${() => editing.value = false}>Cancel</button>
-      <button type="submit" class="btn btn-primary">Save<span class="kbd">${kbd("S")}</span></button>
+// Banner shown above a field when an external write (another agent, the
+// CLI) changed the value while the user has unsaved local edits to that
+// same field. Apply adopts the external value; Dismiss keeps the user's
+// version (next autosave will overwrite the agent's write — explicitly,
+// not silently).
+function ExternalChangeBanner({ label, incoming, onApply, onDismiss }) {
+  // Truncate long bodies in the preview — user clicks Apply to see the
+  // full text in the editor. Single-line preview keeps the banner compact.
+  const preview = (incoming || "(empty)").replace(/\s+/g, " ").trim();
+  const display = preview.length > 120 ? preview.slice(0, 117) + "\u2026" : preview;
+  return html`<div class="external-change-banner" role="status">
+    <span class="external-change-icon" aria-hidden="true">↻</span>
+    <div class="external-change-text">
+      <strong>${label} updated externally</strong>
+      <p class="external-change-preview">${display}</p>
     </div>
-  </form>`;
+    <div class="external-change-actions">
+      <button type="button" class="btn btn-primary" onClick=${onApply}>Apply</button>
+      <button type="button" class="btn" onClick=${onDismiss}>Dismiss</button>
+    </div>
+  </div>`;
+}
+
+// Always-editable surface that owns the title input + body MdEditor for
+// the active task. Mounted under key=${task.id} by ActiveTaskPane, so a
+// task switch re-mounts this component: useSignal initializers re-run
+// (fresh title/body from the new task), useAutosave timers reset, and the
+// previous instance's unmount-flush commits any pending edit.
+//
+// Three-signal-per-field state for safe concurrent editing:
+//   - localSig    : what the user is currently editing.
+//   - serverSig   : last value we know the server has. Updated optimistically
+//                   on autosave commit start (rolled back on failure) so our
+//                   own SSE echo doesn't read as an external change.
+//   - externalSig : pending external value when localSig is dirty AND a
+//                   different value arrives via SSE. null = no pending
+//                   external. Surfaces the banner above the field.
+//
+// SSE-watch effect classifies every (server-sourced) prop change into:
+//   1. incoming === server                   → no-op (steady state / echo)
+//   4. incoming === local                    → converge: serverSig <- incoming
+//   2. local === server, server !== incoming → live update: both <- incoming
+//   5. else                                  → conflict: external <- incoming
+//
+// bodyEpoch increments whenever the body MdEditor needs to be re-mounted
+// with a new initial value (Apply or live-update case 2). MdEditor's
+// editor instance is mount-once for in-flight edit safety, so changing
+// bodySig externally doesn't refresh the visible CodeMirror contents —
+// the key={"body-"+epoch} forces a fresh mount. Title is a controlled
+// <input> so it auto-syncs from titleSig with no extra plumbing.
+function EditableTaskBody({ task }) {
+  const titleSig       = useSignal(task.title);
+  const bodySig        = useSignal(task.body || "");
+  const titleServerSig = useSignal(task.title);
+  const bodyServerSig  = useSignal(task.body || "");
+  const titleExternal  = useSignal(null);
+  const bodyExternal   = useSignal(null);
+  const bodyEpoch      = useSignal(0);
+
+  // SSE-watch: title. Fires whenever the parent re-renders us with a new
+  // task.title (SSE refresh → tasks.value = ts → task prop changes).
+  useEffect(() => {
+    const inc = task.title;
+    if (inc === titleServerSig.value) return;            // case 1: echo / no news
+    if (inc === titleSig.value) {                         // case 4: converge
+      titleServerSig.value = inc;
+      titleExternal.value  = null;
+      return;
+    }
+    if (titleSig.value === titleServerSig.value) {        // case 2: live update
+      titleSig.value       = inc;
+      titleServerSig.value = inc;
+      titleExternal.value  = null;
+      return;
+    }
+    titleExternal.value = inc;                            // case 5: conflict
+  }, [task.title]);
+
+  // SSE-watch: body. Same logic. Bumps bodyEpoch on case 2 so MdEditor
+  // re-mounts with the new value (the editor doesn't sync from value
+  // after mount).
+  useEffect(() => {
+    const inc = task.body || "";
+    if (inc === bodyServerSig.value) return;
+    if (inc === bodySig.value) {
+      bodyServerSig.value = inc;
+      bodyExternal.value  = null;
+      return;
+    }
+    if (bodySig.value === bodyServerSig.value) {
+      bodySig.value       = inc;
+      bodyServerSig.value = inc;
+      bodyExternal.value  = null;
+      bodyEpoch.value++;
+      return;
+    }
+    bodyExternal.value = inc;
+  }, [task.body]);
+
+  // Per-field autosave with optimistic serverSig update. Setting
+  // serverSig BEFORE the PATCH means our own SSE echo lands as case 1
+  // (no false conflict banner from our own write). Rollback on failure
+  // restores the prior baseline so the next dirty check is correct.
+  const titleSave = useAutosave(async () => {
+    const v = titleSig.value;
+    const prev = titleServerSig.value;
+    titleServerSig.value = v;
+    try {
+      await tryApi(() => api.editTask(task.id, { title: v }));
+    } catch (err) {
+      titleServerSig.value = prev;
+      throw err;
+    }
+  });
+  const bodySave = useAutosave(async () => {
+    const v = bodySig.value;
+    const prev = bodyServerSig.value;
+    bodyServerSig.value = v;
+    try {
+      await tryApi(() => api.editTask(task.id, { body: v || null }));
+    } catch (err) {
+      bodyServerSig.value = prev;
+      throw err;
+    }
+  });
+
+  // Banner actions. Apply replaces local + server with the external value
+  // (no save needed — server already has it). Dismiss just clears the
+  // banner; the next autosave will PATCH local, overwriting the external,
+  // explicitly. Body Apply also bumps bodyEpoch to push the new doc into
+  // the CodeMirror editor.
+  const applyTitle = () => {
+    titleSig.value       = titleExternal.value;
+    titleServerSig.value = titleExternal.value;
+    titleExternal.value  = null;
+  };
+  const dismissTitle = () => { titleExternal.value = null; };
+  const applyBody = () => {
+    bodySig.value       = bodyExternal.value;
+    bodyServerSig.value = bodyExternal.value;
+    bodyExternal.value  = null;
+    bodyEpoch.value++;
+  };
+  const dismissBody = () => { bodyExternal.value = null; };
+
+  return html`<div class="editable-task-body">
+    ${titleExternal.value !== null ? html`<${ExternalChangeBanner}
+      label="Title"
+      incoming=${titleExternal.value}
+      onApply=${applyTitle}
+      onDismiss=${dismissTitle}/>` : null}
+    <input class="title-input"
+      value=${titleSig.value}
+      placeholder="Task title"
+      onInput=${e => { titleSig.value = e.target.value; titleSave.schedule(); }}
+      onBlur=${() => titleSave.flush()}/>
+    ${bodyExternal.value !== null ? html`<${ExternalChangeBanner}
+      label="Body"
+      incoming=${bodyExternal.value}
+      onApply=${applyBody}
+      onDismiss=${dismissBody}/>` : null}
+    ${/* Body autosave does NOT register an explicit blur handler — some
+         browsers do not fire blur on tab-hide. The 600 ms idle timer
+         catches normal focus moves; the 3 s max-wait is the worst-case
+         safety net; Cmd/Ctrl+S inside the editor flushes immediately
+         (onSubmit -> bodySave.flush). */ ""}
+    <${MdEditor}
+      key=${"body-" + bodyEpoch.value}
+      value=${bodySig.value}
+      placeholder="Add a description\u2026"
+      onChange=${v => { bodySig.value = v; bodySave.schedule(); }}
+      onSubmit=${() => bodySave.flush()}/>
+  </div>`;
 }
 
 function PostUpdateForm({ task }) {
@@ -1164,8 +1570,6 @@ function buildCommands() {
 
   // ----- active-task scoped -----
   if (at) {
-    cmds.push({ id: "edit-task", label: "Edit task\u2026", hint: `[${at.id}]`, icon: "eye",
-      action: () => editing.value = true });
     cmds.push({ id: "set-status", label: "Set status\u2026", hint: `[${at.id}]`, icon: "checkCircle",
       submenu: () => STATUS.filter(s => s !== at.status).map(s => ({
         id: `status-${s}`, label: STATUS_LABEL[s], hint: "", icon: "checkCircle",
@@ -1183,7 +1587,9 @@ function buildCommands() {
         paletteOpen.value = false;
         // Open the picker on the current active task. The TagsHeaderChip
         // mounts the picker freshly when tagsPopover flips true (see the
-        // mount-discipline note above TagsHeaderChip).
+        // mount-discipline note above TagsHeaderChip). closeAllPopovers()
+        // first preserves the single-popover-at-a-time invariant.
+        closeAllPopovers();
         tagsPopover.value = true;
         // Refocus the search input on next tick so keyboard flow stays
         // continuous (palette → picker, no mouse needed).
@@ -1226,7 +1632,7 @@ function buildCommands() {
     });
   }
   cmds.push({ id: "new-lane", label: "New lane\u2026", hint: "", icon: "plus",
-    action: () => { newLaneOpen.value = true; setTimeout(() => document.querySelector(".pane-lanes input")?.focus(), 0); } });
+    action: () => { closeAllPopovers(); newLaneOpen.value = true; setTimeout(() => document.querySelector(".pane-lanes input")?.focus(), 0); } });
 
   // ----- tag scoped (sidebar mode + filter + edit + new) -----
   cmds.push({
@@ -1260,6 +1666,7 @@ function buildCommands() {
   cmds.push({ id: "new-tag", label: "New tag\u2026", hint: "", icon: "plus",
     action: () => {
       sidebarView.value = "tags";
+      closeAllPopovers();
       newTagOpen.value = true;
       setTimeout(() => document.querySelector(".pane-tags input")?.focus(), 0);
     },
@@ -1390,7 +1797,7 @@ function ModalRoot() {
         <p class="meta" style="margin:0">This permanently removes the task and its updates. Cannot be undone.</p>
         <div class="modal-actions">
           <button class="btn" onClick=${close}>Cancel</button>
-          <button class="btn btn-primary" style="background:var(--err)" onClick=${async () => {
+          <button class="btn btn-primary" onClick=${async () => {
             await tryApi(() => api.delTask(m.id)); selectedId.value = null; close();
           }}>Delete</button>
         </div>

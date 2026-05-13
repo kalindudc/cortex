@@ -38,12 +38,18 @@ export const newTagOpen    = signal(false);
 export const updates       = signal({});
 export const selectedLane  = signal(null);
 export const selectedId    = signal(null);
-export const editing       = signal(false);
 export const statusPopover = signal(false);
 export const newLaneOpen   = signal(false);
 // Active-task tags-chip popover. Mirrors statusPopover: click chip to toggle,
 // outside-click closes via app.js's global handler + closeAllPopovers().
 export const tagsPopover   = signal(false);
+// Active-task lane chip popover. Same outside-click contract as tagsPopover.
+// MUST be flipped inside closeAllPopovers() below — this is the same
+// Esc/outside-click contract that historically broke when a new popover
+// signal was added without updating closeAllPopovers().
+// (Priority no longer needs a popover signal: PriorityChipButton uses an
+// inline <input> with local state — no global popover bookkeeping.)
+export const lanePopover = signal(false);
 export const paletteOpen   = signal(false);
 // modal kinds: 'confirm-delete' | 'lane-edit' | 'confirm-lane-delete'
 export const modal         = signal(null);
@@ -353,9 +359,20 @@ export function moveSelection(delta) {
 // release of this feature).
 export function closeAllPopovers() {
   let closed = false;
-  if (statusPopover.value) { statusPopover.value = false; closed = true; }
-  if (newLaneOpen.value)   { newLaneOpen.value   = false; closed = true; }
-  if (tagsPopover.value)   { tagsPopover.value   = false; closed = true; }
-  if (newTagOpen.value)    { newTagOpen.value    = false; closed = true; }
+  if (statusPopover.value)   { statusPopover.value   = false; closed = true; }
+  if (newLaneOpen.value)     { newLaneOpen.value     = false; closed = true; }
+  if (tagsPopover.value)     { tagsPopover.value     = false; closed = true; }
+  if (newTagOpen.value)      { newTagOpen.value      = false; closed = true; }
+  if (lanePopover.value)     { lanePopover.value     = false; closed = true; }
   return closed;
+}
+
+// Mutually-exclusive popover toggle. Closes whatever was open, then opens
+// the target if it wasn't already open. Use this from chip-click handlers
+// instead of `targetSignal.value = !targetSignal.value` so opening one
+// popover always closes the others — single-popover-at-a-time invariant.
+export function togglePopover(targetSignal) {
+  const wasOpen = targetSignal.value;
+  closeAllPopovers();
+  if (!wasOpen) targetSignal.value = true;
 }

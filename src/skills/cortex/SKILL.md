@@ -14,6 +14,7 @@ Cortex is a single-binary, single-user task tracker designed for one human super
 - **No severity flag. Message text describes urgency.** Write `-m "ready for review"` or `-m "blocked on missing API key"` in plain prose. Structured semantics belong in `--status` (`open`/`review`/`blocked`/`done`), not in a separate severity field.
 - **Every status change is also an audit-trail row.** Setting `-s` writes both the message AND a `status → <new>` row in the updates table, both attributed to `--as`. Parallel-agent status oscillation (open→blocked→open→blocked) shows up in the inbox as history rather than silently overwriting.
 - **Browser notifications fire ONLY on transitions into `blocked`.** Routine updates, `done` flips, and review handoffs do NOT pop notifications. The dashboard treats `blocked` as the one signal worth interrupting the human for.
+- **Two body-edit modes — anchor-based and full overwrite.** `cortex edit <id> --body-search "<exact unique anchor>" --body-replace "<replacement>"` performs an in-place edit that fails 409 if the anchor is missing or matches multiple times — concurrent writes detect conflicts instead of silently overwriting each other. `cortex edit -b "<full body>"` (or `--body-file`) replaces the whole body in one shot. Choose based on the scope of the change you're making. `cortex update` is for status notes; the body is the task's description. See [cli/edit.md](cli/edit.md).
 
 ## CLI
 
@@ -21,11 +22,12 @@ Cortex is a single-binary, single-user task tracker designed for one human super
 |---|---|---|
 | `cortex init` | Initialize the SQLite DB and (re)write the embedded skill at `~/.agents/skills/cortex/`. | [init.md](cli/init.md) |
 | `cortex add <title>` | Create a new task. | [add.md](cli/add.md) |
+| `cortex edit <id>` | Edit a task's title, body, or priority. Body edits prefer anchor-based partial replace. | [edit.md](cli/edit.md) |
 | `cortex update <id> -m <msg> --as <id>` | Post an update on a task; optionally flip status. | [cli/update.md](cli/update.md) |
 | `cortex serve` | Run the localhost API + dashboard daemon. | [serve.md](cli/serve.md) |
 | `cortex reset` | Wipe the DB and regenerate the skill (destructive, requires typing `RESET`). | [reset.md](cli/reset.md) |
 
-Other commands (`ls`, `show`, `edit`, `mv`, `rm`, `lane`, `stop`) follow the same shape — run `cortex <cmd> --help` for argument reference.
+Other commands (`ls`, `show`, `mv`, `rm`, `lane`, `stop`) follow the same shape — run `cortex <cmd> --help` for argument reference.
 
 ## Recipes
 

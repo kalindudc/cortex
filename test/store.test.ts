@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { Store } from "../src/store.ts";
+import { Store, BodySearchError } from "../src/store.ts";
 
 const open = () => Store.open(":memory:");
 
@@ -48,6 +48,111 @@ describe("Store: tasks", () => {
     expect(edited.body).toBe("orig");
     expect(edited.priority).toBe(1);
     expect(edited.updated).toBeGreaterThan(t.updated);
+    s.close();
+  });
+
+  test("editTask bodySearch/bodyReplace splices a unique anchor", () => {
+    const s = open();
+    const t = s.addTask({ title: "x", body: "alpha TODO investigate beta" });
+    const edited = s.editTask(t.id, {
+      bodySearch:  "TODO investigate",
+      bodyReplace: "DONE \u2014 see updates",
+    });
+    expect(edited.body).toBe("alpha DONE \u2014 see updates beta");
+    s.close();
+  });
+
+  test("editTask bodySearch supports multi-line anchors", () => {
+    const s = open();
+    const body = "intro\n\n## Plan\n- step 1\n- step 2\n\noutro";
+    const t = s.addTask({ title: "x", body });
+    const edited = s.editTask(t.id, {
+      bodySearch:  "## Plan\n- step 1\n- step 2",
+      bodyReplace: "## Plan\n- step 1\n- step 2\n- step 3",
+    });
+    expect(edited.body).toBe(
+      "intro\n\n## Plan\n- step 1\n- step 2\n- step 3\n\noutro",
+    );
+    s.close();
+  });
+
+  test("editTask bodyReplace empty string deletes the anchor", () => {
+    const s = open();
+    const t = s.addTask({ title: "x", body: "keep DELETE_ME also-keep" });
+    const edited = s.editTask(t.id, {
+      bodySearch:  " DELETE_ME",
+      bodyReplace: "",
+    });
+    expect(edited.body).toBe("keep also-keep");
+    s.close();
+  });
+
+  test("editTask bodySearch throws BodySearchError(not_found) on no match", () => {
+    const s = open();
+    const t = s.addTask({ title: "x", body: "alpha beta" });
+    let caught: unknown;
+    try {
+      s.editTask(t.id, { bodySearch: "gamma", bodyReplace: "x" });
+    } catch (e) { caught = e; }
+    expect(caught).toBeInstanceOf(BodySearchError);
+    expect((caught as BodySearchError).kind).toBe("not_found");
+    s.close();
+  });
+
+  test("editTask bodySearch throws BodySearchError(ambiguous) with match count on duplicate anchor", () => {
+    const s = open();
+    const t = s.addTask({ title: "x", body: "foo bar foo bar foo" });
+    let caught: unknown;
+    try {
+      s.editTask(t.id, { bodySearch: "foo", bodyReplace: "baz" });
+    } catch (e) { caught = e; }
+    expect(caught).toBeInstanceOf(BodySearchError);
+    expect((caught as BodySearchError).kind).toBe("ambiguous");
+    expect((caught as BodySearchError).matches).toBe(3);
+    s.close();
+  });
+
+  test("editTask bodySearch combined with title in same call is atomic", () => {
+    const s = open();
+    const t = s.addTask({ title: "old", body: "hello world" });
+    const edited = s.editTask(t.id, {
+      title: "new",
+      bodySearch:  "world",
+      bodyReplace: "there",
+    });
+    expect(edited.title).toBe("new");
+    expect(edited.body).toBe("hello there");
+    s.close();
+  });
+
+  test("editTask rejects bodySearch without bodyReplace (defensive)", () => {
+    const s = open();
+    const t = s.addTask({ title: "x", body: "hi" });
+    expect(() => s.editTask(t.id, { bodySearch: "hi" } as never)).toThrow(
+      /bodySearch and bodyReplace must be provided together/,
+    );
+    s.close();
+  });
+
+  test("editTask rejects bodySearch combined with body (defensive)", () => {
+    const s = open();
+    const t = s.addTask({ title: "x", body: "hi" });
+    expect(() =>
+      s.editTask(t.id, {
+        body: "new",
+        bodySearch:  "hi",
+        bodyReplace: "yo",
+      }),
+    ).toThrow(/cannot be combined with body/);
+    s.close();
+  });
+
+  test("editTask rejects empty bodySearch (would match everywhere)", () => {
+    const s = open();
+    const t = s.addTask({ title: "x", body: "hi" });
+    expect(() =>
+      s.editTask(t.id, { bodySearch: "", bodyReplace: "y" }),
+    ).toThrow(/bodySearch cannot be empty/);
     s.close();
   });
 

@@ -3,7 +3,7 @@ import { streamSSE } from "hono/streaming";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { Store, validateAuthorTag, validateTagName, type TaskStatus } from "./store.ts";
+import { Store, validateAuthorTag, validateTagName, BodySearchError, type TaskStatus } from "./store.ts";
 import { emit, subscribe, type CortexEvent } from "./events.ts";
 import pkg from "../package.json" with { type: "json" };
 // `with { type: "file" }` returns a string PATH (not file contents) that
@@ -149,13 +149,49 @@ export function buildApp(store: Store): Hono {
     const fields = (await c.req.json().catch(() => ({}))) as {
       title?: string;
       body?: string | null;
+      bodySearch?: string;
+      bodyReplace?: string;
       priority?: number;
     };
+    // Validate the bodySearch / bodyReplace combo at the API boundary so
+    // agents get a clean 400 (not a generic 500) when they misuse the
+    // partial-edit shape. The store ALSO defends against these but
+    // surfacing them here gives the right HTTP status without relying on
+    // store error-message string matching.
+    const hasSearch  = fields.bodySearch  !== undefined;
+    const hasReplace = fields.bodyReplace !== undefined;
+    const hasBody    = fields.body        !== undefined;
+    if (hasSearch !== hasReplace) {
+      return c.json(
+        { error: "bodySearch and bodyReplace must be provided together" },
+        400,
+      );
+    }
+    if (hasSearch && hasBody) {
+      return c.json(
+        { error: "bodySearch/bodyReplace cannot be combined with body (use one or the other)" },
+        400,
+      );
+    }
+    if (hasSearch && fields.bodySearch!.length === 0) {
+      return c.json({ error: "bodySearch cannot be empty" }, 400);
+    }
     try {
       const task = store.editTask(id, fields);
       emit({ kind: "task.updated", payload: task, ts: Date.now() });
       return c.json(task);
     } catch (err) {
+      // Anchor-based partial edits surface as 409 Conflict so agents can
+      // distinguish "my anchor is stale, re-read and retry" from "the task
+      // doesn't exist" (404) or "my request is malformed" (400).
+      if (err instanceof BodySearchError) {
+        const payload: { error: string; code: string; matches?: number } = {
+          error: err.message,
+          code: err.kind === "not_found" ? "body_search_not_found" : "body_search_ambiguous",
+        };
+        if (err.matches !== undefined) payload.matches = err.matches;
+        return c.json(payload, 409);
+      }
       return c.json({ error: (err as Error).message }, 404);
     }
   });

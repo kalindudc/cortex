@@ -221,6 +221,7 @@ cortex update <id> --as "$SESSION_ID" -s done -m "merged"
 
 ## Rules
 
+- NEVER git stage or git commit, do not create any commits, the user owns the commit process
 - ALWAYS load the `cortex` skill first for CLI vocabulary and status semantics
 - ALWAYS track the core protocol with TODOs or Quests, if the tooling supports it
 - ALWAYS post ONE `cortex update` per Low-Level Task with `--as "$SESSION_ID"`

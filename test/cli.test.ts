@@ -227,3 +227,64 @@ test("cortex show + ls render tags in the formatted text view", async () => {
   r = await run("rm", String(id), "-f"); expect(r.code).toBe(0);
   r = await run("rm", String(fid), "-f"); expect(r.code).toBe(0);
 });
+
+test("cortex edit --body-search/--body-replace: success, no-match, ambiguous, mutex", async () => {
+  // Add a task with a uniquely anchored body — mirrors the agentic
+  // workflow: read the body, identify a unique anchor, send a precise
+  // partial edit instead of a full-string overwrite.
+  let r = await run("add", "anchored", "-b", "intro\n\n## Plan\n- step 1\n- step 2\n\noutro");
+  expect(r.code).toBe(0);
+  const id = Number(r.stdout.match(/^\[(\d+)\]/)?.[1]);
+  expect(id).toBeGreaterThan(0);
+
+  // Happy path: unique multi-line anchor is spliced.
+  r = await run(
+    "edit", String(id),
+    "--body-search",  "## Plan\n- step 1\n- step 2",
+    "--body-replace", "## Plan\n- step 1\n- step 2\n- step 3",
+  );
+  expect(r.code).toBe(0);
+  r = await run("show", String(id));
+  expect(r.stdout).toContain("- step 1");
+  expect(r.stdout).toContain("- step 2");
+  expect(r.stdout).toContain("- step 3");
+
+  // Anchor not found — non-zero exit + helpful error so an agent can
+  // re-read and refine.
+  r = await run(
+    "edit", String(id),
+    "--body-search",  "this anchor does not exist",
+    "--body-replace", "x",
+  );
+  expect(r.code).not.toBe(0);
+  expect(r.stderr).toMatch(/not found/i);
+
+  // Ambiguous anchor: "step" appears 3 times now — must fail with a
+  // count so the agent can broaden the anchor for uniqueness.
+  r = await run(
+    "edit", String(id),
+    "--body-search",  "step",
+    "--body-replace", "STEP",
+  );
+  expect(r.code).not.toBe(0);
+  expect(r.stderr).toMatch(/match.*3.*time|ambiguous/i);
+
+  // Mutex with -b: caught locally before round-trip, with a clear error.
+  r = await run(
+    "edit", String(id),
+    "--body-search",  "intro",
+    "--body-replace", "INTRO",
+    "-b", "whole new body",
+  );
+  expect(r.code).not.toBe(0);
+  expect(r.stderr).toMatch(/cannot be combined/i);
+
+  // Pair-required: --body-search alone fails locally.
+  r = await run("edit", String(id), "--body-search", "intro");
+  expect(r.code).not.toBe(0);
+  expect(r.stderr).toMatch(/must be used together/i);
+
+  // cleanup
+  r = await run("rm", String(id), "-f");
+  expect(r.code).toBe(0);
+});

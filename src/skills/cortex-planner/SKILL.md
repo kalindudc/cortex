@@ -65,13 +65,28 @@ This is MANDATORY — `cortex add` is anonymous; the update records WHO planned 
 
 PLAN STACKS: when a single plan exceeds the size limits and cannot be consolidated, split into a stack — N tasks under a single stack-slug tag with sequential priorities. Title each task `NN: <title>` for visual ordering in `cortex ls`. After writing the whole stack, post a summary update on plan #0 listing every task ID. STOP and confirm with the user before creating a plan stack.
 
-REVISIONS: re-fetch the body, edit it locally, write it back, then attribute the revision:
+REVISIONS: cortex offers two edit modes for plan bodies — anchor-based partial edits and full-body rewrites. Choose based on the scope of the revision.
+
+For surgical changes — adding a task, fixing a typo, marking a Low-Level Task `[COMPLETED]`, amending a single Implementation Note bullet — anchor-based edits make the change race-safe and force you to align on the plan's actual current state before mutating it:
+
+```bash
+cortex edit <id> \
+  --body-search '<exact unique anchor from current body>' \
+  --body-replace '<replacement>'
+cortex update <id> --as "$SESSION_ID" -m "revised: <brief summary>"
+```
+
+The anchor is matched literally and must occur exactly once. If it doesn't (the plan changed under you, or the anchor is ambiguous), the operation fails 409 — re-fetch, refine the anchor (usually by including surrounding lines for uniqueness), and retry. See the `cortex` skill's [cli/edit.md](../cortex/cli/edit.md) for the full operation reference.
+
+For larger restructures where most of the plan is changing, a full-body rewrite is the more direct path:
+
 ```bash
 cortex show <id> --json | jq -r .task.body > /tmp/plan.md
 # edit /tmp/plan.md
 cortex edit <id> --body-file /tmp/plan.md
-cortex update <id> --as "$SESSION_ID" -m "revised: <brief summary of changes>"
+cortex update <id> --as "$SESSION_ID" -m "revised: <brief summary>"
 ```
+
 NEVER edit a task whose status is `review` without explicit user confirmation — overwriting silently destroys the implementer's review handoff.
 
 ---
@@ -330,5 +345,6 @@ Plans always produce working software. Research informs Implementation Notes; Lo
 - NEVER create multiple plans for the same feature / task
 - NEVER edit a `review`-status cortex task without explicit user confirmation
 - ALWAYS use a single plan as the source of truth
+- For plan revisions, choose between `cortex edit --body-search`/`--body-replace` (anchor-based, race-safe for surgical changes) and `--body-file` (full overwrite, for restructures) based on the scope of the change — see the `cortex` skill for tradeoffs
 - MAINTAINABILITY above all else
 - ALWAYS follow KISS (keep it simple stupid), AVOID over engineering

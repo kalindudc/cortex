@@ -30,6 +30,7 @@ import cortexSkillMd        from "./skills/cortex/SKILL.md"               with {
 import cortexCliInitPath    from "./skills/cortex/cli/init.md"            with { type: "file" };
 import cortexCliResetPath   from "./skills/cortex/cli/reset.md"           with { type: "file" };
 import cortexCliAddPath     from "./skills/cortex/cli/add.md"             with { type: "file" };
+import cortexCliEditPath    from "./skills/cortex/cli/edit.md"            with { type: "file" };
 import cortexCliUpdatePath  from "./skills/cortex/cli/update.md"          with { type: "file" };
 import cortexCliServePath   from "./skills/cortex/cli/serve.md"           with { type: "file" };
 import cortexCliTagPath     from "./skills/cortex/cli/tag.md"             with { type: "file" };
@@ -51,6 +52,7 @@ const SKILLS: Record<SkillName, Manifest> = {
     "cli/init.md":           cortexCliInitPath,
     "cli/reset.md":          cortexCliResetPath,
     "cli/add.md":            cortexCliAddPath,
+    "cli/edit.md":           cortexCliEditPath,
     "cli/update.md":         cortexCliUpdatePath,
     "cli/serve.md":          cortexCliServePath,
     "cli/tag.md":            cortexCliTagPath,

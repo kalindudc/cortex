@@ -39,6 +39,18 @@ export default defineCommand({
       valueHint: "path",
       description: "read new body from file (mutually exclusive with -b)",
     },
+    bodySearch: {
+      type: "string",
+      valueHint: "text",
+      description:
+        "anchor text to find in the body (must be unique); paired with --body-replace. Mutually exclusive with -b and --body-file. Fails 409 if anchor is missing or matches multiple times \u2014 agent should re-read and refine.",
+    },
+    bodyReplace: {
+      type: "string",
+      valueHint: "text",
+      description:
+        "replacement for the matched --body-search anchor. Empty string deletes the anchor. Use this for safe partial body edits without read-then-write races.",
+    },
     priority: {
       type: "string",
       alias: "p",
@@ -71,7 +83,32 @@ export default defineCommand({
       console.error("error: use --body-file OR -b, not both");
       process.exit(1);
     }
-    const patch: { title?: string; body?: string | null; priority?: number } = {};
+    // bodySearch + bodyReplace must be present together AND mutually
+    // exclusive with -b / --body-file. Both rules are also enforced server-
+    // side, but checking here gives a fast local exit before round-trip.
+    const hasSearch  = args.bodySearch  !== undefined;
+    const hasReplace = args.bodyReplace !== undefined;
+    if (hasSearch !== hasReplace) {
+      console.error("error: --body-search and --body-replace must be used together");
+      process.exit(1);
+    }
+    if (hasSearch && (args.body !== undefined || args.bodyFile !== undefined)) {
+      console.error(
+        "error: --body-search/--body-replace cannot be combined with -b or --body-file",
+      );
+      process.exit(1);
+    }
+    if (hasSearch && args.bodySearch === "") {
+      console.error("error: --body-search cannot be empty");
+      process.exit(1);
+    }
+    const patch: {
+      title?: string;
+      body?: string | null;
+      bodySearch?: string;
+      bodyReplace?: string;
+      priority?: number;
+    } = {};
     if (args.title) patch.title = args.title;
     if (args.bodyFile) {
       try {
@@ -83,6 +120,10 @@ export default defineCommand({
     } else if (args.body !== undefined && args.body !== "") {
       // Preserve existing semantic: empty -b is a no-op (cf. Plan-1 add.ts).
       patch.body = args.body;
+    }
+    if (hasSearch) {
+      patch.bodySearch  = args.bodySearch;
+      patch.bodyReplace = args.bodyReplace;
     }
     if (args.priority) patch.priority = parsePriority(args.priority);
     // Tag mutations: exactly one of --set-tags / --add-tag / --rm-tag may be
