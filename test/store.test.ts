@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { Store } from "../store.ts";
+import { Store } from "../src/store.ts";
 
 const open = () => Store.open(":memory:");
 

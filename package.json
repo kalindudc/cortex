@@ -4,7 +4,7 @@
   "type": "module",
   "private": true,
   "bin": {
-    "cortex": "./cli.ts"
+    "cortex": "./index.ts"
   },
   "dependencies": {
     "citty": "^0.1.6",

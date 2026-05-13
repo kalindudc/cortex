@@ -1,5 +1,5 @@
 import { test, expect, describe, beforeAll, afterAll } from "bun:test";
-import { Store } from "../store.ts";
+import { Store } from "../src/store.ts";
 import { runCli, mkTmpEnv } from "./helpers.ts";
 
 // Plan 3: every setStatus call writes an audit-trail row in `updates`

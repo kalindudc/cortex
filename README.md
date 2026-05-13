@@ -7,12 +7,12 @@ API on `127.0.0.1`, and a SQLite WAL store at `~/.config/cortex/cortex.db`.
 ## Quick start
 
 ```bash
-task cortex:build          # compile to home/bin/cortex
-cortex init                # create ~/.config/cortex/cortex.db
+task cortex:build                    # compile to home/bin/cortex
+cortex init                          # create ~/.config/cortex/cortex.db
 cortex add "ship plan 1" -p 0
 cortex ls
-cortex serve               # start API daemon on 127.0.0.1:7777
-cortex stop                # stop the daemon
+cortex serve                         # start API daemon on 127.0.0.1:7777
+cortex stop                          # stop the daemon
 ```
 
 For development without compiling:
@@ -24,14 +24,14 @@ task cortex:dev -- ls --json
 ### Live UI dev loop
 
 ```bash
-task cortex:serve:dev          # bun --watch, port 7777, --no-open
+task cortex:serve:dev                # bun --watch, port 7777, --no-open
 task cortex:serve:dev PORT=7778
 ```
 
-- HTML edits to `src/cortex/ui/index.html` are picked up immediately — the
+- HTML edits to `src/ui/index.html` are picked up immediately — the
   server reads the file fresh on every request via `Bun.file().text()`. Just
   refresh the browser; no restart, no reload script.
-- TypeScript edits to `cli.ts`/`server.ts`/`store.ts`/etc. trigger a
+- TypeScript edits to `src/cli.ts`/`src/server.ts`/`src/store.ts`/etc. trigger a
   `bun --watch` restart within ~1 s. The browser stays connected because
   the SSE `EventSource` reconnects automatically; refresh once to repopulate.
 - The dev task stops any background daemon first so it owns the port.
@@ -88,7 +88,7 @@ For every flag that takes a fixed enum (`--status`, `--severity`), `cortex
 
 ## API surface
 
-Bound to `127.0.0.1` only. No auth in Plan 1.
+Bound to `127.0.0.1` only.
 
 | Method | Path | Purpose |
 | --- | --- | --- |

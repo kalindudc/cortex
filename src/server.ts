@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { Store, validateAuthorTag, type TaskStatus } from "./store.ts";
 import { emit, subscribe, type CortexEvent } from "./events.ts";
-import pkg from "./package.json" with { type: "json" };
+import pkg from "../package.json" with { type: "json" };
 // `with { type: "file" }` returns a string PATH (not file contents) that
 // `bun build --compile` rewrites to point at the embedded blob. Read the
 // contents at request time via Bun.file(...).text() (or .bytes() for

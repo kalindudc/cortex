@@ -1,6 +1,6 @@
 import { test, expect, describe, beforeAll, afterAll } from "bun:test";
 import fs from "node:fs";
-import { Store, validateAuthorTag } from "../store.ts";
+import { Store, validateAuthorTag } from "../src/store.ts";
 import { runCli, mkTmpEnv } from "./helpers.ts";
 
 // ---------- pure-unit assertions on the validator ----------

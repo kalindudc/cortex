@@ -2,7 +2,7 @@ import { test, expect, describe, beforeAll, afterAll } from "bun:test";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
-import { writeSkill, listSkills, type SkillName } from "../skills.ts";
+import { writeSkill, listSkills, type SkillName } from "../src/skills.ts";
 
 // All shipped skills are embedded in the cortex binary and self-installed at
 // ~/.agents/skills/<name>/. Tests use writeSkill's targetDir override (and

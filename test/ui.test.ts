@@ -1,6 +1,6 @@
 import { test, expect, beforeAll, afterAll, describe } from "bun:test";
-import { Store } from "../store.ts";
-import { startServer, type ServerHandle } from "../server.ts";
+import { Store } from "../src/store.ts";
+import { startServer, type ServerHandle } from "../src/server.ts";
 
 let store: Store;
 let h: ServerHandle;
