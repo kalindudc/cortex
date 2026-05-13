@@ -17,6 +17,7 @@ import stylesCssPath  from "./ui/styles.css"   with { type: "file" };
 import appJsPath      from "./ui/app.js"       with { type: "file" };
 import componentsJsPath from "./ui/components.js" with { type: "file" };
 import stateJsPath    from "./ui/state.js"     with { type: "file" };
+import tooltipJsPath  from "./ui/tooltip.js"   with { type: "file" };
 
 // Map browser route -> embedded file path + content type. Each entry is
 // served with Cache-Control: no-store so dev edits never sit invisible behind
@@ -26,6 +27,7 @@ const UI_ASSETS: Record<string, { path: string; type: string }> = {
   "/app.js":       { path: appJsPath,       type: "application/javascript; charset=utf-8" },
   "/components.js":{ path: componentsJsPath,type: "application/javascript; charset=utf-8" },
   "/state.js":     { path: stateJsPath,     type: "application/javascript; charset=utf-8" },
+  "/tooltip.js":   { path: tooltipJsPath,   type: "application/javascript; charset=utf-8" },
 };
 
 /**

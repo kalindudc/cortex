@@ -119,6 +119,11 @@ import {
   // theme
   theme, setTheme, toggleTheme,
 } from "./state.js";
+// Top-level tooltip primitive — singleton fixed-position tip + tip(text)
+// helper that returns event-prop spread for any trigger. Mounted once at
+// the App root so every consumer just spreads handlers without rendering
+// per-trigger DOM. See ui/tooltip.js for placement / flip / dismissal logic.
+import { tip, Tooltip } from "./tooltip.js";
 
 const html = htm.bind(h);
 
@@ -827,7 +832,8 @@ function LanesPane() {
           class=${"task-row" + (activeTask.value && t.id === activeTask.value.id ? " active" : "")}
           draggable="true"
           onDragStart=${e => e.dataTransfer.setData("application/x-cortex-task-id", String(t.id))}
-          onClick=${() => selectedId.value = t.id}>
+          onClick=${() => selectedId.value = t.id}
+          ...${tip(t.title)}>
           <span class=${"dot dot-status-" + t.status}></span>
           <span class="task-title">${t.title}</span>
           <${PriorityChip} priority=${t.priority}/>
@@ -928,7 +934,7 @@ function TagsPane() {
               return html`<button
                 class=${"lane-row" + (sel ? " selected" : "")}
                 onClick=${() => { selectedTag.value = sel ? null : tg.name; selectedId.value = null; }}
-                title=${`${tg.task_count} task${tg.task_count === 1 ? "" : "s"} carry #${tg.name}`}>
+                ...${tip(`#${tg.name}  \u00b7  ${tg.task_count} task${tg.task_count === 1 ? "" : "s"}`)}>
                 <${TagPill} name=${tg.name} color=${tg.color} interactive=${true}/>
                 <span class="grow"></span>
                 <span class="lane-count num">${tg.task_count}</span>
@@ -971,7 +977,8 @@ function TagsPane() {
             class=${"task-row" + (activeTask.value && t.id === activeTask.value.id ? " active" : "")}
             draggable="true"
             onDragStart=${e => e.dataTransfer.setData("application/x-cortex-task-id", String(t.id))}
-            onClick=${() => selectedId.value = t.id}>
+            onClick=${() => selectedId.value = t.id}
+            ...${tip(t.title)}>
             <span class=${"dot dot-status-" + t.status}></span>
             <span class="task-title">${t.title}</span>
             <${PriorityChip} priority=${t.priority}/>
@@ -2000,6 +2007,7 @@ function App() {
     <${InboxPane}/>
     ${paletteOpen.value ? html`<${CommandPalette}/>` : null}
     <${ModalRoot}/>
+    <${Tooltip}/>
     ${errorMsg.value ? html`<div class="toast">${errorMsg.value}</div>` : null}
   </div>`;
 }

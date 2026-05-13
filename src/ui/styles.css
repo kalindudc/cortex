@@ -1150,8 +1150,78 @@ input:disabled { opacity: 0.5; cursor: not-allowed; }
   gap: 8px;
   /* grid-template-columns is irrelevant in flex; explicit reset for safety. */
   grid-template-columns: none;
+  /* Without min-width:0, a long .tag-pill child refused to shrink and pushed
+     the count + edit-btn past the row's right edge, hiding them. */
+  min-width: 0;
 }
 .pane-tags .lane-row .lane-count { color: var(--text-3); font-size: var(--fs-2); }
+
+/* Long tag-name handling in the sidebar tag list.
+   Base .tag-pill is white-space:nowrap + flex-shrink:0 (correct for popovers
+   and headers where pills sit in wrap-friendly containers). In the sidebar
+   the row is a fixed-width flex container, so we override: allow shrink,
+   clip overflow, and add an ellipsis. The full name is still discoverable
+   via the JS hover tooltip (see onMouseEnter on the row in components.js)
+   and the native `title` attribute as a fallback. */
+.pane-tags .lane-row .tag-pill {
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: inline-block; /* override inline-flex so text-overflow takes effect */
+  line-height: 20px;     /* preserve the inline-flex centered look */
+}
+
+/* ===== Tooltip primitive (see ui/tooltip.js) =====
+   Singleton fixed-position tip rendered once at the App root. Position is
+   computed in JS (placeTooltip) so it can flip placement when the requested
+   side has no viewport room — escapes any `overflow: hidden` ancestor that
+   would clip a CSS-only ::after.
+
+   Visual: high-contrast inverted surface (background: var(--text), color:
+   var(--bg)) so the tip reads as system chrome rather than another panel.
+   Mirrors the GitHub / Linear / macOS native-tooltip aesthetic and works in
+   both themes without per-theme rules. */
+.tooltip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 1000;
+  max-width: min(60vw, 480px);
+  padding: 5px 9px;
+  background: var(--text);
+  color: var(--bg);
+  border-radius: var(--r-2);
+  font-size: var(--fs-2);
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  opacity: 0;
+  transform: scale(0.96);
+  transform-origin: center center;
+  transition:
+    opacity var(--dur-1) var(--ease),
+    transform var(--dur-1) var(--ease);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  /* Ensure the tip is rendered before its first measure-and-place pass
+     (placeTooltip needs offsetWidth/Height) without flashing at 0,0. The
+     opacity:0 default keeps it invisible until the visibility class lands. */
+  will-change: opacity, transform;
+}
+.tooltip-visible {
+  opacity: 1;
+  transform: scale(1);
+  /* Slightly slower fade-in than fade-out so the tip feels deliberate on
+     entry and snappy on exit. */
+  transition:
+    opacity var(--dur-2) var(--ease),
+    transform var(--dur-2) var(--ease);
+}
 
 /* drag & drop visual.
    Generic draggable surfaces (sidebar task rows) get the grab cursor so
