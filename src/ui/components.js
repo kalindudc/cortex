@@ -57,6 +57,8 @@ import {
   sidebarView, selectedTag, newTagOpen, tagsPopover,
   // computed
   tasksInLane, activeTask, inboxList, blockedTasks,
+  // sentinel
+  UNTAGGED,
   // api + error helpers
   api, showError, tryApi, fetchAuthors,
   // platform / hint helpers
@@ -389,7 +391,10 @@ function SidebarSystemBar() {
   const inTags = sidebarView.value === "tags";
   return html`<div class="pane-system">
     ${inTags ? html`<button class="btn-icon" title="Home (back to lanes)"
-      aria-label="Home" onClick=${() => { sidebarView.value = "lanes"; }}>
+      aria-label="Home" onClick=${() => {
+        sidebarView.value = "lanes";
+        selectedTag.value = null;
+      }}>
       <${Icon} name="home"/>
     </button>` : html`<button class="btn-icon" title="Manage tags"
       aria-label="Manage tags" onClick=${() => { sidebarView.value = "tags"; }}>
@@ -561,6 +566,13 @@ function TagsPane() {
         <span class="view-name">All tags</span>
         <span class="view-count">${totalTagged}</span>
       </button>
+      <button class=${"view-row" + (selectedTag.value === UNTAGGED ? " selected" : "")}
+        onClick=${() => { selectedTag.value = UNTAGGED; selectedId.value = null; }}
+        title="Show only tasks that carry no tags">
+        <${Icon} name="ban"/>
+        <span class="view-name">Untagged</span>
+        <span class="view-count">${tasks.value.length - totalTagged}</span>
+      </button>
     </div>
     <div class="pane-section lanes-section">
       <div class="section-head">
@@ -613,9 +625,11 @@ function TagsPane() {
          'All tagged tasks' when not (matches the All-tags view-row above). */ ""}
     ${tasks.value.length > 0 ? html`<div class="pane-section tasks-section">
       <div class="section-head">
-        <h1 class="eyebrow">${selectedTag.value
-          ? html`Tasks \u00b7 #${selectedTag.value}`
-          : html`All tagged tasks`}</h1>
+        <h1 class="eyebrow">${selectedTag.value === UNTAGGED
+          ? html`Untagged tasks`
+          : selectedTag.value
+            ? html`Tasks \u00b7 #${selectedTag.value}`
+            : html`All tagged tasks`}</h1>
       </div>
       <div class="section-body">
         ${(() => {
@@ -625,9 +639,11 @@ function TagsPane() {
             ? tasksInLane.value
             : tasksInLane.value.filter(t => Array.isArray(t.tags) && t.tags.length > 0);
           if (list.length === 0) {
-            return html`<p class="meta">${selectedTag.value
-              ? html`no tasks carry #${selectedTag.value}`
-              : html`no tagged tasks yet`}</p>`;
+            return html`<p class="meta">${selectedTag.value === UNTAGGED
+              ? html`no untagged tasks`
+              : selectedTag.value
+                ? html`no tasks carry #${selectedTag.value}`
+                : html`no tagged tasks yet`}</p>`;
           }
           return list.map(t => html`<button
             class=${"task-row" + (activeTask.value && t.id === activeTask.value.id ? " active" : "")}
@@ -1217,7 +1233,11 @@ function buildCommands() {
     id: "sidebar-mode",
     label: sidebarView.value === "tags" ? "Switch to lane mode" : "Switch to tag mode",
     hint: "", icon: sidebarView.value === "tags" ? "home" : "hash",
-    action: () => { sidebarView.value = sidebarView.value === "tags" ? "lanes" : "tags"; },
+    action: () => {
+      const goingHome = sidebarView.value === "tags";
+      sidebarView.value = goingHome ? "lanes" : "tags";
+      if (goingHome) selectedTag.value = null;
+    },
   });
   if (tags.value.length > 0) {
     cmds.push({ id: "filter-tag", label: "Filter by tag\u2026", hint: "", icon: "hash",

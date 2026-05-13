@@ -21,8 +21,12 @@ export const lanes         = signal([]);
 export const tags          = signal([]);
 // Sidebar mode: "lanes" (default LanesPane) or "tags" (TagsPane). The home
 // button + a tag-mode button live in the sidebar's .pane-system strip.
-// Switching is non-destructive: it does NOT clear selectedLane/selectedTag/
-// selectedId so the right-hand active task pane keeps its context.
+// Switching is mostly non-destructive: it does NOT clear selectedLane or
+// selectedId so the right-hand active task pane keeps its context. Exception:
+// switching tags → lanes (Home button or "Switch to lane mode" palette entry)
+// resets selectedTag to null so the lanes view never inherits stale tag-mode
+// filter state. The reverse direction (lanes → tags) leaves selectedTag
+// alone — entering tags mode with the previous filter restored is desired.
 export const sidebarView   = signal("lanes");
 // Optional single-tag filter applied to the visible task list. Combined with
 // selectedLane via AND. Set by clicking a tag row in TagsPane (or via the
@@ -110,12 +114,21 @@ export function toggleTheme() {
 if (typeof document !== "undefined") setTheme(theme.value);
 
 // ---------- computed ----------
+// Sentinel value for "filter to untagged tasks". Picked to be collision-free
+// against TAG_NAME_RE (/^[a-z0-9_@-]{1,32}$/, src/store.ts:55) — the null
+// byte cannot appear in a real tag name, so equality checks are safe.
+export const UNTAGGED = "\u0000untagged";
+
 export const tasksInLane = computed(() => {
   const lane = selectedLane.value;
   const tag  = selectedTag.value;
   let out = tasks.value;
   if (lane) out = out.filter(t => t.lane === lane);
-  if (tag)  out = out.filter(t => Array.isArray(t.tags) && t.tags.includes(tag));
+  if (tag === UNTAGGED) {
+    out = out.filter(t => !Array.isArray(t.tags) || t.tags.length === 0);
+  } else if (tag) {
+    out = out.filter(t => Array.isArray(t.tags) && t.tags.includes(tag));
+  }
   return out;
 });
 export const activeTask = computed(() => {
