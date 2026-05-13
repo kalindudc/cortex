@@ -1,78 +1,20 @@
 import { test, expect, beforeAll, afterAll } from "bun:test";
-import path from "node:path";
-import os from "node:os";
-import fs from "node:fs";
+import { runCli, mkTmpEnv } from "./helpers.ts";
 
-const BUN = process.execPath;
-const ROOT = path.resolve(import.meta.dir, "..");
-const CLI = path.join(ROOT, "cli.ts");
-
-let tmpDir: string;
-let dbPath: string;
-let skillDir: string;
+let testEnv: Record<string, string>;
+let cleanup: () => void;
 
 beforeAll(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-cli-"));
-  dbPath = path.join(tmpDir, "cortex.db");
-  // Plan 3: init/reset write+wipe the cortex skill at ~/.agents/skills/cortex.
-  // Redirect to a tmp dir so the test never touches the user's real skill.
-  skillDir = path.join(tmpDir, "skill");
+  const e = mkTmpEnv("cli");
+  testEnv = e.env;
+  cleanup = e.cleanup;
 });
 
-afterAll(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true });
-});
+afterAll(() => cleanup());
 
-async function run(...args: string[]): Promise<{
-  code: number;
-  stdout: string;
-  stderr: string;
-}> {
-  const proc = Bun.spawn([BUN, CLI, ...args], {
-    env: {
-      ...process.env,
-      CORTEX_DB: dbPath,
-      CORTEX_SKILL_DIR: skillDir,
-      NO_COLOR: "1",
-    },
-    cwd: ROOT,
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
-  const code = await proc.exited;
-  return { code, stdout, stderr };
-}
-
-// Helper that pipes stdin to a CLI invocation.
-async function runWithInput(
-  input: string,
-  ...args: string[]
-): Promise<{ code: number; stdout: string; stderr: string }> {
-  const proc = Bun.spawn([BUN, CLI, ...args], {
-    env: {
-      ...process.env,
-      CORTEX_DB: dbPath,
-      CORTEX_SKILL_DIR: skillDir,
-      NO_COLOR: "1",
-    },
-    cwd: ROOT,
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  proc.stdin.write(input);
-  await proc.stdin.end();
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
-  const code = await proc.exited;
-  return { code, stdout, stderr };
-}
+const run = (...args: string[]) => runCli({ args, env: testEnv });
+const runWithInput = (input: string, ...args: string[]) =>
+  runCli({ args, env: testEnv, stdin: input });
 
 test("reset wipes and re-inits when RESET is typed; aborts otherwise", async () => {
   // Seed some state.

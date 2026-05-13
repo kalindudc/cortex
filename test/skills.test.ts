@@ -122,53 +122,23 @@ describe("methodology skills — standalone discipline", () => {
 // --body-file <tmp>` and `cortex edit <id> --body-file <tmp>`, asserts the
 // task's stored body matches the file. Also verifies the mutex error.
 
-const BUN = process.execPath;
-const ROOT = path.resolve(import.meta.dir, "..");
-const CLI = path.join(ROOT, "cli.ts");
+import { runCli, mkTmpEnv } from "./helpers.ts";
 
 describe("cortex add/edit accept --body-file", () => {
+  let testEnv: Record<string, string>;
   let cliTmpDir: string;
-  let dbPath: string;
-  let cliSkillDir: string;
+  let cleanup: () => void;
 
   beforeAll(() => {
-    cliTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-bodyfile-"));
-    dbPath = path.join(cliTmpDir, "cortex.db");
-    // Redirect skill writes to a tmp dir so we don't clobber the user's real
-    // ~/.agents/skills/ tree during the init step.
-    cliSkillDir = path.join(cliTmpDir, "skills");
+    const e = mkTmpEnv("bodyfile");
+    testEnv = e.env;
+    cliTmpDir = e.tmpDir;
+    cleanup = e.cleanup;
   });
 
-  afterAll(() => {
-    fs.rmSync(cliTmpDir, { recursive: true, force: true });
-  });
+  afterAll(() => cleanup());
 
-  async function cli(...args: string[]): Promise<{
-    code: number;
-    stdout: string;
-    stderr: string;
-  }> {
-    const proc = Bun.spawn([BUN, CLI, ...args], {
-      env: {
-        ...process.env,
-        // XDG_CONFIG_HOME isolates pidPath()/urlPath() so the test cannot
-        // detect the user's real running daemon via daemonUrl() and route
-        // mutations to the real DB. CORTEX_DB pins the SQLite file as well.
-        XDG_CONFIG_HOME: cliTmpDir,
-        CORTEX_DB: dbPath,
-        CORTEX_SKILL_DIR: cliSkillDir,
-        NO_COLOR: "1",
-      },
-      cwd: ROOT,
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-    return { code: await proc.exited, stdout, stderr };
-  }
+  const cli = (...args: string[]) => runCli({ args, env: testEnv });
 
   test("add --body-file stores file contents as the task body; edit --body-file updates it; -b + --body-file is rejected", async () => {
     let r = await cli("init");

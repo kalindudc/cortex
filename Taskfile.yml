@@ -21,7 +21,9 @@ tasks:
       - chmod +x bin/cortex && echo "✓ Built bin/cortex"
 
   test:
-    desc: "Run cortex unit + integration tests"
+    desc: "Run cortex unit + integration tests (builds bin/cortex first)"
+    deps:
+      - build
     cmds:
       - ${HOME}/.bun/bin/bun test
 

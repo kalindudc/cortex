@@ -1,58 +1,26 @@
 import { test, expect, describe, beforeAll, afterAll } from "bun:test";
-import path from "node:path";
-import os from "node:os";
-import fs from "node:fs";
 import { Store } from "../store.ts";
+import { runCli, mkTmpEnv } from "./helpers.ts";
 
 // Plan 3: every setStatus call writes an audit-trail row in `updates`
 // alongside the actual status mutation (in the same transaction). This makes
 // parallel-agent status oscillation visible as inbox history rather than
 // silently overwriting the previous status.
 
-const BUN = process.execPath;
-const ROOT = path.resolve(import.meta.dir, "..");
-const CLI = path.join(ROOT, "cli.ts");
-
-let tmpDir: string;
+let testEnv: Record<string, string>;
 let dbPath: string;
-let skillDir: string;
+let cleanup: () => void;
 
 beforeAll(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-audit-"));
-  dbPath = path.join(tmpDir, "cortex.db");
-  skillDir = path.join(tmpDir, "skill");
+  const e = mkTmpEnv("audit");
+  testEnv = e.env;
+  dbPath = e.env.CORTEX_DB!;
+  cleanup = e.cleanup;
 });
 
-afterAll(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true });
-});
+afterAll(() => cleanup());
 
-async function run(...args: string[]): Promise<{
-  code: number;
-  stdout: string;
-  stderr: string;
-}> {
-  const proc = Bun.spawn([BUN, CLI, ...args], {
-    env: {
-      ...process.env,
-      CORTEX_DB: dbPath,
-      CORTEX_SKILL_DIR: skillDir,
-      NO_COLOR: "1",
-    },
-    cwd: ROOT,
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
-  return {
-    code: await proc.exited,
-    stdout: "",
-    stderr: "",
-  };
-}
+const run = (...args: string[]) => runCli({ args, env: testEnv });
 
 describe("audit-trail status rows", () => {
   test("update -s review writes message + audit-trail row, both attributed", async () => {
