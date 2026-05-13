@@ -12,14 +12,25 @@ import { useEffect, useRef } from "https://esm.sh/preact@10.24/hooks";
 // signal() in render the value is replaced every keystroke and inputs freeze.
 import { useSignal } from "https://esm.sh/@preact/signals@1.3?deps=preact@10.24";
 import htm from "https://esm.sh/htm@3.1";
-// highlight.js core + markdown grammar only. We do NOT compile/render the
-// markdown — we show the raw source verbatim with token-level color so the
-// user sees exactly what they typed (#, **, `, [text](url) etc. all visible)
-// but with visual hierarchy. Core ~16KB, markdown lang ~5KB, loaded from
-// esm.sh CDN at runtime so the binary stays the same size.
-import hljs from "https://esm.sh/highlight.js@11.10/lib/core";
-import markdownLang from "https://esm.sh/highlight.js@11.10/lib/languages/markdown";
-hljs.registerLanguage("markdown", markdownLang);
+// CodeMirror 6 — single editor used for BOTH display (readonly) and edit
+// modes of the task description. Gives us a built-in line-number gutter,
+// active-line highlight, scroll-sync, and soft-wrap for free, themed with
+// cortex's design tokens via EditorView.theme(). Loaded from esm.sh so the
+// compiled binary stays the same size; replaces the previous custom gutter +
+// overlay implementation AND the highlight.js-based markdown source view.
+import { EditorState } from "https://esm.sh/@codemirror/state@6";
+import {
+  EditorView,
+  keymap,
+  lineNumbers,
+  highlightActiveLine,
+  highlightActiveLineGutter,
+  drawSelection,
+} from "https://esm.sh/@codemirror/view@6";
+import { defaultKeymap, history, historyKeymap } from "https://esm.sh/@codemirror/commands@6";
+import { markdown } from "https://esm.sh/@codemirror/lang-markdown@6";
+import { syntaxHighlighting, HighlightStyle } from "https://esm.sh/@codemirror/language@6";
+import { tags as t } from "https://esm.sh/@lezer/highlight@1";
 
 // Auto-resize a textarea to fit its content. Attached as a ref callback so it
 // works without re-rendering on every keystroke (which would fight htm). The
@@ -321,7 +332,7 @@ function ActiveTaskPane() {
       </div>
     </header>
 
-    <div class=${"active-body" + (editing.value ? " active-body--editing" : "")}>
+    <div class="active-body">
       ${editing.value ? html`<${EditTaskForm} task=${at}/>` : html`<div class="stack">
         <h2 class="title-2"
           draggable="true"
@@ -333,15 +344,15 @@ function ActiveTaskPane() {
              level syntax coloring — we deliberately do NOT render markdown.
              The user sees exactly what they typed (#, **, `, links, etc.) so
              editing round-trips losslessly. Click anywhere to enter edit mode. */ ""}
-        <div class="md-display"
-          onClick=${() => editing.value = true}
-          style="cursor:pointer; min-height:96px"
-          title="Click to edit (markdown source highlighting)">
-          ${at.body
-            ? html`<pre class="md-source"><code class="hljs"
-                dangerouslySetInnerHTML=${{ __html: hljs.highlight(at.body, { language: "markdown" }).value }}/></pre>`
-            : html`<p class="muted" style="margin:0">Add a description\u2026 (markdown syntax highlighted)</p>`}
-        </div>
+        ${at.body
+          ? html`<${MdEditor}
+              value=${at.body}
+              editable=${false}
+              onClick=${() => editing.value = true}/>`
+          : html`<p class="muted"
+              onClick=${() => editing.value = true}
+              style="margin:0; cursor:pointer; min-height:96px"
+              title="Click to edit">Add a description\u2026 (markdown syntax highlighted)</p>`}
       </div>`}
     </div>
 
@@ -364,6 +375,174 @@ function ActiveTaskPane() {
       <${PostUpdateForm} task=${at}/>
     </footer>
   </section>`;
+}
+
+// ----- MdEditor: CodeMirror-backed description view --------------------
+//
+// One component, two modes (chosen via the `editable` prop, fixed for the
+// instance's lifetime — toggling edit/display swaps the parent component
+// tree, so each MdEditor instance is born already knowing its mode):
+//   editable=true  → full editor (active-line, history, Cmd+S submit)
+//   editable=false → readonly view (gutter + soft-wrap only, click-to-edit)
+//
+// Props:
+//   value     — string, initial document and external source-of-truth when
+//               !editable. Edits live INSIDE the editor while editable=true;
+//               we report changes via onChange, never push value back in.
+//   onChange  — (newDoc:string) => void; called on every doc edit.
+//   editable  — boolean (default true).
+//   onClick   — wrapper click handler; used in display mode for click-to-edit.
+//   onSubmit  — () => void; called on Cmd/Ctrl+S inside the editor.
+//
+// Theme: a single EditorView.theme() pulls every color/font from cortex CSS
+// variables (var(--bg), var(--text-content), var(--accent-tint), etc.), so
+// the editor automatically follows light/dark mode and any future palette
+// retune. Markdown source highlighting maps lezer tags to the same tokens
+// that the old hljs-based .md-source view used.
+const cortexHighlight = HighlightStyle.define([
+  { tag: [t.heading, t.heading1, t.heading2, t.heading3, t.heading4, t.heading5, t.heading6], color: "var(--text)", fontWeight: "700" },
+  { tag: t.strong, color: "var(--text)", fontWeight: "700" },
+  { tag: t.emphasis, color: "var(--text)", fontStyle: "italic" },
+  { tag: t.list, color: "var(--accent)", fontWeight: "600" },
+  { tag: t.monospace, color: "var(--accent)" },
+  { tag: [t.link, t.url], color: "var(--info)", textDecoration: "underline", textUnderlineOffset: "2px" },
+  { tag: t.quote, color: "var(--text-3)", fontStyle: "italic" },
+  { tag: t.comment, color: "var(--text-3)", fontStyle: "italic" },
+  { tag: t.meta, color: "var(--info)" },
+  { tag: t.number, color: "var(--warn)" },
+  // NOTE: @lezer/highlight does NOT export a `title` tag (verified against
+  // its .d.ts — only `heading`, `heading1`..`heading6` cover header content).
+  // Referencing `t.title` here would resolve to undefined and crash
+  // HighlightStyle.define on first import. Headings are already styled above.
+]);
+
+const cortexCmTheme = EditorView.theme({
+  // Editor root is fully transparent so the page's paper-dot pattern (set
+  // on .pane-active above) shows through both display and edit modes. Any
+  // backgroundColor here would paint a flat "slab" over the dots and make
+  // the editor look bolted on. Highlights (.cm-activeLine, selection) are
+  // the only painted surfaces — those use --accent-tint intentionally.
+  "&": {
+    color: "var(--text-content)",
+    backgroundColor: "transparent",
+    fontSize: "var(--fs-3)",
+    fontFamily: "var(--font-mono)",
+    height: "100%",
+  },
+  ".cm-content": {
+    fontFamily: "var(--font-mono)",
+    padding: "6px 0",
+    caretColor: "var(--accent)",
+    color: "var(--text-content)",
+    backgroundColor: "transparent",
+  },
+  ".cm-line": { padding: "0 8px" },
+  ".cm-gutters": {
+    // Transparent so the active-body's own background shows through; we
+    // intentionally do NOT paint a panel surface here — the gutter is meant
+    // to feel like part of the page, not a separate chrome strip. The
+    // border-right alone provides enough visual separation from content.
+    backgroundColor: "transparent",
+    color: "var(--text-3)",
+    border: "0",
+    borderRight: "1px solid var(--border)",
+    fontFamily: "var(--font-mono)",
+    userSelect: "none",
+  },
+  ".cm-lineNumbers .cm-gutterElement": {
+    padding: "0 8px 0 10px",
+    minWidth: "2.5ch",
+    color: "var(--text-3)",
+  },
+  ".cm-activeLineGutter": {
+    backgroundColor: "var(--accent-tint)",
+    color: "var(--text)",
+  },
+  ".cm-activeLine": { backgroundColor: "var(--accent-tint)" },
+  ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--accent)" },
+  "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection": {
+    backgroundColor: "var(--accent-tint)",
+  },
+  ".cm-scroller": {
+    fontFamily: "var(--font-mono)",
+    lineHeight: "1.5",
+    overflow: "auto",
+    scrollbarWidth: "thin",
+    scrollbarColor: "var(--border-strong) transparent",
+  },
+  ".cm-scroller::-webkit-scrollbar": { width: "8px", height: "8px" },
+  ".cm-scroller::-webkit-scrollbar-track": { background: "transparent" },
+  ".cm-scroller::-webkit-scrollbar-thumb": { background: "var(--border-strong)", borderRadius: "4px" },
+  ".cm-scroller::-webkit-scrollbar-thumb:hover": { background: "var(--text-3)" },
+  "&.cm-focused": { outline: "none" },
+});
+
+function MdEditor({ value, onChange, editable = true, onClick, onSubmit }) {
+  const hostRef = useRef(null);
+  const viewRef = useRef(null);
+  // Refs for callbacks so the editor (mounted once) always sees the latest
+  // closure even though the parent re-renders and passes fresh function
+  // identities every time.
+  const onChangeRef = useRef(onChange);
+  const onSubmitRef = useRef(onSubmit);
+  onChangeRef.current = onChange;
+  onSubmitRef.current = onSubmit;
+
+  useEffect(() => {
+    const exts = [
+      lineNumbers(),
+      markdown(),
+      syntaxHighlighting(cortexHighlight),
+      cortexCmTheme,
+      EditorView.lineWrapping,
+    ];
+    if (editable) {
+      exts.push(
+        highlightActiveLine(),
+        highlightActiveLineGutter(),
+        drawSelection(),
+        history(),
+        keymap.of([
+          { key: "Mod-s", preventDefault: true, run: () => { onSubmitRef.current?.(); return true; } },
+          ...defaultKeymap,
+          ...historyKeymap,
+        ]),
+        EditorView.updateListener.of((u) => {
+          if (u.docChanged) onChangeRef.current?.(u.state.doc.toString());
+        }),
+      );
+    } else {
+      exts.push(
+        EditorState.readOnly.of(true),
+        EditorView.editable.of(false),
+      );
+    }
+
+    const view = new EditorView({
+      state: EditorState.create({ doc: value || "", extensions: exts }),
+      parent: hostRef.current,
+    });
+    viewRef.current = view;
+    return () => { view.destroy(); viewRef.current = null; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // mount once; editable is fixed per instance
+
+  // When NOT editable, sync external value changes into the editor (e.g.
+  // task body refreshed via API). When editable, the editor is the source
+  // of truth and we never overwrite the user's in-progress edits.
+  useEffect(() => {
+    if (editable) return;
+    const view = viewRef.current;
+    if (!view) return;
+    const next = value || "";
+    if (view.state.doc.toString() !== next) {
+      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: next } });
+    }
+  }, [value, editable]);
+
+  return html`<div class=${"md-editor" + (editable ? " md-editor--edit" : " md-editor--display")}
+    ref=${hostRef}
+    onClick=${onClick}></div>`;
 }
 
 function EditTaskForm({ task }) {
@@ -390,9 +569,11 @@ function EditTaskForm({ task }) {
     onSubmit=${e => { e.preventDefault(); submit(); }}
     onKeyDown=${onSubmitKeys(submit)}>
     <input value=${t.value} onInput=${e => t.value = e.target.value} placeholder="Task title"/>
-    <textarea class="edit-body"
-      placeholder="Description\u2026 (markdown syntax highlighted)"
-      onInput=${e => b.value = e.target.value}>${b.value}</textarea>
+    <${MdEditor}
+      value=${b.value}
+      onChange=${v => b.value = v}
+      editable=${true}
+      onSubmit=${submit}/>
     <div class="row">
       <label class="row meta" style="gap:6px">priority
         <input type="number" min="0" style="width:64px; height:28px" value=${p.value}

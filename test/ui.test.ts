@@ -45,8 +45,15 @@ describe("UI: served assets", () => {
     // name itself, plus a structural class that should never go away.)
     expect(t).toMatch(/--accent:\s+#[0-9a-f]{6};/);
     expect(t).toContain(".pane-active");
-    expect(t).toContain(".md-source");
     expect(t).toContain("--paper-dot");
+    // Task description renders through the CodeMirror-backed MdEditor in
+    // BOTH display (readonly) and edit modes; the wrapper class is the
+    // stable contract this stylesheet owns. The editor's own chrome
+    // (gutter, active line, scrollbar) is themed inside EditorView.theme
+    // and lives in JS, not in styles.css.
+    expect(t).toContain(".md-editor");
+    expect(t).toContain(".md-editor--edit");
+    expect(t).toContain(".md-editor--display");
   });
 
   test("GET /app.js returns the JS entry that imports App + state", async () => {
@@ -65,6 +72,11 @@ describe("UI: served assets", () => {
     expect(cs.status).toBe(200);
     expect(ct).toContain("esm.sh/preact@10.24");
     expect(ct).toContain("esm.sh/htm@3.1");
+    // CodeMirror 6 powers the description editor (display + edit modes).
+    // Pin checks guard against accidental version drift on bundle rebuild.
+    expect(ct).toContain("esm.sh/@codemirror/state@6");
+    expect(ct).toContain("esm.sh/@codemirror/view@6");
+    expect(ct).toContain("esm.sh/@codemirror/lang-markdown@6");
 
     const st = await fetch(`${h.url}/state.js`);
     const stt = await st.text();

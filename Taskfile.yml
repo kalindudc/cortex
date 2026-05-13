@@ -14,9 +14,17 @@ tasks:
     cmds:
       - pnpm install --frozen-lockfile
       - |
-        BUN="${HOME}/.bun/bin/bun"
+        # bun is a pinned devDependency (see package.json). pnpm exec resolves
+        # it from node_modules/.bin, so no global bun install is required.
+        # NOTE: --bytecode dropped intentionally. It produces a binary that
+        # crashes with "Expected CommonJS module to have a function wrapper"
+        # on bun >=1.3 when the bundle contains CJS deps (citty/hono pull
+        # transitive CJS). Known bun regression: oven-sh/bun#25398 and
+        # related. The flag was a startup optimization; cortex starts in ms
+        # without it, so the trade-off favors correctness over re-pinning to
+        # a year-old bun.
         TARGET="bun-$(uname | tr '[:upper:]' '[:lower:]')-$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/')"
-        "$BUN" build index.ts --compile --minify --bytecode \
+        pnpm exec bun build index.ts --compile --minify \
           --target="$TARGET" --outfile bin/cortex
       - chmod +x bin/cortex && echo "✓ Built bin/cortex"
 
@@ -25,20 +33,20 @@ tasks:
     deps:
       - build
     cmds:
-      - ${HOME}/.bun/bin/bun test
+      - pnpm exec bun test
 
   dev:
     desc: "Run cortex from source via bun. Use CLI_ARGS to pass args."
     cmds:
-      - ${HOME}/.bun/bin/bun index.ts {{.CLI_ARGS}}
+      - pnpm exec bun index.ts {{.CLI_ARGS}}
 
   serve:dev:
     desc: "Run the cortex API server from source with hot-reload (bun --watch). HTML is served fresh per request, so UI edits show on browser refresh; .ts changes restart the server. Pass PORT to override."
     cmds:
       - |
         # Stop any background daemon first so the watch server owns 7777.
-        ${HOME}/.bun/bin/bun index.ts stop 2>/dev/null || true
-      - ${HOME}/.bun/bin/bun --watch index.ts serve --foreground --no-open --port {{.PORT | default "7777"}}
+        pnpm exec bun index.ts stop 2>/dev/null || true
+      - pnpm exec bun --watch index.ts serve --foreground --no-open --port {{.PORT | default "7777"}}
     interactive: true
 
   deploy:

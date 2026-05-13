@@ -165,12 +165,6 @@ input, textarea {
   -webkit-user-select: text;
   user-select: text;
 }
-/* Markdown source view inside the active task: this is the user's own
-   content (their task descriptions), so allow selection for copy/paste. */
-.md-source {
-  -webkit-user-select: text;
-  user-select: text;
-}
 ::selection { background: var(--accent-tint); color: var(--text); }
 ::placeholder { color: var(--text-3); }
 
@@ -746,7 +740,51 @@ input:disabled { opacity: 0.5; cursor: not-allowed; }
   display: flex; align-items: center; gap: 10px;
   padding: 16px 24px; border-bottom: 1px solid var(--border);
 }
-.active-body { padding: 20px 24px; flex: 1; min-height: 0; overflow: auto; }
+/* Active task body: ALWAYS a flex column whose only scroll surface is the
+   description region inside (the editor in both display and edit modes).
+   The header above and the form chrome / footer below stay pinned, so the
+   task title and the save/cancel row are always reachable regardless of
+   description length. Replaces the older nested scroll where the body
+   itself owned overflow:auto and could push chrome past the viewport.
+
+   Padding is ZERO here: the editor extends edge-to-edge of the pane so it
+   doesn't read as a floating slab inside a padded frame. Padding is
+   redistributed to the title (display mode) and .edit-task-form (edit
+   mode) below — the editor itself stays flush. */
+.active-body {
+  padding: 0;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+/* In display mode, .stack wraps the title + the readonly editor. The
+   editor must take the remaining vertical space so it can scroll
+   internally instead of letting .active-body scroll — keeping behavior
+   parity with edit mode. */
+.active-body > .stack {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* Title gets its own padding + a bottom border that acts as the visual
+   separator from the editor below. The default 12px .stack sibling gap is
+   nulled inside .active-body so the border-bottom is the only divider. */
+.active-body > .stack > .title-2 {
+  padding: 16px 24px;
+  margin: 0;
+  border-bottom: 1px solid var(--border);
+}
+.active-body > .stack > * + * {
+  margin-top: 0;
+}
+/* Empty-body placeholder gets the same inset so it doesn't touch the
+   pane edges when there's no description yet. */
+.active-body > .stack > .muted {
+  padding: 16px 24px;
+}
 
 .active-foot {
   padding: 16px 24px; border-top: 1px solid var(--border); background: var(--panel);
@@ -764,48 +802,14 @@ input:disabled { opacity: 0.5; cursor: not-allowed; }
 [draggable="true"]:active { cursor: grabbing; }
 .status-pill.dragover { background: var(--accent-tint); color: var(--text); }
 
-/* ---------- markdown source highlighting (task body display) ----------
-   We do NOT compile/render the markdown. The user sees the EXACT raw text
-   they typed (#, **, `, [...](...) etc all visible) with token-level color
-   so structure is recognisable at a glance but editing round-trips losslessly.
-   highlight.js (markdown grammar) emits .hljs-* spans inside our .md-source
-   <pre><code> wrapper; this section themes those tokens to the palette. */
-.md-display { font-family: var(--font-mono); }
-.md-source {
-  margin: 0; padding: 0; background: transparent; border: 0;
-  font-family: var(--font-mono); font-size: var(--fs-3); line-height: 1.65;
-  color: var(--text-content);
-  white-space: pre-wrap; word-break: break-word;
-  /* Preserve the user's literal whitespace, but allow long lines to wrap so
-     the description never causes horizontal scroll on a narrow active pane. */
-}
-.md-source .hljs-section,
-.md-source .hljs-strong       { color: var(--text); font-weight: 700; }
-.md-source .hljs-emphasis     { color: var(--text); font-style: italic; }
-.md-source .hljs-bullet,
-.md-source .hljs-symbol       { color: var(--accent); font-weight: 600; }
-.md-source .hljs-code         { color: var(--accent); }
-.md-source .hljs-link,
-.md-source .hljs-link_label,
-.md-source .hljs-string       { color: var(--info); text-decoration: underline; text-underline-offset: 2px; text-decoration-thickness: 1px; }
-.md-source .hljs-quote        { color: var(--text-3); font-style: italic; }
-.md-source .hljs-meta,
-.md-source .hljs-attr,
-.md-source .hljs-attribute,
-.md-source .hljs-name         { color: var(--info); }
-.md-source .hljs-number       { color: var(--warn); }
-.md-source .hljs-comment      { color: var(--text-3); font-style: italic; }
-.md-source .hljs-title        { color: var(--text); font-weight: 600; }
-
 /* ---------- autosize textarea (post-update compose only) ----------
    Companion to autosizeRef in components.js: JS sets `height` to fit content
    exactly on every input, so the textarea has no internal scroll. Used by
    the inbox post-update compose box, where growing-with-content feels right
    because the box is small and lives at the bottom of its pane.
 
-   The EDIT TASK description deliberately does NOT use this — see .edit-body
-   below: in edit mode we need bounded scroll so the form chrome (priority,
-   lane, cancel, save) is always visible. */
+   The task description does NOT use this — it uses the CodeMirror-backed
+   .md-editor below, which has its own bounded scroll and gutter. */
 textarea.autosize {
   min-height: 80px;
   overflow: hidden;     /* never scroll — JS keeps height = scrollHeight */
@@ -813,21 +817,12 @@ textarea.autosize {
 }
 
 /* ---------- edit-task-form (the in-place description editor) ----------
-   When .active-body has the --editing modifier, it switches from a normal
-   scroll container to a flex column that hosts the edit form. The form is
-   itself a flex column where the .edit-body textarea is `flex: 1` — so the
-   title input, priority/lane row, and cancel/save row stay at their natural
-   height (always visible) and the textarea is the ONLY thing that scrolls
-   when the description outgrows the available space.
-
-   This replaces the older nested-scroll behaviour where both the textarea
-   and .active-body scrolled, pushing the form chrome (and the .active-foot
-   below it) past the viewport. */
-.active-body--editing {
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
+   .active-body is always a flex column (see above), so the form just needs
+   to be a flex:1 child whose own children stack vertically. The MdEditor
+   inside is flex:1 1 auto so the title input, priority/lane row, and
+   cancel/save row stay at their natural height (always visible) and the
+   editor is the ONLY thing that scrolls when the description outgrows the
+   available space. */
 .edit-task-form {
   display: flex;
   flex-direction: column;
@@ -835,18 +830,66 @@ textarea.autosize {
   min-height: 0;     /* let the textarea actually be constrained by parent */
   width: 100%;
   gap: 10px;
+  /* Inherits the chrome inset since .active-body now has padding:0 — keeps
+     the title input, priority/lane row, and save/cancel button row from
+     touching the pane edges. */
+  padding: 16px 24px;
 }
-.edit-task-form > .edit-body {
+/* ---------- .md-editor (CodeMirror-backed task description) ----------
+   ONE component (MdEditor in components.js) renders both the readonly
+   display view and the live editor; this stylesheet only owns the
+   wrapper sizing/affordance — the editor's chrome (gutter colors, active
+   line, scrollbar) is themed inside the EditorView via cortex CSS
+   variables, so it follows light/dark mode automatically.
+
+   --edit  : bounded flex child of the form; CM owns internal scroll.
+             Border + radius live here so they wrap the gutter too.
+   --display: natural height; pointer cursor signals click-to-edit. */
+.md-editor {
+  width: 100%;
+  display: block;
+}
+.md-editor--edit {
   flex: 1 1 auto;
   min-height: 120px;
-  overflow-y: auto;  /* THE only scroll surface in edit mode */
-  resize: none;
-  /* matched scrollbar styling so the only visible scrollbar in edit mode
-     looks deliberate, not like a browser default. */
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-strong) transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  /* Transparent so the page's paper-dot pattern shows through the editor;
+   the border alone delimits the editable region. Painting a solid bg here
+   would defeat the same transparency we set inside cortexCmTheme. */
+  background: transparent;
+  overflow: hidden;
 }
-.edit-task-form > .edit-body::-webkit-scrollbar         { width: 8px; }
-.edit-task-form > .edit-body::-webkit-scrollbar-track   { background: transparent; }
-.edit-task-form > .edit-body::-webkit-scrollbar-thumb   { background: var(--border-strong); border-radius: 4px; }
-.edit-task-form > .edit-body::-webkit-scrollbar-thumb:hover { background: var(--text-3); }
+/* Native contenteditable shows the I-beam over actual text glyphs, but
+   browsers default to the arrow cursor over empty whitespace below the
+   last line and over the .cm-scroller padding. Force I-beam across the
+   entire editable surface so the whole region reads as "clickable text".
+   Gutter overrides back to default — line-number column isn't editable
+   and shouldn't pretend to be. */
+.md-editor--edit .cm-scroller,
+.md-editor--edit .cm-content {
+  cursor: text;
+}
+.md-editor--edit .cm-gutters {
+  cursor: default;
+}
+.md-editor--display {
+  /* Same bounded-fill treatment as edit mode: take whatever vertical space
+   the parent stack offers and let CodeMirror own the internal scroll.
+   Without this the .active-body would have to scroll, which makes the
+   task header drift away from the description and looks out of place
+   relative to edit mode. No border in display mode — the gutter's own
+   border-right and the page background carry the visual separation. */
+  flex: 1 1 auto;
+  min-height: 0;
+  cursor: pointer;
+  background: transparent;
+  overflow: hidden;
+}
+/* CodeMirror's root is .cm-editor; fill our wrappers exactly in BOTH modes
+   so the gutter + content area stretch to the available space and CM's
+   internal .cm-scroller owns vertical scroll. */
+.md-editor .cm-editor {
+  height: 100%;
+  width: 100%;
+}
