@@ -33,6 +33,19 @@
   --accent-tint:   #f7e1d4;
   --accent-on:     #2c2820;
 
+  /* Code selection highlight. Intentionally cool/blue-tinted so it reads
+     as visibly distinct from the warm --active-line used by the active
+     line — without those two being different, a selection on the active
+     line is invisible. */
+  --selection:     #cfd9e8;
+
+  /* Active-line background for the editor. MUST be translucent: CodeMirror
+     paints the selection layer behind text (z-index: -1) so any opaque
+     line background would mask the selection on the active line. Using
+     accent at low alpha gives a visible warm tint while letting the cool
+     --selection bleed through where they overlap. */
+  --active-line:   rgba(237, 142, 96, 0.13);
+
   /* semantic */
   --ok:    #5e8a4b;
   --warn:  #c08a3a;
@@ -93,6 +106,12 @@
     --accent-tint:   #2e2418;
     --accent-on:     #1d1f24;
 
+    /* Cool blue-grey to contrast the warm --active-line. */
+    --selection:     #2a3550;
+    /* Translucent warm wash — must be rgba so --selection shows through
+       on the active line (CM's selection layer sits behind text). */
+    --active-line:   rgba(245, 164, 126, 0.10);
+
     --ok:    #7eaa6c;
     --warn:  #d8a558;
     --err:   #e08580;
@@ -124,6 +143,12 @@
   --accent-hover:  #ffb795;
   --accent-tint:   #2e2418;
   --accent-on:     #1d1f24;
+
+  /* Cool blue-grey to contrast the warm --active-line. */
+  --selection:     #2a3550;
+  /* Translucent warm wash — must be rgba so --selection shows through
+     on the active line (CM's selection layer sits behind text). */
+  --active-line:   rgba(245, 164, 126, 0.10);
 
   --ok:    #7eaa6c;
   --warn:  #d8a558;

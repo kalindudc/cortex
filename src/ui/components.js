@@ -1151,11 +1151,20 @@ const cortexCmTheme = EditorView.theme({
     minWidth: "2.5ch",
     color: "var(--text-3)",
   },
+  // Active line uses --active-line, NOT --accent-tint. CM6 paints the
+  // selection layer (.cm-selectionLayer) at z-index: -1 — behind the
+  // text so glyphs aren't masked — which means it's ALSO behind any
+  // background painted on .cm-line. An opaque background here would hide
+  // the selection on the active line. --active-line is rgba with low
+  // alpha so the cool --selection shows through where they overlap.
+  // (Confirmed by Marijn on https://discuss.codemirror.net/t/7157.)
+  // The gutter has no selection layer to worry about, but we keep both
+  // tokens in sync so the visual stays unified.
   ".cm-activeLineGutter": {
-    backgroundColor: "var(--accent-tint)",
+    backgroundColor: "var(--active-line)",
     color: "var(--text)",
   },
-  ".cm-activeLine": { backgroundColor: "var(--accent-tint)" },
+  ".cm-activeLine": { backgroundColor: "var(--active-line)" },
   ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--accent)" },
   // Selection styling. CM6's bundled view default theme ships rules that
   // BEAT naive overrides on both specificity AND !important — we have to
@@ -1177,15 +1186,21 @@ const cortexCmTheme = EditorView.theme({
   //      BEHIND the text. Selector below matches CM's exact 5-class form
   //      so we beat it on tie (we load last) AND adds !important for belt
   //      and suspenders. Text color is unchanged in this mode (the layer
-  //      has no text), so contrast = --accent-tint vs --text-content.
+  //      has no text), so contrast = --selection vs --text-content.
   //   2. Display/readonly mode — no drawSelection; native ::selection.
   //      CM defaults use !important so we MUST too, or the system
   //      Highlight color wins.
+  //
+  // Selection uses --selection (cool blue-grey). The active line above
+  // uses --active-line (translucent warm wash). They MUST be different
+  // tokens AND --active-line must be translucent — see the comment on
+  // .cm-activeLine for why opacity matters (CM's selection layer is
+  // painted behind text).
   "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, & > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground": {
-    backgroundColor: "var(--accent-tint) !important",
+    backgroundColor: "var(--selection) !important",
   },
   "& ::selection, &::selection": {
-    backgroundColor: "var(--accent-tint) !important",
+    backgroundColor: "var(--selection) !important",
     color: "var(--text) !important",
   },
   ".cm-scroller": {
