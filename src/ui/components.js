@@ -838,8 +838,36 @@ const cortexCmTheme = EditorView.theme({
   },
   ".cm-activeLine": { backgroundColor: "var(--accent-tint)" },
   ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--accent)" },
-  "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection": {
-    backgroundColor: "var(--accent-tint)",
+  // Selection styling. CM6's bundled view default theme ships rules that
+  // BEAT naive overrides on both specificity AND !important — we have to
+  // match both. The exact CM6 defaults (from @codemirror/view 6.42 source):
+  //
+  //   &light.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground { background: #d7d4f0 }
+  //   &dark.cm-focused  > .cm-scroller > .cm-selectionLayer .cm-selectionBackground { background: #233 }
+  //   & ::selection, &::selection { background-color: transparent !important }
+  //   &::selection, & ::selection { background-color: Highlight !important }
+  //
+  // We do NOT pass `{ dark: true }` to EditorView.theme below — our theme
+  // is variable-driven (CSS custom properties from html[data-theme]) so a
+  // single rule serves both modes. But CM's selector defaults to the
+  // `&light` branch in that case, which is why the light-purple #d7d4f0
+  // bleeds through in dark mode (the bug this block fixes).
+  //
+  // Two modes:
+  //   1. Edit mode — drawSelection() paints <div .cm-selectionBackground>
+  //      BEHIND the text. Selector below matches CM's exact 5-class form
+  //      so we beat it on tie (we load last) AND adds !important for belt
+  //      and suspenders. Text color is unchanged in this mode (the layer
+  //      has no text), so contrast = --accent-tint vs --text-content.
+  //   2. Display/readonly mode — no drawSelection; native ::selection.
+  //      CM defaults use !important so we MUST too, or the system
+  //      Highlight color wins.
+  "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, & > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground": {
+    backgroundColor: "var(--accent-tint) !important",
+  },
+  "& ::selection, &::selection": {
+    backgroundColor: "var(--accent-tint) !important",
+    color: "var(--text) !important",
   },
   ".cm-scroller": {
     fontFamily: "var(--font-mono)",
