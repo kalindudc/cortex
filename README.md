@@ -7,7 +7,7 @@ API on `127.0.0.1`, and a SQLite WAL store at `~/.config/cortex/cortex.db`.
 ## Quick start
 
 ```bash
-task cortex:build                    # compile to home/bin/cortex
+pnpm run build                       # compile to bin/cortex
 cortex init                          # create ~/.config/cortex/cortex.db
 cortex add "ship plan 1" -p 0
 cortex ls
@@ -18,14 +18,14 @@ cortex stop                          # stop the daemon
 For development without compiling:
 
 ```bash
-task cortex:dev -- ls --json
+pnpm run dev -- ls --json
 ```
 
 ### Live UI dev loop
 
 ```bash
-task cortex:serve:dev                # bun --watch, port 7777, --no-open
-task cortex:serve:dev PORT=7778
+pnpm run serve:dev                   # bun --watch, port 7777, --no-open
+PORT=7778 pnpm run serve:dev
 ```
 
 - HTML edits to `src/ui/index.html` are picked up immediately — the
@@ -34,8 +34,8 @@ task cortex:serve:dev PORT=7778
 - TypeScript edits to `src/cli.ts`/`src/server.ts`/`src/store.ts`/etc. trigger a
   `bun --watch` restart within ~1 s. The browser stays connected because
   the SSE `EventSource` reconnects automatically; refresh once to repopulate.
-- The dev task stops any background daemon first so it owns the port.
-- Use a different port if you also want the daemon running: `task cortex:serve:dev PORT=7778`.
+- The dev script stops any background daemon first so it owns the port.
+- Use a different port if you also want the daemon running: `PORT=7778 pnpm run serve:dev`.
 
 ## Commands
 
