@@ -64,7 +64,7 @@ const ls = defineCommand({
         return;
       }
       console.table(
-        lanes.map((l) => ({
+        lanes.map(l => ({
           name: l.name,
           color: l.color ?? "",
         })),

@@ -223,9 +223,7 @@ export class Store {
       // table is destructive; for a single-user tool we warn once and let the
       // human run `cortex reset` when they want the new limit.
       const updatesDdl = this.db
-        .query<{ sql: string | null }, []>(
-          "SELECT sql FROM sqlite_master WHERE name='updates';",
-        )
+        .query<{ sql: string | null }, []>("SELECT sql FROM sqlite_master WHERE name='updates';")
         .get();
       if (updatesDdl?.sql && updatesDdl.sql.includes("length(summary) <= 200")) {
         console.warn(
@@ -250,9 +248,7 @@ export class Store {
           PRIMARY KEY(task_id, tag_name)
         );
       `);
-      this.db.run(
-        `INSERT OR IGNORE INTO lanes (name, color, sort) VALUES ('now', '#fe8019', 0);`,
-      );
+      this.db.run(`INSERT OR IGNORE INTO lanes (name, color, sort) VALUES ('now', '#fe8019', 0);`);
       // NOTE: pre-existing DBs may still have `wip_limit` (lanes) and
       // `focus`/`parked_at`/`park_note` (tasks) columns from earlier versions.
       // SQLite cannot drop columns without a full table rebuild; since each
@@ -268,10 +264,7 @@ export class Store {
    * Used by addTask/moveTask so callers don't have to pre-create lanes.
    */
   private ensureLane(name: string): void {
-    this.db.run(
-      `INSERT OR IGNORE INTO lanes (name, color, sort) VALUES (?, NULL, 0);`,
-      [name],
-    );
+    this.db.run(`INSERT OR IGNORE INTO lanes (name, color, sort) VALUES (?, NULL, 0);`, [name]);
   }
 
   /**
@@ -348,7 +341,7 @@ export class Store {
        ORDER BY t.priority ASC, t.created ASC;
     `;
     const rows = this.db.query<TaskRow, (string | number)[]>(sql).all(...params);
-    return rows.map((r) => this.rowToTask(r));
+    return rows.map(r => this.rowToTask(r));
   }
 
   getTask(id: number): Task | null {
@@ -388,10 +381,7 @@ export class Store {
         const current = existing.body ?? "";
         const matches = countOccurrences(current, fields.bodySearch);
         if (matches === 0) {
-          throw new BodySearchError(
-            "not_found",
-            "body-search anchor not found in body",
-          );
+          throw new BodySearchError("not_found", "body-search anchor not found in body");
         }
         if (matches > 1) {
           throw new BodySearchError(
@@ -401,9 +391,7 @@ export class Store {
           );
         }
         const idx = current.indexOf(fields.bodySearch);
-        resolvedBody = current.slice(0, idx)
-          + fields.bodyReplace
-          + current.slice(idx + fields.bodySearch.length);
+        resolvedBody = current.slice(0, idx) + fields.bodyReplace + current.slice(idx + fields.bodySearch.length);
       }
       const sets: string[] = [];
       const params: Array<string | number | null> = [];
@@ -463,11 +451,7 @@ export class Store {
    * the validated `--as` value; the dashboard route passes the server-side
    * cascade (`resolveAuthor()`).
    */
-  setStatus(
-    id: number,
-    status: TaskStatus,
-    opts: { author?: string | null } = {},
-  ): Task {
+  setStatus(id: number, status: TaskStatus, opts: { author?: string | null } = {}): Task {
     const ts = now();
     return this.db.transaction(() => {
       const row = this.db
@@ -550,17 +534,13 @@ export class Store {
         params.push(validateTagName(fields.rename));
       }
       if (sets.length === 0) {
-        const existing = this.db
-          .query<Tag, [string]>(`SELECT * FROM tags WHERE name = ?;`)
-          .get(name);
+        const existing = this.db.query<Tag, [string]>(`SELECT * FROM tags WHERE name = ?;`).get(name);
         if (!existing) throw new Error(`tag ${name} not found`);
         return existing;
       }
       params.push(name);
       const sql = `UPDATE tags SET ${sets.join(", ")} WHERE name = ? RETURNING *;`;
-      const row = this.db
-        .query<Tag, (string | number | null)[]>(sql)
-        .get(...params);
+      const row = this.db.query<Tag, (string | number | null)[]>(sql).get(...params);
       if (!row) throw new Error(`tag ${name} not found`);
       return row;
     })();
@@ -572,20 +552,14 @@ export class Store {
    * rows automatically; tasks themselves are never touched.
    */
   removeTag(name: string, opts: { force?: boolean } = {}): void {
-    const existing = this.db
-      .query<Tag, [string]>(`SELECT * FROM tags WHERE name = ?;`)
-      .get(name);
+    const existing = this.db.query<Tag, [string]>(`SELECT * FROM tags WHERE name = ?;`).get(name);
     if (!existing) throw new Error(`tag ${name} not found`);
     if (!opts.force) {
       const refs = this.db
-        .query<{ n: number }, [string]>(
-          `SELECT COUNT(*) AS n FROM task_tags WHERE tag_name = ?;`,
-        )
+        .query<{ n: number }, [string]>(`SELECT COUNT(*) AS n FROM task_tags WHERE tag_name = ?;`)
         .get(name);
       if (refs && refs.n > 0) {
-        throw new Error(
-          `cannot remove tag '${name}': ${refs.n} task(s) reference it (use --force)`,
-        );
+        throw new Error(`cannot remove tag '${name}': ${refs.n} task(s) reference it (use --force)`);
       }
     }
     this.db.run(`DELETE FROM tags WHERE name = ?;`, [name]);
@@ -600,7 +574,7 @@ export class Store {
   setTaskTags(id: number, names: string[]): Task {
     // Validate every name BEFORE opening the transaction so a bad input
     // can't leave the DB half-modified.
-    const validated = names.map((n) => validateTagName(n));
+    const validated = names.map(n => validateTagName(n));
     const unique = Array.from(new Set(validated));
     return this.db.transaction(() => {
       const existing = this.getTask(id);
@@ -609,18 +583,12 @@ export class Store {
       // Auto-create missing tag rows. INSERT OR IGNORE so existing tags
       // (with their custom colors) are preserved.
       for (const n of unique) {
-        this.db.run(
-          `INSERT OR IGNORE INTO tags (name, color, created) VALUES (?, NULL, ?);`,
-          [n, ts],
-        );
+        this.db.run(`INSERT OR IGNORE INTO tags (name, color, created) VALUES (?, NULL, ?);`, [n, ts]);
       }
       // Replace semantics: drop everything, then re-insert.
       this.db.run(`DELETE FROM task_tags WHERE task_id = ?;`, [id]);
       for (const n of unique) {
-        this.db.run(
-          `INSERT INTO task_tags (task_id, tag_name) VALUES (?, ?);`,
-          [id, n],
-        );
+        this.db.run(`INSERT INTO task_tags (task_id, tag_name) VALUES (?, ?);`, [id, n]);
       }
       const full = this.getTask(id);
       if (!full) throw new Error(`task ${id} not found`);
@@ -663,11 +631,7 @@ export class Store {
   }
 
   listUpdates(taskId: number): Update[] {
-    return this.db
-      .query<Update, [number]>(
-        `SELECT * FROM updates WHERE task_id = ? ORDER BY created ASC;`,
-      )
-      .all(taskId);
+    return this.db.query<Update, [number]>(`SELECT * FROM updates WHERE task_id = ? ORDER BY created ASC;`).all(taskId);
   }
 
   /**
@@ -707,9 +671,7 @@ export class Store {
   }
 
   listLanes(): Lane[] {
-    return this.db
-      .query<Lane, []>(`SELECT * FROM lanes ORDER BY sort ASC, name ASC;`)
-      .all();
+    return this.db.query<Lane, []>(`SELECT * FROM lanes ORDER BY sort ASC, name ASC;`).all();
   }
 
   editLane(name: string, fields: EditLaneFields): Lane {
@@ -729,17 +691,13 @@ export class Store {
         params.push(fields.rename);
       }
       if (sets.length === 0) {
-        const existing = this.db
-          .query<Lane, [string]>(`SELECT * FROM lanes WHERE name = ?;`)
-          .get(name);
+        const existing = this.db.query<Lane, [string]>(`SELECT * FROM lanes WHERE name = ?;`).get(name);
         if (!existing) throw new Error(`lane ${name} not found`);
         return existing;
       }
       params.push(name);
       const sql = `UPDATE lanes SET ${sets.join(", ")} WHERE name = ? RETURNING *;`;
-      const row = this.db
-        .query<Lane, (string | number | null)[]>(sql)
-        .get(...params);
+      const row = this.db.query<Lane, (string | number | null)[]>(sql).get(...params);
       if (!row) throw new Error(`lane ${name} not found`);
       return row;
     })();
@@ -749,17 +707,11 @@ export class Store {
     if (name === "now") {
       throw new Error("cannot remove the 'now' lane");
     }
-    const refs = this.db
-      .query<{ n: number }, [string]>(
-        `SELECT COUNT(*) AS n FROM tasks WHERE lane = ?;`,
-      )
-      .get(name);
+    const refs = this.db.query<{ n: number }, [string]>(`SELECT COUNT(*) AS n FROM tasks WHERE lane = ?;`).get(name);
     if (refs && refs.n > 0) {
       throw new Error(`cannot remove lane '${name}': ${refs.n} task(s) reference it`);
     }
-    const existing = this.db
-      .query<Lane, [string]>(`SELECT * FROM lanes WHERE name = ?;`)
-      .get(name);
+    const existing = this.db.query<Lane, [string]>(`SELECT * FROM lanes WHERE name = ?;`).get(name);
     if (!existing) throw new Error(`lane ${name} not found`);
     this.db.run(`DELETE FROM lanes WHERE name = ?;`, [name]);
   }

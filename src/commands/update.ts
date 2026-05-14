@@ -1,10 +1,5 @@
 import { defineCommand } from "citty";
-import {
-  Store,
-  validateAuthorTag,
-  type TaskStatus,
-  type Update,
-} from "../store.ts";
+import { Store, validateAuthorTag, type TaskStatus, type Update } from "../store.ts";
 import { Client, daemonUrl } from "../client.ts";
 
 const STATUSES: TaskStatus[] = ["open", "review", "blocked", "done"];

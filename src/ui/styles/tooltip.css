@@ -1,4 +1,4 @@
-/* ===== Tooltip primitive (see ui/tooltip.js) =====
+/* ===== Tooltip primitive (see ui/components/Tooltip.tsx) =====
    Singleton fixed-position tip rendered once at the App root. Position is
    computed in JS (placeTooltip) so it can flip placement when the requested
    side has no viewport room — escapes any `overflow: hidden` ancestor that

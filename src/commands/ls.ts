@@ -16,7 +16,7 @@ const LS_TAG_LIMIT = 3;
  *  testability. */
 function renderTagsTruncated(tags: string[]): string {
   if (!tags || tags.length === 0) return "";
-  const head = tags.slice(0, LS_TAG_LIMIT).map((n) => `#${n}`);
+  const head = tags.slice(0, LS_TAG_LIMIT).map(n => `#${n}`);
   const more = tags.length - LS_TAG_LIMIT;
   if (more > 0) head.push(`+${more}`);
   return ` [${head.join(" ")}]`;
@@ -76,9 +76,9 @@ export default defineCommand({
       try {
         tagFilter = args.tags
           .split(",")
-          .map((s) => s.trim())
+          .map(s => s.trim())
           .filter(Boolean)
-          .map((n) => validateTagName(n));
+          .map(n => validateTagName(n));
       } catch (e) {
         console.error(`error: ${(e as Error).message}`);
         process.exit(1);

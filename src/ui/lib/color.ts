@@ -18,7 +18,11 @@ export function parseHex(hex: string | null | undefined): { r: number; g: number
   if (!hex || typeof hex !== "string" || hex[0] !== "#") return null;
   let h = hex.slice(1);
   // Accept #rgb shorthand by doubling each nibble (#abc → #aabbcc).
-  if (h.length === 3) h = h.split("").map(c => c + c).join("");
+  if (h.length === 3)
+    h = h
+      .split("")
+      .map(c => c + c)
+      .join("");
   if (h.length !== 6) return null;
   const r = parseInt(h.slice(0, 2), 16);
   const g = parseInt(h.slice(2, 4), 16);
@@ -30,21 +34,30 @@ export function parseHex(hex: string | null | undefined): { r: number; g: number
 // Standard RGB → HSL conversion (W3C / colorjs). Inputs in 0-255, outputs
 // h: 0-360, s: 0-100, l: 0-100 — matching Primer's expected variable units.
 export function rgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: number } {
-  r /= 255; g /= 255; b /= 255;
+  r /= 255;
+  g /= 255;
+  b /= 255;
   const max = Math.max(r, g, b);
   const min = Math.min(r, g, b);
   let h = 0;
   let s = 0;
   const l = (max + min) / 2;
   if (max === min) {
-    h = 0; s = 0;
+    h = 0;
+    s = 0;
   } else {
     const d = max - min;
     s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
     switch (max) {
-      case r: h = (g - b) / d + (g < b ? 6 : 0); break;
-      case g: h = (b - r) / d + 2; break;
-      case b: h = (r - g) / d + 4; break;
+      case r:
+        h = (g - b) / d + (g < b ? 6 : 0);
+        break;
+      case g:
+        h = (b - r) / d + 2;
+        break;
+      case b:
+        h = (r - g) / d + 4;
+        break;
     }
     h /= 6;
   }
@@ -71,12 +84,10 @@ export function tagPillStyleFromHex(hex: string | null | undefined): Record<stri
 }
 
 // Lookup a lane's color (or null). Used by lane chip + color dot in lists.
-export const laneColor = (name: string): string | null =>
-  lanes.value.find(l => l.name === name)?.color || null;
+export const laneColor = (name: string): string | null => lanes.value.find(l => l.name === name)?.color || null;
 
 // Lookup a tag's color (or null). Used by TagPill in the active-task popover
 // and TagsPane rows. Returns null when the tag has no color OR is not yet
 // present in the rollup (e.g. just-created via SSE round-trip) — the pill
 // falls back to the neutral .tag-pill background defined in styles/tag-pill.css.
-export const tagColor = (name: string): string | null =>
-  tags.value.find(t => t.name === name)?.color || null;
+export const tagColor = (name: string): string | null => tags.value.find(t => t.name === name)?.color || null;

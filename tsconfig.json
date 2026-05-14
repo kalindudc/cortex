@@ -1,4 +1,6 @@
 {
+  "include": ["src/**/*", "test/**/*", "index.ts"],
+  "exclude": ["node_modules", "out", "bin", "tmp"],
   "compilerOptions": {
     "target": "ESNext",
     "module": "ESNext",

@@ -6,16 +6,17 @@ import { Client, daemonUrl } from "../client.ts";
 /** Parse a comma-separated tag list and validate each name. Empty/blank entries
  *  are silently dropped (e.g. `-t a,,b` becomes `["a","b"]`). */
 function parseTags(raw: string): string[] {
-  const names = raw.split(",").map((s) => s.trim()).filter(Boolean);
-  return names.map((n) => validateTagName(n));
+  const names = raw
+    .split(",")
+    .map(s => s.trim())
+    .filter(Boolean);
+  return names.map(n => validateTagName(n));
 }
 
 function parsePriority(raw: string): number {
   const n = Number.parseInt(raw, 10);
   if (!Number.isFinite(n) || n < 0 || String(n) !== raw.trim()) {
-    console.error(
-      `error: --priority must be a non-negative integer (0 = highest); got '${raw}'`,
-    );
+    console.error(`error: --priority must be a non-negative integer (0 = highest); got '${raw}'`);
     process.exit(1);
   }
   return n;

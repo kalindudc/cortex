@@ -13,8 +13,12 @@ export const tasks = signal<Task[]>([]);
 export const lanes = signal<Lane[]>([]);
 // Tag rollups: { name, color, created, task_count } from /api/tags. Refreshed
 // in the same Promise.all as tasks/lanes so chip colors stay in sync after
-// any tag.changed / task.updated SSE event.
-export const tags = signal<Tag[]>([]);
+// any tag.changed / task.updated SSE event. Server returns the rollup shape
+// (Tag + task_count); the type below mirrors that runtime reality so typed
+// callers can read .task_count without a cast.
+export type { TagWithCount } from "../api/client.ts";
+import type { TagWithCount } from "../api/client.ts";
+export const tags = signal<TagWithCount[]>([]);
 export const updates = signal<Record<number, Update[]>>({});
 export const authors = signal<Author[]>([]);
 
@@ -42,7 +46,7 @@ export const newTagOpen = signal<boolean>(false);
 export const newLaneOpen = signal<boolean>(false);
 export const statusPopover = signal<boolean>(false);
 // Active-task tags-chip popover. Mirrors statusPopover: click chip to toggle,
-// outside-click closes via app.js's global handler + closeAllPopovers().
+// outside-click closes via index.tsx's global handler + closeAllPopovers().
 export const tagsPopover = signal<boolean>(false);
 // Active-task lane chip popover. Same outside-click contract as tagsPopover.
 // MUST be flipped inside closeAllPopovers() — this is the same Esc/outside-

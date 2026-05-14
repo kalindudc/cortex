@@ -39,16 +39,11 @@ export default defineCommand({
       // process. Drop it when re-spawning so the binary uses its own embedded
       // entrypoint. From source, argv[1] is the .ts script path which IS
       // re-runnable, so keep it.
-      const reSpawnArgs = process.argv[1]?.startsWith("/$bunfs/")
-        ? process.argv.slice(2)
-        : process.argv.slice(1);
-      const child = Bun.spawn(
-        [process.execPath, ...reSpawnArgs, "--foreground"],
-        {
-          stdio: ["ignore", "ignore", "ignore"],
-          detached: true,
-        },
-      );
+      const reSpawnArgs = process.argv[1]?.startsWith("/$bunfs/") ? process.argv.slice(2) : process.argv.slice(1);
+      const child = Bun.spawn([process.execPath, ...reSpawnArgs, "--foreground"], {
+        stdio: ["ignore", "ignore", "ignore"],
+        detached: true,
+      });
       if (typeof child.unref === "function") child.unref();
       fs.writeFileSync(pidPath(), String(child.pid));
       const url = `http://127.0.0.1:${port}`;

@@ -158,7 +158,7 @@
    and headers where pills sit in wrap-friendly containers). In the sidebar
    the row is a fixed-width flex container, so we override: allow shrink,
    clip overflow, and add an ellipsis. The full name is still discoverable
-   via the JS hover tooltip (see onMouseEnter on the row in components.js)
+   via the JS hover tooltip (see the tip(...) spread on rows in LanesPane/TagsPane)
    and the native `title` attribute as a fallback. */
 .pane-tags .lane-row .tag-pill {
   flex-shrink: 1;

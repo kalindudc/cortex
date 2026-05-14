@@ -95,7 +95,7 @@ const ls = defineCommand({
       return;
     }
     console.table(
-      tags.map((t) => ({
+      tags.map(t => ({
         name: t.name,
         color: t.color ?? "",
         tasks: t.task_count,

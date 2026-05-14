@@ -12,8 +12,8 @@ function prompt(question: string): Promise<string> {
     input: process.stdin,
     output: process.stdout,
   });
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => {
+  return new Promise(resolve => {
+    rl.question(question, answer => {
       rl.close();
       resolve(answer);
     });
@@ -70,13 +70,11 @@ async function stopDaemonIfRunning(): Promise<boolean> {
 export default defineCommand({
   meta: {
     name: "reset",
-    description:
-      "wipe the cortex database and re-initialize (requires typing RESET to confirm)",
+    description: "wipe the cortex database and re-initialize (requires typing RESET to confirm)",
   },
   async run() {
     const db = dbPath();
-    const livePid =
-      readPid() !== null && isAlive(readPid()!) ? readPid() : null;
+    const livePid = readPid() !== null && isAlive(readPid()!) ? readPid() : null;
 
     console.log(`This will:`);
     if (livePid !== null) {
@@ -85,9 +83,7 @@ export default defineCommand({
     console.log(`  • delete ${db}`);
     console.log(`  • delete ${db}-wal, ${db}-shm (SQLite WAL sidecars, if present)`);
     console.log(`  • delete ${pidPath()}, ${urlPath()} (daemon state, if present)`);
-    console.log(
-      `  • wipe and regenerate ${listSkills().length} skill dir(s) under ${skillsRoot()}`,
-    );
+    console.log(`  • wipe and regenerate ${listSkills().length} skill dir(s) under ${skillsRoot()}`);
     console.log(`  • re-initialize an empty database with the default 'now' lane`);
     const answer = await prompt(`Type ${CONFIRM} to confirm: `);
     if (answer.trim() !== CONFIRM) {

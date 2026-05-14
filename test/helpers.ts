@@ -33,9 +33,7 @@ export const BIN: string = path.join(ROOT, "bin/cortex");
 // canonical run path this is unreachable. The throw exists so that running
 // `bun test` directly in a fresh checkout produces a clear next-step.
 if (!fs.existsSync(BIN)) {
-  throw new Error(
-    `bin/cortex missing -- run \`task build\` (or \`task test\` which builds first)`,
-  );
+  throw new Error(`bin/cortex missing -- run \`task build\` (or \`task test\` which builds first)`);
 }
 
 export type RunResult = { code: number; stdout: string; stderr: string };
@@ -59,9 +57,7 @@ export function mkTmpEnv(label: string): {
   env: Record<string, string>;
   cleanup: () => void;
 } {
-  const tmpDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), `cortex-${label}-${crypto.randomBytes(4).toString("hex")}-`),
-  );
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `cortex-${label}-${crypto.randomBytes(4).toString("hex")}-`));
   const dbPath = path.join(tmpDir, "cortex.db");
   const skillDir = path.join(tmpDir, "skill");
 
@@ -109,10 +105,7 @@ export async function runCli(opts: RunOpts): Promise<RunResult> {
     await proc.stdin.end();
   }
 
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
+  const [stdout, stderr] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
   const code = await proc.exited;
   return { code, stdout, stderr };
 }

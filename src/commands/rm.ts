@@ -8,8 +8,8 @@ function prompt(question: string): Promise<string> {
     input: process.stdin,
     output: process.stdout,
   });
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => {
+  return new Promise(resolve => {
+    rl.question(question, answer => {
       rl.close();
       resolve(answer);
     });

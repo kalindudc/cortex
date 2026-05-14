@@ -34,7 +34,7 @@ describe("parallel-agent updates: 8 concurrent posts", () => {
   test("all 201, all rows persisted, all distinct authors, 8 update.posted events", async () => {
     // 1. Subscribe BEFORE firing POSTs so we never miss an event.
     const events: CortexEvent[] = [];
-    const unsub = subscribe((ev) => {
+    const unsub = subscribe(ev => {
       if (ev.kind === "update.posted") events.push(ev);
     });
 
@@ -42,7 +42,7 @@ describe("parallel-agent updates: 8 concurrent posts", () => {
       // 2. Fire 8 parallel POSTs with distinct author tags.
       const authors = Array.from({ length: 8 }, (_, i) => `agent-${i}`);
       const responses = await Promise.all(
-        authors.map((author) =>
+        authors.map(author =>
           fetch(`${h.url}/api/tasks/1/updates`, {
             method: "POST",
             headers: { "content-type": "application/json" },
@@ -55,20 +55,18 @@ describe("parallel-agent updates: 8 concurrent posts", () => {
       );
 
       // Every response is a 201.
-      expect(responses.map((r) => r.status)).toEqual(Array(8).fill(201));
+      expect(responses.map(r => r.status)).toEqual(Array(8).fill(201));
 
       // 3. Persistence — 8 rows, 8 distinct authors.
       const rows: Update[] = store.listUpdates(1);
       expect(rows.length).toBe(8);
-      const seenAuthors = new Set(rows.map((u) => u.author));
+      const seenAuthors = new Set(rows.map(u => u.author));
       expect(seenAuthors.size).toBe(8);
       expect([...seenAuthors].sort()).toEqual([...authors].sort());
 
       // 4. Event bus — 8 update.posted events, one per POST.
       expect(events.length).toBe(8);
-      const eventAuthors = new Set(
-        events.map((e) => (e.payload as { author: string }).author),
-      );
+      const eventAuthors = new Set(events.map(e => (e.payload as { author: string }).author));
       expect(eventAuthors.size).toBe(8);
       expect([...eventAuthors].sort()).toEqual([...authors].sort());
     } finally {

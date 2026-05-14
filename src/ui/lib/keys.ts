@@ -8,8 +8,8 @@
 // every keyboard hint in the UI so we never make a Linux user squint at a
 // Mac key icon. Always include "+" between modifier and key for visual
 // parity across platforms.
-export const IS_MAC = typeof navigator !== "undefined"
-  && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "");
+export const IS_MAC =
+  typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "");
 export const MOD = IS_MAC ? "\u2318" : "Ctrl";
 export const kbd = (key: string): string => `${MOD} + ${key}`;
 

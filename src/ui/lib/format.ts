@@ -8,5 +8,4 @@ export const fmtTime = (ms: number): string => {
   return Math.floor(s / 86400) + "d ago";
 };
 
-export const initial = (s: string | null | undefined): string =>
-  (s || "?").trim().charAt(0).toUpperCase();
+export const initial = (s: string | null | undefined): string => (s || "?").trim().charAt(0).toUpperCase();

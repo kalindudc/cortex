@@ -24,13 +24,19 @@ export function useAutosave(
   const commitRef = useRef(commit);
   commitRef.current = commit;
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const maxTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const dirty     = useRef(false);
+  const maxTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dirty = useRef(false);
 
   const flush = () => {
     if (!dirty.current) return;
-    if (idleTimer.current) { clearTimeout(idleTimer.current); idleTimer.current = null; }
-    if (maxTimer.current)  { clearTimeout(maxTimer.current);  maxTimer.current  = null; }
+    if (idleTimer.current) {
+      clearTimeout(idleTimer.current);
+      idleTimer.current = null;
+    }
+    if (maxTimer.current) {
+      clearTimeout(maxTimer.current);
+      maxTimer.current = null;
+    }
     dirty.current = false;
     commitRef.current?.();
   };

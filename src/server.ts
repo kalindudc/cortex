@@ -3,7 +3,7 @@ import { streamSSE } from "hono/streaming";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { Store, validateAuthorTag, validateTagName, BodySearchError, type TaskStatus } from "./store.ts";
+import { type Store, validateAuthorTag, validateTagName, BodySearchError, type TaskStatus } from "./store.ts";
 import { emit, subscribe, type CortexEvent } from "./events.ts";
 import pkg from "../package.json" with { type: "json" };
 // `with { type: "file" }` returns a string PATH (not file contents) that
@@ -18,15 +18,15 @@ import pkg from "../package.json" with { type: "json" };
 // embedded by `bun build --compile`. If the bundler outputs are missing at
 // server-build time, `bun build --compile` fails loudly with a missing-file
 // error — which is the desired behavior (it surfaces a broken build).
-import indexHtmlPath  from "./ui/index.html"   with { type: "file" };
-import bundleJsPath   from "../out/bundle.js"  with { type: "file" };
-import bundleCssPath  from "../out/bundle.css" with { type: "file" };
+import indexHtmlPath from "./ui/index.html" with { type: "file" };
+import bundleJsPath from "../out/bundle.js" with { type: "file" };
+import bundleCssPath from "../out/bundle.css" with { type: "file" };
 
 // Map browser route -> embedded file path + content type. Each entry is
 // served with Cache-Control: no-store so dev edits never sit invisible behind
 // a stale cache, and so any shipped fix is picked up on the next reload.
 const UI_ASSETS: Record<string, { path: string; type: string }> = {
-  "/bundle.js":  { path: bundleJsPath,  type: "application/javascript; charset=utf-8" },
+  "/bundle.js": { path: bundleJsPath, type: "application/javascript; charset=utf-8" },
   "/bundle.css": { path: bundleCssPath, type: "text/css; charset=utf-8" },
 };
 
@@ -71,45 +71,47 @@ function resolveAuthor(): string {
 }
 
 const VERSION = pkg.version;
-const isStatus = (v: string): v is TaskStatus =>
-  v === "open" || v === "review" || v === "blocked" || v === "done";
+const isStatus = (v: string): v is TaskStatus => v === "open" || v === "review" || v === "blocked" || v === "done";
 
 export function buildApp(store: Store): Hono {
   const app = new Hono();
 
-  app.get("/", async (c) => {
+  app.get("/", async c => {
     // Local single-user app served from a Bun.embed bundle. We never want the
     // browser to cache the HTML; otherwise dev edits (and shipped fixes) sit
     // invisible behind a stale page until the user discovers Cmd-Shift-R.
     c.header("Cache-Control", "no-store, must-revalidate");
-    return c.html(await Bun.file(indexHtmlPath).text());
+    // bun-types declares `*.html` imports as HTMLBundle, but the `with { type: "file" }`
+    // attribute we use makes Bun resolve this to a string path at runtime. Cast at
+    // the boundary rather than augmenting bun-types.
+    return c.html(await Bun.file(indexHtmlPath as unknown as string).text());
   });
 
   // Static UI modules — CSS + ESM JS modules. Same no-store policy so the
   // browser always picks up the latest module graph after a reload. We use
   // c.body() with raw bytes so non-ASCII chars survive without re-encoding.
   for (const [route, { path, type }] of Object.entries(UI_ASSETS)) {
-    app.get(route, async (c) => {
+    app.get(route, async c => {
       c.header("Cache-Control", "no-store, must-revalidate");
       c.header("Content-Type", type);
       return c.body(await Bun.file(path).bytes());
     });
   }
 
-  app.get("/api/health", (c) => c.json({ ok: true, version: VERSION }));
+  app.get("/api/health", c => c.json({ ok: true, version: VERSION }));
 
   // UI bootstraps the default author for the post-update form from this.
-  app.get("/api/me", (c) => c.json({ author: resolveAuthor() }));
+  app.get("/api/me", c => c.json({ author: resolveAuthor() }));
 
   // ---------- tasks ----------
-  app.get("/api/tasks", (c) => {
+  app.get("/api/tasks", c => {
     const lane = c.req.query("lane");
     const statusQ = c.req.query("status");
     const status = statusQ && isStatus(statusQ) ? statusQ : undefined;
     return c.json(store.listTasks({ lane, status }));
   });
 
-  app.post("/api/tasks", async (c) => {
+  app.post("/api/tasks", async c => {
     const body = (await c.req.json().catch(() => ({}))) as {
       title?: string;
       lane?: string;
@@ -126,7 +128,9 @@ export function buildApp(store: Store): Hono {
     // roll back.
     if (Array.isArray(body.tags)) {
       try {
-        body.tags.forEach((n) => validateTagName(n));
+        body.tags.forEach(n => {
+          validateTagName(n);
+        });
       } catch (e) {
         return c.json({ error: (e as Error).message }, 400);
       }
@@ -139,14 +143,14 @@ export function buildApp(store: Store): Hono {
     return c.json(task, 201);
   });
 
-  app.get("/api/tasks/:id", (c) => {
+  app.get("/api/tasks/:id", c => {
     const id = Number(c.req.param("id"));
     const task = store.getTask(id);
     if (!task) return c.json({ error: "not found" }, 404);
     return c.json(task);
   });
 
-  app.patch("/api/tasks/:id", async (c) => {
+  app.patch("/api/tasks/:id", async c => {
     const id = Number(c.req.param("id"));
     const fields = (await c.req.json().catch(() => ({}))) as {
       title?: string;
@@ -160,20 +164,14 @@ export function buildApp(store: Store): Hono {
     // partial-edit shape. The store ALSO defends against these but
     // surfacing them here gives the right HTTP status without relying on
     // store error-message string matching.
-    const hasSearch  = fields.bodySearch  !== undefined;
+    const hasSearch = fields.bodySearch !== undefined;
     const hasReplace = fields.bodyReplace !== undefined;
-    const hasBody    = fields.body        !== undefined;
+    const hasBody = fields.body !== undefined;
     if (hasSearch !== hasReplace) {
-      return c.json(
-        { error: "bodySearch and bodyReplace must be provided together" },
-        400,
-      );
+      return c.json({ error: "bodySearch and bodyReplace must be provided together" }, 400);
     }
     if (hasSearch && hasBody) {
-      return c.json(
-        { error: "bodySearch/bodyReplace cannot be combined with body (use one or the other)" },
-        400,
-      );
+      return c.json({ error: "bodySearch/bodyReplace cannot be combined with body (use one or the other)" }, 400);
     }
     if (hasSearch && fields.bodySearch!.length === 0) {
       return c.json({ error: "bodySearch cannot be empty" }, 400);
@@ -198,7 +196,7 @@ export function buildApp(store: Store): Hono {
     }
   });
 
-  app.patch("/api/tasks/:id/status", async (c) => {
+  app.patch("/api/tasks/:id/status", async c => {
     const id = Number(c.req.param("id"));
     const body = (await c.req.json().catch(() => ({}))) as {
       status?: string;
@@ -229,7 +227,7 @@ export function buildApp(store: Store): Hono {
     }
   });
 
-  app.patch("/api/tasks/:id/lane", async (c) => {
+  app.patch("/api/tasks/:id/lane", async c => {
     const id = Number(c.req.param("id"));
     const body = (await c.req.json().catch(() => ({}))) as { lane?: string };
     if (!body.lane || typeof body.lane !== "string") {
@@ -244,7 +242,7 @@ export function buildApp(store: Store): Hono {
     }
   });
 
-  app.patch("/api/tasks/:id/tags", async (c) => {
+  app.patch("/api/tasks/:id/tags", async c => {
     const id = Number(c.req.param("id"));
     const body = (await c.req.json().catch(() => ({}))) as {
       set?: string[];
@@ -256,24 +254,21 @@ export function buildApp(store: Store): Hono {
     // `--rm-tag` flags.
     const modes = [body.set, body.add, body.remove].filter(Array.isArray).length;
     if (modes !== 1) {
-      return c.json(
-        { error: "exactly one of 'set', 'add', or 'remove' must be provided" },
-        400,
-      );
+      return c.json({ error: "exactly one of 'set', 'add', or 'remove' must be provided" }, 400);
     }
     try {
       let next: string[];
       if (Array.isArray(body.set)) {
-        next = body.set.map((n) => validateTagName(n));
+        next = body.set.map(n => validateTagName(n));
       } else {
         const existing = store.getTask(id);
         if (!existing) return c.json({ error: `task ${id} not found` }, 404);
         if (Array.isArray(body.add)) {
-          const adds = body.add.map((n) => validateTagName(n));
+          const adds = body.add.map(n => validateTagName(n));
           next = Array.from(new Set([...existing.tags, ...adds]));
         } else {
-          const rms = new Set((body.remove ?? []).map((n) => validateTagName(n)));
-          next = existing.tags.filter((n) => !rms.has(n));
+          const rms = new Set((body.remove ?? []).map(n => validateTagName(n)));
+          next = existing.tags.filter(n => !rms.has(n));
         }
       }
       const task = store.setTaskTags(id, next);
@@ -286,7 +281,7 @@ export function buildApp(store: Store): Hono {
     }
   });
 
-  app.delete("/api/tasks/:id", (c) => {
+  app.delete("/api/tasks/:id", c => {
     const id = Number(c.req.param("id"));
     try {
       store.removeTask(id);
@@ -298,12 +293,12 @@ export function buildApp(store: Store): Hono {
   });
 
   // ---------- updates ----------
-  app.get("/api/tasks/:id/updates", (c) => {
+  app.get("/api/tasks/:id/updates", c => {
     const id = Number(c.req.param("id"));
     return c.json(store.listUpdates(id));
   });
 
-  app.post("/api/tasks/:id/updates", async (c) => {
+  app.post("/api/tasks/:id/updates", async c => {
     const id = Number(c.req.param("id"));
     const body = (await c.req.json().catch(() => ({}))) as {
       author?: string;
@@ -338,12 +333,12 @@ export function buildApp(store: Store): Hono {
   // ---------- authors (derived view from updates table) ----------
   // Powers the dashboard's Authors tab. No new schema, no new column — just
   // a GROUP BY over the last 24h of updates. See Store.listAuthorsLast24h.
-  app.get("/api/authors", (c) => c.json(store.listAuthorsLast24h()));
+  app.get("/api/authors", c => c.json(store.listAuthorsLast24h()));
 
   // ---------- lanes ----------
-  app.get("/api/lanes", (c) => c.json(store.listLanes()));
+  app.get("/api/lanes", c => c.json(store.listLanes()));
 
-  app.post("/api/lanes", async (c) => {
+  app.post("/api/lanes", async c => {
     const body = (await c.req.json().catch(() => ({}))) as {
       name?: string;
       color?: string | null;
@@ -361,7 +356,7 @@ export function buildApp(store: Store): Hono {
     }
   });
 
-  app.patch("/api/lanes/:name", async (c) => {
+  app.patch("/api/lanes/:name", async c => {
     const name = c.req.param("name");
     const fields = (await c.req.json().catch(() => ({}))) as {
       color?: string | null;
@@ -377,7 +372,7 @@ export function buildApp(store: Store): Hono {
     }
   });
 
-  app.delete("/api/lanes/:name", (c) => {
+  app.delete("/api/lanes/:name", c => {
     const name = c.req.param("name");
     try {
       store.removeLane(name);
@@ -392,9 +387,9 @@ export function buildApp(store: Store): Hono {
   // Mirrors /api/lanes: GET list, POST add, PATCH edit, DELETE remove.
   // Every write emits `tag.changed`; the dashboard's refresh() re-fetches
   // /api/tags on every event, so no per-event handler is needed in v1.
-  app.get("/api/tags", (c) => c.json(store.listTags()));
+  app.get("/api/tags", c => c.json(store.listTags()));
 
-  app.post("/api/tags", async (c) => {
+  app.post("/api/tags", async c => {
     const body = (await c.req.json().catch(() => ({}))) as {
       name?: string;
       color?: string | null;
@@ -411,7 +406,7 @@ export function buildApp(store: Store): Hono {
     }
   });
 
-  app.patch("/api/tags/:name", async (c) => {
+  app.patch("/api/tags/:name", async c => {
     const name = c.req.param("name");
     const fields = (await c.req.json().catch(() => ({}))) as {
       color?: string | null;
@@ -428,7 +423,7 @@ export function buildApp(store: Store): Hono {
     }
   });
 
-  app.delete("/api/tags/:name", (c) => {
+  app.delete("/api/tags/:name", c => {
     const name = c.req.param("name");
     const force = c.req.query("force") === "1";
     try {
@@ -441,8 +436,8 @@ export function buildApp(store: Store): Hono {
   });
 
   // ---------- SSE ----------
-  app.get("/events", (c) =>
-    streamSSE(c, async (stream) => {
+  app.get("/events", c =>
+    streamSSE(c, async stream => {
       const unsub = subscribe((ev: CortexEvent) => {
         void stream.writeSSE({
           event: ev.kind,
@@ -468,13 +463,7 @@ export type ServerHandle = {
   stop(): Promise<void>;
 };
 
-export function startServer({
-  port,
-  store,
-}: {
-  port: number;
-  store: Store;
-}): ServerHandle {
+export function startServer({ port, store }: { port: number; store: Store }): ServerHandle {
   const app = buildApp(store);
   const server = Bun.serve({
     port,
@@ -482,7 +471,7 @@ export function startServer({
     fetch: app.fetch,
   });
   return {
-    port: server.port,
+    port: server.port ?? port,
     url: `http://127.0.0.1:${server.port}`,
     async stop() {
       server.stop(true);

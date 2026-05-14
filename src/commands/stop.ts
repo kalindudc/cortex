@@ -50,8 +50,8 @@ function discoverDaemons(): number[] {
     if (!out) return [];
     return out
       .split(/\s+/)
-      .map((s) => Number.parseInt(s, 10))
-      .filter((n) => Number.isFinite(n) && n !== process.pid && isAlive(n));
+      .map(s => Number.parseInt(s, 10))
+      .filter(n => Number.isFinite(n) && n !== process.pid && isAlive(n));
   } catch {
     // pgrep not on PATH (Windows, stripped images). Best-effort fallback —
     // we'll still operate on the pid file alone.

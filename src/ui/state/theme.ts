@@ -25,7 +25,9 @@ function readStoredTheme(): Theme {
   try {
     const v = localStorage.getItem(THEME_KEY);
     if (v === "light" || v === "dark") return v;
-  } catch { /* private mode — fall through */ }
+  } catch {
+    /* private mode — fall through */
+  }
   return systemPrefersDark() ? "dark" : "light";
 }
 
@@ -38,7 +40,11 @@ export function setTheme(mode: Theme): void {
   if (typeof document !== "undefined") {
     document.documentElement.setAttribute("data-theme", mode);
   }
-  try { localStorage.setItem(THEME_KEY, mode); } catch { /* ignore */ }
+  try {
+    localStorage.setItem(THEME_KEY, mode);
+  } catch {
+    /* ignore */
+  }
 }
 
 // Flip light ↔ dark.

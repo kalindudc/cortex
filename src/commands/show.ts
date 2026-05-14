@@ -41,7 +41,7 @@ export default defineCommand({
       // user explicitly asked for the details of one task). Skipped entirely
       // when the task has no tags.
       if (task.tags && task.tags.length > 0) {
-        console.log(`  tags:     ${task.tags.map((n) => `#${n}`).join(" ")}`);
+        console.log(`  tags:     ${task.tags.map(n => `#${n}`).join(" ")}`);
       }
       console.log(`  created:  ${new Date(task.created).toISOString()}`);
       console.log(`  updated:  ${new Date(task.updated).toISOString()}`);

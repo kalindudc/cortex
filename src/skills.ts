@@ -26,19 +26,19 @@ import os from "node:os";
 import path from "node:path";
 
 // --- Base cortex skill (Plan 3) -------------------------------------------
-import cortexSkillMd        from "./skills/cortex/SKILL.md"               with { type: "file" };
-import cortexCliInitPath    from "./skills/cortex/cli/init.md"            with { type: "file" };
-import cortexCliResetPath   from "./skills/cortex/cli/reset.md"           with { type: "file" };
-import cortexCliAddPath     from "./skills/cortex/cli/add.md"             with { type: "file" };
-import cortexCliEditPath    from "./skills/cortex/cli/edit.md"            with { type: "file" };
-import cortexCliUpdatePath  from "./skills/cortex/cli/update.md"          with { type: "file" };
-import cortexCliServePath   from "./skills/cortex/cli/serve.md"           with { type: "file" };
-import cortexCliTagPath     from "./skills/cortex/cli/tag.md"             with { type: "file" };
-import cortexRecipeSession  from "./skills/cortex/recipes/session-id.md"  with { type: "file" };
+import cortexSkillMd from "./skills/cortex/SKILL.md" with { type: "file" };
+import cortexCliInitPath from "./skills/cortex/cli/init.md" with { type: "file" };
+import cortexCliResetPath from "./skills/cortex/cli/reset.md" with { type: "file" };
+import cortexCliAddPath from "./skills/cortex/cli/add.md" with { type: "file" };
+import cortexCliEditPath from "./skills/cortex/cli/edit.md" with { type: "file" };
+import cortexCliUpdatePath from "./skills/cortex/cli/update.md" with { type: "file" };
+import cortexCliServePath from "./skills/cortex/cli/serve.md" with { type: "file" };
+import cortexCliTagPath from "./skills/cortex/cli/tag.md" with { type: "file" };
+import cortexRecipeSession from "./skills/cortex/recipes/session-id.md" with { type: "file" };
 
 // --- Methodology skills (Plan 4) ------------------------------------------
-import plannerSkillMd       from "./skills/cortex-planner/SKILL.md"       with { type: "file" };
-import implementerSkillMd   from "./skills/cortex-implementer/SKILL.md"   with { type: "file" };
+import plannerSkillMd from "./skills/cortex-planner/SKILL.md" with { type: "file" };
+import implementerSkillMd from "./skills/cortex-implementer/SKILL.md" with { type: "file" };
 
 export type SkillName = "cortex" | "cortex-planner" | "cortex-implementer";
 
@@ -47,15 +47,15 @@ export type SkillName = "cortex" | "cortex-planner" | "cortex-implementer";
 type Manifest = Record<string /*relPath*/, string /*embeddedPath*/>;
 
 const SKILLS: Record<SkillName, Manifest> = {
-  "cortex": {
-    "SKILL.md":              cortexSkillMd,
-    "cli/init.md":           cortexCliInitPath,
-    "cli/reset.md":          cortexCliResetPath,
-    "cli/add.md":            cortexCliAddPath,
-    "cli/edit.md":           cortexCliEditPath,
-    "cli/update.md":         cortexCliUpdatePath,
-    "cli/serve.md":          cortexCliServePath,
-    "cli/tag.md":            cortexCliTagPath,
+  cortex: {
+    "SKILL.md": cortexSkillMd,
+    "cli/init.md": cortexCliInitPath,
+    "cli/reset.md": cortexCliResetPath,
+    "cli/add.md": cortexCliAddPath,
+    "cli/edit.md": cortexCliEditPath,
+    "cli/update.md": cortexCliUpdatePath,
+    "cli/serve.md": cortexCliServePath,
+    "cli/tag.md": cortexCliTagPath,
     "recipes/session-id.md": cortexRecipeSession,
   },
   "cortex-planner": {
@@ -77,10 +77,7 @@ const SKILLS: Record<SkillName, Manifest> = {
  * Plan-3 single-skill override semantics in spirit while supporting N skills.
  */
 export function skillsRoot(): string {
-  return (
-    process.env.CORTEX_SKILL_DIR ??
-    path.join(os.homedir(), ".agents", "skills")
-  );
+  return process.env.CORTEX_SKILL_DIR ?? path.join(os.homedir(), ".agents", "skills");
 }
 
 /**
@@ -103,10 +100,7 @@ export function listSkills(): SkillName[] {
  *
  * `targetDir` is overridable so tests can write into a tmp dir.
  */
-export async function writeSkill(
-  name: SkillName,
-  targetDir: string = skillDir(name),
-): Promise<void> {
+export async function writeSkill(name: SkillName, targetDir: string = skillDir(name)): Promise<void> {
   const manifest = SKILLS[name];
   if (!manifest) throw new Error(`unknown skill: ${name}`);
   fs.mkdirSync(targetDir, { recursive: true });

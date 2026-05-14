@@ -5,7 +5,7 @@
 // fits/placeTooltip), and the module-load global window listeners (scroll/
 // resize/Esc) that hide the tip when the anchor coordinates would go stale.
 //
-// The `<Tooltip/>` Preact component itself stays in src/ui/tooltip.js and
+// The `<Tooltip/>` Preact component itself lives in src/ui/components/Tooltip.tsx and
 // reads `tooltipState` from this module. (Plan 02 will extract it into TSX.)
 //
 // Why a singleton:
@@ -56,7 +56,10 @@ export const tooltipState: Signal<TooltipState> = signal<TooltipState>({
 
 let openTimer: ReturnType<typeof setTimeout> | null = null;
 const clearOpen = (): void => {
-  if (openTimer) { clearTimeout(openTimer); openTimer = null; }
+  if (openTimer) {
+    clearTimeout(openTimer);
+    openTimer = null;
+  }
 };
 
 interface ShowTipArgs {
@@ -73,8 +76,12 @@ function showTip({ text, target, placement, delay }: ShowTipArgs): void {
   // tip glued to where the user actually pointed.
   const r = target.getBoundingClientRect();
   const anchor: AnchorRect = {
-    top: r.top, left: r.left, right: r.right, bottom: r.bottom,
-    width: r.width, height: r.height,
+    top: r.top,
+    left: r.left,
+    right: r.right,
+    bottom: r.bottom,
+    width: r.width,
+    height: r.height,
   };
   const next: TooltipState = { visible: true, text, anchor, placement };
   if (delay <= 0) {
@@ -103,16 +110,30 @@ function hideTip(): void {
 if (typeof window !== "undefined") {
   window.addEventListener("scroll", hideTip, true);
   window.addEventListener("resize", hideTip);
-  window.addEventListener("keydown", (e) => { if (e.key === "Escape") hideTip(); });
+  window.addEventListener("keydown", e => {
+    if (e.key === "Escape") hideTip();
+  });
 }
 
 // ---------- public helper ----------
 // Returns an event-prop spread to attach to ANY trigger element:
-//   <button ...${tip(longName)}>...</button>
+//   <button {...tip(longName)}>...</button>
 //
 // Empty / nullish text returns {} so callers don't have to guard.
 // Focus opens with delay:0 so keyboard nav reveals labels immediately.
-export function tip(text: string | null | undefined, opts: TipOpts = {}): JSX.HTMLAttributes {
+//
+// Return type narrowed to ONLY the event handlers tip actually sets. The
+// previous `JSX.HTMLAttributes` return shape carried a generic `ref?:
+// Ref<EventTarget>` field that conflicted with element-specific ref types
+// (e.g. `Ref<HTMLButtonElement>`) at every spread site, causing every
+// `<button {...tip(...)}>` to fail tsc strict-mode checks.
+export interface TipSpread {
+  onMouseEnter?: (e: Event) => void;
+  onMouseLeave?: (e: Event) => void;
+  onFocus?: (e: Event) => void;
+  onBlur?: (e: Event) => void;
+}
+export function tip(text: string | null | undefined, opts: TipOpts = {}): TipSpread {
   if (text == null || text === "") return {};
   const { placement = "right", delay = 200 } = opts;
   const open = (e: Event) => showTip({ text, target: e.currentTarget as Element, placement, delay });
@@ -120,9 +141,9 @@ export function tip(text: string | null | undefined, opts: TipOpts = {}): JSX.HT
   return {
     onMouseEnter: open,
     onMouseLeave: hideTip,
-    onFocus:      openNow,
-    onBlur:       hideTip,
-  } as JSX.HTMLAttributes;
+    onFocus: openNow,
+    onBlur: hideTip,
+  };
 }
 
 // ---------- positioning ----------
@@ -132,23 +153,28 @@ const GAP = 8;
 // "doesn't fit" and try the next one.
 const MARGIN = 6;
 
-interface Position { left: number; top: number }
+interface Position {
+  left: number;
+  top: number;
+}
 
 function computePosition(p: Placement, a: AnchorRect, w: number, h: number): Position {
   switch (p) {
-    case "right":  return { left: a.right + GAP,                top: a.top + (a.height - h) / 2 };
-    case "left":   return { left: a.left  - GAP - w,            top: a.top + (a.height - h) / 2 };
-    case "top":    return { left: a.left + (a.width - w) / 2,   top: a.top - GAP - h };
-    case "bottom": return { left: a.left + (a.width - w) / 2,   top: a.bottom + GAP };
-    default:       return { left: a.right + GAP,                top: a.top };
+    case "right":
+      return { left: a.right + GAP, top: a.top + (a.height - h) / 2 };
+    case "left":
+      return { left: a.left - GAP - w, top: a.top + (a.height - h) / 2 };
+    case "top":
+      return { left: a.left + (a.width - w) / 2, top: a.top - GAP - h };
+    case "bottom":
+      return { left: a.left + (a.width - w) / 2, top: a.bottom + GAP };
+    default:
+      return { left: a.right + GAP, top: a.top };
   }
 }
 
 function fits(pos: Position, w: number, h: number, vw: number, vh: number): boolean {
-  return pos.left >= MARGIN
-      && pos.top  >= MARGIN
-      && pos.left + w <= vw - MARGIN
-      && pos.top  + h <= vh - MARGIN;
+  return pos.left >= MARGIN && pos.top >= MARGIN && pos.left + w <= vw - MARGIN && pos.top + h <= vh - MARGIN;
 }
 
 // Place the tooltip element at the best available position. Tries the
@@ -158,9 +184,13 @@ function fits(pos: Position, w: number, h: number, vw: number, vh: number): bool
 export function placeTooltip(el: HTMLElement, anchor: AnchorRect, requested: Placement): void {
   const tipW = el.offsetWidth;
   const tipH = el.offsetHeight;
-  const vw = window.innerWidth, vh = window.innerHeight;
+  const vw = window.innerWidth,
+    vh = window.innerHeight;
 
-  const order: Placement[] = [requested, ...(["right", "left", "top", "bottom"] as Placement[]).filter(p => p !== requested)];
+  const order: Placement[] = [
+    requested,
+    ...(["right", "left", "top", "bottom"] as Placement[]).filter(p => p !== requested),
+  ];
   let chosen: { left: number; top: number; placement: Placement } | null = null;
   for (const p of order) {
     const pos = computePosition(p, anchor, tipW, tipH);
@@ -173,12 +203,12 @@ export function placeTooltip(el: HTMLElement, anchor: AnchorRect, requested: Pla
     const pos = computePosition(requested, anchor, tipW, tipH);
     chosen = {
       left: Math.max(MARGIN, Math.min(pos.left, vw - tipW - MARGIN)),
-      top:  Math.max(MARGIN, Math.min(pos.top,  vh - tipH - MARGIN)),
+      top: Math.max(MARGIN, Math.min(pos.top, vh - tipH - MARGIN)),
       placement: requested,
     };
   }
 
   el.style.left = chosen.left + "px";
-  el.style.top  = chosen.top + "px";
+  el.style.top = chosen.top + "px";
   el.dataset.placement = chosen.placement;
 }

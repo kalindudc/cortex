@@ -34,7 +34,7 @@ describe("Store: tasks", () => {
     s.addTask({ title: "normal", priority: 1 });
     s.addTask({ title: "top", priority: 0 });
     s.addTask({ title: "low", priority: 5 });
-    const order = s.listTasks().map((t) => t.title);
+    const order = s.listTasks().map(t => t.title);
     expect(order).toEqual(["top", "normal", "low"]);
     s.close();
   });
@@ -55,7 +55,7 @@ describe("Store: tasks", () => {
     const s = open();
     const t = s.addTask({ title: "x", body: "alpha TODO investigate beta" });
     const edited = s.editTask(t.id, {
-      bodySearch:  "TODO investigate",
+      bodySearch: "TODO investigate",
       bodyReplace: "DONE \u2014 see updates",
     });
     expect(edited.body).toBe("alpha DONE \u2014 see updates beta");
@@ -67,12 +67,10 @@ describe("Store: tasks", () => {
     const body = "intro\n\n## Plan\n- step 1\n- step 2\n\noutro";
     const t = s.addTask({ title: "x", body });
     const edited = s.editTask(t.id, {
-      bodySearch:  "## Plan\n- step 1\n- step 2",
+      bodySearch: "## Plan\n- step 1\n- step 2",
       bodyReplace: "## Plan\n- step 1\n- step 2\n- step 3",
     });
-    expect(edited.body).toBe(
-      "intro\n\n## Plan\n- step 1\n- step 2\n- step 3\n\noutro",
-    );
+    expect(edited.body).toBe("intro\n\n## Plan\n- step 1\n- step 2\n- step 3\n\noutro");
     s.close();
   });
 
@@ -80,7 +78,7 @@ describe("Store: tasks", () => {
     const s = open();
     const t = s.addTask({ title: "x", body: "keep DELETE_ME also-keep" });
     const edited = s.editTask(t.id, {
-      bodySearch:  " DELETE_ME",
+      bodySearch: " DELETE_ME",
       bodyReplace: "",
     });
     expect(edited.body).toBe("keep also-keep");
@@ -93,7 +91,9 @@ describe("Store: tasks", () => {
     let caught: unknown;
     try {
       s.editTask(t.id, { bodySearch: "gamma", bodyReplace: "x" });
-    } catch (e) { caught = e; }
+    } catch (e) {
+      caught = e;
+    }
     expect(caught).toBeInstanceOf(BodySearchError);
     expect((caught as BodySearchError).kind).toBe("not_found");
     s.close();
@@ -105,7 +105,9 @@ describe("Store: tasks", () => {
     let caught: unknown;
     try {
       s.editTask(t.id, { bodySearch: "foo", bodyReplace: "baz" });
-    } catch (e) { caught = e; }
+    } catch (e) {
+      caught = e;
+    }
     expect(caught).toBeInstanceOf(BodySearchError);
     expect((caught as BodySearchError).kind).toBe("ambiguous");
     expect((caught as BodySearchError).matches).toBe(3);
@@ -117,7 +119,7 @@ describe("Store: tasks", () => {
     const t = s.addTask({ title: "old", body: "hello world" });
     const edited = s.editTask(t.id, {
       title: "new",
-      bodySearch:  "world",
+      bodySearch: "world",
       bodyReplace: "there",
     });
     expect(edited.title).toBe("new");
@@ -140,7 +142,7 @@ describe("Store: tasks", () => {
     expect(() =>
       s.editTask(t.id, {
         body: "new",
-        bodySearch:  "hi",
+        bodySearch: "hi",
         bodyReplace: "yo",
       }),
     ).toThrow(/cannot be combined with body/);
@@ -150,9 +152,7 @@ describe("Store: tasks", () => {
   test("editTask rejects empty bodySearch (would match everywhere)", () => {
     const s = open();
     const t = s.addTask({ title: "x", body: "hi" });
-    expect(() =>
-      s.editTask(t.id, { bodySearch: "", bodyReplace: "y" }),
-    ).toThrow(/bodySearch cannot be empty/);
+    expect(() => s.editTask(t.id, { bodySearch: "", bodyReplace: "y" })).toThrow(/bodySearch cannot be empty/);
     s.close();
   });
 
@@ -165,7 +165,7 @@ describe("Store: tasks", () => {
     // missing lane is auto-created with defaults
     const moved2 = s.moveTask(t.id, "new-lane");
     expect(moved2.lane).toBe("new-lane");
-    const lane = s.listLanes().find((l) => l.name === "new-lane");
+    const lane = s.listLanes().find(l => l.name === "new-lane");
     expect(lane?.color).toBeNull();
     expect(lane?.sort).toBe(0);
     s.close();
@@ -175,7 +175,7 @@ describe("Store: tasks", () => {
     const s = open();
     const t = s.addTask({ title: "x", lane: "fresh" });
     expect(t.lane).toBe("fresh");
-    expect(s.listLanes().some((l) => l.name === "fresh")).toBe(true);
+    expect(s.listLanes().some(l => l.name === "fresh")).toBe(true);
     s.close();
   });
 
@@ -209,12 +209,8 @@ describe("Store: updates", () => {
   test("addUpdate accepts 1024-char summary, throws on 1025", () => {
     const s = open();
     const t = s.addTask({ title: "x" });
-    expect(() =>
-      s.addUpdate({ task_id: t.id, author: "me", summary: "x".repeat(1024) }),
-    ).not.toThrow();
-    expect(() =>
-      s.addUpdate({ task_id: t.id, author: "me", summary: "x".repeat(1025) }),
-    ).toThrow("summary too long");
+    expect(() => s.addUpdate({ task_id: t.id, author: "me", summary: "x".repeat(1024) })).not.toThrow();
+    expect(() => s.addUpdate({ task_id: t.id, author: "me", summary: "x".repeat(1025) })).toThrow("summary too long");
     s.close();
   });
 });
@@ -233,7 +229,9 @@ describe("Store: migrate", () => {
     expect(reopened?.priority).toBe(2);
     s.close();
     for (const ext of ["", "-wal", "-shm"]) {
-      try { require("node:fs").rmSync(tmp + ext, { force: true }); } catch {}
+      try {
+        require("node:fs").rmSync(tmp + ext, { force: true });
+      } catch {}
     }
   });
 });
@@ -243,18 +241,18 @@ describe("Store: tags", () => {
     const s = open();
     s.addTag({ name: "foo", color: "#abc" });
     let listed = s.listTags();
-    expect(listed.find((t) => t.name === "foo")?.color).toBe("#abc");
-    expect(listed.find((t) => t.name === "foo")?.task_count).toBe(0);
+    expect(listed.find(t => t.name === "foo")?.color).toBe("#abc");
+    expect(listed.find(t => t.name === "foo")?.task_count).toBe(0);
     // attach to a task to validate task_count + cascade-on-rename
     const task = s.addTask({ title: "x" });
     s.setTaskTags(task.id, ["foo"]);
     listed = s.listTags();
-    expect(listed.find((t) => t.name === "foo")?.task_count).toBe(1);
+    expect(listed.find(t => t.name === "foo")?.task_count).toBe(1);
     s.editTag("foo", { rename: "foobar" });
     expect(s.getTask(task.id)?.tags).toEqual(["foobar"]);
-    expect(s.listTags().some((t) => t.name === "foo")).toBe(false);
+    expect(s.listTags().some(t => t.name === "foo")).toBe(false);
     s.removeTag("foobar", { force: true });
-    expect(s.listTags().some((t) => t.name === "foobar")).toBe(false);
+    expect(s.listTags().some(t => t.name === "foobar")).toBe(false);
     expect(s.getTask(task.id)?.tags).toEqual([]);
     s.close();
   });
@@ -268,7 +266,12 @@ describe("Store: tags", () => {
     s.setTaskTags(t.id, ["c"]);
     expect(s.getTask(t.id)?.tags).toEqual(["c"]);
     // tags auto-created on first reference
-    expect(s.listTags().map((x) => x.name).sort()).toEqual(["a", "b", "c"]);
+    expect(
+      s
+        .listTags()
+        .map(x => x.name)
+        .sort(),
+    ).toEqual(["a", "b", "c"]);
     expect(() => s.setTaskTags(t.id, ["BAD!"])).toThrow(/invalid tag name/);
     s.close();
   });
@@ -281,9 +284,12 @@ describe("Store: tags", () => {
     s.setTaskTags(ta.id, ["a"]);
     s.setTaskTags(tab.id, ["a", "b"]);
     s.setTaskTags(tb.id, ["b"]);
-    const both = s.listTasks({ tags: ["a", "b"] }).map((t) => t.title);
+    const both = s.listTasks({ tags: ["a", "b"] }).map(t => t.title);
     expect(both).toEqual(["tab"]);
-    const onlyA = s.listTasks({ tags: ["a"] }).map((t) => t.title).sort();
+    const onlyA = s
+      .listTasks({ tags: ["a"] })
+      .map(t => t.title)
+      .sort();
     expect(onlyA).toEqual(["ta", "tab"]);
     s.close();
   });
@@ -292,11 +298,11 @@ describe("Store: tags", () => {
     const s = open();
     const t = s.addTask({ title: "t" });
     s.setTaskTags(t.id, ["a", "b"]);
-    expect(s.listTags().find((x) => x.name === "a")?.task_count).toBe(1);
+    expect(s.listTags().find(x => x.name === "a")?.task_count).toBe(1);
     s.removeTask(t.id);
     // tag rows survive removeTask; only join rows are dropped
-    expect(s.listTags().find((x) => x.name === "a")?.task_count).toBe(0);
-    expect(s.listTags().find((x) => x.name === "b")?.task_count).toBe(0);
+    expect(s.listTags().find(x => x.name === "a")?.task_count).toBe(0);
+    expect(s.listTags().find(x => x.name === "b")?.task_count).toBe(0);
     s.close();
   });
 
@@ -306,7 +312,7 @@ describe("Store: tags", () => {
     s.setTaskTags(t.id, ["keep"]);
     expect(() => s.removeTag("keep")).toThrow(/task\(s\) reference it/);
     s.removeTag("keep", { force: true });
-    expect(s.listTags().some((x) => x.name === "keep")).toBe(false);
+    expect(s.listTags().some(x => x.name === "keep")).toBe(false);
     expect(s.getTask(t.id)?.tags).toEqual([]);
     s.close();
   });
@@ -327,7 +333,7 @@ describe("Store: tags", () => {
 describe("Store: lanes", () => {
   test("add/list/edit/remove lifecycle", () => {
     const s = open();
-    expect(s.listLanes().map((l) => l.name)).toEqual(["now"]);
+    expect(s.listLanes().map(l => l.name)).toEqual(["now"]);
     s.addLane({ name: "later", color: "#abc", sort: 5 });
     expect(s.listLanes().length).toBe(2);
     const edited = s.editLane("later", { color: "#def" });
@@ -351,7 +357,7 @@ describe("Store: lanes", () => {
     s.addLane({ name: "later" });
     const t = s.addTask({ title: "x", lane: "later" });
     s.editLane("later", { rename: "soon" });
-    expect(s.listLanes().some((l) => l.name === "soon")).toBe(true);
+    expect(s.listLanes().some(l => l.name === "soon")).toBe(true);
     expect(s.getTask(t.id)?.lane).toBe("soon");
     s.close();
   });

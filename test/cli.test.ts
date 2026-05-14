@@ -13,8 +13,7 @@ beforeAll(() => {
 afterAll(() => cleanup());
 
 const run = (...args: string[]) => runCli({ args, env: testEnv });
-const runWithInput = (input: string, ...args: string[]) =>
-  runCli({ args, env: testEnv, stdin: input });
+const runWithInput = (input: string, ...args: string[]) => runCli({ args, env: testEnv, stdin: input });
 
 test("reset wipes and re-inits when RESET is typed; aborts otherwise", async () => {
   // Seed some state.
@@ -69,16 +68,7 @@ test("CLI round-trip: init → add → ls → update → edit → mv → rm", as
   // update with status change.
   // Plan 3: --as is REQUIRED on `cortex update` (single source of truth
   // for author attribution; the dashboard cascade does not apply to CLI).
-  r = await run(
-    "update",
-    "1",
-    "-m",
-    "in review now",
-    "-s",
-    "review",
-    "--as",
-    "cli-roundtrip",
-  );
+  r = await run("update", "1", "-m", "in review now", "-s", "review", "--as", "cli-roundtrip");
   expect(r.code).toBe(0);
   expect(r.stdout).toContain("update");
   expect(r.stdout).toContain("status");
@@ -111,10 +101,8 @@ test("CLI round-trip: init → add → ls → update → edit → mv → rm", as
   expect(show.task.title).toBe("task one renamed");
   expect(show.task.status).toBe("review");
   expect(show.updates.length).toBe(2);
-  expect(show.updates.some((u: { summary: string }) => u.summary === "in review now"))
-    .toBe(true);
-  expect(show.updates.some((u: { summary: string }) => u.summary === "status \u2192 review"))
-    .toBe(true);
+  expect(show.updates.some((u: { summary: string }) => u.summary === "in review now")).toBe(true);
+  expect(show.updates.some((u: { summary: string }) => u.summary === "status \u2192 review")).toBe(true);
 
   // rm both with -f
   r = await run("rm", "1", "-f");
@@ -224,8 +212,10 @@ test("cortex show + ls render tags in the formatted text view", async () => {
   expect(plain2).not.toMatch(/few-tagged \[#x #y \+/);
 
   // cleanup
-  r = await run("rm", String(id), "-f"); expect(r.code).toBe(0);
-  r = await run("rm", String(fid), "-f"); expect(r.code).toBe(0);
+  r = await run("rm", String(id), "-f");
+  expect(r.code).toBe(0);
+  r = await run("rm", String(fid), "-f");
+  expect(r.code).toBe(0);
 });
 
 test("cortex edit --body-search/--body-replace: success, no-match, ambiguous, mutex", async () => {
@@ -239,9 +229,12 @@ test("cortex edit --body-search/--body-replace: success, no-match, ambiguous, mu
 
   // Happy path: unique multi-line anchor is spliced.
   r = await run(
-    "edit", String(id),
-    "--body-search",  "## Plan\n- step 1\n- step 2",
-    "--body-replace", "## Plan\n- step 1\n- step 2\n- step 3",
+    "edit",
+    String(id),
+    "--body-search",
+    "## Plan\n- step 1\n- step 2",
+    "--body-replace",
+    "## Plan\n- step 1\n- step 2\n- step 3",
   );
   expect(r.code).toBe(0);
   r = await run("show", String(id));
@@ -251,31 +244,18 @@ test("cortex edit --body-search/--body-replace: success, no-match, ambiguous, mu
 
   // Anchor not found — non-zero exit + helpful error so an agent can
   // re-read and refine.
-  r = await run(
-    "edit", String(id),
-    "--body-search",  "this anchor does not exist",
-    "--body-replace", "x",
-  );
+  r = await run("edit", String(id), "--body-search", "this anchor does not exist", "--body-replace", "x");
   expect(r.code).not.toBe(0);
   expect(r.stderr).toMatch(/not found/i);
 
   // Ambiguous anchor: "step" appears 3 times now — must fail with a
   // count so the agent can broaden the anchor for uniqueness.
-  r = await run(
-    "edit", String(id),
-    "--body-search",  "step",
-    "--body-replace", "STEP",
-  );
+  r = await run("edit", String(id), "--body-search", "step", "--body-replace", "STEP");
   expect(r.code).not.toBe(0);
   expect(r.stderr).toMatch(/match.*3.*time|ambiguous/i);
 
   // Mutex with -b: caught locally before round-trip, with a clear error.
-  r = await run(
-    "edit", String(id),
-    "--body-search",  "intro",
-    "--body-replace", "INTRO",
-    "-b", "whole new body",
-  );
+  r = await run("edit", String(id), "--body-search", "intro", "--body-replace", "INTRO", "-b", "whole new body");
   expect(r.code).not.toBe(0);
   expect(r.stderr).toMatch(/cannot be combined/i);
 

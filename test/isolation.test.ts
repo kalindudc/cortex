@@ -45,9 +45,7 @@ describe("CLI isolation guard", () => {
       beforeMtime = st.mtimeMs;
       beforeSize = st.size;
     } else {
-      console.log(
-        `[isolation guard] no real DB at ${REAL_DB} -- clean state, snapshot skipped`,
-      );
+      console.log(`[isolation guard] no real DB at ${REAL_DB} -- clean state, snapshot skipped`);
     }
 
     const { tmpDir, env, cleanup } = mkTmpEnv("isolation-guard");

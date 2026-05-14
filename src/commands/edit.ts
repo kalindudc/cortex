@@ -6,9 +6,7 @@ import { Client, daemonUrl } from "../client.ts";
 function parsePriority(raw: string): number {
   const n = Number.parseInt(raw, 10);
   if (!Number.isFinite(n) || n < 0 || String(n) !== raw.trim()) {
-    console.error(
-      `error: --priority must be a non-negative integer (0 = highest); got '${raw}'`,
-    );
+    console.error(`error: --priority must be a non-negative integer (0 = highest); got '${raw}'`);
     process.exit(1);
   }
   return n;
@@ -86,16 +84,14 @@ export default defineCommand({
     // bodySearch + bodyReplace must be present together AND mutually
     // exclusive with -b / --body-file. Both rules are also enforced server-
     // side, but checking here gives a fast local exit before round-trip.
-    const hasSearch  = args.bodySearch  !== undefined;
+    const hasSearch = args.bodySearch !== undefined;
     const hasReplace = args.bodyReplace !== undefined;
     if (hasSearch !== hasReplace) {
       console.error("error: --body-search and --body-replace must be used together");
       process.exit(1);
     }
     if (hasSearch && (args.body !== undefined || args.bodyFile !== undefined)) {
-      console.error(
-        "error: --body-search/--body-replace cannot be combined with -b or --body-file",
-      );
+      console.error("error: --body-search/--body-replace cannot be combined with -b or --body-file");
       process.exit(1);
     }
     if (hasSearch && args.bodySearch === "") {
@@ -122,20 +118,16 @@ export default defineCommand({
       patch.body = args.body;
     }
     if (hasSearch) {
-      patch.bodySearch  = args.bodySearch;
+      patch.bodySearch = args.bodySearch;
       patch.bodyReplace = args.bodyReplace;
     }
     if (args.priority) patch.priority = parsePriority(args.priority);
     // Tag mutations: exactly one of --set-tags / --add-tag / --rm-tag may be
     // present per invocation. Mirrors the HTTP route's `set | add | remove`
     // exclusivity check; any combination yields a hard exit.
-    const tagModes = [args.setTags, args.addTag, args.rmTag].filter(
-      (v) => v !== undefined,
-    ).length;
+    const tagModes = [args.setTags, args.addTag, args.rmTag].filter(v => v !== undefined).length;
     if (tagModes > 1) {
-      console.error(
-        "error: --set-tags, --add-tag, and --rm-tag are mutually exclusive",
-      );
+      console.error("error: --set-tags, --add-tag, and --rm-tag are mutually exclusive");
       process.exit(1);
     }
     let tagOp: { mode: "set" | "add" | "rm"; names: string[] } | null = null;
@@ -143,9 +135,9 @@ export default defineCommand({
       if (args.setTags !== undefined) {
         const names = args.setTags
           .split(",")
-          .map((s) => s.trim())
+          .map(s => s.trim())
           .filter(Boolean)
-          .map((n) => validateTagName(n));
+          .map(n => validateTagName(n));
         tagOp = { mode: "set", names };
       } else if (args.addTag !== undefined) {
         tagOp = { mode: "add", names: [validateTagName(args.addTag)] };
@@ -157,9 +149,7 @@ export default defineCommand({
       process.exit(1);
     }
     if (Object.keys(patch).length === 0 && tagOp === null) {
-      console.error(
-        "error: provide at least one of --title, --body, --priority, --set-tags, --add-tag, --rm-tag",
-      );
+      console.error("error: provide at least one of --title, --body, --priority, --set-tags, --add-tag, --rm-tag");
       process.exit(1);
     }
     const url = daemonUrl();
@@ -170,10 +160,7 @@ export default defineCommand({
           task = (await Client.editTask(url, id, patch)) as Task;
         }
         if (tagOp) {
-          const newSet = await resolveTagSet(
-            tagOp,
-            async () => (await Client.getTask(url, id)) as Task,
-          );
+          const newSet = await resolveTagSet(tagOp, async () => (await Client.getTask(url, id)) as Task);
           task = (await Client.setTaskTags(url, id, newSet)) as Task;
         }
         if (!task) throw new Error("no fields changed");
@@ -226,5 +213,5 @@ async function resolveTagSet(
     return Array.from(new Set([...existing.tags, ...op.names]));
   }
   const drop = new Set(op.names);
-  return existing.tags.filter((n) => !drop.has(n));
+  return existing.tags.filter(n => !drop.has(n));
 }

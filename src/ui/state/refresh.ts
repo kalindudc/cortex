@@ -2,7 +2,7 @@
 //
 // `refresh()` is the standard "the server says something changed" entry,
 // called at boot and on every SSE event from the daemon (debounced in
-// app.js). `fetchAuthors()` is the lazy load of the author rollup invoked
+// index.tsx). `fetchAuthors()` is the lazy load of the author rollup invoked
 // when the user opens the Authors tab.
 //
 // The module-level `effect` watches `activeTask` and lazy-fetches its
@@ -26,11 +26,13 @@ export async function fetchAuthors(): Promise<void> {
 }
 
 // Re-pulls tasks + lanes (and updates for the active task) from the server.
-// Called at boot and on every SSE event from the daemon (debounced in app.js).
+// Called at boot and on every SSE event from the daemon (debounced in index.tsx).
 export async function refresh(): Promise<void> {
   try {
     const [ts, ls, tg] = await Promise.all([api.tasks(), api.lanes(), api.tags()]);
-    tasks.value = ts; lanes.value = ls; tags.value = tg;
+    tasks.value = ts;
+    lanes.value = ls;
+    tags.value = tg;
     const at = activeTask.value;
     if (at) updates.value = { ...updates.value, [at.id]: await api.updates(at.id) };
   } catch (err) {
@@ -45,8 +47,13 @@ effect(() => {
   const at = activeTask.value;
   if (at && at.id !== lastActive) {
     lastActive = at.id;
-    api.updates(at.id)
-      .then(u => { updates.value = { ...updates.value, [at.id]: u }; })
-      .catch(() => { /* swallow — listing is non-critical */ });
+    api
+      .updates(at.id)
+      .then(u => {
+        updates.value = { ...updates.value, [at.id]: u };
+      })
+      .catch(() => {
+        /* swallow — listing is non-critical */
+      });
   }
 });

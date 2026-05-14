@@ -29,7 +29,7 @@
 .compose-hint { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-1); }
 
 /* ---------- autosize textarea (post-update compose only) ----------
-   Companion to autosizeRef in components.js: JS sets `height` to fit content
+   Companion to autosizeRef in lib/autosize.ts: JS sets `height` to fit content
    exactly on every input, so the textarea has no internal scroll. Used by
    the inbox post-update compose box, where growing-with-content feels right
    because the box is small and lives at the bottom of its pane.
