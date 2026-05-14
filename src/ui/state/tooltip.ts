@@ -15,7 +15,6 @@
 //   - Centralised cleanup: scroll/resize/Esc all collapse one signal.
 
 import { signal, type Signal } from "@preact/signals";
-import type { JSX } from "preact";
 
 export type Placement = "top" | "bottom" | "left" | "right";
 
@@ -208,7 +207,7 @@ export function placeTooltip(el: HTMLElement, anchor: AnchorRect, requested: Pla
     };
   }
 
-  el.style.left = chosen.left + "px";
-  el.style.top = chosen.top + "px";
+  el.style.left = `${chosen.left}px`;
+  el.style.top = `${chosen.top}px`;
   el.dataset.placement = chosen.placement;
 }

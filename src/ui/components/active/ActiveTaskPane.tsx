@@ -63,7 +63,7 @@ export function ActiveTaskPane(): VNode {
             }}
             onDragLeave={(e: DragEvent) => (e.currentTarget as HTMLElement).classList.remove("dragover")}
           >
-            <span class={"dot dot-status-" + at.status}></span>
+            <span class={`dot dot-status-${at.status}`}></span>
             <span>{STATUS_LABEL[at.status]}</span>
             <Icon name="chevronDown" size={12} />
           </button>

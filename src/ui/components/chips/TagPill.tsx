@@ -23,7 +23,7 @@ export interface TagPillProps {
 export function TagPill({ name, color, interactive = false }: TagPillProps): VNode {
   const c = color !== undefined ? color : tagColor(name);
   const style = tagPillStyleFromHex(c);
-  const cls = "tag-pill" + (c ? " tag-pill-colored" : "") + (interactive ? " tag-pill-interactive" : "");
+  const cls = `tag-pill${c ? " tag-pill-colored" : ""}${interactive ? " tag-pill-interactive" : ""}`;
   return (
     <span class={cls} style={style}>
       {name}

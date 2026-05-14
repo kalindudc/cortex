@@ -66,7 +66,8 @@ describe("CLI isolation guard", () => {
       }
 
       // tmpDir's DB exists and is non-empty (the writes landed where we asked).
-      const tmpDb = env.CORTEX_DB!;
+      if (!env.CORTEX_DB) throw new Error("CORTEX_DB env var unset");
+      const tmpDb = env.CORTEX_DB;
       expect(tmpDb.startsWith(tmpDir)).toBe(true);
       expect(fs.existsSync(tmpDb)).toBe(true);
       expect(fs.statSync(tmpDb).size).toBeGreaterThan(0);
@@ -88,9 +89,9 @@ describe("CLI isolation guard", () => {
     try {
       // Each pinned key starts with the freshly-created tmpDir, NOT the
       // poisoned parent values.
-      expect(env.XDG_CONFIG_HOME!.startsWith(tmpDir)).toBe(true);
-      expect(env.CORTEX_DB!.startsWith(tmpDir)).toBe(true);
-      expect(env.CORTEX_SKILL_DIR!.startsWith(tmpDir)).toBe(true);
+      expect(env.XDG_CONFIG_HOME?.startsWith(tmpDir)).toBe(true);
+      expect(env.CORTEX_DB?.startsWith(tmpDir)).toBe(true);
+      expect(env.CORTEX_SKILL_DIR?.startsWith(tmpDir)).toBe(true);
 
       // None of the pinned values leak the poisoned values.
       expect(env.XDG_CONFIG_HOME).not.toBe("/tmp/poison-xdg");

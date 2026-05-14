@@ -44,7 +44,7 @@ export function Icon({ name, size = 14, className = "" }: IconProps): VNode {
   const inner = ICONS[name] || "";
   return (
     <svg
-      class={"icon " + className}
+      class={`icon ${className}`}
       width={size}
       height={size}
       viewBox="0 0 24 24"

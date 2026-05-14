@@ -34,7 +34,7 @@ export function LanePicker({ task }: { task: Task }): VNode {
       className="lane-picker"
       renderRow={({ item: l, isSelected, isCursor, onClick, onMouseMove }) => (
         <button
-          class={"picker-row" + (isSelected ? " selected" : "") + (isCursor ? " cursor" : "")}
+          class={`picker-row${isSelected ? " selected" : ""}${isCursor ? " cursor" : ""}`}
           onClick={onClick}
           onMouseMove={onMouseMove}
           title={isSelected ? "Current lane" : `Move to ${l.name}`}

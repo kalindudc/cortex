@@ -4,7 +4,7 @@
 // validated server-side against TAG_NAME_RE; we display the resulting error
 // via the existing toast.
 
-import type { VNode } from "preact";
+import type { JSX, VNode } from "preact";
 import { useSignal } from "@preact/signals";
 
 import { tags, selectedTag, modal } from "../../state/signals.ts";
@@ -54,7 +54,7 @@ export function TagEditModal({ name, close }: { name: string; close: () => void 
           <span class="meta">Name</span>
           <input
             value={renameTo.value}
-            onInput={(e: any) => (renameTo.value = e.currentTarget.value)}
+            onInput={(e: JSX.TargetedInputEvent<HTMLInputElement>) => (renameTo.value = e.currentTarget.value)}
             placeholder="a-z, 0-9, _ @ - (1-32 chars)"
           />
         </label>
@@ -63,7 +63,7 @@ export function TagEditModal({ name, close }: { name: string; close: () => void 
           <div class="color-grid">
             {LANE_COLORS.map(c => (
               <button
-                class={"color-swatch" + (color.value === c ? " selected" : "") + (c === null ? " clear" : "")}
+                class={`color-swatch${color.value === c ? " selected" : ""}${c === null ? " clear" : ""}`}
                 style={c ? `background: ${c}` : ""}
                 title={c || "no color"}
                 onClick={(e: MouseEvent) => {

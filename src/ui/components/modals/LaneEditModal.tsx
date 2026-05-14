@@ -1,7 +1,7 @@
 // LaneEditModal — edit a lane's name, color, and sort order. Includes the
 // "Delete lane" button (gated on the lane being non-default and empty).
 
-import type { VNode } from "preact";
+import type { JSX, VNode } from "preact";
 import { useSignal } from "@preact/signals";
 
 import { lanes, tasks, selectedLane, modal } from "../../state/signals.ts";
@@ -55,7 +55,7 @@ export function LaneEditModal({ name, close }: { name: string; close: () => void
           <span class="meta">Name</span>
           <input
             value={renameTo.value}
-            onInput={(e: any) => (renameTo.value = e.currentTarget.value)}
+            onInput={(e: JSX.TargetedInputEvent<HTMLInputElement>) => (renameTo.value = e.currentTarget.value)}
             disabled={isDefault}
             title={isDefault ? "the 'now' lane cannot be renamed" : ""}
           />
@@ -65,7 +65,7 @@ export function LaneEditModal({ name, close }: { name: string; close: () => void
           <div class="color-grid">
             {LANE_COLORS.map(c => (
               <button
-                class={"color-swatch" + (color.value === c ? " selected" : "") + (c === null ? " clear" : "")}
+                class={`color-swatch${color.value === c ? " selected" : ""}${c === null ? " clear" : ""}`}
                 style={c ? `background: ${c}` : ""}
                 title={c || "no color"}
                 onClick={(e: MouseEvent) => {
@@ -83,7 +83,11 @@ export function LaneEditModal({ name, close }: { name: string; close: () => void
               (lower = higher in the list)
             </span>
           </span>
-          <input type="number" value={sort.value} onInput={(e: any) => (sort.value = e.currentTarget.value)} />
+          <input
+            type="number"
+            value={sort.value}
+            onInput={(e: JSX.TargetedInputEvent<HTMLInputElement>) => (sort.value = e.currentTarget.value)}
+          />
         </label>
         <div class="row" style="justify-content:space-between">
           <button

@@ -27,7 +27,7 @@ export function Tooltip(): VNode {
   return (
     <div
       ref={ref}
-      class={"tooltip" + (s.visible ? " tooltip-visible" : "")}
+      class={`tooltip${s.visible ? " tooltip-visible" : ""}`}
       role="tooltip"
       aria-hidden={s.visible ? "false" : "true"}
     >

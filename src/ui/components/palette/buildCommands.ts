@@ -99,7 +99,7 @@ export function buildCommands(): Command[] {
           .filter(p => p !== at.priority)
           .map(p => ({
             id: `priority-${p}`,
-            label: `P${p}` + (p === 0 ? " (urgent)" : ""),
+            label: `P${p}${p === 0 ? " (urgent)" : ""}`,
             hint: "",
             icon: "star",
             action: () => api.editTask(at.id, { priority: p }),

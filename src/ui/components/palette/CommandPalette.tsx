@@ -5,7 +5,7 @@
 // and useEffect(..., []) would fire only the very first time. That's the
 // exact bug that broke autofocus on the second and subsequent opens.
 
-import type { VNode } from "preact";
+import type { JSX, VNode } from "preact";
 import { useEffect, useRef } from "preact/hooks";
 import { useSignal } from "@preact/signals";
 
@@ -57,9 +57,12 @@ export function CommandPalette(): VNode {
   };
 
   // Push a new scope. Lazily evaluates submenu() so per-lane lists aren't
-  // built unless the user actually dives in.
+  // built unless the user actually dives in. Callers (`exec`, click handlers)
+  // only invoke pushScope on commands that have a submenu — guard explicitly
+  // so the type system stops nagging about Command.submenu being optional.
   const pushScope = (cmd: Command) => {
-    stack.value = [...stack.value, { title: cmd.label.replace(/\u2026$/, ""), cmds: cmd.submenu!() }];
+    if (!cmd.submenu) return;
+    stack.value = [...stack.value, { title: cmd.label.replace(/\u2026$/, ""), cmds: cmd.submenu() }];
     query.value = "";
     cursor.value = 0;
     setTimeout(() => inputRef.current?.focus(), 0);
@@ -105,7 +108,7 @@ export function CommandPalette(): VNode {
           }
           autoFocus
           value={query.value}
-          onInput={(e: any) => {
+          onInput={(e: JSX.TargetedInputEvent<HTMLInputElement>) => {
             query.value = e.currentTarget.value;
             cursor.value = 0;
           }}
@@ -145,7 +148,7 @@ export function CommandPalette(): VNode {
           ) : (
             filtered.map((c, i) => (
               <button
-                class={"palette-row" + (i === safeCursor ? " active" : "")}
+                class={`palette-row${i === safeCursor ? " active" : ""}`}
                 onMouseEnter={() => (cursor.value = i)}
                 onClick={() => exec(c)}
               >

@@ -45,7 +45,7 @@
         "noAutofocus": "off"
       },
       "suspicious": {
-        "noExplicitAny": "warn",
+        "noExplicitAny": "error",
         "noArrayIndexKey": "off",
         "noAssignInExpressions": "off",
         "noControlCharactersInRegex": "off",
@@ -53,16 +53,17 @@
       },
       "style": {
         "noParameterAssign": "off",
-        "noNonNullAssertion": "warn",
-        "useImportType": "warn",
-        "useTemplate": "warn"
+        "noNonNullAssertion": "error",
+        "useImportType": "error",
+        "useTemplate": "error"
       },
       "complexity": {
-        "noForEach": "off"
+        "noForEach": "off",
+        "useOptionalChain": "error"
       },
       "correctness": {
-        "noUnusedImports": "warn",
-        "noUnusedVariables": "warn"
+        "noUnusedImports": "error",
+        "noUnusedVariables": "error"
       }
     }
   },

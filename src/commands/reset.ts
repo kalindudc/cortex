@@ -74,7 +74,8 @@ export default defineCommand({
   },
   async run() {
     const db = dbPath();
-    const livePid = readPid() !== null && isAlive(readPid()!) ? readPid() : null;
+    const pid = readPid();
+    const livePid = pid !== null && isAlive(pid) ? pid : null;
 
     console.log(`This will:`);
     if (livePid !== null) {

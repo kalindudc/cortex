@@ -11,12 +11,14 @@
     "ui:build": "bash scripts/build-css.sh && pnpm exec bun build src/ui/index.tsx --target browser --outdir out --sourcemap=external --minify --entry-naming bundle.[ext] --asset-naming bundle.[ext]",
     "ui:watch": "bash scripts/build-css.sh && pnpm exec bun build src/ui/index.tsx --target browser --outdir out --sourcemap=external --entry-naming bundle.[ext] --asset-naming bundle.[ext] --watch",
     "build": "bash scripts/build.sh",
-    "test": "pnpm run build && pnpm exec bun test",
+    "test": "pnpm run build && pnpm exec bun test test/*.test.ts test/unit/",
+    "test:unit": "pnpm exec bun test test/unit/",
+    "test:e2e": "pnpm run build && pnpm exec playwright install chromium --with-deps && pnpm exec playwright test",
     "dev": "pnpm exec bun index.ts",
     "serve:dev": "pnpm exec bun index.ts stop 2>/dev/null; pnpm exec bun --watch index.ts serve --foreground --no-open --port ${PORT:-7777}",
     "deploy": "pnpm run build && rm -rf ~/bin/cortex && cp bin/cortex ~/bin/",
-    "style": "node node_modules/@biomejs/biome/bin/biome check --write . && pnpm exec tsc --noEmit",
-    "style:check": "node node_modules/@biomejs/biome/bin/biome check . && pnpm exec tsc --noEmit"
+    "style": "node node_modules/@biomejs/biome/bin/biome check --error-on-warnings --write . && pnpm exec tsc --noEmit",
+    "style:check": "node node_modules/@biomejs/biome/bin/biome check --error-on-warnings . && pnpm exec tsc --noEmit"
   },
   "dependencies": {
     "@codemirror/commands": "^6.0.0",
@@ -32,9 +34,13 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.15",
+    "@happy-dom/global-registrator": "^17.0.0",
+    "@playwright/test": "^1.49.0",
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/preact": "^3.2.4",
     "@types/bun": "latest",
-
     "bun": "1.1.12",
+    "happy-dom": "^17.0.0",
     "typescript": "^5.7.0"
   },
   "pnpm": {

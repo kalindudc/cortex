@@ -20,7 +20,7 @@
 // .popover-row here — that's the rigid grid that clamped tag pills to 14px in
 // the v3 bug.
 
-import type { VNode } from "preact";
+import type { JSX, VNode } from "preact";
 import { useEffect, useRef } from "preact/hooks";
 import { useSignal } from "@preact/signals";
 
@@ -139,7 +139,7 @@ export function TagPicker({ task }: { task: Task }): VNode {
     }
   };
 
-  const onSearchInput = (e: any) => {
+  const onSearchInput = (e: JSX.TargetedInputEvent<HTMLInputElement>) => {
     search.value = e.currentTarget.value;
     // Reset to top whenever the filter changes so the cursor doesn't sit on
     // a row that just scrolled out of view.
@@ -179,7 +179,7 @@ export function TagPicker({ task }: { task: Task }): VNode {
             if (isCreateRow(it)) {
               return (
                 <button
-                  class={"tag-picker-row tag-picker-create-row" + (isCursor ? " cursor" : "")}
+                  class={`tag-picker-row tag-picker-create-row${isCursor ? " cursor" : ""}`}
                   onClick={() => create(it.name)}
                   title={`Create the tag '${it.name}' and attach it to this task`}
                 >
@@ -194,7 +194,7 @@ export function TagPicker({ task }: { task: Task }): VNode {
             const sel = attached.has(it.name);
             return (
               <button
-                class={"tag-picker-row" + (sel ? " selected" : "") + (isCursor ? " cursor" : "")}
+                class={`tag-picker-row${sel ? " selected" : ""}${isCursor ? " cursor" : ""}`}
                 onClick={() => toggle(it.name)}
                 onMouseMove={() => {
                   if (cursor.value !== i) cursor.value = i;

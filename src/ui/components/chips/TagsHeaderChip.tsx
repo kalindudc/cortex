@@ -23,7 +23,7 @@ export function TagsHeaderChip({ task }: { task: Task }): VNode {
   const count = (task.tags || []).length;
   // Tooltip preview of attached tags (if any) so quick hover-inspection works
   // without opening the picker.
-  const titleAttr = count > 0 ? task.tags.map(n => "#" + n).join(" ") + " \u2014 click to manage" : "Click to add tags";
+  const titleAttr = count > 0 ? `${task.tags.map(n => `#${n}`).join(" ")} \u2014 click to manage` : "Click to add tags";
   return (
     <div style="position:relative" data-pop>
       <button

@@ -213,9 +213,10 @@ export function MdEditor({ value, onChange, onSubmit, placeholder: phText }: MdE
     // acceptable since focus is the moment the user is committing to edit.
     if (phText) exts.push(placeholder(phText));
 
+    if (!hostRef.current) return;
     const view = new EditorView({
       state: EditorState.create({ doc: value || "", extensions: exts }),
-      parent: hostRef.current!,
+      parent: hostRef.current,
     });
     viewRef.current = view;
     return () => {

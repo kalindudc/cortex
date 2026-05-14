@@ -152,7 +152,8 @@ describe("cortex add/edit accept --body-file", () => {
     expect(r.code).toBe(0);
     const m = r.stdout.match(/^\[(\d+)\]/);
     expect(m).not.toBeNull();
-    const id = m![1];
+    const id = m?.[1];
+    if (!id) throw new Error(`could not parse task id from cli output: ${r.stdout}`);
 
     // Verify stored body via `show --json` (the canonical body-fetch path
     // documented in Plan 4 Implementation Notes for plan revision).
@@ -163,7 +164,7 @@ describe("cortex add/edit accept --body-file", () => {
     expect(task.body).toBe(original);
 
     // Modify the file, run edit --body-file, verify the body updates.
-    const updated = original + "\n\nappended.";
+    const updated = `${original}\n\nappended.`;
     fs.writeFileSync(tmp, updated);
     r = await cli("edit", id, "--body-file", tmp);
     expect(r.code).toBe(0);

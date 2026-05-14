@@ -27,7 +27,7 @@
 // the key={"body-"+epoch} forces a fresh mount. Title is a controlled
 // <input> so it auto-syncs from titleSig with no extra plumbing.
 
-import type { VNode } from "preact";
+import type { JSX, VNode } from "preact";
 import { useEffect } from "preact/hooks";
 import { useSignal } from "@preact/signals";
 
@@ -122,16 +122,20 @@ export function EditableTaskBody({ task }: { task: Task }): VNode {
   // explicitly. Body Apply also bumps bodyEpoch to push the new doc into
   // the CodeMirror editor.
   const applyTitle = () => {
-    titleSig.value = titleExternal.value!;
-    titleServerSig.value = titleExternal.value!;
+    const incoming = titleExternal.value;
+    if (incoming === null) return; // banner already dismissed; no-op
+    titleSig.value = incoming;
+    titleServerSig.value = incoming;
     titleExternal.value = null;
   };
   const dismissTitle = () => {
     titleExternal.value = null;
   };
   const applyBody = () => {
-    bodySig.value = bodyExternal.value!;
-    bodyServerSig.value = bodyExternal.value!;
+    const incoming = bodyExternal.value;
+    if (incoming === null) return;
+    bodySig.value = incoming;
+    bodyServerSig.value = incoming;
     bodyExternal.value = null;
     bodyEpoch.value++;
   };
@@ -153,7 +157,7 @@ export function EditableTaskBody({ task }: { task: Task }): VNode {
         class="title-input"
         value={titleSig.value}
         placeholder="Task title"
-        onInput={(e: any) => {
+        onInput={(e: JSX.TargetedInputEvent<HTMLInputElement>) => {
           titleSig.value = e.currentTarget.value;
           titleSave.schedule();
         }}
@@ -168,7 +172,7 @@ export function EditableTaskBody({ task }: { task: Task }): VNode {
            safety net; Cmd/Ctrl+S inside the editor flushes immediately
            (onSubmit -> bodySave.flush). */}
       <MdEditor
-        key={"body-" + bodyEpoch.value}
+        key={`body-${bodyEpoch.value}`}
         value={bodySig.value}
         placeholder="Add a description…"
         onChange={v => {

@@ -30,7 +30,7 @@ export function StatusPopover({ task }: { task: Task }): VNode | null {
             await tryApi(() => api.setStat(task.id, s));
           }}
         >
-          <span class={"dot dot-status-" + s}></span>
+          <span class={`dot dot-status-${s}`}></span>
           <span>{STATUS_LABEL[s]}</span>
           {task.status === s ? <Icon name="checkCircle" size={12} /> : <span></span>}
         </button>

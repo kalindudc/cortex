@@ -4,7 +4,7 @@
 // handler in index.tsx can flush the latest closure (with the current task
 // + signal values).
 
-import type { VNode } from "preact";
+import type { JSX, VNode } from "preact";
 import { useEffect } from "preact/hooks";
 import { useSignal } from "@preact/signals";
 
@@ -60,7 +60,7 @@ export function PostUpdateForm({ task }: { task: Task }): VNode {
         rows={2}
         maxlength={1024}
         value={summary.value}
-        onInput={(e: any) => (summary.value = e.currentTarget.value)}
+        onInput={(e: JSX.TargetedInputEvent<HTMLTextAreaElement>) => (summary.value = e.currentTarget.value)}
         onKeyDown={onSubmitKeys(submit)}
       />
       <div class="compose-foot">
@@ -68,10 +68,10 @@ export function PostUpdateForm({ task }: { task: Task }): VNode {
           class="author"
           title="Author (default from gh / git / hostname)"
           value={author.value}
-          onInput={(e: any) => (author.value = e.currentTarget.value)}
+          onInput={(e: JSX.TargetedInputEvent<HTMLInputElement>) => (author.value = e.currentTarget.value)}
         />
         <span class="grow"></span>
-        <span class={"char-counter num" + (len > 1000 ? " warn" : "")}>{len}/1024</span>
+        <span class={`char-counter num${len > 1000 ? " warn" : ""}`}>{len}/1024</span>
         {/* Hotkey hints live in the foot strip so they stay visible while the
              user is typing (placeholder hints disappear the moment text is
              entered — useless when discoverability matters most). */}

@@ -5,7 +5,7 @@
 // (new-task form + Commands palette button). The Lanes and Tasks sections
 // live in SEPARATE scroll surfaces — see CSS .lanes-section / .tasks-section.
 
-import type { VNode } from "preact";
+import type { JSX, VNode } from "preact";
 import { useSignal } from "@preact/signals";
 
 import { tasks, lanes, selectedLane, selectedId, modal, paletteOpen, newLaneOpen } from "../../state/signals.ts";
@@ -57,7 +57,7 @@ export function LanesPane(): VNode {
       <SidebarSystemBar />
       <div class="pane-section" style="padding-bottom: 8px">
         <button
-          class={"view-row" + (selectedLane.value === null ? " selected" : "")}
+          class={`view-row${selectedLane.value === null ? " selected" : ""}`}
           onClick={() => {
             selectedLane.value = null;
             selectedId.value = null;
@@ -114,7 +114,7 @@ export function LanesPane(): VNode {
                 placeholder="lane name"
                 style="width:100%; height:28px; padding:4px 8px"
                 value={newLaneName.value}
-                onInput={(e: any) => (newLaneName.value = e.currentTarget.value)}
+                onInput={(e: JSX.TargetedInputEvent<HTMLInputElement>) => (newLaneName.value = e.currentTarget.value)}
               />
             </form>
           ) : null}
@@ -125,7 +125,7 @@ export function LanesPane(): VNode {
             const sel = selectedLane.value === l.name;
             return (
               <button
-                class={"lane-row" + (sel ? " selected" : "")}
+                class={`lane-row${sel ? " selected" : ""}`}
                 onClick={() => {
                   selectedLane.value = sel ? null : l.name;
                   selectedId.value = null;
@@ -137,7 +137,7 @@ export function LanesPane(): VNode {
                 onDragLeave={(e: DragEvent) => (e.currentTarget as HTMLElement).classList.remove("dragover")}
                 onDrop={async (e: DragEvent) => {
                   (e.currentTarget as HTMLElement).classList.remove("dragover");
-                  const id = Number(e.dataTransfer!.getData("application/x-cortex-task-id"));
+                  const id = Number(e.dataTransfer?.getData("application/x-cortex-task-id"));
                   if (id) await tryApi(() => api.moveLane(id, l.name));
                 }}
                 title={`${open.length} open task${open.length === 1 ? "" : "s"}`}
@@ -171,13 +171,13 @@ export function LanesPane(): VNode {
             ) : (
               tasksInLane.value.map(t => (
                 <button
-                  class={"task-row" + (activeTask.value && t.id === activeTask.value.id ? " active" : "")}
+                  class={`task-row${activeTask.value && t.id === activeTask.value.id ? " active" : ""}`}
                   draggable={true}
-                  onDragStart={(e: DragEvent) => e.dataTransfer!.setData("application/x-cortex-task-id", String(t.id))}
+                  onDragStart={(e: DragEvent) => e.dataTransfer?.setData("application/x-cortex-task-id", String(t.id))}
                   onClick={() => (selectedId.value = t.id)}
                   {...tip(t.title)}
                 >
-                  <span class={"dot dot-status-" + t.status}></span>
+                  <span class={`dot dot-status-${t.status}`}></span>
                   <span class="task-title">{t.title}</span>
                   <PriorityChip priority={t.priority} />
                 </button>
@@ -200,7 +200,7 @@ export function LanesPane(): VNode {
               class="grow"
               placeholder="New task…"
               value={newTaskTitle.value}
-              onInput={(e: any) => (newTaskTitle.value = e.currentTarget.value)}
+              onInput={(e: JSX.TargetedInputEvent<HTMLInputElement>) => (newTaskTitle.value = e.currentTarget.value)}
               style="height:32px"
             />
             <button type="submit" class="btn btn-primary" style="height:32px" title="Add task">

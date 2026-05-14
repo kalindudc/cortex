@@ -41,7 +41,8 @@ let cleanup: () => void;
 beforeAll(() => {
   const e = mkTmpEnv("author");
   testEnv = e.env;
-  dbPath = e.env.CORTEX_DB!;
+  if (!e.env.CORTEX_DB) throw new Error("CORTEX_DB env var unset");
+  dbPath = e.env.CORTEX_DB;
   cleanup = e.cleanup;
 });
 

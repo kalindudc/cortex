@@ -25,7 +25,7 @@
 //   onCreate?    : (query: string) => void                       — fired when create row is triggered (click or Enter on cursor)
 //   footer?      : vnode                                         — rendered below the list
 
-import type { VNode } from "preact";
+import type { JSX, VNode } from "preact";
 import { useEffect, useRef } from "preact/hooks";
 import { useSignal } from "@preact/signals";
 
@@ -130,7 +130,7 @@ export function Picker<T>({
     }
   };
 
-  const onSearchInput = (e: any) => {
+  const onSearchInput = (e: JSX.TargetedInputEvent<HTMLInputElement>) => {
     query.value = e.currentTarget.value;
     cursor.value = 0;
   };
@@ -145,7 +145,7 @@ export function Picker<T>({
   }, [cursor.value, totalRows]);
 
   return (
-    <div class={"popover picker " + className} data-pop style="top: 32px; left: 0">
+    <div class={`popover picker ${className}`} data-pop style="top: 32px; left: 0">
       <div class="picker-search">
         <input
           ref={searchRef}

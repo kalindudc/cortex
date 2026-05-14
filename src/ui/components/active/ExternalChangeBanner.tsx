@@ -17,7 +17,7 @@ export function ExternalChangeBanner({ label, incoming, onApply, onDismiss }: Ex
   // Truncate long bodies in the preview — user clicks Apply to see the
   // full text in the editor. Single-line preview keeps the banner compact.
   const preview = (incoming || "(empty)").replace(/\s+/g, " ").trim();
-  const display = preview.length > 120 ? preview.slice(0, 117) + "\u2026" : preview;
+  const display = preview.length > 120 ? `${preview.slice(0, 117)}\u2026` : preview;
   return (
     <div class="external-change-banner" role="status">
       <span class="external-change-icon" aria-hidden="true">

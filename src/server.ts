@@ -47,7 +47,7 @@ function resolveAuthor(): string {
     const ghHosts = path.join(os.homedir(), ".config", "gh", "hosts.yml");
     if (fs.existsSync(ghHosts)) {
       const m = fs.readFileSync(ghHosts, "utf8").match(/^\s+user:\s*(\S+)/m);
-      if (m && m[1]) return (cachedAuthor = m[1]);
+      if (m?.[1]) return (cachedAuthor = m[1]);
     }
   } catch {
     /* fall through */
@@ -173,7 +173,7 @@ export function buildApp(store: Store): Hono {
     if (hasSearch && hasBody) {
       return c.json({ error: "bodySearch/bodyReplace cannot be combined with body (use one or the other)" }, 400);
     }
-    if (hasSearch && fields.bodySearch!.length === 0) {
+    if (hasSearch && fields.bodySearch?.length === 0) {
       return c.json({ error: "bodySearch cannot be empty" }, 400);
     }
     try {

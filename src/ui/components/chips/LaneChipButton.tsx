@@ -28,7 +28,7 @@ export function LaneChipButton({ task }: { task: Task }): VNode {
         data-pop
         draggable={true}
         title={`Lane: ${task.lane} — click to move, drag to reorder`}
-        onDragStart={(e: DragEvent) => e.dataTransfer!.setData("application/x-cortex-task-id", String(task.id))}
+        onDragStart={(e: DragEvent) => e.dataTransfer?.setData("application/x-cortex-task-id", String(task.id))}
         onClick={(e: MouseEvent) => {
           e.stopPropagation();
           togglePopover(lanePopover);

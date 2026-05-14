@@ -225,7 +225,7 @@ export class Store {
       const updatesDdl = this.db
         .query<{ sql: string | null }, []>("SELECT sql FROM sqlite_master WHERE name='updates';")
         .get();
-      if (updatesDdl?.sql && updatesDdl.sql.includes("length(summary) <= 200")) {
+      if (updatesDdl?.sql?.includes("length(summary) <= 200")) {
         console.warn(
           "cortex: updates table has the old 200-char limit; run `cortex reset` to enable the 1024-char limit (existing data lost).",
         );

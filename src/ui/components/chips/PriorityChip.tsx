@@ -6,7 +6,7 @@
 // The active-task header instead uses `PriorityChipButton`, which morphs
 // into an inline <input> on click.
 
-import type { VNode } from "preact";
+import type { JSX, VNode } from "preact";
 import { useEffect, useRef } from "preact/hooks";
 import { useSignal } from "@preact/signals";
 
@@ -23,7 +23,7 @@ import { priorityClass } from "../../lib/constants.ts";
 // morphs into an inline <input> on click.
 export function PriorityChip({ priority }: { priority: number }): VNode {
   return (
-    <span class={"priority-chip " + priorityClass(priority)} title={`Priority ${priority} (0 = highest)`}>
+    <span class={`priority-chip ${priorityClass(priority)}`} title={`Priority ${priority} (0 = highest)`}>
       P{priority}
     </span>
   );
@@ -83,9 +83,9 @@ export function PriorityChipButton({ task }: { task: Task }): VNode {
         ref={inputRef}
         type="number"
         min="0"
-        class={"priority-chip priority-chip-input " + priorityClass(task.priority)}
+        class={`priority-chip priority-chip-input ${priorityClass(task.priority)}`}
         value={val.value}
-        onInput={(e: any) => (val.value = e.currentTarget.value)}
+        onInput={(e: JSX.TargetedInputEvent<HTMLInputElement>) => (val.value = e.currentTarget.value)}
         onKeyDown={(e: KeyboardEvent) => {
           if (e.key === "Enter") {
             e.preventDefault();
@@ -102,7 +102,7 @@ export function PriorityChipButton({ task }: { task: Task }): VNode {
   }
   return (
     <button
-      class={"priority-chip " + priorityClass(task.priority)}
+      class={`priority-chip ${priorityClass(task.priority)}`}
       title={`Priority ${task.priority} (0 = highest) — click to edit`}
       onClick={(e: MouseEvent) => {
         e.stopPropagation();

@@ -30,7 +30,9 @@ declare global {
 }
 
 // ---------- mount + initial data ----------
-render(<App />, document.querySelector("main#app")!);
+const mountPoint = document.querySelector("main#app");
+if (!mountPoint) throw new Error("#main#app not found in document — cannot mount cortex UI");
+render(<App />, mountPoint);
 
 // One-shot bootstrap of the default post-update author.
 fetch("/api/me")
@@ -112,7 +114,7 @@ if (typeof Notification !== "undefined") {
 // click on those is a no-op. Anything else closes everything.
 document.addEventListener("click", (e: MouseEvent) => {
   const t = e.target as HTMLElement | null;
-  if (!t || !t.closest || !t.closest("[data-pop]")) closeAllPopovers();
+  if (!t?.closest?.("[data-pop]")) closeAllPopovers();
 });
 
 // ---------- global keyboard shortcuts ----------

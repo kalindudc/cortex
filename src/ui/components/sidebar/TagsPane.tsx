@@ -5,7 +5,7 @@
 // Click a tag row → toggle selectedTag (filters the right-pane task list).
 // Hover a tag row → reveals an edit affordance that opens TagEditModal.
 
-import type { VNode } from "preact";
+import type { JSX, VNode } from "preact";
 import { useSignal } from "@preact/signals";
 
 import { tasks, tags, selectedTag, selectedId, modal, paletteOpen, newTagOpen } from "../../state/signals.ts";
@@ -46,7 +46,7 @@ export function TagsPane(): VNode {
       <SidebarSystemBar />
       <div class="pane-section" style="padding-bottom: 8px">
         <button
-          class={"view-row" + (selectedTag.value === null ? " selected" : "")}
+          class={`view-row${selectedTag.value === null ? " selected" : ""}`}
           onClick={() => {
             selectedTag.value = null;
             selectedId.value = null;
@@ -58,7 +58,7 @@ export function TagsPane(): VNode {
           <span class="view-count">{totalTagged}</span>
         </button>
         <button
-          class={"view-row" + (selectedTag.value === UNTAGGED ? " selected" : "")}
+          class={`view-row${selectedTag.value === UNTAGGED ? " selected" : ""}`}
           onClick={() => {
             selectedTag.value = UNTAGGED;
             selectedId.value = null;
@@ -101,7 +101,7 @@ export function TagsPane(): VNode {
                 placeholder="tag name (a-z, 0-9, _ @ -)"
                 style="width:100%; height:28px; padding:4px 8px"
                 value={newTagName.value}
-                onInput={(e: any) => (newTagName.value = e.currentTarget.value)}
+                onInput={(e: JSX.TargetedInputEvent<HTMLInputElement>) => (newTagName.value = e.currentTarget.value)}
               />
             </form>
           ) : null}
@@ -114,7 +114,7 @@ export function TagsPane(): VNode {
               const sel = selectedTag.value === tg.name;
               return (
                 <button
-                  class={"lane-row" + (sel ? " selected" : "")}
+                  class={`lane-row${sel ? " selected" : ""}`}
                   onClick={() => {
                     selectedTag.value = sel ? null : tg.name;
                     selectedId.value = null;
@@ -172,13 +172,13 @@ export function TagsPane(): VNode {
             ) : (
               taggedTaskList.map(t => (
                 <button
-                  class={"task-row" + (activeTask.value && t.id === activeTask.value.id ? " active" : "")}
+                  class={`task-row${activeTask.value && t.id === activeTask.value.id ? " active" : ""}`}
                   draggable={true}
-                  onDragStart={(e: DragEvent) => e.dataTransfer!.setData("application/x-cortex-task-id", String(t.id))}
+                  onDragStart={(e: DragEvent) => e.dataTransfer?.setData("application/x-cortex-task-id", String(t.id))}
                   onClick={() => (selectedId.value = t.id)}
                   {...tip(t.title)}
                 >
-                  <span class={"dot dot-status-" + t.status}></span>
+                  <span class={`dot dot-status-${t.status}`}></span>
                   <span class="task-title">{t.title}</span>
                   <PriorityChip priority={t.priority} />
                 </button>

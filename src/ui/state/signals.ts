@@ -6,7 +6,7 @@
 // this file imports nothing from the state/ directory (acyclic).
 
 import { signal } from "@preact/signals";
-import type { Task, Lane, Tag, Update, Author } from "../api/types.ts";
+import type { Task, Lane, Update, Author } from "../api/types.ts";
 
 // ---------- task data ----------
 export const tasks = signal<Task[]>([]);

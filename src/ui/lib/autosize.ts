@@ -16,7 +16,7 @@ export const autosizeRef = (el: HTMLTextAreaElement | null): void => {
   t.__cortexAutoSized = true;
   const fit = () => {
     t.style.height = "auto";
-    t.style.height = t.scrollHeight + "px";
+    t.style.height = `${t.scrollHeight}px`;
   };
   t.addEventListener("input", fit);
   // Run once now (next paint) so initial content sizes correctly.
