@@ -435,6 +435,71 @@ export function buildApp(store: Store): Hono {
     }
   });
 
+  // ---------- dev-only live-reload ----------
+  // Gated by CORTEX_DEV=1 (set by scripts/dev.sh). The route is simply not
+  // registered when the env var is missing, so production `cortex serve`
+  // returns 404 for /api/dev-reload — no "is dev?" check leaks into the
+  // hot path. We watch out/bundle.js with node:fs.watch on macOS (FSEvents
+  // under the hood; reliable for a single file). Debounce ~100ms so a
+  // single bun-build write doesn't fan out into 3 reloads. The CSS slice
+  // pipeline rewrites bundle.css, which doesn't trigger this watcher —
+  // but build-css.sh re-touches bundle.js? No: it doesn't. So we ALSO
+  // watch out/bundle.css and reload on either. The browser's full reload
+  // pulls both fresh anyway.
+  if (process.env.CORTEX_DEV === "1") {
+    console.log("[cortex] dev-reload enabled — GET /api/dev-reload (CORTEX_DEV=1)");
+    const listeners = new Set<() => void>();
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const fanout = (): void => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        debounceTimer = null;
+        for (const fn of listeners) {
+          try {
+            fn();
+          } catch {
+            /* listener already gone — cleaned up on stream abort */
+          }
+        }
+      }, 100);
+    };
+    const watchOne = (p: string): void => {
+      try {
+        // recursive:false on a single file path; fs.watch tolerates the
+        // file going away briefly during atomic rewrites.
+        fs.watch(p, () => fanout());
+      } catch (e) {
+        console.warn(`[cortex] dev-reload: cannot watch ${p}: ${(e as Error).message}`);
+      }
+    };
+    const bundleJsAbs = path.resolve(import.meta.dir, "..", "out", "bundle.js");
+    const bundleCssAbs = path.resolve(import.meta.dir, "..", "out", "bundle.css");
+    watchOne(bundleJsAbs);
+    watchOne(bundleCssAbs);
+
+    app.get("/api/dev-reload", c =>
+      streamSSE(c, async stream => {
+        const onChange = (): void => {
+          void stream.writeSSE({
+            event: "reload",
+            data: JSON.stringify({ mtime: Date.now() }),
+          });
+        };
+        listeners.add(onChange);
+        stream.onAbort(() => {
+          listeners.delete(onChange);
+        });
+        // Initial hello so the client can confirm the channel is live.
+        await stream.writeSSE({ event: "hello", data: String(Date.now()) });
+        while (!stream.aborted) {
+          await stream.sleep(25000);
+          if (stream.aborted) break;
+          await stream.writeSSE({ event: "ping", data: String(Date.now()) });
+        }
+      }),
+    );
+  }
+
   // ---------- SSE ----------
   app.get("/events", c =>
     streamSSE(c, async stream => {

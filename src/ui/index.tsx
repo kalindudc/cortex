@@ -14,6 +14,11 @@
 
 import { render } from "preact";
 
+// Side-effect import: opens an EventSource to /api/dev-reload. The endpoint
+// only exists when the server is started with CORTEX_DEV=1 (i.e. via
+// `pnpm run serve:dev`); in production it 404s and the EventSource quietly
+// no-ops. See src/ui/dev-reload.ts.
+import "./dev-reload.ts";
 import App from "./components/App.tsx";
 import { refresh } from "./state/refresh.ts";
 import { meAuthor, paletteOpen, modal } from "./state/signals.ts";

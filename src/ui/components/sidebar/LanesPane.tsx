@@ -8,7 +8,16 @@
 import type { JSX, VNode } from "preact";
 import { useSignal } from "@preact/signals";
 
-import { tasks, lanes, selectedLane, selectedId, modal, paletteOpen, newLaneOpen } from "../../state/signals.ts";
+import {
+  tasks,
+  lanes,
+  selectedLane,
+  selectedId,
+  modal,
+  paletteOpen,
+  newLaneOpen,
+  showAllTasks,
+} from "../../state/signals.ts";
 import { tasksInLane, activeTask } from "../../state/computed.ts";
 import { togglePopover } from "../../state/popovers.ts";
 import { tip } from "../../state/tooltip.ts";
@@ -163,26 +172,44 @@ export function LanesPane(): VNode {
       {tasks.value.length > 0 ? (
         <div class="pane-section tasks-section">
           <div class="section-head">
-            <h1 class="eyebrow">{selectedLane.value ? <>Tasks &middot; {selectedLane.value}</> : <>All tasks</>}</h1>
+            <div class="row">
+              <h1 class="eyebrow grow">
+                {selectedLane.value ? <>Tasks &middot; {selectedLane.value}</> : <>All tasks</>}
+              </h1>
+              <button
+                class="btn-icon"
+                title={showAllTasks.value ? "Hide done tasks" : "Show done tasks too"}
+                onClick={() => (showAllTasks.value = !showAllTasks.value)}
+              >
+                <Icon name={showAllTasks.value ? "eye" : "eyeOff"} />
+              </button>
+            </div>
           </div>
           <div class="section-body">
-            {tasksInLane.value.length === 0 ? (
-              <p class="meta">no tasks in this lane</p>
-            ) : (
-              tasksInLane.value.map(t => (
-                <button
-                  class={`task-row${activeTask.value && t.id === activeTask.value.id ? " active" : ""}`}
-                  draggable={true}
-                  onDragStart={(e: DragEvent) => e.dataTransfer?.setData("application/x-cortex-task-id", String(t.id))}
-                  onClick={() => (selectedId.value = t.id)}
-                  {...tip(t.title)}
-                >
-                  <span class={`dot dot-status-${t.status}`}></span>
-                  <span class="task-title">{t.title}</span>
-                  <PriorityChip priority={t.priority} />
-                </button>
-              ))
-            )}
+            {(() => {
+              const visibleTasks = showAllTasks.value
+                ? tasksInLane.value
+                : tasksInLane.value.filter(t => t.status !== "done");
+              return visibleTasks.length === 0 ? (
+                <p class="meta">no tasks in this lane</p>
+              ) : (
+                visibleTasks.map(t => (
+                  <button
+                    class={`task-row${activeTask.value && t.id === activeTask.value.id ? " active" : ""}`}
+                    draggable={true}
+                    onDragStart={(e: DragEvent) =>
+                      e.dataTransfer?.setData("application/x-cortex-task-id", String(t.id))
+                    }
+                    onClick={() => (selectedId.value = t.id)}
+                    {...tip(t.title)}
+                  >
+                    <span class={`dot dot-status-${t.status}`}></span>
+                    <span class="task-title">{t.title}</span>
+                    <PriorityChip priority={t.priority} />
+                  </button>
+                ))
+              );
+            })()}
           </div>
         </div>
       ) : null}

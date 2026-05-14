@@ -31,8 +31,10 @@
 }
 .btn-primary:hover { background: var(--accent-hover); color: var(--accent-on); }
 .btn-icon {
-  width: 28px; height: 28px; padding: 0; justify-content: center;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; padding: 0; border-radius: var(--r-2);
   color: var(--text-3);
+  transition: background var(--dur-2) var(--ease), color var(--dur-2) var(--ease);
 }
 .btn-icon:hover { color: var(--text); background: var(--tint); }
 .btn-danger:hover { color: var(--err); background: var(--tint); }

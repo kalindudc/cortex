@@ -39,6 +39,9 @@ export const sidebarView = signal<"lanes" | "tags">("lanes");
 export const selectedTag = signal<string | null>(null);
 export const selectedLane = signal<string | null>(null);
 export const selectedId = signal<number | null>(null);
+// Tasks-list filter toggle in LanesPane. false (default) = hide done tasks;
+// true = show everything. In-memory only, matching sibling sidebar signals.
+export const showAllTasks = signal<boolean>(false);
 
 // ---------- popovers / overlays ----------
 // New-tag inline form open/closed (mirrors newLaneOpen).

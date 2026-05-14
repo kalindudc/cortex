@@ -44,7 +44,15 @@ mock.module("../../../../src/ui/api/client.ts", () => ({
 import { render, fireEvent } from "@testing-library/preact";
 
 import { LanesPane } from "../../../../src/ui/components/sidebar/LanesPane.tsx";
-import { lanes, tasks, selectedLane, selectedId, newLaneOpen, sidebarView } from "../../../../src/ui/state/signals.ts";
+import {
+  lanes,
+  tasks,
+  selectedLane,
+  selectedId,
+  newLaneOpen,
+  sidebarView,
+  showAllTasks,
+} from "../../../../src/ui/state/signals.ts";
 
 describe("LanesPane", () => {
   beforeEach(() => {
@@ -53,6 +61,7 @@ describe("LanesPane", () => {
     selectedId.value = null;
     newLaneOpen.value = false;
     tasks.value = [];
+    showAllTasks.value = false;
     lanes.value = [
       { name: "now", color: "#888", sort: 0 },
       { name: "next", color: "#444", sort: 1 },
@@ -118,5 +127,71 @@ describe("LanesPane", () => {
     fireEvent.submit(form);
     await Promise.resolve();
     expect(addLane).not.toHaveBeenCalled();
+  });
+
+  test("Tasks list hides done tasks by default", () => {
+    selectedLane.value = "now";
+    tasks.value = [
+      {
+        id: 1,
+        lane: "now",
+        title: "open task",
+        body: null,
+        status: "open",
+        priority: 0,
+        created: 0,
+        updated: 0,
+        tags: [],
+      },
+      {
+        id: 2,
+        lane: "now",
+        title: "done task",
+        body: null,
+        status: "done",
+        priority: 0,
+        created: 0,
+        updated: 0,
+        tags: [],
+      },
+    ];
+    const { container } = render(<LanesPane />);
+    const rows = container.querySelectorAll(".task-row");
+    expect(rows.length).toBe(1);
+    expect(rows[0].querySelector(".task-title")?.textContent).toBe("open task");
+  });
+
+  test("clicking the toggle button reveals done tasks and flips the signal", () => {
+    selectedLane.value = "now";
+    tasks.value = [
+      {
+        id: 1,
+        lane: "now",
+        title: "open task",
+        body: null,
+        status: "open",
+        priority: 0,
+        created: 0,
+        updated: 0,
+        tags: [],
+      },
+      {
+        id: 2,
+        lane: "now",
+        title: "done task",
+        body: null,
+        status: "done",
+        priority: 0,
+        created: 0,
+        updated: 0,
+        tags: [],
+      },
+    ];
+    const { container } = render(<LanesPane />);
+    const toggle = container.querySelector('button[title="Show done tasks too"]') as HTMLButtonElement;
+    if (!toggle) throw new Error("expected the show-done toggle to render");
+    fireEvent.click(toggle);
+    expect(showAllTasks.value).toBe(true);
+    expect(container.querySelectorAll(".task-row").length).toBe(2);
   });
 });
