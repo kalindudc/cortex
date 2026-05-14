@@ -524,20 +524,33 @@ export function buildApp(store: Store): Hono {
 
 export type ServerHandle = {
   port: number;
+  /** Loopback URL written to `cortex.url`; used by the CLI client. */
   url: string;
+  /** User-facing URL written to `cortex.browser-url`; opened in a browser. */
+  browserUrl: string;
   stop(): Promise<void>;
 };
 
-export function startServer({ port, store }: { port: number; store: Store }): ServerHandle {
+export function startServer({
+  port,
+  host = "cortex.localhost",
+  store,
+}: {
+  port: number;
+  host?: string;
+  store: Store;
+}): ServerHandle {
   const app = buildApp(store);
   const server = Bun.serve({
     port,
     hostname: "127.0.0.1",
     fetch: app.fetch,
   });
+  const resolvedPort = server.port ?? port;
   return {
-    port: server.port ?? port,
-    url: `http://127.0.0.1:${server.port}`,
+    port: resolvedPort,
+    url: `http://127.0.0.1:${resolvedPort}`,
+    browserUrl: `http://${host}:${resolvedPort}`,
     async stop() {
       server.stop(true);
     },

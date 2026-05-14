@@ -2,7 +2,35 @@ import { defineCommand } from "citty";
 import fs from "node:fs";
 import { Store } from "../store.ts";
 import { startServer } from "../server.ts";
-import { pidPath, urlPath, ensureConfigDir } from "../paths.ts";
+import { pidPath, urlPath, browserUrlPath, ensureConfigDir } from "../paths.ts";
+import { openInBrowser } from "../open-browser.ts";
+
+/**
+ * Validate a user-supplied hostname for the printed/opened dashboard URL.
+ *
+ * Accepts RFC 1123 label-or-FQDN shape: ASCII letters, digits, dots, and
+ * hyphens; first AND last character must be alphanumeric; max length 253.
+ * Rejects empty / whitespace-only strings, scheme prefixes, port suffixes,
+ * and any character outside the allowed set (e.g. `:`, `/`, spaces).
+ *
+ * Casing is preserved. DNS itself is case-insensitive, but display layers
+ * (CLI stdout, the writeable cortex.browser-url file) should reflect the
+ * user's intent.
+ *
+ * On rejection, prints a single-line error to stderr and exits 1 — same
+ * convention as the `--port` validation above this helper.
+ */
+function validateHost(raw: unknown): string {
+  const value = typeof raw === "string" ? raw : "";
+  // RFC 1123 label-or-FQDN: A-Z, a-z, 0-9, `.`, `-`; must START AND END
+  // with [A-Za-z0-9]. Length cap mirrors the DNS hostname limit.
+  const ok = value.length > 0 && value.length <= 253 && /^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/.test(value);
+  if (!ok) {
+    console.error("error: --host must be a valid hostname (RFC 1123 form, no port, no scheme)");
+    process.exit(1);
+  }
+  return value;
+}
 
 export default defineCommand({
   meta: { name: "serve", description: "run the cortex API server (writes ~/.config/cortex/cortex.{pid,url})" },
@@ -24,6 +52,12 @@ export default defineCommand({
       default: false,
       description: "do not auto-open the dashboard in a browser (headless)",
     },
+    host: {
+      type: "string",
+      default: "cortex.localhost",
+      valueHint: "name",
+      description: "user-facing hostname for the printed URL (server still binds 127.0.0.1)",
+    },
   },
   run({ args }) {
     const port = Number.parseInt(args.port, 10);
@@ -32,6 +66,7 @@ export default defineCommand({
       process.exit(1);
     }
 
+    const host = validateHost(args.host);
     if (!args.foreground) {
       ensureConfigDir();
       // In a `bun build --compile` binary, argv[1] is the embedded virtual
@@ -46,25 +81,22 @@ export default defineCommand({
       });
       if (typeof child.unref === "function") child.unref();
       fs.writeFileSync(pidPath(), String(child.pid));
-      const url = `http://127.0.0.1:${port}`;
-      fs.writeFileSync(urlPath(), url);
-      console.log(`✓ cortex serving at ${url} (pid ${child.pid})`);
-      if (process.platform === "darwin" && !args["no-open"]) {
-        try {
-          Bun.spawn(["open", url]);
-        } catch {
-          /* best-effort */
-        }
-      }
+      const apiUrl = `http://127.0.0.1:${port}`;
+      const browserUrl = `http://${host}:${port}`;
+      fs.writeFileSync(urlPath(), apiUrl);
+      fs.writeFileSync(browserUrlPath(), browserUrl);
+      console.log(`✓ cortex serving at ${browserUrl} (pid ${child.pid})`);
+      if (!args["no-open"]) openInBrowser(browserUrl);
       return;
     }
 
     const store = Store.open();
-    const handle = startServer({ port, store });
+    const handle = startServer({ port, host, store });
     ensureConfigDir();
     fs.writeFileSync(pidPath(), String(process.pid));
     fs.writeFileSync(urlPath(), handle.url);
-    console.log(`cortex listening on ${handle.url}`);
+    fs.writeFileSync(browserUrlPath(), handle.browserUrl);
+    console.log(`cortex listening on ${handle.browserUrl}`);
 
     const shutdown = async () => {
       try {
@@ -76,6 +108,7 @@ export default defineCommand({
       try {
         fs.rmSync(pidPath(), { force: true });
         fs.rmSync(urlPath(), { force: true });
+        fs.rmSync(browserUrlPath(), { force: true });
       } catch {
         /* ignore */
       }

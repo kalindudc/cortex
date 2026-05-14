@@ -35,6 +35,17 @@ export function urlPath(): string {
 }
 
 /**
+ * Path to the daemon BROWSER URL file. Written by `serve` so `cortex open`
+ * (and humans inspecting the config dir) know the user-facing URL for the
+ * dashboard. Distinct from `urlPath()` because the browser URL uses the
+ * friendly hostname (e.g. `cortex.localhost`) which the CLI client cannot
+ * reliably resolve via Bun's fetch / curl / glibc getaddrinfo.
+ */
+export function browserUrlPath(): string {
+  return path.join(configDir(), "cortex.browser-url");
+}
+
+/**
  * Ensure the config directory exists. Idempotent.
  */
 export function ensureConfigDir(): void {

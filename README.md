@@ -11,7 +11,8 @@ pnpm run build                       # compile to bin/cortex
 cortex init                          # create ~/.config/cortex/cortex.db
 cortex add "ship plan 1" -p 0
 cortex ls
-cortex serve                         # start API daemon on 127.0.0.1:7777
+cortex serve                         # start the dashboard on http://cortex.localhost:7777
+cortex open                          # re-open the dashboard in your browser
 cortex stop                          # stop the daemon
 ```
 
@@ -50,8 +51,9 @@ PORT=7778 pnpm run serve:dev
 | `mv <id> <lane>` | move a task to another lane (auto-creates `lane` if missing) |
 | `rm <id> [-f]` | remove a task (prompts unless `-f`) |
 | `lane add\|ls\|edit\|rm` | manage lanes |
-| `serve [-p port] [--foreground] [--no-open]` | run the HTTP daemon; serves the dashboard at `/` |
-| `reset` | stop the daemon (if running), wipe the DB + WAL sidecars + pid/url files, then re-init an empty DB. Requires typing `RESET` to confirm. |
+| `serve [-p port] [--foreground] [--no-open] [--host name]` | run the HTTP daemon; serves the dashboard at `/`. Default printed URL uses the friendly host `http://cortex.localhost:<port>` (server still binds `127.0.0.1`). |
+| `open` | open the cortex dashboard in your default browser |
+| `reset` | stop the daemon (if running), wipe the DB + WAL sidecars + pid/url/browser-url files, then re-init an empty DB. Requires typing `RESET` to confirm. |
 | `stop` | stop the running daemon |
 
 ## Lanes

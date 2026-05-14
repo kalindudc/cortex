@@ -2,7 +2,7 @@ import { defineCommand } from "citty";
 import readline from "node:readline";
 import fs from "node:fs";
 import { Store } from "../store.ts";
-import { dbPath, pidPath, urlPath, ensureConfigDir } from "../paths.ts";
+import { dbPath, pidPath, urlPath, browserUrlPath, ensureConfigDir } from "../paths.ts";
 import { writeAllSkills, skillDir, skillsRoot, listSkills } from "../skills.ts";
 import { writeAllExtensions, extensionDir, extensionsRoot, listExtensions } from "../extensions.ts";
 
@@ -58,7 +58,7 @@ async function stopDaemonIfRunning(): Promise<boolean> {
     }
   }
   // Force-cleanup any lingering daemon state files.
-  for (const p of [pidPath(), urlPath()]) {
+  for (const p of [pidPath(), urlPath(), browserUrlPath()]) {
     try {
       fs.rmSync(p, { force: true });
     } catch {
@@ -84,7 +84,7 @@ export default defineCommand({
     }
     console.log(`  • delete ${db}`);
     console.log(`  • delete ${db}-wal, ${db}-shm (SQLite WAL sidecars, if present)`);
-    console.log(`  • delete ${pidPath()}, ${urlPath()} (daemon state, if present)`);
+    console.log(`  • delete ${pidPath()}, ${urlPath()}, ${browserUrlPath()} (daemon state, if present)`);
     console.log(`  • wipe and regenerate ${listSkills().length} skill dir(s) under ${skillsRoot()}`);
     console.log(`  • wipe and regenerate ${listExtensions().length} pi extension(s) under ${extensionsRoot()}`);
     console.log(`  • re-initialize an empty database with the default 'now' lane`);

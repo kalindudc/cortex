@@ -19,6 +19,7 @@ const EXPECTED_SUBCOMMANDS = [
   "lane",
   "tag",
   "serve",
+  "open",
   "stop",
   "reset",
   "resume",

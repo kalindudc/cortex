@@ -1,10 +1,11 @@
 import { defineCommand } from "citty";
 import fs from "node:fs";
-import { pidPath, urlPath } from "./../paths.ts";
+import { pidPath, urlPath, browserUrlPath } from "./../paths.ts";
 
 function cleanupFiles(): void {
   fs.rmSync(pidPath(), { force: true });
   fs.rmSync(urlPath(), { force: true });
+  fs.rmSync(browserUrlPath(), { force: true });
 }
 
 function isAlive(pid: number): boolean {

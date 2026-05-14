@@ -1,5 +1,5 @@
 import { test, expect, describe, beforeEach, afterEach } from "bun:test";
-import { configDir, dbPath, pidPath, urlPath, ensureConfigDir } from "../../src/paths.ts";
+import { configDir, dbPath, pidPath, urlPath, browserUrlPath, ensureConfigDir } from "../../src/paths.ts";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
@@ -87,6 +87,15 @@ describe("paths", () => {
   test("urlPath() resolves under configDir()", () => {
     expect(urlPath()).toBe(path.join(tmpDir, "cortex", "cortex.url"));
     expect(urlPath()).toBe(path.join(configDir(), "cortex.url"));
+  });
+
+  test("browserUrlPath() resolves under configDir() and is distinct from urlPath()", () => {
+    expect(browserUrlPath()).toBe(path.join(tmpDir, "cortex", "cortex.browser-url"));
+    expect(browserUrlPath()).toBe(path.join(configDir(), "cortex.browser-url"));
+    // Distinct file: CLI uses urlPath() (loopback), browser/`cortex open` uses
+    // browserUrlPath() (friendly host). Conflating them would route mutations
+    // through DNS that Bun fetch / glibc getaddrinfo cannot resolve.
+    expect(browserUrlPath()).not.toBe(urlPath());
   });
 
   test("ensureConfigDir() creates the directory (XDG pinned to tmp)", () => {

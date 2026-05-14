@@ -25,6 +25,7 @@ Cortex is a single-binary, single-user task tracker designed for one human super
 | `cortex edit <id>` | Edit a task's title, body, or priority. Body edits prefer anchor-based partial replace. | [edit.md](cli/edit.md) |
 | `cortex update <id> -m <msg> --as <id>` | Post an update on a task; optionally flip status. | [cli/update.md](cli/update.md) |
 | `cortex serve` | Run the localhost API + dashboard daemon. | [serve.md](cli/serve.md) |
+| `cortex open` | Open the cortex dashboard in your default browser. | [open.md](cli/open.md) |
 | `cortex reset` | Wipe the DB and regenerate the skill (destructive, requires typing `RESET`). | [reset.md](cli/reset.md) |
 
 Other commands (`ls`, `show`, `mv`, `rm`, `lane`, `stop`) follow the same shape — run `cortex <cmd> --help` for argument reference.

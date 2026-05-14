@@ -26,10 +26,11 @@ import { BIN, mkTmpEnv, runCli } from "../helpers.ts";
 
 // Real user-home pid/url files we MUST NOT touch. The daemon under test
 // has XDG_CONFIG_HOME=<tmpDir> in its env so it writes into
-// <tmpDir>/cortex/cortex.{pid,url} instead of ~/.config/cortex/, but we
-// snapshot the real files anyway to fail loud if that pin ever regresses.
+// <tmpDir>/cortex/cortex.{pid,url,browser-url} instead of ~/.config/cortex/,
+// but we snapshot the real files anyway to fail loud if that pin ever regresses.
 const REAL_PID = path.join(os.homedir(), ".config", "cortex", "cortex.pid");
 const REAL_URL = path.join(os.homedir(), ".config", "cortex", "cortex.url");
+const REAL_BROWSER_URL = path.join(os.homedir(), ".config", "cortex", "cortex.browser-url");
 
 type Snap = { mtimeMs: number; size: number } | null;
 function snap(p: string): Snap {
@@ -48,6 +49,7 @@ function snapEq(a: Snap, b: Snap): boolean {
 
 let realPidBefore: Snap = null;
 let realUrlBefore: Snap = null;
+let realBrowserUrlBefore: Snap = null;
 
 // Track every PID we spawn so afterAll can SIGKILL them no matter what.
 const spawnedPids = new Set<number>();
@@ -55,6 +57,7 @@ const spawnedPids = new Set<number>();
 beforeAll(() => {
   realPidBefore = snap(REAL_PID);
   realUrlBefore = snap(REAL_URL);
+  realBrowserUrlBefore = snap(REAL_BROWSER_URL);
 });
 
 afterAll(() => {
@@ -88,11 +91,13 @@ async function spawnDaemon(label: string): Promise<{
   tmpDir: string;
   pidFile: string;
   urlFile: string;
+  browserUrlFile: string;
   cleanup: () => void;
 }> {
   const { tmpDir, env, cleanup } = mkTmpEnv(label);
   const pidFile = path.join(tmpDir, "cortex", "cortex.pid");
   const urlFile = path.join(tmpDir, "cortex", "cortex.url");
+  const browserUrlFile = path.join(tmpDir, "cortex", "cortex.browser-url");
 
   const proc = Bun.spawn([BIN, "serve", "--port", "0", "--foreground", "--no-open"], {
     env,
@@ -107,10 +112,10 @@ async function spawnDaemon(label: string): Promise<{
   // so first-existence is a strict happens-after of the listener install.
   const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
-    if (fs.existsSync(pidFile) && fs.existsSync(urlFile)) break;
+    if (fs.existsSync(pidFile) && fs.existsSync(urlFile) && fs.existsSync(browserUrlFile)) break;
     await Bun.sleep(25);
   }
-  if (!fs.existsSync(pidFile) || !fs.existsSync(urlFile)) {
+  if (!fs.existsSync(pidFile) || !fs.existsSync(urlFile) || !fs.existsSync(browserUrlFile)) {
     // Daemon never came up. Capture stderr for a useful failure message
     // and tear everything down before throwing.
     let stderr = "";
@@ -125,19 +130,20 @@ async function spawnDaemon(label: string): Promise<{
       /* ignore */
     }
     cleanup();
-    throw new Error(`daemon failed to write pid/url within 5s. stderr=${stderr}`);
+    throw new Error(`daemon failed to write pid/url/browser-url within 5s. stderr=${stderr}`);
   }
 
-  return { proc, tmpDir, pidFile, urlFile, cleanup };
+  return { proc, tmpDir, pidFile, urlFile, browserUrlFile, cleanup };
 }
 
 describe("cortex serve shutdown integration", () => {
-  test("SIGTERM to the daemon removes pid/url files and exits cleanly", async () => {
-    const { proc, pidFile, urlFile, cleanup } = await spawnDaemon("serve-sigterm");
+  test("SIGTERM to the daemon removes pid/url/browser-url files and exits cleanly", async () => {
+    const { proc, pidFile, urlFile, browserUrlFile, cleanup } = await spawnDaemon("serve-sigterm");
     try {
       // Sanity: the daemon wrote into our tmp dir, not ~/.config/cortex.
       expect(fs.existsSync(pidFile)).toBe(true);
       expect(fs.existsSync(urlFile)).toBe(true);
+      expect(fs.existsSync(browserUrlFile)).toBe(true);
       const recordedPid = Number.parseInt(fs.readFileSync(pidFile, "utf8").trim(), 10);
       expect(recordedPid).toBe(proc.pid);
 
@@ -157,12 +163,14 @@ describe("cortex serve shutdown integration", () => {
       const code = await proc.exited;
       expect([0, 143]).toContain(code);
 
-      // shutdown() should have removed both files. This is the assertion
-      // that proves the handler ran to completion (vs. the kernel
-      // delivering SIGTERM and the runtime tearing down the process
-      // before the listener fired).
+      // shutdown() should have removed all three files. This is the
+      // assertion that proves the handler ran to completion (vs. the
+      // kernel delivering SIGTERM and the runtime tearing down the process
+      // before the listener fired). Plan 35 added cortex.browser-url to the
+      // cleanup set; missing it from the rmSync would be silent leakage.
       expect(fs.existsSync(pidFile)).toBe(false);
       expect(fs.existsSync(urlFile)).toBe(false);
+      expect(fs.existsSync(browserUrlFile)).toBe(false);
     } finally {
       // Always remove from the kill-set; the process is already gone.
       spawnedPids.delete(proc.pid);
@@ -185,7 +193,7 @@ describe("cortex serve shutdown integration", () => {
       return;
     }
 
-    const { proc, pidFile, urlFile, tmpDir, cleanup } = await spawnDaemon("serve-stop-e2e");
+    const { proc, pidFile, urlFile, browserUrlFile, tmpDir, cleanup } = await spawnDaemon("serve-stop-e2e");
     try {
       // Build the stop env from the SAME tmpDir/XDG_CONFIG_HOME so
       // stop.ts resolves the same pidPath()/urlPath() the daemon wrote.
@@ -205,6 +213,8 @@ describe("cortex serve shutdown integration", () => {
       expect([0, 143]).toContain(code);
       expect(fs.existsSync(pidFile)).toBe(false);
       expect(fs.existsSync(urlFile)).toBe(false);
+      // Plan 35: stop.cleanupFiles() must remove cortex.browser-url too.
+      expect(fs.existsSync(browserUrlFile)).toBe(false);
     } finally {
       spawnedPids.delete(proc.pid);
       cleanup();
@@ -224,5 +234,10 @@ describe("cortex serve shutdown integration", () => {
   test("hermetic guard: ~/.config/cortex/cortex.url mtime+size unchanged", () => {
     const after = snap(REAL_URL);
     expect(snapEq(after, realUrlBefore)).toBe(true);
+  });
+
+  test("hermetic guard: ~/.config/cortex/cortex.browser-url mtime+size unchanged", () => {
+    const after = snap(REAL_BROWSER_URL);
+    expect(snapEq(after, realBrowserUrlBefore)).toBe(true);
   });
 });
