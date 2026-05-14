@@ -13,14 +13,11 @@
 
 import { activeTask } from "../../state/computed.ts";
 import {
-  selectedLane,
-  selectedTag,
-  sidebarView,
+  setFilter,
+  clearAllFilters,
   modal,
   paletteOpen,
   tagsPopover,
-  newLaneOpen,
-  newTagOpen,
   lanes,
   tasks,
   tags,
@@ -132,6 +129,39 @@ export function buildCommands(): Command[] {
     });
   }
 
+  // ----- top-level smart-view filter shortcuts -----
+  // Mirrors the View rows in SidebarPane so filter swaps stay one-key-away.
+  cmds.push({
+    id: "filter-review",
+    label: "Filter: In review",
+    hint: "",
+    icon: "eye",
+    action: () => {
+      setFilter("status", "review");
+      selectedId.value = null;
+    },
+  });
+  cmds.push({
+    id: "filter-blocked",
+    label: "Filter: Blocked",
+    hint: "",
+    icon: "ban",
+    action: () => {
+      setFilter("status", "blocked");
+      selectedId.value = null;
+    },
+  });
+  cmds.push({
+    id: "filter-clear",
+    label: "Clear filters",
+    hint: "",
+    icon: "rotateCcw",
+    action: () => {
+      clearAllFilters();
+      selectedId.value = null;
+    },
+  });
+
   // ----- lane scoped (one root entry per verb) -----
   cmds.push({
     id: "filter-lane",
@@ -145,7 +175,7 @@ export function buildCommands(): Command[] {
         hint: "",
         icon: "inbox",
         action: () => {
-          selectedLane.value = null;
+          setFilter("lane", null);
           selectedId.value = null;
         },
       },
@@ -155,7 +185,7 @@ export function buildCommands(): Command[] {
         hint: "",
         icon: "inbox",
         action: () => {
-          selectedLane.value = l.name;
+          setFilter("lane", l.name);
           selectedId.value = null;
         },
       })),
@@ -203,55 +233,28 @@ export function buildCommands(): Command[] {
     hint: "",
     icon: "plus",
     action: () => {
+      // Routes through ModalRoot → NewLaneModal so creation matches the
+      // edit/delete flow and the name input is reliably focused on open.
       closeAllPopovers();
-      newLaneOpen.value = true;
-      setTimeout(() => (document.querySelector(".pane-lanes input") as HTMLElement | null)?.focus(), 0);
+      modal.value = { kind: "new-lane" };
     },
   });
 
-  // ----- tag scoped (sidebar mode + filter + edit + new) -----
+  // ----- tag scoped (filter + edit) -----
+  // Single top-level "Filter by tags…" entry opens TagFilterModal — that's
+  // the canonical entry for ALL tag filtering, including search and multi-
+  // select. We deliberately do NOT flatten per-tag toggle commands into the
+  // root list: it bloats the palette and the modal's own search already
+  // covers "type a tag name to find it" use case.
+  // Standalone tag CREATION lives in TagPicker on the active task.
   cmds.push({
-    id: "sidebar-mode",
-    label: sidebarView.value === "tags" ? "Switch to lane mode" : "Switch to tag mode",
-    hint: "",
-    icon: sidebarView.value === "tags" ? "home" : "hash",
-    action: () => {
-      const goingHome = sidebarView.value === "tags";
-      sidebarView.value = goingHome ? "lanes" : "tags";
-      if (goingHome) selectedTag.value = null;
-    },
+    id: "filter-tags-modal",
+    label: "Filter by tags\u2026",
+    hint: "opens modal",
+    icon: "hash",
+    action: () => (modal.value = { kind: "filter-tags" }),
   });
   if (tags.value.length > 0) {
-    cmds.push({
-      id: "filter-tag",
-      label: "Filter by tag\u2026",
-      hint: "",
-      icon: "hash",
-      submenu: () => [
-        {
-          id: "tag-all",
-          label: "All tags",
-          hint: "",
-          icon: "hash",
-          action: () => {
-            selectedTag.value = null;
-            selectedId.value = null;
-          },
-        },
-        ...[...tags.value]
-          .sort((a, b) => a.name.localeCompare(b.name))
-          .map(tg => ({
-            id: `tag-${tg.name}`,
-            label: `#${tg.name}`,
-            hint: `${tg.task_count}`,
-            icon: "hash",
-            action: () => {
-              selectedTag.value = tg.name;
-              selectedId.value = null;
-            },
-          })),
-      ],
-    });
     cmds.push({
       id: "edit-tag",
       label: "Edit tag\u2026",
@@ -269,18 +272,6 @@ export function buildCommands(): Command[] {
           })),
     });
   }
-  cmds.push({
-    id: "new-tag",
-    label: "New tag\u2026",
-    hint: "",
-    icon: "plus",
-    action: () => {
-      sidebarView.value = "tags";
-      closeAllPopovers();
-      newTagOpen.value = true;
-      setTimeout(() => (document.querySelector(".pane-tags input") as HTMLElement | null)?.focus(), 0);
-    },
-  });
 
   // ----- system -----
   cmds.push({

@@ -1,86 +1,85 @@
 /* ---------- layout ---------- */
+/* 3-column × 2-row main grid. Row 1 holds the three panes (lanes/active/
+   inbox); row 2 is the app-wide status bar that spans all three columns. */
 main {
   display: grid;
-  grid-template-columns: 220px 1fr 340px;
-  grid-template-areas: "lanes active inbox";
+  grid-template-columns: 280px 1fr 340px;
+  grid-template-rows: 1fr auto;
+  grid-template-areas:
+    "lanes active inbox"
+    "status status status";
   height: 100vh;
   overflow: hidden;
 }
+.status-bar { grid-area: status; }
 .pane { overflow: auto; display: flex; flex-direction: column; min-height: 0; }
-/* Left sidebar opts out of pane-level scrolling: each domain section
-   (Lanes, Tasks) owns its own scroll context so the system strip, All
-   tasks button, and pane-foot stay pinned. */
+/* Sidebar pane: per-section scroll model with content-aware packing.
+   The pane is a fixed flex column; .sidebar-body holds the section stack
+   between .pane-system (top) and .pane-foot (bottom) which stay pinned via
+   flex-shrink:0 in misc.css. Each .pane-section inside .sidebar-body is
+   itself a flex column whose body owns its own overflow-y — a long lane
+   list never pushes the task list out of view, and collapsing one section
+   gives the open ones more room.
+
+   Sizing model (the "pack to content, give Tasks the rest, never starve
+   Tasks" rule):
+     .section-views — 0 0 auto: 4 fixed rows, sized to content.
+     .section-lanes — 0 1 auto: sized to its content; can SHRINK if Tasks
+                                 demands its floor (then internal scroll).
+     .section-tags  — 0 1 auto: same as lanes.
+     .section-tasks — 1 0 33.333%: basis = 1/3 of .sidebar-body, grow=1
+                                    (takes all extra space when Lanes/Tags
+                                    are short), shrink=0 (NEVER goes below
+                                    its 1/3 floor). Long task lists scroll
+                                    inside Tasks rather than evicting it.
+     .closed        — 0 0 auto: header-only when collapsed.
+
+   min-height:0 on each open shrinkable section (and on .sidebar-body) is
+   load-bearing — without it, flex children refuse to shrink below their
+   intrinsic content size and the inner overflow-y never engages. The
+   60px floor on Lanes/Tags keeps at least the header + ~1 row visible
+   even when Tasks is claiming most of the column. */
 .pane-lanes  { grid-area: lanes; background: var(--panel); overflow: hidden; }
-
-/* Lanes section
-   ---------------
-   When ALONE in the middle (no tasks list rendered yet), it grows to fill
-   all remaining vertical space and scrolls internally if there are many
-   lanes.
-
-   When PAIRED with the tasks section, it caps at one-third of the pane
-   height (:has() selector below) so a long lane list can never squeeze the
-   task list out of view — task triage is the primary activity, lane
-   navigation is secondary. The lanes-section then becomes a fixed-basis
-   flex item; the tasks section consumes whatever's left.
-
-   Padding lives on the inner .section-head / .section-body (not on the
-   section itself) so the sticky header can span flush to the section's
-   edges and cover scrolling content underneath without a padding gap. */
-.pane-lanes > .lanes-section,
-.pane-lanes > .tasks-section {
-  padding: 0;
+.sidebar-pane { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.sidebar-pane > .sidebar-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.sidebar-pane .pane-section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.sidebar-pane .pane-section.closed { flex: 0 0 auto; }
+/* Tasks gets the lion's share of the sidebar; Lanes is content-sized but
+   capped so a long lane list never crowds the task list. With max-height
+   30%, Lanes scrolls internally past ~6–7 lanes; Tasks claims the rest. */
+.sidebar-pane .pane-section.section-views.open { flex: 0 0 auto; }
+.sidebar-pane .pane-section.section-lanes.open { flex: 0 1 auto; min-height: 60px; max-height: 30%; }
+.sidebar-pane .pane-section.section-tasks.open { flex: 1 0 50%; min-height: 50%; }
+/* Reset the global .pane-section { padding: 16px } from misc.css inside the
+   sidebar so section content uses the full pane width — the global rule is
+   intended for the active/inbox panes, but inside the sidebar it'd inset
+   rows by an extra 16px on top of .section-body's own horizontal padding. */
+.sidebar-pane .pane-section { padding: 0; }
+/* Section bodies inside open sections own their internal scroll. The header
+   (.section-head / .section-toggle) stays pinned via flex-shrink:0. */
+.sidebar-pane .pane-section .section-head { flex-shrink: 0; }
+.sidebar-pane .pane-section.open > .section-body {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--border-strong) transparent;
 }
-.pane-lanes:has(> .tasks-section) > .lanes-section {
-  flex: 0 0 auto;
-  max-height: 33%;
-}
-.pane-lanes > .tasks-section {
-  /* Visible gap between the lane list and the task list — they're
-     conceptually separate, the spacing should reflect that. */
-  padding-top: 12px;
-}
-
-/* Sticky section header for both lanes-section and tasks-section. Sits at
-   the top of its scrolling parent so the title (and the new-lane form when
-   open) stays visible no matter how far you scroll. Background matches the
-   pane so scrolling content disappears cleanly underneath.
-
-   min-height matches the .btn-icon height (28px) so the Tasks heading
-   (eyebrow only) reads at the same visual weight as the Lanes heading
-   (eyebrow + plus button). flex-column + justify-content:center vertically
-   centers content within the min-height box. */
-.lanes-section > .section-head,
-.tasks-section > .section-head {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background: var(--panel);
-  padding: 12px 16px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  min-height: 28px;
-}
-.lanes-section > .section-body,
-.tasks-section > .section-body {
-  padding: 0 16px 16px 16px;
-}
-
-/* Shared scrollbar styling for both internal scrollers in the lanes pane. */
-.pane-lanes > .lanes-section::-webkit-scrollbar,
-.pane-lanes > .tasks-section::-webkit-scrollbar         { width: 8px; }
-.pane-lanes > .lanes-section::-webkit-scrollbar-track,
-.pane-lanes > .tasks-section::-webkit-scrollbar-track   { background: transparent; }
-.pane-lanes > .lanes-section::-webkit-scrollbar-thumb,
-.pane-lanes > .tasks-section::-webkit-scrollbar-thumb   { background: var(--border-strong); border-radius: 4px; }
-.pane-lanes > .lanes-section::-webkit-scrollbar-thumb:hover,
-.pane-lanes > .tasks-section::-webkit-scrollbar-thumb:hover { background: var(--text-3); }
+.sidebar-pane .pane-section.open > .section-body::-webkit-scrollbar         { width: 8px; }
+.sidebar-pane .pane-section.open > .section-body::-webkit-scrollbar-track   { background: transparent; }
+.sidebar-pane .pane-section.open > .section-body::-webkit-scrollbar-thumb   { background: var(--border-strong); border-radius: 4px; }
+.sidebar-pane .pane-section.open > .section-body::-webkit-scrollbar-thumb:hover { background: var(--text-3); }
 /* Active pane wears the dot-grid "paper" background as a subtle full-pane
    texture. 26px gap + sub-pixel dots make it almost invisible until you
    look for it — the goal is grain, not pattern. */

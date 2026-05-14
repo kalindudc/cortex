@@ -47,6 +47,13 @@ describe("UI: served assets (bundled)", () => {
     expect(t).toContain(".md-editor");
     expect(t).toContain(".pane-active");
     expect(t).toContain(".tooltip");
+    // Unified-sidebar guard: the four classes below ship from the new
+    // SidebarPane / FilterChips / SectionHeader / StatusBar bundle. If any
+    // disappear, scripts/build-css.sh dropped a slice from styles/.
+    expect(t).toContain(".sidebar-pane");
+    expect(t).toContain(".status-bar");
+    expect(t).toContain(".filter-chip");
+    expect(t).toContain(".section-toggle");
   });
 
   test("GET /bundle.js serves the bundled JS with the preact runtime baked in", async () => {

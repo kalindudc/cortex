@@ -7,7 +7,7 @@
 import type { JSX, VNode } from "preact";
 import { useSignal } from "@preact/signals";
 
-import { tags, selectedTag, modal } from "../../state/signals.ts";
+import { tags, filters, setFilter, modal } from "../../state/signals.ts";
 import { api, type EditTagBody } from "../../api/client.ts";
 import { tryApi } from "../../api/errors.ts";
 import { LANE_COLORS } from "../../lib/constants.ts";
@@ -33,7 +33,14 @@ export function TagEditModal({ name, close }: { name: string; close: () => void 
     }
     await tryApi(() => api.editTag(tg.name, fields));
     // Follow the rename if this tag was the active filter.
-    if (fields.rename && selectedTag.value === tg.name) selectedTag.value = fields.rename;
+    // Tag filter is multi-select — if the renamed tag is in the active filter
+    // array, swap its entry in place so the filter follows the rename.
+    if (fields.rename && filters.value.tag.includes(tg.name)) {
+      setFilter(
+        "tag",
+        filters.value.tag.map(n => (n === tg.name ? (fields.rename as string) : n)),
+      );
+    }
     close();
   };
   return (

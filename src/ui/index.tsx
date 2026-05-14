@@ -169,7 +169,7 @@ window.addEventListener("keydown", (e: KeyboardEvent) => {
     // if it caught the Esc; the next step only fires if nothing was open at
     // this level. closeAllPopovers() returns true iff it closed at least one
     // popover signal — don't enumerate popover signals here so adding new
-    // ones (tagsPopover, newTagOpen, etc.) doesn't require touching this
+    // ones (tagsPopover, lanePopover, etc.) doesn't require touching this
     // handler.
     if (paletteOpen.value) {
       paletteOpen.value = false;

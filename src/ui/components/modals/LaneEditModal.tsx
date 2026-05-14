@@ -4,7 +4,7 @@
 import type { JSX, VNode } from "preact";
 import { useSignal } from "@preact/signals";
 
-import { lanes, tasks, selectedLane, modal } from "../../state/signals.ts";
+import { lanes, tasks, filters, setFilter, modal } from "../../state/signals.ts";
 import { api, type EditLaneBody } from "../../api/client.ts";
 import { tryApi } from "../../api/errors.ts";
 import { LANE_COLORS } from "../../lib/constants.ts";
@@ -33,8 +33,8 @@ export function LaneEditModal({ name, close }: { name: string; close: () => void
       return;
     }
     await tryApi(() => api.editLane(lane.name, fields));
-    // If we renamed and this lane was selected, follow the rename.
-    if (fields.rename && selectedLane.value === lane.name) selectedLane.value = fields.rename;
+    // If we renamed and this lane was the active filter, follow the rename.
+    if (fields.rename && filters.value.lane === lane.name) setFilter("lane", fields.rename);
     close();
   };
   return (

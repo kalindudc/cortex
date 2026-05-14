@@ -28,12 +28,13 @@
 // <input> so it auto-syncs from titleSig with no extra plumbing.
 
 import type { JSX, VNode } from "preact";
-import { useEffect } from "preact/hooks";
+import { useEffect, useRef } from "preact/hooks";
 import { useSignal } from "@preact/signals";
 
 import type { Task } from "../../api/types.ts";
 import { api } from "../../api/client.ts";
 import { tryApi } from "../../api/errors.ts";
+import { pendingTitleFocus } from "../../state/signals.ts";
 import { useAutosave } from "../../lib/autosave.ts";
 import { MdEditor } from "./MdEditor.tsx";
 import { ExternalChangeBanner } from "./ExternalChangeBanner.tsx";
@@ -46,6 +47,22 @@ export function EditableTaskBody({ task }: { task: Task }): VNode {
   const titleExternal = useSignal<string | null>(null);
   const bodyExternal = useSignal<string | null>(null);
   const bodyEpoch = useSignal(0);
+  // Imperative focus handle for the title input. Used by the pendingTitleFocus
+  // effect below to grab focus when SidebarPane has just created an
+  // `untitled-<id>` task and wants the user to immediately rename it. Pure
+  // imperative wiring — normal edits don't go through this.
+  const titleInputRef = useRef<HTMLInputElement>(null);
+
+  // pendingTitleFocus consumer (one-shot semantics): if the signal matches
+  // this task's id when we mount (or update), focus + select the input and
+  // clear the signal. Mounted under key={task.id} so a task switch always
+  // re-runs this effect with a fresh task prop.
+  useEffect(() => {
+    if (pendingTitleFocus.value !== task.id) return;
+    titleInputRef.current?.focus();
+    titleInputRef.current?.select();
+    pendingTitleFocus.value = null;
+  }, [task.id]);
 
   // SSE-watch: title. Fires whenever the parent re-renders us with a new
   // task.title (SSE refresh → tasks.value = ts → task prop changes).
@@ -154,6 +171,7 @@ export function EditableTaskBody({ task }: { task: Task }): VNode {
         />
       ) : null}
       <input
+        ref={titleInputRef}
         class="title-input"
         value={titleSig.value}
         placeholder="Task title"

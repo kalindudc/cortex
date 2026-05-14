@@ -3,11 +3,14 @@
 
 import type { VNode } from "preact";
 
-import { modal, selectedLane, selectedTag, selectedId } from "../../state/signals.ts";
+import { modal, filters, setFilter, selectedId } from "../../state/signals.ts";
 import { api } from "../../api/client.ts";
 import { tryApi } from "../../api/errors.ts";
 import { LaneEditModal } from "./LaneEditModal.tsx";
 import { TagEditModal } from "./TagEditModal.tsx";
+import { NewLaneModal } from "./NewLaneModal.tsx";
+import { NewTagModal } from "./NewTagModal.tsx";
+import { TagFilterModal } from "./TagFilterModal.tsx";
 
 export function ModalRoot(): VNode | null {
   const m = modal.value;
@@ -46,6 +49,15 @@ export function ModalRoot(): VNode | null {
   if (m.kind === "lane-edit") {
     return <LaneEditModal name={m.name as string} close={close} />;
   }
+  if (m.kind === "new-lane") {
+    return <NewLaneModal close={close} />;
+  }
+  if (m.kind === "new-tag") {
+    return <NewTagModal close={close} />;
+  }
+  if (m.kind === "filter-tags") {
+    return <TagFilterModal close={close} />;
+  }
   if (m.kind === "tag-edit") {
     return <TagEditModal name={m.name as string} close={close} />;
   }
@@ -72,7 +84,12 @@ export function ModalRoot(): VNode | null {
               style="background:var(--err)"
               onClick={async () => {
                 await tryApi(() => api.delTag(tagName, taskCount > 0));
-                if (selectedTag.value === tagName) selectedTag.value = null;
+                if (filters.value.tag.includes(tagName)) {
+                  setFilter(
+                    "tag",
+                    filters.value.tag.filter(n => n !== tagName),
+                  );
+                }
                 close();
               }}
             >
@@ -103,7 +120,7 @@ export function ModalRoot(): VNode | null {
               style="background:var(--err)"
               onClick={async () => {
                 await tryApi(() => api.delLane(laneName));
-                if (selectedLane.value === laneName) selectedLane.value = null;
+                if (filters.value.lane === laneName) setFilter("lane", null);
                 close();
               }}
             >

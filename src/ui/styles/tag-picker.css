@@ -176,3 +176,185 @@
 }
 .tag-picker-create-row .icon { color: var(--accent); flex-shrink: 0; }
 
+/* ===== TagFilterModal (kind:'filter-tags') =====
+   Modal multi-select for filters.tag. Layout mirrors .tag-picker but the
+   container is a .modal (overlay + box-shadow) instead of a popover, and
+   we add a top "selected summary" strip showing already-picked tags as
+   removable mini-chips. Class names are scoped (tag-filter-*) so future
+   tag-picker tweaks don't accidentally style the modal. */
+.tag-filter-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+}
+.tag-filter-modal h2 { font-size: var(--fs-4); }
+.tag-filter-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+}
+.tag-filter-search .icon { color: var(--text-3); flex-shrink: 0; }
+.tag-filter-search input {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  font: var(--fs-3) var(--font-sans);
+  color: var(--text);
+  outline: none;
+}
+/* Reset default <fieldset> chrome (browsers default to a thin border + small
+   inline padding). The fieldset is purely semantic here — it groups the
+   selected-tag mini-chips and carries an sr-only <legend> for screen readers. */
+.tag-filter-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px;
+  margin: 0;
+  background: var(--accent-tint);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  min-width: 0;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.tag-filter-summary-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 4px 0 8px;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-pill);
+  font-size: var(--fs-2);
+}
+.tag-filter-summary-chip .x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  border-radius: var(--r-1);
+}
+.tag-filter-summary-chip .x:hover { background: var(--tint-strong); color: var(--text); }
+.tag-filter-list {
+  max-height: 280px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0 -4px;
+  padding: 0 4px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+/* Picker rows: flex layout (not grid) keeps the TagPill snug against the
+   check-icon and lets the count float on the right. Compact vertical
+   padding (4px) keeps rows dense — the modal scales to many tags so
+   each row should occupy minimum height. */
+.tag-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 8px;
+  border-radius: var(--r-2);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--fs-3);
+}
+.tag-filter-row:hover { background: var(--tint); }
+.tag-filter-row.cursor {
+  background: var(--accent-tint);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.tag-filter-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.tag-filter-row .grow { flex: 1; min-width: 0; }
+.tag-filter-row .tag-pill {
+  /* Defensive shrink + ellipsis for long tag names in the modal list —
+   matches the sidebar pattern. */
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: inline-block;
+  line-height: 20px;
+}
+/* Untagged sentinel row: italic label, faint divider rule below to set the
+   group apart from real tags. The divider is a 1px dotted line so it reads
+   as a section break without competing with the row's hover/cursor states. */
+.tag-filter-untagged-row {
+  border-bottom: 1px dotted var(--border);
+  padding-bottom: 6px;
+  margin-bottom: 4px;
+}
+.tag-filter-untagged-label {
+  color: var(--text-2);
+  font-style: italic;
+  font-size: var(--fs-3);
+}
+.tag-filter-row.selected .tag-filter-untagged-label { color: var(--text); }
+.tag-filter-count {
+  color: var(--text-3);
+  font-size: var(--fs-2);
+  flex-shrink: 0;
+}
+.tag-filter-empty {
+  margin: 8px 0;
+  text-align: center;
+}
+.tag-filter-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-2);
+}
+.tag-filter-count-hint { margin-right: 4px; }
+
+/* Subtle text-link button used in modal footers. The Clear-all action in
+   TagFilterModal uses this so it reads as a tertiary action next to the
+   primary Done button. */
+.btn-link {
+  background: transparent;
+  color: var(--text-3);
+  font-weight: 500;
+}
+.btn-link:hover { background: transparent; color: var(--text); text-decoration: underline; }
+.btn-link:disabled,
+.btn-link:disabled:hover { color: var(--text-4); cursor: not-allowed; text-decoration: none; }
+

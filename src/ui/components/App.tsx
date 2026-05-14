@@ -4,12 +4,12 @@
 
 import type { VNode } from "preact";
 
-import { sidebarView, paletteOpen, errorMsg } from "../state/signals.ts";
+import { paletteOpen, errorMsg } from "../state/signals.ts";
 import { TopBar } from "./TopBar.tsx";
-import { LanesPane } from "./sidebar/LanesPane.tsx";
-import { TagsPane } from "./sidebar/TagsPane.tsx";
+import { SidebarPane } from "./sidebar/SidebarPane.tsx";
 import { ActiveTaskPane } from "./active/ActiveTaskPane.tsx";
 import { InboxPane } from "./inbox/InboxPane.tsx";
+import { StatusBar } from "./StatusBar.tsx";
 import { CommandPalette } from "./palette/CommandPalette.tsx";
 import { ModalRoot } from "./modals/ModalRoot.tsx";
 import { Tooltip } from "./Tooltip.tsx";
@@ -23,9 +23,10 @@ export default function App(): VNode {
   return (
     <div class="contents">
       <TopBar />
-      {sidebarView.value === "tags" ? <TagsPane /> : <LanesPane />}
+      <SidebarPane />
       <ActiveTaskPane />
       <InboxPane />
+      <StatusBar />
       {paletteOpen.value ? <CommandPalette /> : null}
       <ModalRoot />
       <Tooltip />

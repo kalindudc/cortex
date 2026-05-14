@@ -13,14 +13,14 @@ mock.module("../../../../src/ui/api/client.ts", () => ({
 
 import { render, fireEvent } from "@testing-library/preact";
 import { LaneEditModal } from "../../../../src/ui/components/modals/LaneEditModal.tsx";
-import { lanes, tasks, modal, selectedLane } from "../../../../src/ui/state/signals.ts";
+import { lanes, tasks, modal, filters } from "../../../../src/ui/state/signals.ts";
 
 describe("LaneEditModal", () => {
   beforeEach(() => {
     lanes.value = [{ name: "next", color: "#dc2626", sort: 5 }];
     tasks.value = [];
     modal.value = null;
-    selectedLane.value = null;
+    filters.value = { status: null, lane: null, tag: [] };
     editLane.mockClear();
   });
 

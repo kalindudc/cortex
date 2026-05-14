@@ -4,28 +4,43 @@
 
 import { computed, type ReadonlySignal } from "@preact/signals";
 import type { Task, Update } from "../api/types.ts";
-import { tasks, selectedLane, selectedTag, selectedId, updates } from "./signals.ts";
+import { tasks, filters, selectedId, updates } from "./signals.ts";
 
 // Sentinel value for "filter to untagged tasks". Picked to be collision-free
 // against TAG_NAME_RE (/^[a-z0-9_@-]{1,32}$/, src/store.ts:55) — the null
 // byte cannot appear in a real tag name, so equality checks are safe.
 export const UNTAGGED = "\u0000untagged";
 
-export const tasksInLane: ReadonlySignal<Task[]> = computed(() => {
-  const lane = selectedLane.value;
-  const tag = selectedTag.value;
+// Composed task filter over the unified `filters` signal:
+//   status — task.status equality (AND)
+//   lane   — task.lane equality   (AND)
+//   tag    — OR over the array; an entry is satisfied when the task carries
+//            that tag, OR the entry is the UNTAGGED sentinel and the task
+//            has zero tags. Empty array = no tag filter.
+// Any null/empty slot is a no-op.
+export const filteredTasks: ReadonlySignal<Task[]> = computed(() => {
+  const { status, lane, tag } = filters.value;
   let out = tasks.value;
+  if (status) out = out.filter(t => t.status === status);
   if (lane) out = out.filter(t => t.lane === lane);
-  if (tag === UNTAGGED) {
-    out = out.filter(t => !Array.isArray(t.tags) || t.tags.length === 0);
-  } else if (tag) {
-    out = out.filter(t => Array.isArray(t.tags) && t.tags.includes(tag));
+  if (tag.length > 0) {
+    out = out.filter(t => {
+      const taskTags = Array.isArray(t.tags) ? t.tags : [];
+      // Match if any selected tag is present on the task, OR if UNTAGGED is
+      // selected and the task has no tags at all.
+      return tag.some(sel => (sel === UNTAGGED ? taskTags.length === 0 : taskTags.includes(sel)));
+    });
   }
   return out;
 });
 
+// Legacy alias retained while call sites migrate. Delete once nothing
+// imports tasksInLane (search src/ for remaining references after the
+// SidebarPane swap lands).
+export const tasksInLane = filteredTasks;
+
 export const activeTask: ReadonlySignal<Task | null> = computed(() => {
-  const list = tasksInLane.value;
+  const list = filteredTasks.value;
   if (selectedId.value != null) {
     const t = list.find(x => x.id === selectedId.value);
     if (t) return t;

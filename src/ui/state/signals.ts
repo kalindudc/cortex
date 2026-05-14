@@ -6,7 +6,7 @@
 // this file imports nothing from the state/ directory (acyclic).
 
 import { signal } from "@preact/signals";
-import type { Task, Lane, Update, Author } from "../api/types.ts";
+import type { Task, Lane, Update, Author, TaskStatus } from "../api/types.ts";
 
 // ---------- task data ----------
 export const tasks = signal<Task[]>([]);
@@ -23,30 +23,67 @@ export const updates = signal<Record<number, Update[]>>({});
 export const authors = signal<Author[]>([]);
 
 // ---------- sidebar / selection ----------
-// Sidebar mode: "lanes" (default LanesPane) or "tags" (TagsPane). The home
-// button + a tag-mode button live in the sidebar's .pane-system strip.
-// Switching is mostly non-destructive: it does NOT clear selectedLane or
-// selectedId so the right-hand active task pane keeps its context. Exception:
-// switching tags → lanes (Home button or "Switch to lane mode" palette entry)
-// resets selectedTag to null so the lanes view never inherits stale tag-mode
-// filter state. The reverse direction (lanes → tags) leaves selectedTag
-// alone — entering tags mode with the previous filter restored is desired.
-export const sidebarView = signal<"lanes" | "tags">("lanes");
-// Optional single-tag filter applied to the visible task list. Combined with
-// selectedLane via AND. Set by clicking a tag row in TagsPane (or via the
-// command palette's "Filter by tag…" entry); cleared by clicking the same
-// tag again or by the "All tags" entry.
-export const selectedTag = signal<string | null>(null);
-export const selectedLane = signal<string | null>(null);
+// Unified composable filter state. Three slots produce the visible task list
+// (see state/computed.ts:filteredTasks). status and lane AND together; tag is
+// an array OR-composed across its entries (any task carrying ANY selected
+// tag is included). The UNTAGGED sentinel from state/computed.ts may appear
+// as an array entry to mean "also include untagged tasks" — handled inline
+// in filteredTasks, NOT a separate code path.
+export interface Filters {
+  status: TaskStatus | null;
+  lane: string | null;
+  // OR-composed list of tag names (or UNTAGGED sentinel). Empty = no filter.
+  tag: string[];
+}
+export const filters = signal<Filters>({ status: null, lane: null, tag: [] });
+export function setFilter<K extends keyof Filters>(k: K, v: Filters[K]): void {
+  filters.value = { ...filters.value, [k]: v };
+}
+// Convenience helpers for the multi-tag filter — keeps callers from open-
+// coding `[...filters.value.tag, name]` / Array.filter dance.
+export function toggleTagFilter(name: string): void {
+  const cur = filters.value.tag;
+  const next = cur.includes(name) ? cur.filter(n => n !== name) : [...cur, name];
+  setFilter("tag", next);
+}
+export function clearAllFilters(): void {
+  filters.value = { status: null, lane: null, tag: [] };
+}
+export function hasActiveFilters(): boolean {
+  const f = filters.value;
+  return f.status !== null || f.lane !== null || f.tag.length > 0;
+}
+// Per-section open/closed state for the unified SidebarPane. Tag-FILTERING
+// lives in TagFilterModal (FilterChips "+ tag" affordance / command palette);
+// tag MANAGEMENT lives in the dedicated tags-mode SidebarPane (toggled via
+// SidebarSystemBar). In-memory only; defaults reset on reload (matches how
+// theme.ts deferred persistence until later).
+export const sectionOpen = signal<{ views: boolean; lanes: boolean; tasks: boolean }>({
+  views: true,
+  lanes: true,
+  tasks: true,
+});
+// Sidebar mode toggle. "main" shows Views + Lanes + Tasks; "tags" swaps the
+// pane to a single TAGS management section (add / edit tags). Toggled by
+// the hash-icon button in SidebarSystemBar. Live, in-memory only.
+export const sidebarMode = signal<"main" | "tags">("main");
+// Task id whose title-input should grab focus on next mount. Set by the
+// "+ New task" affordance in SidebarPane (createUntitledTask) so the user
+// can immediately rename the auto-generated `untitled-<id>` placeholder.
+// EditableTaskBody picks this up via useEffect and clears it after focus
+// (one-shot semantics).
+export const pendingTitleFocus = signal<number | null>(null);
 export const selectedId = signal<number | null>(null);
-// Tasks-list filter toggle in LanesPane. false (default) = hide done tasks;
-// true = show everything. In-memory only, matching sibling sidebar signals.
+// Tasks-list filter toggle. false (default) = hide done tasks; true = show
+// everything. In-memory only, matching sibling sidebar signals.
 export const showAllTasks = signal<boolean>(false);
 
 // ---------- popovers / overlays ----------
-// New-tag inline form open/closed (mirrors newLaneOpen).
-export const newTagOpen = signal<boolean>(false);
-export const newLaneOpen = signal<boolean>(false);
+// Lane creation flows through the NewLaneModal (modal.value = { kind:
+// "new-lane" }) instead of an inline sidebar popover form — keeps create /
+// edit / delete on a single consistent surface and dodges the autoFocus
+// race that the inline form had. Tag creation flows through the active-
+// task TagPicker (type a new name → "Create #foo" row appears).
 export const statusPopover = signal<boolean>(false);
 // Active-task tags-chip popover. Mirrors statusPopover: click chip to toggle,
 // outside-click closes via index.tsx's global handler + closeAllPopovers().

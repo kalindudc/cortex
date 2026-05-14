@@ -27,16 +27,7 @@ mock.module("../../../../src/ui/api/client.ts", () => ({
 }));
 
 import { ActiveTaskPane } from "../../../../src/ui/components/active/ActiveTaskPane.tsx";
-import {
-  lanes,
-  modal,
-  selectedId,
-  selectedLane,
-  selectedTag,
-  statusPopover,
-  tags,
-  tasks,
-} from "../../../../src/ui/state/signals.ts";
+import { lanes, modal, selectedId, filters, statusPopover, tags, tasks } from "../../../../src/ui/state/signals.ts";
 
 const makeTask = (over: Record<string, unknown> = {}) => ({
   id: 7,
@@ -64,8 +55,7 @@ describe("ActiveTaskPane", () => {
     lanes.value = [];
     tags.value = [];
     selectedId.value = null;
-    selectedLane.value = null;
-    selectedTag.value = null;
+    filters.value = { status: null, lane: null, tag: [] };
     statusPopover.value = false;
     modal.value = null;
   });

@@ -68,8 +68,15 @@ interface ShowTipArgs {
   delay: number;
 }
 
+// Module-local handle on the currently-shown anchor DOM element. NOT in
+// the signal because (a) signals are for renderable state and (b) holding
+// element refs across renders that re-mount nodes would leak. Cleared on
+// hideTip and on every show.
+let activeAnchorEl: Element | null = null;
+
 function showTip({ text, target, placement, delay }: ShowTipArgs): void {
   clearOpen();
+  activeAnchorEl = target;
   // Snapshot the rect now — by the time the open timer fires the trigger
   // could have moved (scroll, layout shift). Using the snapshot keeps the
   // tip glued to where the user actually pointed.
@@ -95,6 +102,7 @@ function showTip({ text, target, placement, delay }: ShowTipArgs): void {
 
 function hideTip(): void {
   clearOpen();
+  activeAnchorEl = null;
   if (tooltipState.value.visible) {
     // Preserve text/anchor so the fade-out has something to position against
     // for the duration of the CSS transition.
@@ -112,6 +120,28 @@ if (typeof window !== "undefined") {
   window.addEventListener("keydown", e => {
     if (e.key === "Escape") hideTip();
   });
+  // Click-refresh: when the user clicks an element whose tooltip is the
+  // currently-shown one, the click usually triggers a state change that
+  // re-renders the trigger with NEW tip text (e.g. show/hide toggle). The
+  // existing tooltip is still showing the OLD text because the mouse
+  // hasn't left the trigger. Dispatch a synthetic mouseenter AFTER the
+  // re-render so the freshly-attached tip handler closes over the new
+  // text and re-issues showTip with it.
+  window.addEventListener(
+    "click",
+    e => {
+      const target = e.target;
+      if (!(target instanceof Element) || !activeAnchorEl) return;
+      if (!activeAnchorEl.contains(target)) return;
+      const el = activeAnchorEl;
+      // requestAnimationFrame waits for Preact to flush the re-render
+      // queued by the click's handler before we re-fire mouseenter.
+      requestAnimationFrame(() => {
+        el.dispatchEvent(new MouseEvent("mouseenter", { bubbles: false }));
+      });
+    },
+    true,
+  );
 }
 
 // ---------- public helper ----------

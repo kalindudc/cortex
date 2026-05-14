@@ -8,7 +8,7 @@
 // being added without the Esc handler being updated.
 
 import type { Signal } from "@preact/signals";
-import { statusPopover, newLaneOpen, tagsPopover, newTagOpen, lanePopover } from "./signals.ts";
+import { statusPopover, tagsPopover, lanePopover } from "./signals.ts";
 
 export function closeAllPopovers(): boolean {
   let closed = false;
@@ -16,16 +16,8 @@ export function closeAllPopovers(): boolean {
     statusPopover.value = false;
     closed = true;
   }
-  if (newLaneOpen.value) {
-    newLaneOpen.value = false;
-    closed = true;
-  }
   if (tagsPopover.value) {
     tagsPopover.value = false;
-    closed = true;
-  }
-  if (newTagOpen.value) {
-    newTagOpen.value = false;
     closed = true;
   }
   if (lanePopover.value) {

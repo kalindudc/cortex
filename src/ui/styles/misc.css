@@ -98,25 +98,88 @@ input:disabled { opacity: 0.5; cursor: not-allowed; }
 .pane-section { padding: 16px; }
 .pane-section + .pane-section { padding-top: 0; }
 
-/* App-level system controls strip at the very top of the left sidebar.
-   Right-aligned bare icon buttons; no eyebrow label — position + treatment
-   already convey "app chrome". A hairline bottom border separates it from
-   domain content (All tasks, Lanes) below without adding visual weight. */
+/* App-level system controls strip at the top of the left sidebar.
+   Holds the tag-filter trigger (left), theme toggle, and reset-filters
+   button (right). A spacer .grow span between them keeps the tag-filter
+   button anchored left while theme + reset stay right-aligned. flex-shrink:0
+   keeps the strip pinned at the top of .sidebar-pane while .sidebar-body
+   absorbs all vertical overflow. */
 .pane-system {
+  flex-shrink: 0;
   display: flex;
-  justify-content: flex-end;
   align-items: center;
   gap: 4px;
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
-  margin-bottom: 8px;
+}
+/* Active variant for icon-only buttons that carry persistent state
+   (tag-filter button when at least one tag is selected). Subtle accent
+   wash so it reads as "on" without competing with selected-row contrast. */
+.btn-icon-active {
+  color: var(--accent);
+  background: var(--accent-tint);
+}
+.btn-icon-active:hover { color: var(--accent); background: var(--accent-tint); }
+/* Tiny numeric badge inside an icon button (count of active tag filters).
+   Positioned bottom-right of the 28px icon button via relative + absolute. */
+.btn-icon { position: relative; }
+.btn-icon-badge {
+  position: absolute;
+  bottom: 2px;
+  right: 0;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: var(--accent-on);
+  font: 600 10px/14px var(--font-mono);
+  text-align: center;
+  pointer-events: none;
 }
 .pane-foot {
+  flex-shrink: 0;
   margin-top: auto;
   padding: 12px 16px;
   border-top: 1px solid var(--border);
   background: var(--panel);
 }
+
+/* App-wide status bar (row 2 of the main grid, spans all 3 columns).
+   Read-only summary: filter description on the left, counts in the middle,
+   palette hint on the right. Tabular numerals so jittery counts don't
+   shift sibling text. */
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 24px;
+  padding: 0 12px;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text-3);
+  font-size: var(--fs-1);
+  font-variant-numeric: tabular-nums;
+}
+.status-bar .grow { flex: 1; }
+.status-bar .filter-summary { color: var(--text-2); }
+.status-bar .status-counts { display: inline-flex; gap: 4px; }
+.status-bar .hint { display: inline-flex; align-items: center; gap: 4px; }
+/* Clickable variant: same visual as .hint but button-resetted + interactive.
+   Hover surfaces a subtle accent-tint wash so users know it's actionable. */
+.status-bar .hint-button {
+  background: transparent;
+  border: 0;
+  padding: 2px 6px;
+  color: var(--text-3);
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  border-radius: var(--r-1);
+  transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
+}
+.status-bar .hint-button:hover { background: var(--accent-tint); color: var(--text); }
+.status-bar .hint-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .active-header {
   display: flex; align-items: center; gap: 10px;

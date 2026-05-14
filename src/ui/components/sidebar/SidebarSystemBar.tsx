@@ -1,43 +1,59 @@
-// Shared system-control strip rendered at the top of EVERY sidebar pane so
-// the toolbar reads identically whether you are in lanes mode or tags mode.
-// Order: home (back to lanes) | tag-mode | theme. The home button is hidden
-// in lanes mode — it would be a no-op since we're already home — and the
-// tag-mode button is hidden in tags mode for the same reason. This keeps the
-// strip from advertising affordances that do nothing.
+// SidebarSystemBar — top app-chrome strip on the unified SidebarPane.
+//
+// Consolidates ALL button-based controls + filter toggles in one strip so
+// the section bodies stay focused on their data. Layout (left → right):
+//
+//   Theme toggle
+//   Tag-management toggle (hash → swap to TAGS-only view; home ← back)
+//   Show-done toggle (eye / eyeOff) — main-mode only
+//   (grow spacer)
+//   Reset filters (rotateCcw) — main-mode only; disabled when none active
+//
+// Mode-specific affordances render only in their relevant mode so the bar
+// never advertises a control that does nothing for the current view.
+
 import type { VNode } from "preact";
-import { sidebarView, selectedTag } from "../../state/signals.ts";
+import { clearAllFilters, hasActiveFilters, showAllTasks, sidebarMode } from "../../state/signals.ts";
+import { tip } from "../../state/tooltip.ts";
 import { Icon } from "../Icon.tsx";
 import { ThemeToggle } from "./ThemeToggle.tsx";
 
 export function SidebarSystemBar(): VNode {
-  const inTags = sidebarView.value === "tags";
+  const inTags = sidebarMode.value === "tags";
+  const active = hasActiveFilters();
   return (
     <div class="pane-system">
-      {inTags ? (
+      <ThemeToggle />
+      <button
+        class={`btn-icon${inTags ? " btn-icon-active" : ""}`}
+        aria-label={inTags ? "Back to main sidebar" : "Manage tags"}
+        onClick={() => (sidebarMode.value = inTags ? "main" : "tags")}
+        {...tip(inTags ? "Back to the main sidebar (views, lanes, tasks)" : "Switch to tag management")}
+      >
+        <Icon name={inTags ? "home" : "hash"} />
+      </button>
+      {inTags ? null : (
         <button
-          class="btn-icon"
-          title="Home (back to lanes)"
-          aria-label="Home"
-          onClick={() => {
-            sidebarView.value = "lanes";
-            selectedTag.value = null;
-          }}
+          class={`btn-icon${showAllTasks.value ? " btn-icon-active" : ""}`}
+          aria-label={showAllTasks.value ? "Hide done tasks" : "Show done tasks too"}
+          onClick={() => (showAllTasks.value = !showAllTasks.value)}
+          {...tip(showAllTasks.value ? "Hide done tasks from the list" : "Include done tasks in the list")}
         >
-          <Icon name="home" />
-        </button>
-      ) : (
-        <button
-          class="btn-icon"
-          title="Manage tags"
-          aria-label="Manage tags"
-          onClick={() => {
-            sidebarView.value = "tags";
-          }}
-        >
-          <Icon name="hash" />
+          <Icon name={showAllTasks.value ? "eye" : "eyeOff"} />
         </button>
       )}
-      <ThemeToggle />
+      <span class="grow"></span>
+      {inTags ? null : (
+        <button
+          class="btn-icon"
+          aria-label="Reset filters"
+          disabled={!active}
+          onClick={() => clearAllFilters()}
+          {...tip(active ? "Clear every active filter (status, lane, tags)" : "No filters active")}
+        >
+          <Icon name="rotateCcw" />
+        </button>
+      )}
     </div>
   );
 }

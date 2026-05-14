@@ -31,16 +31,7 @@ mock.module("../../../../src/ui/api/client.ts", () => ({
 }));
 
 import { buildCommands } from "../../../../src/ui/components/palette/buildCommands.ts";
-import {
-  tasks,
-  lanes,
-  tags,
-  selectedId,
-  selectedLane,
-  selectedTag,
-  sidebarView,
-  modal,
-} from "../../../../src/ui/state/signals.ts";
+import { tasks, lanes, tags, selectedId, filters, modal } from "../../../../src/ui/state/signals.ts";
 import type { Task, Lane } from "../../../../src/ui/api/types.ts";
 import type { TagWithCount } from "../../../../src/ui/api/client.ts";
 
@@ -73,9 +64,7 @@ describe("buildCommands", () => {
     lanes.value = [];
     tags.value = [];
     selectedId.value = null;
-    selectedLane.value = null;
-    selectedTag.value = null;
-    sidebarView.value = "lanes";
+    filters.value = { status: null, lane: null, tag: [] };
     modal.value = null;
     setStat.mockClear();
     editTask.mockClear();
@@ -89,7 +78,9 @@ describe("buildCommands", () => {
     expect(labels).toContain("Next task");
     expect(labels).toContain("Previous task");
     expect(labels).toContain("New lane\u2026");
-    expect(labels).toContain("New tag\u2026");
+    // "New tag…" command was removed: tag creation now flows through the
+    // active-task TagPicker (type a new name → "Create #foo" row appears).
+    expect(labels).not.toContain("New tag\u2026");
   });
 
   test("active-task commands only appear when there is an active task", () => {
@@ -132,22 +123,74 @@ describe("buildCommands", () => {
     expect(labels).toContain("Delete lane\u2026");
   });
 
-  test("tag verbs appear only when tags exist", () => {
+  test("tag verbs at root: 'Filter by tags…' (modal) always; 'Edit tag…' only when tags exist; NO per-tag flat rows", () => {
+    // 'Filter by tags…' (modal) is the canonical entry and renders
+    // unconditionally so the affordance exists even with zero tags yet.
     let labels = buildCommands().map(c => c.label);
-    expect(labels).not.toContain("Filter by tag\u2026");
+    expect(labels).toContain("Filter by tags\u2026");
     expect(labels).not.toContain("Edit tag\u2026");
+    // Regression guard: NO per-tag flat commands at root — the modal
+    // covers per-tag selection via search to keep palette uncluttered.
+    expect(buildCommands().some(c => c.id.startsWith("filter-tag-"))).toBe(false);
 
     tags.value = [tag({ name: "bug" }), tag({ name: "ui", task_count: 2 })];
     labels = buildCommands().map(c => c.label);
-    expect(labels).toContain("Filter by tag\u2026");
+    expect(labels).toContain("Filter by tags\u2026");
     expect(labels).toContain("Edit tag\u2026");
+    // Still no per-tag flat rows even when tags exist.
+    expect(labels).not.toContain("Filter tag: #bug");
+    expect(labels).not.toContain("Filter tag: #ui");
+    expect(labels).not.toContain("Filter tag: untagged");
   });
 
-  test("sidebar-mode toggle label reflects the current sidebarView", () => {
-    sidebarView.value = "lanes";
-    expect(buildCommands().find(c => c.id === "sidebar-mode")?.label).toBe("Switch to tag mode");
-    sidebarView.value = "tags";
-    expect(buildCommands().find(c => c.id === "sidebar-mode")?.label).toBe("Switch to lane mode");
+  test("smart-view filter shortcuts set filters.status (and 'Clear filters' zeroes every slot)", () => {
+    // Replaces the old sidebar-mode toggle test — the unified pane has no
+    // mode swap. The palette now has three top-level commands that flip
+    // status filters directly, plus a Clear filters command.
+    const cmds = buildCommands();
+    const review = cmds.find(c => c.id === "filter-review");
+    const blocked = cmds.find(c => c.id === "filter-blocked");
+    const clear = cmds.find(c => c.id === "filter-clear");
+    if (!review || !blocked || !clear) {
+      throw new Error("expected filter-review, filter-blocked, filter-clear commands to be registered");
+    }
+    expect(review.label).toBe("Filter: In review");
+    expect(blocked.label).toBe("Filter: Blocked");
+    expect(clear.label).toBe("Clear filters");
+
+    review.action?.();
+    expect(filters.value.status).toBe("review");
+    blocked.action?.();
+    expect(filters.value.status).toBe("blocked");
+
+    // Pre-load every slot then verify Clear wipes them all in one shot.
+    filters.value = { status: "done", lane: "now", tag: ["bug", "ui"] };
+    clear.action?.();
+    expect(filters.value).toEqual({ status: null, lane: null, tag: [] });
+  });
+
+  test("lane filter submenu actions call setFilter (filters.lane)", () => {
+    lanes.value = [lane({ name: "now" }), lane({ name: "next", sort: 1 })];
+    const filterLane = buildCommands().find(c => c.id === "filter-lane");
+    const laneSub = filterLane?.submenu?.();
+    if (!laneSub) throw new Error("expected Filter by lane submenu");
+    laneSub.find(s => s.id === "lane-next")?.action?.();
+    expect(filters.value.lane).toBe("next");
+    laneSub.find(s => s.id === "lane-all")?.action?.();
+    expect(filters.value.lane).toBeNull();
+  });
+
+  test("'Filter by tags…' top-level command opens the filter-tags modal", () => {
+    const cmd = buildCommands().find(c => c.id === "filter-tags-modal");
+    if (!cmd) throw new Error("expected filter-tags-modal command");
+    cmd.action?.();
+    expect(modal.value).toEqual({ kind: "filter-tags" });
+  });
+
+  test("sidebar-mode toggle command no longer exists", () => {
+    // Regression guard: SidebarPane is unified, there is no swap target.
+    const cmds = buildCommands();
+    expect(cmds.find(c => c.id === "sidebar-mode")).toBeUndefined();
   });
 
   test("'Delete task…' opens the confirm-delete modal", () => {

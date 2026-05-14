@@ -41,8 +41,19 @@ export function CommandPalette(): VNode {
   });
 
   const cmds = stack.value.length === 0 ? buildCommands() : stack.value[stack.value.length - 1].cmds;
-  const q = query.value.trim().toLowerCase();
-  const filtered = q ? cmds.filter(c => c.label.toLowerCase().includes(q) || c.id.includes(q)) : cmds;
+  // Word-split (fuzzy-ish) match: split the query on whitespace and require
+  // EVERY token to appear (substring) in either the label or id, in any
+  // order. Lets "filter tag" match "Filter by tags…" which strict substring
+  // search would miss because "by" sits between the tokens. Predictable +
+  // cheap; no scoring/ranking complexity.
+  const tokens = query.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const filtered =
+    tokens.length === 0
+      ? cmds
+      : cmds.filter(c => {
+          const hay = `${c.label} ${c.id}`.toLowerCase();
+          return tokens.every(t => hay.includes(t));
+        });
   const safeCursor = Math.min(cursor.value, Math.max(0, filtered.length - 1));
   const inSubmenu = stack.value.length > 0;
 

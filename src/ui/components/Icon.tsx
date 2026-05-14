@@ -34,6 +34,10 @@ const ICONS: Record<string, string> = {
   home: '<path d="M3 12l9-9 9 9"/><path d="M5 10v10a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V10"/>',
   // Used by TagPicker to mark currently-attached tags. Lucide check.
   check: '<polyline points="20 6 9 17 4 12"/>',
+  // Lucide rotate-ccw — reset/clear-filters affordance in SidebarSystemBar.
+  rotateCcw: '<polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>',
+  // Lucide search — search-input ornament in TagFilterModal.
+  search: '<circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
 };
 
 export interface IconProps {

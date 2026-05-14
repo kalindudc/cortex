@@ -36,24 +36,30 @@ async function seedTask(url: string, lane: string, title: string): Promise<{ id:
   return r.json();
 }
 
-test("dashboard boots and shows the empty lanes prompt", async ({ url, page }) => {
+test("dashboard boots; sidebar pane + status bar + Tasks-section '+' affordance render", async ({ url, page }) => {
   await page.goto(url);
-  // Lanes pane is the canonical left rail. The new-task input lives in the
-  // pane foot and is always present, regardless of how many lanes exist.
+  // Lanes pane is the canonical left rail.
   await expect(page.locator(".pane-lanes")).toBeVisible();
-  await expect(page.locator("#new-task-input")).toBeVisible();
+  // StatusBar is the bottom row (replaced the old new-task input as the
+  // canonical "command palette entry" via its clickable hint).
+  await expect(page.locator(".status-bar")).toBeVisible();
+  // The Tasks section's '+' button is the new entry for task creation.
+  await expect(page.locator('button[aria-label="New task"]')).toBeVisible();
 });
 
-test("create a task via the UI new-task input — appears in the lane list", async ({ url, page }) => {
+test("create a task via the Tasks-section '+' button — untitled-<id> appears in the lane list", async ({
+  url,
+  page,
+}) => {
   await seedLane(url, "inbox");
   await page.goto(url);
-  // The new-task input lives in the lanes-pane foot.
-  const input = page.locator("#new-task-input");
-  await expect(input).toBeVisible();
-  await input.fill("write the docs");
-  await input.press("Enter");
-  // Auto-wait: the .task-row with this title appears via SSE round-trip.
-  await expect(page.locator(".task-row", { hasText: "write the docs" })).toBeVisible();
+  // Click the Tasks-section '+' button. Server assigns an id; the title is
+  // auto-set to `untitled-<id>` via the two-request POST + PATCH flow in
+  // SidebarPane.createUntitledTask.
+  await page.locator('button[aria-label="New task"]').click();
+  // Auto-wait for the SSE round-trip; assert SOME .task-row with the
+  // untitled-<n> shape appears (we don't know the exact id ahead of time).
+  await expect(page.locator(".task-row .task-title", { hasText: /^untitled-\d+$/ }).first()).toBeVisible();
 });
 
 test("post an update on the active task via the compose form", async ({ url, page }) => {
@@ -143,6 +149,32 @@ test("open command palette with Cmd+P / Ctrl+P", async ({ url, page }) => {
   // Esc closes it.
   await page.keyboard.press("Escape");
   await expect(page.locator(".palette-input")).toHaveCount(0);
+});
+
+test("tooltip refreshes its text on click without requiring the cursor to move (show-all-tasks toggle)", async ({
+  url,
+  page,
+}) => {
+  // The show-all-tasks toggle in the Tasks section header flips its tip
+  // text every click ("Include done tasks in the list" ↔ "Hide done tasks
+  // from the list"). The tooltip is shown on hover; clicking the button
+  // used to leave the OLD text on screen until the cursor left and re-
+  // entered. This regression guard asserts the tip text updates in place.
+  await seedLane(url, "inbox");
+  await page.goto(url);
+  // Toggle's aria-label flips between "Show done tasks too" (initial) and
+  // "Hide done tasks" (after click). The tip text is more verbose:
+  // "Include done tasks in the list" ↔ "Hide done tasks from the list".
+  const toggle = page.locator('button[aria-label="Show done tasks too"], button[aria-label="Hide done tasks"]');
+  await expect(toggle).toBeVisible();
+  await toggle.hover();
+  await expect(page.locator(".tooltip-visible")).toContainText("Include done tasks");
+  // Click WITHOUT moving the mouse. The button re-renders with the new
+  // aria-label / tip text; the global click handler in tooltip.ts
+  // dispatches a synthetic mouseenter on rAF, so the tip refreshes in
+  // place without the cursor leaving and returning.
+  await toggle.click();
+  await expect(page.locator(".tooltip-visible")).toContainText("Hide done tasks from the list");
 });
 
 test("hover a truncated task title — tooltip appears with full text", async ({ url, page }) => {

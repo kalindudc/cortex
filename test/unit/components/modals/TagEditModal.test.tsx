@@ -13,13 +13,13 @@ mock.module("../../../../src/ui/api/client.ts", () => ({
 
 import { render, fireEvent } from "@testing-library/preact";
 import { TagEditModal } from "../../../../src/ui/components/modals/TagEditModal.tsx";
-import { tags, modal, selectedTag } from "../../../../src/ui/state/signals.ts";
+import { tags, modal, filters } from "../../../../src/ui/state/signals.ts";
 
 describe("TagEditModal", () => {
   beforeEach(() => {
     tags.value = [{ name: "bug", color: "#16a34a", created: 0, task_count: 3 }];
     modal.value = null;
-    selectedTag.value = null;
+    filters.value = { status: null, lane: null, tag: [] };
     editTag.mockClear();
   });
 

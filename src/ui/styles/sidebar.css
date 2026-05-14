@@ -18,9 +18,15 @@
 .view-row .icon       { color: var(--text-3); }
 .view-row.selected .icon { color: var(--text); }
 
-/* ---------- lane row ---------- */
+/* ---------- lane row ----------
+   Trailing slot (.lane-row-trail) holds BOTH .lane-count and .lane-edit-btn
+   in a single relative-positioned container. The count is the default
+   visible content; the edit button is absolutely positioned over the same
+   slot and fades in on hover, replacing the count. This way the edit btn
+   does NOT consume row width when not hovered (the column auto-sizes to the
+   count width), and the swap is a smooth opacity crossfade. */
 .lane-row {
-  display: grid; grid-template-columns: 8px 1fr auto auto;
+  display: grid; grid-template-columns: 8px 1fr auto;
   align-items: center; gap: 8px;
   width: 100%; padding: 6px 10px; border-radius: var(--r-2);
   color: var(--text-2); text-align: left;
@@ -36,13 +42,43 @@
   width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0;
   background: var(--border-strong);
 }
+.lane-row-trail {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 22px;
+  height: 18px;
+}
+.lane-row-trail .lane-count {
+  transition: opacity var(--dur-2) var(--ease);
+}
 .lane-edit-btn {
-  width: 18px; height: 18px; padding: 0; border-radius: var(--r-1);
-  color: var(--text-3); opacity: 0; transition: opacity var(--dur-2) var(--ease), color var(--dur-2) var(--ease);
-  display: inline-flex; align-items: center; justify-content: center;
+  position: absolute;
+  inset: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-1);
+  background: transparent;
+  color: var(--text-3);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-2) var(--ease), color var(--dur-2) var(--ease), background var(--dur-1) var(--ease);
 }
 .lane-row:hover .lane-edit-btn,
-.lane-row.selected .lane-edit-btn { opacity: 1; }
+.lane-row.selected .lane-edit-btn {
+  opacity: 1;
+  pointer-events: auto;
+}
+.lane-row:hover .lane-row-trail .lane-count,
+.lane-row.selected .lane-row-trail .lane-count {
+  opacity: 0;
+}
 .lane-edit-btn:hover { color: var(--text); background: var(--tint-strong); }
 
 /* Task priority chip — small monospace badge after the title.
@@ -134,39 +170,148 @@
    title + description so the editor area is the visual focus). */
 .task-row .task-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-3); }
 
-/* ===== TagsPane row layout override =====
+/* ===== Tag-row layout override (within unified SidebarPane Tags section) =====
    Base .lane-row is `display: grid; grid-template-columns: 8px 1fr auto auto`,
    designed for `.lane-color | .lane-name | .lane-count | .lane-edit-btn`.
-   In a tags row the first child is a TagPill (variable-width) instead of an
-   8px square, so the grid clamped the pill to 8px and the text overflowed
-   onto the empty .grow span looking like it overlapped. Switch to flex so
-   each child owns its natural width and `<span class="grow">` does its job. */
-.pane-tags .lane-row {
+   When the first child is a TagPill (variable width) instead of an 8px
+   color square, the grid clamps the pill to 8px and the text overflows.
+   The :has(> .tag-pill) selector targets exactly the tag-row variant
+   without needing a second class on the row — the pill itself is the
+   discriminator. (Used to be `.pane-tags .lane-row` when TagsPane existed.) */
+.sidebar-pane .lane-row:has(> .tag-pill) {
   display: flex;
   align-items: center;
   gap: 8px;
-  /* grid-template-columns is irrelevant in flex; explicit reset for safety. */
   grid-template-columns: none;
-  /* Without min-width:0, a long .tag-pill child refused to shrink and pushed
-     the count + edit-btn past the row's right edge, hiding them. */
   min-width: 0;
 }
-.pane-tags .lane-row .lane-count { color: var(--text-3); font-size: var(--fs-2); }
+.sidebar-pane .lane-row:has(> .tag-pill) .lane-count { color: var(--text-3); font-size: var(--fs-2); }
+/* Tag-row variant uses flex (no grid auto-column to push the trail right),
+   so the trail wrapper needs margin-left:auto to anchor at the right edge. */
+.sidebar-pane .lane-row:has(> .tag-pill) .lane-row-trail { margin-left: auto; }
 
-/* Long tag-name handling in the sidebar tag list.
-   Base .tag-pill is white-space:nowrap + flex-shrink:0 (correct for popovers
-   and headers where pills sit in wrap-friendly containers). In the sidebar
-   the row is a fixed-width flex container, so we override: allow shrink,
-   clip overflow, and add an ellipsis. The full name is still discoverable
-   via the JS hover tooltip (see the tip(...) spread on rows in LanesPane/TagsPane)
-   and the native `title` attribute as a fallback. */
-.pane-tags .lane-row .tag-pill {
+/* Long tag-name handling in the sidebar tag list. Base .tag-pill is
+   white-space:nowrap + flex-shrink:0 (correct for popovers and headers).
+   In the sidebar row we override: allow shrink, clip overflow, ellipsis.
+   Full name discoverable via the tip(...) hover tooltip and native title. */
+.sidebar-pane .lane-row:has(> .tag-pill) .tag-pill {
   flex-shrink: 1;
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
-  display: inline-block; /* override inline-flex so text-overflow takes effect */
-  line-height: 20px;     /* preserve the inline-flex centered look */
+  display: inline-block;
+  line-height: 20px;
 }
+
+/* ---------- collapsible section header (SidebarPane) ----------
+   .section-toggle is the actual <button> rendered by SectionHeader.tsx.
+   Wraps a chevron + label + optional count + optional trailing slot. The
+   chevron rotates -90deg when the section is closed (.closed modifier).
+   Visual weight matches the previous .section-head eyebrow so the new
+   sections feel familiar. */
+.section-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 10px 12px 4px;
+  color: var(--text-3);
+  font-size: var(--fs-2);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.section-toggle:hover { color: var(--text-2); }
+.section-toggle .icon { transition: transform var(--dur-2) var(--ease); flex-shrink: 0; }
+.section-toggle.closed .icon { transform: rotate(-90deg); }
+.section-toggle .section-label { flex: 0 0 auto; }
+.section-toggle .count { margin-left: auto; color: var(--text-3); font-size: var(--fs-1); }
+.section-toggle .section-trailing { display: inline-flex; align-items: center; }
+
+/* Sidebar section bodies. Horizontal padding kept modest (8px) so rows
+   (.view-row / .lane-row / .task-row each have their own internal padding)
+   use as much of the pane width as possible — the wider sidebar should
+   surface as wider rows, not extra dead space at the edges. The TOP
+   padding (8px) gives a deliberate gap below the section header so the
+   first row is never visually glued to the eyebrow text. */
+.sidebar-pane .pane-section.open > .section-body { padding: 8px 8px 8px 8px; }
+
+/* Section-head padding: applies uniformly to non-toggle headers (e.g. the
+   Tasks section eyebrow + show-all-tasks button row). The .section-toggle
+   button inside SectionHeader brings its own padding (defined later). */
+.sidebar-pane .pane-section > .section-head { padding: 10px 12px 4px; }
+
+/* ---------- filter chips strip ----------
+   Lives between the Tags section and Tasks section as a flex item in
+   .sidebar-body. Renders nothing (component returns null) when no slots
+   are active, so the Tasks section can claim the freed vertical space.
+   Hairline borders separate it from the sections above and below. */
+.filter-chips {
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 4px 0 8px;
+  border-radius: var(--r-pill);
+  background: var(--tint);
+  color: var(--text);
+  font-size: var(--fs-2);
+}
+.filter-chip .filter-chip-label { white-space: nowrap; }
+.filter-chip .x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-1);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: color var(--dur-1) var(--ease), background var(--dur-1) var(--ease);
+}
+.filter-chip .x:hover { color: var(--text); background: var(--tint-strong, var(--accent-tint)); }
+
+/* The dashed "+ tag" affordance lives at the end of the filter-chips strip
+   regardless of how many chips precede it. Dashed border + transparent
+   background distinguishes it from active chips so it reads as an action
+   rather than state. Hover lifts to the accent-tint to match other clickable
+   chrome. */
+.filter-chip-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px 0 6px;
+  border-radius: var(--r-pill);
+  background: transparent;
+  border: 1px dashed var(--border-strong);
+  color: var(--text-3);
+  font-family: var(--font-sans);
+  font-size: var(--fs-2);
+  cursor: pointer;
+  transition: background var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
+}
+.filter-chip-add:hover {
+  background: var(--accent-tint);
+  border-color: var(--accent);
+  color: var(--text);
+}
+.filter-chip-add .icon { color: currentColor; }
 
