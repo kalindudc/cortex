@@ -1,7 +1,7 @@
 import { test, expect, describe, beforeAll, afterAll } from "bun:test";
-import { Store, type Update } from "../src/store.ts";
-import { startServer, type ServerHandle } from "../src/server.ts";
-import { subscribe, type CortexEvent } from "../src/events.ts";
+import { Store, type Update } from "../../src/store.ts";
+import { startServer, type ServerHandle } from "../../src/server.ts";
+import { subscribe, type CortexEvent } from "../../src/events.ts";
 
 // bun:sqlite WAL serializes writes (one writer, many readers) and the
 // `updates` table is append-only, so 8 parallel coding agents POSTing to

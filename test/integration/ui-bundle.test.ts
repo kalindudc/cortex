@@ -1,7 +1,7 @@
 import path from "node:path";
 import { test, expect, beforeAll, afterAll, describe } from "bun:test";
-import { Store } from "../src/store.ts";
-import { startServer, type ServerHandle } from "../src/server.ts";
+import { Store } from "../../src/store.ts";
+import { startServer, type ServerHandle } from "../../src/server.ts";
 
 let store: Store;
 let h: ServerHandle;
@@ -86,7 +86,7 @@ describe("UI: source-level lint guards (caught by tests, not Biome)", () => {
   // detectable, so we catch it here. Use the actual unicode character or
   // the JSX-expression form (`placeholder={"foo\u2026"}`) instead.
   test("no .tsx file has a JSX attribute string with literal \\u escape", async () => {
-    const root = path.resolve(import.meta.dir, "..", "src", "ui");
+    const root = path.resolve(import.meta.dir, "..", "..", "src", "ui");
     const glob = new Bun.Glob("**/*.tsx");
     const files: string[] = [];
     for await (const f of glob.scan({ cwd: root, absolute: true })) files.push(f);

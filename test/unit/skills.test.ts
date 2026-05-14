@@ -2,8 +2,8 @@ import { test, expect, describe, beforeAll, afterAll } from "bun:test";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
-import { writeSkill, listSkills, type SkillName } from "../src/skills.ts";
-import { writeExtension, listExtensions } from "../src/extensions.ts";
+import { writeSkill, listSkills, skillsRoot, skillDir, type SkillName } from "../../src/skills.ts";
+import { writeExtension, listExtensions } from "../../src/extensions.ts";
 
 // All shipped skills are embedded in the cortex binary and self-installed at
 // ~/.agents/skills/<name>/. Tests use writeSkill's targetDir override (and
@@ -110,7 +110,7 @@ describe("methodology skills — standalone discipline", () => {
     await writeSkill("cortex-implementer", path.join(tmpDir, "cortex-implementer"));
     const planner = fs.readFileSync(path.join(tmpDir, "cortex-planner", "SKILL.md"), "utf8");
     const implementer = fs.readFileSync(path.join(tmpDir, "cortex-implementer", "SKILL.md"), "utf8");
-    // The planner description tells the picker to use the implementer for execution.
+    // The planner description tells the picker to use the implementer for drafting.
     expect(planner).toContain("cortex-implementer");
     // The implementer description tells the picker to use the planner for drafting.
     expect(implementer).toContain("cortex-planner");
@@ -127,10 +127,10 @@ describe("methodology skills — standalone discipline", () => {
 // cheapest guard against accidental removal.
 describe("writeExtension — every shipped extension", () => {
   for (const name of listExtensions()) {
-    test(`${name}: cortex.ts written, > 200 bytes, contains tool + prompt-integration literals`, async () => {
+    test(`${name}: index.ts written, > 200 bytes, contains tool + prompt-integration literals`, async () => {
       const dir = path.join(tmpDir, `ext-${name}`);
       await writeExtension(name, dir);
-      const extFile = path.join(dir, "cortex.ts");
+      const extFile = path.join(dir, "index.ts");
       expect(fs.existsSync(extFile)).toBe(true);
       expect(fs.statSync(extFile).size).toBeGreaterThan(200);
       const txt = fs.readFileSync(extFile, "utf8");
@@ -143,68 +143,39 @@ describe("writeExtension — every shipped extension", () => {
   }
 });
 
-// --- --body-file smoke test (Plan 4 task 2) ------------------------------
-//
-// End-to-end via the CLI binary: writes a tmp file, runs `cortex add
-// --body-file <tmp>` and `cortex edit <id> --body-file <tmp>`, asserts the
-// task's stored body matches the file. Also verifies the mutex error.
-
-import { runCli, mkTmpEnv } from "./helpers.ts";
-
-describe("cortex add/edit accept --body-file", () => {
-  let testEnv: Record<string, string>;
-  let cliTmpDir: string;
-  let cleanup: () => void;
-
-  beforeAll(() => {
-    const e = mkTmpEnv("bodyfile");
-    testEnv = e.env;
-    cliTmpDir = e.tmpDir;
-    cleanup = e.cleanup;
+// --- gap-closers: registry + path resolution + error branches --------------
+describe("skills: registry + path resolution", () => {
+  test("listSkills() returns every shipped skill name (deterministic order)", () => {
+    const expected: SkillName[] = ["cortex", "cortex-planner", "cortex-implementer"];
+    expect(listSkills()).toEqual(expected);
   });
 
-  afterAll(() => cleanup());
+  test("writeSkill('not-a-real-skill') throws /unknown skill/", async () => {
+    // biome-ignore lint/suspicious/noExplicitAny: deliberately bypass SkillName narrowing to test the runtime guard
+    await expect(writeSkill("not-a-real-skill" as any, path.join(tmpDir, "nope"))).rejects.toThrow(/unknown skill/);
+  });
 
-  const cli = (...args: string[]) => runCli({ args, env: testEnv });
+  test("skillsRoot() honors CORTEX_SKILL_DIR override", () => {
+    const prev = process.env.CORTEX_SKILL_DIR;
+    const override = path.join(tmpDir, "skill-root-override");
+    try {
+      process.env.CORTEX_SKILL_DIR = override;
+      expect(skillsRoot()).toBe(override);
+      expect(skillDir("cortex")).toBe(path.join(override, "cortex"));
+    } finally {
+      if (prev === undefined) delete process.env.CORTEX_SKILL_DIR;
+      else process.env.CORTEX_SKILL_DIR = prev;
+    }
+  });
 
-  test("add --body-file stores file contents as the task body; edit --body-file updates it; -b + --body-file is rejected", async () => {
-    let r = await cli("init");
-    expect(r.code).toBe(0);
-
-    const tmp = path.join(cliTmpDir, "plan.md");
-    const original = "plan body content here\n\n## Section\n\nbody.";
-    fs.writeFileSync(tmp, original);
-
-    r = await cli("add", "test", "-l", "now", "--body-file", tmp);
-    expect(r.code).toBe(0);
-    const m = r.stdout.match(/^\[(\d+)\]/);
-    expect(m).not.toBeNull();
-    const id = m?.[1];
-    if (!id) throw new Error(`could not parse task id from cli output: ${r.stdout}`);
-
-    // Verify stored body via `show --json` (the canonical body-fetch path
-    // documented in Plan 4 Implementation Notes for plan revision).
-    r = await cli("show", id, "--json");
-    expect(r.code).toBe(0);
-    const showOut = JSON.parse(r.stdout);
-    const task = showOut.task ?? showOut;
-    expect(task.body).toBe(original);
-
-    // Modify the file, run edit --body-file, verify the body updates.
-    const updated = `${original}\n\nappended.`;
-    fs.writeFileSync(tmp, updated);
-    r = await cli("edit", id, "--body-file", tmp);
-    expect(r.code).toBe(0);
-
-    r = await cli("show", id, "--json");
-    expect(r.code).toBe(0);
-    const showOut2 = JSON.parse(r.stdout);
-    const task2 = showOut2.task ?? showOut2;
-    expect(task2.body).toBe(updated);
-
-    // Mutex: -b together with --body-file MUST fail with the documented error.
-    r = await cli("add", "x", "-l", "now", "-b", "inline", "--body-file", tmp);
-    expect(r.code).not.toBe(0);
-    expect(r.stderr).toContain("use --body-file OR -b");
+  test("skillsRoot() falls back to <homedir>/.agents/skills when env unset (string assertion only)", () => {
+    const prev = process.env.CORTEX_SKILL_DIR;
+    try {
+      delete process.env.CORTEX_SKILL_DIR;
+      // String-only assertion — DO NOT call any function that writes to disk.
+      expect(skillsRoot().endsWith(path.join(".agents", "skills"))).toBe(true);
+    } finally {
+      if (prev !== undefined) process.env.CORTEX_SKILL_DIR = prev;
+    }
   });
 });

@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { Store, BodySearchError } from "../src/store.ts";
+import { Store, BodySearchError, validateTagName, TAG_NAME_RE } from "../../src/store.ts";
 
 const open = () => Store.open(":memory:");
 
@@ -359,6 +359,115 @@ describe("Store: lanes", () => {
     s.editLane("later", { rename: "soon" });
     expect(s.listLanes().some(l => l.name === "soon")).toBe(true);
     expect(s.getTask(t.id)?.lane).toBe("soon");
+    s.close();
+  });
+});
+
+// ---------- validateTagName: pure validator gap-closers ----------
+//
+// validateTagName is the single chokepoint enforced from three sites:
+//   1. CLI flag-parse (commands/tag.ts, commands/edit.ts) — defense in depth
+//   2. HTTP handler (server.ts) — early 400 rejection
+//   3. Store.addTag/setTaskTags — final guard at the DB layer
+// Tests below pin the documented contract: lowercase alnum/_@/- only, max 32.
+describe("validateTagName", () => {
+  test("accepts a typical tag and trims surrounding whitespace", () => {
+    expect(validateTagName("plan")).toBe("plan");
+    expect(validateTagName("  spaced-tag  ")).toBe("spaced-tag");
+  });
+
+  test("rejects empty string (HTTP/CLI rely on this for 400)", () => {
+    expect(() => validateTagName("")).toThrow(/invalid tag name/);
+    expect(() => validateTagName("   ")).toThrow(/invalid tag name/);
+  });
+
+  test("rejects uppercase / punctuation outside the documented charset", () => {
+    expect(() => validateTagName("BAD!")).toThrow(/invalid tag name/);
+    expect(() => validateTagName("with space")).toThrow(/invalid tag name/);
+    expect(() => validateTagName("Capital")).toThrow(/invalid tag name/);
+  });
+
+  test("rejects names > 32 chars; 32 succeeds (boundary)", () => {
+    expect(() => validateTagName("a".repeat(33))).toThrow(/invalid tag name/);
+    expect(validateTagName("a".repeat(32))).toBe("a".repeat(32));
+  });
+
+  test("TAG_NAME_RE allows the documented charset (a-z 0-9 _ @ -)", () => {
+    expect(TAG_NAME_RE.test("a_b@c-1")).toBe(true);
+    expect(TAG_NAME_RE.test("@release")).toBe(true);
+    expect(TAG_NAME_RE.test("a.b")).toBe(false);
+  });
+});
+
+// ---------- listUpdates / listAuthorsLast24h: read-side gap-closers ----------
+//
+// Both queries are exercised end-to-end by integration tests, but the SHAPE
+// (column projection + ordering direction) is fast to pin in-process via
+// Store.open(":memory:"). 24h cutoff is timing-dependent and integration-only.
+describe("Store: listUpdates ordering", () => {
+  test("returns rows ordered by created ASC (chronological)", async () => {
+    const s = open();
+    const t = s.addTask({ title: "x" });
+    s.addUpdate({ task_id: t.id, author: "a1", summary: "first" });
+    // Bun.sleep(2) is enough to bump SQLite's millisecond `created` value
+    // since rows insert too fast otherwise. We use a real sleep here
+    // (rather than forging timestamps) because Store.addUpdate doesn't
+    // accept a `created` override and we deliberately avoid touching
+    // production code in this plan.
+    await Bun.sleep(2);
+    s.addUpdate({ task_id: t.id, author: "a2", summary: "second" });
+    await Bun.sleep(2);
+    s.addUpdate({ task_id: t.id, author: "a3", summary: "third" });
+    const rows = s.listUpdates(t.id);
+    expect(rows.map(r => r.summary)).toEqual(["first", "second", "third"]);
+    s.close();
+  });
+
+  test("returns [] for a task with no updates (and for a missing task_id)", () => {
+    const s = open();
+    const t = s.addTask({ title: "x" });
+    expect(s.listUpdates(t.id)).toEqual([]);
+    expect(s.listUpdates(9999)).toEqual([]);
+    s.close();
+  });
+});
+
+describe("Store: listAuthorsLast24h", () => {
+  test("returns one row per distinct author with MAX(created) and COUNT(*) shape", async () => {
+    const s = open();
+    const t = s.addTask({ title: "x" });
+    s.addUpdate({ task_id: t.id, author: "alice", summary: "a1" });
+    await Bun.sleep(2);
+    s.addUpdate({ task_id: t.id, author: "bob", summary: "b1" });
+    await Bun.sleep(2);
+    s.addUpdate({ task_id: t.id, author: "alice", summary: "a2" });
+    const rows = s.listAuthorsLast24h();
+    expect(rows.length).toBe(2);
+    const alice = rows.find(r => r.author === "alice");
+    const bob = rows.find(r => r.author === "bob");
+    expect(alice?.posts).toBe(2);
+    expect(bob?.posts).toBe(1);
+    expect(alice?.last_seen).toBeGreaterThan(bob?.last_seen ?? 0);
+    s.close();
+  });
+
+  test("orders by last_seen DESC (most recent author first)", async () => {
+    const s = open();
+    const t = s.addTask({ title: "x" });
+    s.addUpdate({ task_id: t.id, author: "first-poster", summary: "x" });
+    await Bun.sleep(2);
+    s.addUpdate({ task_id: t.id, author: "second-poster", summary: "y" });
+    await Bun.sleep(2);
+    s.addUpdate({ task_id: t.id, author: "third-poster", summary: "z" });
+    const rows = s.listAuthorsLast24h();
+    // ORDER BY last_seen DESC: third → second → first
+    expect(rows.map(r => r.author)).toEqual(["third-poster", "second-poster", "first-poster"]);
+    s.close();
+  });
+
+  test("returns [] when no updates exist", () => {
+    const s = open();
+    expect(s.listAuthorsLast24h()).toEqual([]);
     s.close();
   });
 });

@@ -25,15 +25,15 @@ import crypto from "node:crypto";
 // re-target the wrong place. We never spread + overwrite (an empty-string
 // XDG_CONFIG_HOME from the parent shell still defeats the ?? in paths.ts:9).
 
-export const ROOT: string = path.resolve(import.meta.dir, "..");
+export const ROOT: string = path.resolve(import.meta.dir, "../..");
 export const BIN: string = path.join(ROOT, "bin/cortex");
 
 // Top-level guard: fail loudly with an actionable message if the binary is
-// missing. `task test` (Taskfile.yml) depends on `task build`, so under the
-// canonical run path this is unreachable. The throw exists so that running
+// missing. `pnpm test` runs `pnpm run build` first, so under the canonical
+// run path this is unreachable. The throw exists so that running
 // `bun test` directly in a fresh checkout produces a clear next-step.
 if (!fs.existsSync(BIN)) {
-  throw new Error(`bin/cortex missing -- run \`task build\` (or \`task test\` which builds first)`);
+  throw new Error(`bin/cortex missing -- run \`pnpm run build\` (or \`pnpm test\` which builds first)`);
 }
 
 export type RunResult = { code: number; stdout: string; stderr: string };

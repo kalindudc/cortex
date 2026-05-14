@@ -15,7 +15,7 @@ import { test, expect, describe, beforeAll, afterAll } from "bun:test";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
-import { runCli, mkTmpEnv } from "./helpers.ts";
+import { runCli, mkTmpEnv } from "../helpers.ts";
 
 const PI_AUTHOR_A = "pi-01923f3a-9201-7c0e-b1c8-abcdef012345";
 const PI_AUTHOR_B = "pi-01abcdef-1234-7567-89ab-cdef01234567";
