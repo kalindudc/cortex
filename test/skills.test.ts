@@ -3,6 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
 import { writeSkill, listSkills, type SkillName } from "../src/skills.ts";
+import { writeExtension, listExtensions } from "../src/extensions.ts";
 
 // All shipped skills are embedded in the cortex binary and self-installed at
 // ~/.agents/skills/<name>/. Tests use writeSkill's targetDir override (and
@@ -114,6 +115,32 @@ describe("methodology skills — standalone discipline", () => {
     // The implementer description tells the picker to use the planner for drafting.
     expect(implementer).toContain("cortex-planner");
   });
+});
+
+// --- pi-extension manifest -----------------------------------------------
+//
+// Every shipped pi extension MUST install at least one .ts file > 200 bytes
+// that contains the structural literals proving prompt-integration is
+// wired correctly. Without `promptSnippet`, custom tools are OMITTED from
+// the system prompt entirely (per pi `core/extensions/types.ts:432-433`),
+// so the agent never discovers them. Asserting the literal is the
+// cheapest guard against accidental removal.
+describe("writeExtension — every shipped extension", () => {
+  for (const name of listExtensions()) {
+    test(`${name}: cortex.ts written, > 200 bytes, contains tool + prompt-integration literals`, async () => {
+      const dir = path.join(tmpDir, `ext-${name}`);
+      await writeExtension(name, dir);
+      const extFile = path.join(dir, "cortex.ts");
+      expect(fs.existsSync(extFile)).toBe(true);
+      expect(fs.statSync(extFile).size).toBeGreaterThan(200);
+      const txt = fs.readFileSync(extFile, "utf8");
+      expect(txt).toContain("cortex_update");
+      expect(txt).toContain("pi.exec");
+      expect(txt).toContain("getSessionId");
+      expect(txt).toContain("promptSnippet");
+      expect(txt).toContain("promptGuidelines");
+    });
+  }
 });
 
 // --- --body-file smoke test (Plan 4 task 2) ------------------------------

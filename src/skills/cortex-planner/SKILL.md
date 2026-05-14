@@ -25,11 +25,11 @@ This skill persists the plan as the body of a cortex task. Multiple plans for on
 
 Plans are stored in cortex — not as files. Three cortex specifics apply.
 
-1. SESSION ID — every `cortex update` REQUIRES `--as <session-id>` (alias `--author`). Generate ONE id at the start of your agent session, hold in working memory, and reuse it for the lifetime of the session:
+1. SESSION ID — every `cortex update` REQUIRES author attribution. PREFERRED: if your harness has the `cortex_update` tool, call that tool for every update (auto-attributes via your harness session; updates round-trip via `cortex resume <task-id>`). FALLBACK: if `cortex_update` is unavailable, generate ONE id at the start of your agent session, hold in working memory, and reuse it for the lifetime of the session:
    ```bash
    SESSION_ID="planner-$(openssl rand -hex 4)"   # e.g. planner-7f3a9201
    ```
-   Format `<role>-<8 hex>`, max 80 chars, no newlines. NEVER store in env vars (sandboxed sub-shells throw them away) or in repo files (two agents collapse into one identity in the audit trail).
+   Format `<role>-<8 hex>`, max 80 chars, no newlines. NEVER store in env vars (sandboxed sub-shells throw them away) or in repo files (two agents collapse into one identity in the audit trail). The `cortex update <id> --as "$SESSION_ID" -m "..."` examples below are the fallback path — keep using them when the tool is unavailable.
 
 2. PLAN BODY → cortex task. Draft the plan into a tmpfile and persist it via `--body-file`:
    ```bash

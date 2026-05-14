@@ -21,6 +21,7 @@ const main = defineCommand({
     serve: () => import("./commands/serve.ts").then(m => m.default),
     stop: () => import("./commands/stop.ts").then(m => m.default),
     reset: () => import("./commands/reset.ts").then(m => m.default),
+    resume: () => import("./commands/resume.ts").then(m => m.default),
   },
 });
 

@@ -4,6 +4,7 @@ import fs from "node:fs";
 import { Store } from "../store.ts";
 import { dbPath, pidPath, urlPath, ensureConfigDir } from "../paths.ts";
 import { writeAllSkills, skillDir, skillsRoot, listSkills } from "../skills.ts";
+import { writeAllExtensions, extensionDir, extensionsRoot, listExtensions } from "../extensions.ts";
 
 const CONFIRM = "RESET";
 
@@ -85,6 +86,7 @@ export default defineCommand({
     console.log(`  • delete ${db}-wal, ${db}-shm (SQLite WAL sidecars, if present)`);
     console.log(`  • delete ${pidPath()}, ${urlPath()} (daemon state, if present)`);
     console.log(`  • wipe and regenerate ${listSkills().length} skill dir(s) under ${skillsRoot()}`);
+    console.log(`  • wipe and regenerate ${listExtensions().length} pi extension(s) under ${extensionsRoot()}`);
     console.log(`  • re-initialize an empty database with the default 'now' lane`);
     const answer = await prompt(`Type ${CONFIRM} to confirm: `);
     if (answer.trim() !== CONFIRM) {
@@ -121,6 +123,12 @@ export default defineCommand({
     }
     await writeAllSkills();
     console.log(`✓ regenerated ${listSkills().length} skill(s)`);
+
+    for (const name of listExtensions()) {
+      fs.rmSync(extensionDir(name), { recursive: true, force: true });
+    }
+    await writeAllExtensions();
+    console.log(`✓ regenerated ${listExtensions().length} extension(s)`);
 
     console.log("✓ reset complete");
   },
