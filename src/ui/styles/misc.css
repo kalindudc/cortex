@@ -1,0 +1,167 @@
+/* ---------- typography ---------- */
+.eyebrow {
+  font-size: var(--fs-1); font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--text-3); margin: 0;
+}
+/* Task display titles render in mono — they're user content that round-trips
+   through the edit form (also mono), so the visual weight stays consistent.
+   Color uses --text-content (a softer grey than the full text color) so the
+   title doesn't shout against the warm paper background. */
+.title-2 { font: 600 var(--fs-7)/1.33 var(--font-mono); margin: 0; letter-spacing: -0.01em; color: var(--text-content); }
+.title-3 { font: 600 var(--fs-8)/1.33 var(--font-mono); margin: 0; letter-spacing: -0.01em; color: var(--text-content); }
+.muted   { color: var(--text-3); }
+.meta    { color: var(--text-3); font-size: var(--fs-2); }
+.num     { font-variant-numeric: tabular-nums; }
+
+/* ---------- buttons ---------- */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 28px; padding: 0 10px; border-radius: var(--r-2);
+  color: var(--text-2); background: transparent;
+  transition: background var(--dur-2) var(--ease), color var(--dur-2) var(--ease);
+  font-size: var(--fs-3);
+}
+.btn:hover { background: var(--tint); color: var(--text); }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn .kbd { margin-left: 4px; }
+.btn-primary {
+  background: var(--accent); color: var(--accent-on);
+  transition: background var(--dur-2) var(--ease);
+}
+.btn-primary:hover { background: var(--accent-hover); color: var(--accent-on); }
+.btn-icon {
+  width: 28px; height: 28px; padding: 0; justify-content: center;
+  color: var(--text-3);
+}
+.btn-icon:hover { color: var(--text); background: var(--tint); }
+.btn-danger:hover { color: var(--err); background: var(--tint); }
+.btn:disabled, .btn:disabled:hover {
+  opacity: 0.4; cursor: not-allowed; background: transparent; color: var(--text-3);
+}
+input:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.icon { width: 14px; height: 14px; flex-shrink: 0; }
+.icon-sm { width: 12px; height: 12px; }
+.icon-lg { width: 20px; height: 20px; }
+
+/* ---------- kbd hint ----------
+   Subtle inline annotation, NOT a 3D keyboard cap. The earlier raised-key
+   styling clashed inside primary buttons (a tiny chip-on-a-chip look). The
+   refined version is a flat, low-contrast lozenge that reads as part of the
+   surrounding text/button rather than a separate widget.
+
+   - .kbd alone: subtle tint chip suitable for sidebars and inline copy
+   - .btn .kbd:  inherits the button's text color, very faint wash via
+                 currentColor so it sits on top of any button background
+                 (primary, ghost, danger) without an inline override. */
+.kbd {
+  display: inline-flex; align-items: center;
+  padding: 1px 6px;
+  font: 500 var(--fs-1)/1.4 var(--font-mono);
+  letter-spacing: 0.02em;
+  color: var(--text-3);
+  background: var(--tint);
+  border-radius: var(--r-1);
+}
+.btn .kbd {
+  margin-left: 6px;
+  padding: 1px 5px;
+  color: inherit;
+  background: color-mix(in srgb, currentColor 14%, transparent);
+  opacity: 0.78;
+  font-weight: 500;
+}
+
+/* ---------- toast / error ---------- */
+.toast {
+  position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+  padding: 10px 14px; border-radius: var(--r-3);
+  background: var(--err); color: #fff; font-size: var(--fs-3);
+  box-shadow: var(--shadow-pop); z-index: 200;
+  animation: pop var(--dur-3) var(--ease);
+}
+
+/* ---------- misc ---------- */
+.row { display: flex; align-items: center; gap: 8px; }
+.col { display: flex; flex-direction: column; gap: 8px; }
+.stack > * + * { margin-top: 12px; }
+.grow { flex: 1; min-width: 0; }
+/* App() wraps panes in a single <div class="contents"> for layout-only.
+   display:contents makes the wrapper transparent so inner panes are direct
+   children of the <main> grid. */
+.contents { display: contents; }
+.hidden { display: none !important; }
+
+.pane-section { padding: 16px; }
+.pane-section + .pane-section { padding-top: 0; }
+
+/* App-level system controls strip at the very top of the left sidebar.
+   Right-aligned bare icon buttons; no eyebrow label — position + treatment
+   already convey "app chrome". A hairline bottom border separates it from
+   domain content (All tasks, Lanes) below without adding visual weight. */
+.pane-system {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+}
+.pane-foot {
+  margin-top: auto;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.active-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 16px 24px; border-bottom: 1px solid var(--border);
+}
+/* Header chip alignment: the priority chip stays compact (16px) in list
+   rows so the sidebar lane list keeps its density, but in the active-task
+   header it sits next to .lane-chip and .tags-chip which are 20px pills.
+   Bump priority-chip ONLY here so all three header chips share a baseline. */
+.active-header .priority-chip {
+  height: 20px; min-width: 28px; padding: 0 10px;
+}
+/* Active task body: ALWAYS a flex column whose only scroll surface is the
+   MdEditor inside (.editable-task-body > .md-editor owns internal scroll).
+   The header above and the post-update form / footer below stay pinned,
+   so the title input and the action row are always reachable regardless
+   of description length. Replaces the older nested scroll where the body
+   itself owned overflow:auto and could push chrome past the viewport.
+
+   Padding is ZERO here: the editor extends edge-to-edge of the pane so it
+   doesn't read as a floating slab inside a padded frame. Padding is
+   redistributed to the title input below — the editor itself stays flush. */
+.active-body {
+  padding: 0;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+/* Always-editable title input that mirrors the old .title-2 heading
+   visually. Borderless by default; focus ring uses --accent-tint to
+   surface the editable affordance. The bottom border separates the title
+   from the MdEditor below — same role the previous .title-2 had. */
+.title-input {
+  display: block; width: 100%;
+  padding: 16px 24px; margin: 0;
+  border: 0; background: transparent;
+  font: 700 var(--fs-5)/1.2 var(--font-mono);
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+  outline: none;
+}
+.title-input:focus { background: var(--accent-tint); }
+
+.active-foot {
+  padding: 16px 24px; border-top: 1px solid var(--border); background: var(--panel);
+}
+
+

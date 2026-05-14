@@ -1,0 +1,178 @@
+/* ===== Generic Picker (search + filtered list + keyboard nav) =====
+   Used by LanePicker today; designed to host other future pickers. Visual
+   conventions mirror .tag-picker so both feel like the same component
+   family — a future migration of TagPicker onto Picker would mostly mean
+   replacing the .tag-picker* class names with .picker* (and moving the
+   create-row + footer rendering into the createRow / footer props). */
+.picker {
+  width: 280px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  max-height: 360px;
+}
+.picker-search {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.picker-search input {
+  width: 100%;
+  height: 28px;
+  padding: 4px 8px;
+  font-size: var(--fs-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  background: var(--bg);
+  color: var(--text);
+}
+.picker-search input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-tint);
+}
+.picker-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px;
+}
+.picker-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: var(--r-2);
+  background: transparent;
+  border: 0;
+  border-left: 2px solid transparent;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text-2);
+  transition: background var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease);
+}
+.picker-row:hover { background: var(--tint); color: var(--text); }
+/* Selected: leading checkmark is the indicator (no row background) so it
+   stays distinguishable from the keyboard cursor. Same convention as
+   .tag-picker-row. */
+.picker-row.cursor {
+  background: var(--tint);
+  border-left-color: var(--accent);
+  color: var(--text);
+}
+.picker-check {
+  width: 14px; height: 14px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.picker-empty {
+  margin: 0;
+  padding: 16px 12px;
+  text-align: center;
+  font-size: var(--fs-2);
+}
+.picker-foot {
+  border-top: 1px solid var(--border);
+  padding: 4px;
+  flex: 0 0 auto;
+}
+
+/* ===== Tag picker (GitHub labels-style dropdown) =====
+   Fixed-width, scrollable, keyboard-driven multi-select. Single source of
+   truth for editing a task's tags (replaces the older read-only
+   TagsPopover and the prior comma-separated input). */
+.tag-picker {
+  width: 280px;
+  padding: 0;            /* sections own their own padding */
+  display: flex;
+  flex-direction: column;
+  /* The list scrolls; the search header and create footer stay pinned. */
+  max-height: 360px;
+}
+.tag-picker-search {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.tag-picker-search input {
+  width: 100%;
+  height: 28px;
+  padding: 4px 8px;
+  font-size: var(--fs-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  background: var(--bg);
+  color: var(--text);
+}
+.tag-picker-search input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-tint);
+}
+.tag-picker-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px;
+}
+.tag-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: var(--r-2);
+  background: transparent;
+  /* Reserve 2px on the left so the cursor accent doesn't shift other rows. */
+  border: 0;
+  border-left: 2px solid transparent;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text-2);
+  transition: background var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease);
+}
+.tag-picker-row:hover { background: var(--tint); color: var(--text); }
+/* `.selected` (currently-attached) intentionally has NO background — the
+   checkmark in the leading slot is the only selection indicator. Avoids the
+   prior "too prominent" complaint where attached rows looked like the
+   keyboard cursor. */
+.tag-picker-row.cursor {
+  background: var(--tint);
+  border-left-color: var(--accent);
+  color: var(--text);
+}
+.tag-picker-check {
+  width: 14px; height: 14px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.tag-picker-count {
+  font-size: var(--fs-1);
+  font-variant-numeric: tabular-nums;
+}
+.tag-picker-empty {
+  margin: 0;
+  padding: 16px 12px;
+  text-align: center;
+  font-size: var(--fs-2);
+}
+.tag-picker-foot {
+  border-top: 1px solid var(--border);
+  padding: 4px;
+  flex: 0 0 auto;
+}
+/* The Create row now lives INSIDE .tag-picker-list as the last item, so the
+   keyboard cursor can land on it via ArrowDown. Distinct .tag-picker-create-row
+   styling so the user can tell it's a different action (creating, not
+   toggling). */
+.tag-picker-create-row .tag-picker-check { color: var(--accent); }
+.tag-picker-create-row .tag-picker-create-label {
+  font-size: var(--fs-2);
+  font-weight: 600;
+  color: var(--text);
+}
+.tag-picker-create-row .icon { color: var(--accent); flex-shrink: 0; }
+

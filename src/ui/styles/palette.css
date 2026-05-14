@@ -1,0 +1,54 @@
+/* ---------- command palette ---------- */
+.modal.palette {
+  max-width: 560px; padding: 0; gap: 0;
+  overflow: hidden;
+}
+.palette-input {
+  border: 0; border-bottom: 1px solid var(--border); border-radius: 0;
+  padding: 14px 16px; font-size: var(--fs-5);
+  background: transparent;
+}
+.palette-input:focus { outline: none; box-shadow: none; border-bottom-color: var(--border); }
+
+/* Breadcrumb shown above the search input when the palette is inside a sub-
+   menu. Click the back button OR press Esc / Backspace / ← (when query is
+   empty) to pop one scope level. */
+.palette-breadcrumb {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 8px 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+.palette-breadcrumb .meta { font-size: var(--fs-2); }
+
+.palette-list {
+  max-height: 360px; overflow: auto; padding: 4px;
+}
+.palette-row {
+  display: grid; grid-template-columns: 14px 1fr auto auto;
+  align-items: center; gap: 10px;
+  width: 100%; padding: 8px 12px; border-radius: var(--r-2);
+  color: var(--text-2); font-size: var(--fs-4);
+  text-align: left;
+  transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
+}
+/* The trailing chevron on submenu rows uses --text-3 so the affordance is
+   present but quiet — the row label is what the user is reading. */
+.palette-row > .icon.rotate-90-ccw { color: var(--text-3); }
+
+/* Chevron rotation utilities. The ICONS table only has chevronDown; we
+   rotate that single SVG instead of carrying chevronRight / chevronLeft. */
+.icon.rotate-90-ccw { transform: rotate(-90deg); }
+.icon.rotate-90-cw  { transform: rotate(90deg); }
+.palette-row.active,
+.palette-row:hover { background: var(--tint); color: var(--text); }
+.palette-row.active { background: var(--accent-tint); color: var(--text); }
+.palette-foot {
+  display: flex; gap: 16px; padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+  font-size: var(--fs-1);
+}
+.palette-foot .kbd { margin-right: 4px; }
+.overlay-top { padding-top: 12vh; }
+

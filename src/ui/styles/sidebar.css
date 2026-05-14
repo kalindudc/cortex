@@ -1,0 +1,172 @@
+/* ---------- view row (top-level non-lane filters like "All tasks") ----------
+   Distinct from .lane-row because views aren't lanes — they have no color
+   swatch column and no edit affordance, just an icon + label + count. Kept
+   visually similar enough that selection state reads the same. */
+.view-row {
+  display: grid; grid-template-columns: 14px 1fr auto;
+  align-items: center; gap: 8px;
+  width: 100%; padding: 6px 10px; border-radius: var(--r-2);
+  color: var(--text-2); text-align: left;
+  font-size: var(--fs-3);
+  transition: background var(--dur-2) var(--ease), color var(--dur-2) var(--ease);
+}
+.view-row:hover    { background: var(--tint); color: var(--text); }
+.view-row.selected { background: var(--tint); color: var(--text); }
+.view-row.dragover { background: var(--accent-tint); color: var(--text); }
+.view-row .view-name  { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.view-row .view-count { font-size: var(--fs-2); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.view-row .icon       { color: var(--text-3); }
+.view-row.selected .icon { color: var(--text); }
+
+/* ---------- lane row ---------- */
+.lane-row {
+  display: grid; grid-template-columns: 8px 1fr auto auto;
+  align-items: center; gap: 8px;
+  width: 100%; padding: 6px 10px; border-radius: var(--r-2);
+  color: var(--text-2); text-align: left;
+  transition: background var(--dur-2) var(--ease), color var(--dur-2) var(--ease);
+  position: relative;
+}
+.lane-row:hover { background: var(--tint); color: var(--text); }
+.lane-row.selected { background: var(--tint); color: var(--text); }
+.lane-row .lane-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-3); }
+.lane-row .lane-count { font-size: var(--fs-2); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.lane-row.dragover { background: var(--accent-tint); color: var(--text); }
+.lane-color {
+  width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0;
+  background: var(--border-strong);
+}
+.lane-edit-btn {
+  width: 18px; height: 18px; padding: 0; border-radius: var(--r-1);
+  color: var(--text-3); opacity: 0; transition: opacity var(--dur-2) var(--ease), color var(--dur-2) var(--ease);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.lane-row:hover .lane-edit-btn,
+.lane-row.selected .lane-edit-btn { opacity: 1; }
+.lane-edit-btn:hover { color: var(--text); background: var(--tint-strong); }
+
+/* Task priority chip — small monospace badge after the title.
+   In list rows it stays a static <span> badge (PriorityChip).
+   In the active-task header it's promoted to a <button> via
+   PriorityChipButton; the button affordances (cursor + hover) below apply
+   to BOTH because the .priority-chip class is shared. */
+.priority-chip {
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 16px; min-width: 24px; padding: 0 6px;
+  font: 600 var(--fs-1)/1 var(--font-mono);
+  color: var(--text-3); background: var(--tint);
+  border-radius: var(--r-pill); flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer; border: 0;
+  transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
+}
+.priority-chip:hover { background: var(--tint-strong, var(--accent-tint)); color: var(--text); }
+.priority-chip.urgent { color: var(--accent-on); background: var(--accent); }
+.priority-chip.high   { color: var(--err);       background: transparent; border: 1px solid var(--err); }
+
+/* Inline edit state of .priority-chip in the active-task header. The pill
+   morphs into a number <input> that keeps the SAME shape + size (border-
+   radius / height / padding / font come from .priority-chip and the
+   .active-header sizing override). What changes when editing:
+     - cursor: text                 — signals "type here", not "click"
+     - paper-white bg + accent border  — lifts the surface off the chip
+                                          palette so urgent/high color
+                                          modifiers don't bleed through
+     - accent caret + focus glow    — makes the typing point unmissable
+   Selector uses .priority-chip.priority-chip-input (specificity 0,2,0)
+   so it beats .priority-chip.urgent / .priority-chip.high which would
+   otherwise repaint the editable surface red/orange. */
+.priority-chip.priority-chip-input {
+  width: 3.5em;
+  text-align: center;
+  cursor: text;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--accent);
+  caret-color: var(--accent);
+  -moz-appearance: textfield;
+  appearance: textfield;
+  transition: background var(--dur-1) var(--ease),
+              border-color var(--dur-1) var(--ease),
+              box-shadow   var(--dur-1) var(--ease);
+}
+.priority-chip.priority-chip-input::-webkit-outer-spin-button,
+.priority-chip.priority-chip-input::-webkit-inner-spin-button {
+  -webkit-appearance: none; margin: 0;
+}
+.priority-chip.priority-chip-input:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-tint);
+}
+
+/* Color swatch grid for lane edit modal */
+.color-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; }
+.color-swatch {
+  width: 100%; aspect-ratio: 1; border-radius: var(--r-2);
+  border: 2px solid transparent;
+  cursor: pointer; transition: transform var(--dur-1) var(--ease);
+}
+.color-swatch.selected { border-color: var(--text); }
+.color-swatch:hover { transform: scale(1.1); }
+.color-swatch.clear {
+  background: repeating-linear-gradient(45deg, var(--tint), var(--tint) 4px, var(--bg) 4px, var(--bg) 8px);
+  border-color: var(--border);
+}
+
+/* ---------- task list (inside lane filter) ----------
+   width:100% so the row spans the full sidebar width regardless of how short
+   the task title is — otherwise <button>'s default inline-block sizing makes
+   each row only as wide as its content, leaving the priority chip and
+   hover/active background ragged across the column. */
+.task-row {
+  display: grid; grid-template-columns: 14px 1fr auto;
+  align-items: center; gap: 8px;
+  width: 100%;
+  padding: 4px 8px; border-radius: var(--r-2);
+  color: var(--text-2);
+  transition: background var(--dur-2) var(--ease), color var(--dur-2) var(--ease);
+  cursor: pointer;
+  text-align: left;
+}
+.task-row:hover { background: var(--tint); color: var(--text); }
+.task-row.active { background: var(--tint); color: var(--text); }
+/* Sidebar task list — default sans (keeps mono reserved for the main view's
+   title + description so the editor area is the visual focus). */
+.task-row .task-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-3); }
+
+/* ===== TagsPane row layout override =====
+   Base .lane-row is `display: grid; grid-template-columns: 8px 1fr auto auto`,
+   designed for `.lane-color | .lane-name | .lane-count | .lane-edit-btn`.
+   In a tags row the first child is a TagPill (variable-width) instead of an
+   8px square, so the grid clamped the pill to 8px and the text overflowed
+   onto the empty .grow span looking like it overlapped. Switch to flex so
+   each child owns its natural width and `<span class="grow">` does its job. */
+.pane-tags .lane-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* grid-template-columns is irrelevant in flex; explicit reset for safety. */
+  grid-template-columns: none;
+  /* Without min-width:0, a long .tag-pill child refused to shrink and pushed
+     the count + edit-btn past the row's right edge, hiding them. */
+  min-width: 0;
+}
+.pane-tags .lane-row .lane-count { color: var(--text-3); font-size: var(--fs-2); }
+
+/* Long tag-name handling in the sidebar tag list.
+   Base .tag-pill is white-space:nowrap + flex-shrink:0 (correct for popovers
+   and headers where pills sit in wrap-friendly containers). In the sidebar
+   the row is a fixed-width flex container, so we override: allow shrink,
+   clip overflow, and add an ellipsis. The full name is still discoverable
+   via the JS hover tooltip (see onMouseEnter on the row in components.js)
+   and the native `title` attribute as a fallback. */
+.pane-tags .lane-row .tag-pill {
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: inline-block; /* override inline-flex so text-overflow takes effect */
+  line-height: 20px;     /* preserve the inline-flex centered look */
+}
+

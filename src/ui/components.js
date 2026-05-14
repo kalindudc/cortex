@@ -1,6 +1,6 @@
 // components.js — All Preact components for the cortex dashboard.
 //
-// Imports the data layer from ./state.js and presents it. Single file because
+// Imports the data layer from ./state/, ./api/, and ./lib/ and presents it. Single file because
 // the components are densely cross-referenced (e.g. ActiveTaskPane embeds
 // EditableTaskBody + PostUpdateForm + StatusPopover; CommandPalette references
 // every action; ModalRoot dispatches to LaneEditModal). Splitting further
@@ -34,116 +34,38 @@ import { markdown } from "@codemirror/lang-markdown";
 import { syntaxHighlighting, HighlightStyle } from "@codemirror/language";
 import { tags as t } from "@lezer/highlight";
 
-// Auto-resize a textarea to fit its content. Attached as a ref callback so it
-// works without re-rendering on every keystroke (which would fight htm). The
-// __cortexAutoSized flag prevents double-binding on rerenders — the listener
-// stays attached for the textarea's whole lifetime. min-height + viewport-
-// capped max-height live in CSS (.autosize) so JS only computes the natural
-// height.
-const autosizeRef = (el) => {
-  if (!el || el.__cortexAutoSized) return;
-  el.__cortexAutoSized = true;
-  const fit = () => {
-    el.style.height = "auto";
-    el.style.height = el.scrollHeight + "px";
-  };
-  el.addEventListener("input", fit);
-  // Run once now (next paint) so initial content sizes correctly.
-  requestAnimationFrame(fit);
-};
-
-// useAutosave — debounced + max-wait commit hook for always-editable inputs.
-// Every change calls schedule(); the commit fn fires on whichever comes
-// first: 600 ms idle (debounce) or 3000 ms since the first dirty change
-// (hard ceiling so a continuous typist still saves periodically). flush()
-// commits immediately and is invoked on blur and on unmount so a fast
-// task switch (parent key change) never drops the last keystroke.
-//
-// Errors are swallowed by the caller — commit functions are expected to
-// wrap their api call in tryApi at the call site, so this hook does not
-// need its own try/catch (matches the pattern in PostUpdateForm.submit).
-function useAutosave(commit, idleMs = 600, maxMs = 3000) {
-  // commitRef refreshes every render so the latest closure (with current
-  // signal values) is what fires when timers tick — mirrors the
-  // onChangeRef pattern inside MdEditor.
-  const commitRef  = useRef(commit);
-  commitRef.current = commit;
-  const idleTimer  = useRef(null);
-  const maxTimer   = useRef(null);
-  const dirty      = useRef(false);
-
-  const flush = () => {
-    if (!dirty.current) return;
-    if (idleTimer.current) { clearTimeout(idleTimer.current); idleTimer.current = null; }
-    if (maxTimer.current)  { clearTimeout(maxTimer.current);  maxTimer.current  = null; }
-    dirty.current = false;
-    commitRef.current?.();
-  };
-  const schedule = () => {
-    dirty.current = true;
-    if (idleTimer.current) clearTimeout(idleTimer.current);
-    idleTimer.current = setTimeout(flush, idleMs);
-    // Hard-ceiling timer arms only on the FIRST dirty change of a burst so
-    // a continuous typist still gets a periodic flush.
-    if (!maxTimer.current) maxTimer.current = setTimeout(flush, maxMs);
-  };
-
-  // Unmount-flush: guarantees the previous task's pending edits commit
-  // before the new task's EditableTaskBody mounts (parent key=task.id
-  // re-mounts on every task switch).
-  useEffect(() => () => flush(), []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  return { schedule, flush };
-}
-
+// Data layer — extracted from this file (autosizeRef, useAutosave,
+// onSubmitKeys) and the former state.js into per-feature TS modules under
+// state/, lib/, and api/. See cortex task 24 (Plan 01) for the rationale.
 import {
-  // signals
   tasks, lanes, tags, selectedLane, selectedId, statusPopover, newLaneOpen,
   paletteOpen, modal, errorMsg, meAuthor, tab, authors,
-  sidebarView, selectedTag, newTagOpen, tagsPopover,
-  lanePopover,
-  // computed
-  tasksInLane, activeTask, inboxList, blockedTasks,
-  // sentinel
-  UNTAGGED,
-  // api + error helpers
-  api, showError, tryApi, fetchAuthors,
-  // popover bookkeeping
-  closeAllPopovers, togglePopover,
-  // platform / hint helpers
-  kbd,
-  // pure helpers
-  fmtTime, initial, STATUS, STATUS_LABEL, nextStatusFor, nextActionLabel,
-  priorityClass, laneColor, LANE_COLORS, tagColor, tagPillStyleFromHex, isValidTagName,
-  // navigation
-  moveSelection,
-  // theme
-  theme, setTheme, toggleTheme,
-} from "./state.js";
-// Top-level tooltip primitive — singleton fixed-position tip + tip(text)
-// helper that returns event-prop spread for any trigger. Mounted once at
-// the App root so every consumer just spreads handlers without rendering
-// per-trigger DOM. See ui/tooltip.js for placement / flip / dismissal logic.
-import { tip, Tooltip } from "./tooltip.js";
+  sidebarView, selectedTag, newTagOpen, tagsPopover, lanePopover,
+} from "./state/signals.ts";
+import {
+  tasksInLane, activeTask, inboxList, blockedTasks, UNTAGGED,
+} from "./state/computed.ts";
+import { closeAllPopovers, togglePopover } from "./state/popovers.ts";
+import { moveSelection } from "./state/selection.ts";
+import { theme, setTheme, toggleTheme } from "./state/theme.ts";
+import { fetchAuthors } from "./state/refresh.ts";
+import { tip } from "./state/tooltip.ts";
+import { api } from "./api/client.ts";
+import { showError, tryApi } from "./api/errors.ts";
+import {
+  STATUS, STATUS_LABEL, nextStatusFor, nextActionLabel, priorityClass,
+  LANE_COLORS, isValidTagName,
+} from "./lib/constants.ts";
+import { fmtTime, initial } from "./lib/format.ts";
+import { kbd, onSubmitKeys } from "./lib/keys.ts";
+import { tagColor, tagPillStyleFromHex, laneColor } from "./lib/color.ts";
+import { useAutosave } from "./lib/autosave.ts";
+import { autosizeRef } from "./lib/autosize.ts";
+// Tooltip Preact component continues to live in tooltip.js until Plan 02
+// extracts it into components/Tooltip.tsx.
+import { Tooltip } from "./tooltip.js";
 
 const html = htm.bind(h);
-
-// Universal "save this form" keydown matcher. Used by every form (new task,
-// new lane, edit task, lane edit modal, post update). Fires on Cmd/Ctrl+S
-// and Cmd/Ctrl+Enter so muscle memory from any editor (⌘S in macOS, Ctrl+S
-// in Win/Linux, ⌘⏎ / Ctrl+⏎ as the universal "submit" gesture) works.
-// Returns a keydown handler you attach to the form (or to the focused input,
-// for textareas where Enter alone has its own meaning).
-const onSubmitKeys = (submit) => (e) => {
-  if (e.isComposing) return; // skip mid-IME
-  const meta = e.metaKey || e.ctrlKey;
-  if (!meta) return;
-  if (e.key === "Enter" || e.key === "s" || e.key === "S") {
-    e.preventDefault();
-    e.stopPropagation();
-    submit();
-  }
-};
 
 // ---------- icons (Lucide canonical: viewBox 24, fill none, stroke currentColor) ----------
 const ICONS = {
@@ -318,7 +240,7 @@ function LanePicker({ task }) {
 
 // Single tag rendered as a Primer-IssueLabelToken-style pill: pill shape,
 // per-tag background color derived from a hex via the GitHub luminance
-// algorithm in styles.css (see .tag-pill). Inline style sets --label-r/g/b
+// algorithm in styles/tag-pill.css (see .tag-pill). Inline style sets --label-r/g/b
 // + --label-h/s/l from the hex; CSS derives perceived-lightness, text
 // color (black/white), and border from those. When `color` is missing the
 // inline style is empty and the pill falls through to the neutral CSS rule.

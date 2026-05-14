@@ -8,8 +8,8 @@
   },
   "scripts": {
     "up": "pnpm install",
-    "ui:build": "pnpm exec bun build src/ui/index.tsx --target browser --outdir out --sourcemap=external --minify --entry-naming bundle.[ext] --asset-naming bundle.[ext]",
-    "ui:watch": "pnpm exec bun build src/ui/index.tsx --target browser --outdir out --sourcemap=external --entry-naming bundle.[ext] --asset-naming bundle.[ext] --watch",
+    "ui:build": "bash scripts/build-css.sh && pnpm exec bun build src/ui/index.tsx --target browser --outdir out --sourcemap=external --minify --entry-naming bundle.[ext] --asset-naming bundle.[ext]",
+    "ui:watch": "bash scripts/build-css.sh && pnpm exec bun build src/ui/index.tsx --target browser --outdir out --sourcemap=external --entry-naming bundle.[ext] --asset-naming bundle.[ext] --watch",
     "build": "bash scripts/build.sh",
     "test": "pnpm run build && pnpm exec bun test",
     "dev": "pnpm exec bun index.ts",

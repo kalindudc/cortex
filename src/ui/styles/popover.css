@@ -1,0 +1,16 @@
+/* ---------- popover ---------- */
+.popover {
+  position: absolute; min-width: 180px;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--r-3); box-shadow: var(--shadow-pop);
+  padding: 4px; z-index: 50;
+}
+.popover-row {
+  display: grid; grid-template-columns: 14px 1fr auto;
+  align-items: center; gap: 8px;
+  width: 100%; padding: 6px 10px; border-radius: var(--r-2);
+  font-size: var(--fs-3); color: var(--text-2);
+  transition: background var(--dur-2) var(--ease), color var(--dur-2) var(--ease);
+}
+.popover-row:hover { background: var(--tint); color: var(--text); }
+

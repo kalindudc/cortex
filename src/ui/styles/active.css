@@ -1,0 +1,134 @@
+/* ---------- update form ---------- */
+.compose {
+  display: flex; flex-direction: column;
+  border: 1px solid var(--border); border-radius: var(--r-3);
+  background: var(--bg);
+  transition: border-color var(--dur-2) var(--ease), box-shadow var(--dur-2) var(--ease);
+}
+.compose:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-tint); }
+.compose textarea {
+  border: 0; box-shadow: none; padding: 10px 12px; min-height: 56px;
+  background: transparent; resize: none;
+}
+.compose textarea:focus { outline: none; box-shadow: none; }
+.compose-foot {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px 6px 12px; border-top: 1px solid var(--border);
+}
+.compose-foot input.author {
+  height: 24px; padding: 0 6px; width: 80px; font-size: var(--fs-2);
+  border: 1px solid transparent; background: transparent;
+}
+.compose-foot input.author:hover { border-color: var(--border); }
+.compose-foot input.author:focus { border-color: var(--accent); background: var(--bg); }
+.char-counter { font-size: var(--fs-1); color: var(--text-3); }
+.char-counter.warn { color: var(--err); }
+/* Hotkey hint chip in the compose-foot. Sits inline with the char counter
+   and Post button so it stays visible while typing (placeholders vanish on
+   first keystroke, which is the worst possible time to forget a shortcut). */
+.compose-hint { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-1); }
+
+/* ---------- autosize textarea (post-update compose only) ----------
+   Companion to autosizeRef in components.js: JS sets `height` to fit content
+   exactly on every input, so the textarea has no internal scroll. Used by
+   the inbox post-update compose box, where growing-with-content feels right
+   because the box is small and lives at the bottom of its pane.
+
+   The task description does NOT use this — it uses the CodeMirror-backed
+   .md-editor below, which has its own bounded scroll and gutter. */
+textarea.autosize {
+  min-height: 80px;
+  overflow: hidden;     /* never scroll — JS keeps height = scrollHeight */
+  resize: none;
+}
+
+/* ---------- external-change banner ----------
+   Surfaced above a field (title or body) inside .editable-task-body when
+   another agent / the CLI wrote a different value to that field while the
+   user has unsaved local edits. Apply adopts the external value; Dismiss
+   keeps the user's version (the next autosave will explicitly overwrite
+   the agent's write). Compact, accent-tinted strip so the affordance is
+   visible without dominating the editing surface. */
+.external-change-banner {
+  display: flex; align-items: center; gap: 12px;
+  margin: 8px 24px; padding: 8px 12px;
+  background: var(--accent-tint);
+  border: 1px solid var(--accent);
+  border-left-width: 3px;
+  border-radius: var(--r-2);
+  font-size: var(--fs-2);
+  color: var(--text);
+}
+.external-change-icon {
+  font-size: var(--fs-4);
+  color: var(--accent);
+  flex-shrink: 0;
+  line-height: 1;
+}
+.external-change-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.external-change-text strong {
+  display: block;
+  font-weight: 600;
+  font-size: var(--fs-2);
+}
+.external-change-preview {
+  margin: 2px 0 0;
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.external-change-actions {
+  display: flex; gap: 6px;
+  flex-shrink: 0;
+}
+.external-change-actions .btn {
+  height: 24px; padding: 0 10px;
+  font-size: var(--fs-2);
+}
+
+/* ---------- editable-task-body (always-on title input + body editor) ----
+   .active-body is always a flex column (see above), so this wrapper just
+   needs to be a flex column whose MdEditor child takes the remaining
+   vertical space and owns internal scroll. The title input keeps its
+   natural height — always visible — and the editor scrolls when content
+   exceeds the available space. */
+.editable-task-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+/* ---------- .md-editor (CodeMirror-backed task description) ----------
+   Single always-editable mode. This stylesheet only owns the wrapper
+   sizing/affordance — the editor's chrome (gutter colors, active line,
+   scrollbar) is themed inside EditorView.theme via cortex CSS variables,
+   so it follows light/dark mode automatically.
+
+   Bounded so the header chrome above and the post-update form below stay
+   pinned; CodeMirror owns internal scroll. I-beam cursor across the
+   editable surface (gutter overrides back to default — line-number column
+   isn't editable). */
+.md-editor {
+  width: 100%;
+  display: block;
+  flex: 1 1 auto;
+  min-height: 120px;
+  background: transparent;
+  overflow: hidden;
+}
+.md-editor .cm-scroller, .md-editor .cm-content { cursor: text; }
+.md-editor .cm-gutters { cursor: default; }
+/* CodeMirror's root is .cm-editor; fill our wrappers exactly in BOTH modes
+   so the gutter + content area stretch to the available space and CM's
+   internal .cm-scroller owns vertical scroll. */
+.md-editor .cm-editor {
+  height: 100%;
+  width: 100%;
+}

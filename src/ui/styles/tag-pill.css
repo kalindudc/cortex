@@ -1,0 +1,96 @@
+/* ===== Tag pill (Primer IssueLabelToken-style) =====
+   Pill shape, semibold, line-height 1, height 20px (matches Primer 'medium'
+   Label). Background color is set by inline CSS custom properties on the
+   element (--label-r/g/b plus --label-h/s/l) computed by tagPillStyleFromHex
+   in lib/color.ts from a single hex. The light / dark theme rule blocks below
+   then derive perceived-lightness, switch the text color to black or white,
+   and pick a border tone. Mirrors /tmp/gh-research/IssueLabelToken.module.css.
+   When no color is supplied (.tag-pill without .tag-pill-colored) the pill
+   falls through to the neutral var(--tint) background. */
+.tag-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-1);
+  font-weight: 600;
+  line-height: 1;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border);
+  background: var(--tint);
+  color: var(--text-2);
+  white-space: nowrap;     /* names never break mid-word */
+  flex-shrink: 0;          /* survive tight flex parents (TagsPane rows) */
+  user-select: none;
+}
+.tag-pill-interactive {
+  cursor: pointer;
+  transition: filter var(--dur-1) var(--ease);
+}
+.tag-pill-interactive:hover { filter: brightness(1.05); }
+
+/* When a color IS supplied: derive perceived-lightness, text color, border.
+   The luminance formula (W3C) is multiplied 0.2126/0.7152/0.0722 onto RGB.
+   --lightness-switch is a step function: 1 when bg is dark (text → white),
+   0 when bg is light (text → black). */
+.tag-pill-colored {
+  --lightness-threshold: 0.6;
+  --perceived-lightness: calc(
+    ((var(--label-r) * 0.2126) + (var(--label-g) * 0.7152) + (var(--label-b) * 0.0722)) / 255
+  );
+  --lightness-switch: max(0, min(calc((var(--lightness-threshold) - var(--perceived-lightness)) * 1000), 1));
+  background: rgb(var(--label-r), var(--label-g), var(--label-b));
+  color: hsl(0deg, 0%, calc(var(--lightness-switch) * 100%));
+  border-color: hsl(
+    var(--label-h), calc(var(--label-s) * 1%), calc((var(--label-l) - 12) * 1%)
+  );
+}
+/* Dark theme: dampen the background to 22% alpha, brighten the text via
+   computed lighten-by, soften the border. Mirrors Primer's dark mixin. */
+:root[data-theme="dark"] .tag-pill-colored {
+  --lightness-threshold: 0.6;
+  --background-alpha: 0.22;
+  --border-alpha: 0.4;
+  --lighten-by: calc(((var(--lightness-threshold) - var(--perceived-lightness)) * 100) * var(--lightness-switch));
+  background: rgba(var(--label-r), var(--label-g), var(--label-b), var(--background-alpha));
+  color: hsl(
+    var(--label-h), calc(var(--label-s) * 1%), calc((var(--label-l) + var(--lighten-by)) * 1%)
+  );
+  border-color: hsla(
+    var(--label-h), calc(var(--label-s) * 1%), calc((var(--label-l) + var(--lighten-by)) * 1%), var(--border-alpha)
+  );
+}
+
+/* ===== Tag list (popover content + anywhere a wrapping pill grid is needed) =====
+   Fresh container — explicitly NOT .popover-row (which is display:grid with
+   rigid columns and was the cause of the v3 char-by-char render bug). */
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding: 8px;
+  max-width: 320px;
+}
+
+/* ===== Active-header "tags: N" count chip =====
+   Width-invariant to tag count: always 'tags: N' so the status pill never
+   gets pushed off-canvas. Visually distinct from .tag-pill (different shape,
+   no per-tag color, plain text label) so users don't mistake it for a tag. */
+.tags-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 20px; padding: 0 10px;
+  border-radius: var(--r-pill);
+  background: var(--tint); color: var(--text-3);
+  font-size: var(--fs-1); font-weight: 600; line-height: 1;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+  transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
+}
+.tags-chip:hover { background: var(--tint-strong, var(--accent-tint)); color: var(--text); }
+.tags-chip .tags-chip-label { color: var(--text-3); text-transform: lowercase; }
+.tags-chip:hover .tags-chip-label { color: var(--text); }
+.tags-chip .tags-chip-count { color: var(--text); font-family: var(--font-mono); }
+

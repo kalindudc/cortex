@@ -41,7 +41,7 @@ describe("UI: served assets (bundled)", () => {
     expect(r.headers.get("content-type") ?? "").toMatch(/text\/css/);
     expect(r.headers.get("cache-control") ?? "").toMatch(/no-store/);
     // Stable tokens / classes that the dashboard depends on. If any of
-    // these vanish, the bundler dropped src/ui/styles.css from the graph.
+    // these vanish, scripts/build-css.sh dropped a slice from styles/.
     expect(t).toMatch(/--accent:\s*#?[0-9a-f]{3,6};/i);
     expect(t).toContain(".md-editor");
     expect(t).toContain(".pane-active");

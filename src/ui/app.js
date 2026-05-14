@@ -4,19 +4,15 @@
 // the daemon's SSE stream, fetches the resolved /api/me identity, and
 // installs the two global event listeners (outside-click for popovers,
 // keydown for global shortcuts). Imports App from components.js and the
-// state/helpers it needs from state.js. No business logic lives here.
+// state/helpers it needs from state/. No business logic lives here.
 
 import { h, render } from "preact";
 import htm from "htm";
 
 import App from "./components.js";
-import {
-  refresh,
-  meAuthor,
-  closeAllPopovers,
-  paletteOpen,
-  modal,
-} from "./state.js";
+import { refresh } from "./state/refresh.ts";
+import { meAuthor, paletteOpen, modal } from "./state/signals.ts";
+import { closeAllPopovers } from "./state/popovers.ts";
 
 const html = htm.bind(h);
 

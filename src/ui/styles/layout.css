@@ -1,0 +1,97 @@
+/* ---------- layout ---------- */
+main {
+  display: grid;
+  grid-template-columns: 220px 1fr 340px;
+  grid-template-areas: "lanes active inbox";
+  height: 100vh;
+  overflow: hidden;
+}
+.pane { overflow: auto; display: flex; flex-direction: column; min-height: 0; }
+/* Left sidebar opts out of pane-level scrolling: each domain section
+   (Lanes, Tasks) owns its own scroll context so the system strip, All
+   tasks button, and pane-foot stay pinned. */
+.pane-lanes  { grid-area: lanes; background: var(--panel); overflow: hidden; }
+
+/* Lanes section
+   ---------------
+   When ALONE in the middle (no tasks list rendered yet), it grows to fill
+   all remaining vertical space and scrolls internally if there are many
+   lanes.
+
+   When PAIRED with the tasks section, it caps at one-third of the pane
+   height (:has() selector below) so a long lane list can never squeeze the
+   task list out of view — task triage is the primary activity, lane
+   navigation is secondary. The lanes-section then becomes a fixed-basis
+   flex item; the tasks section consumes whatever's left.
+
+   Padding lives on the inner .section-head / .section-body (not on the
+   section itself) so the sticky header can span flush to the section's
+   edges and cover scrolling content underneath without a padding gap. */
+.pane-lanes > .lanes-section,
+.pane-lanes > .tasks-section {
+  padding: 0;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+.pane-lanes:has(> .tasks-section) > .lanes-section {
+  flex: 0 0 auto;
+  max-height: 33%;
+}
+.pane-lanes > .tasks-section {
+  /* Visible gap between the lane list and the task list — they're
+     conceptually separate, the spacing should reflect that. */
+  padding-top: 12px;
+}
+
+/* Sticky section header for both lanes-section and tasks-section. Sits at
+   the top of its scrolling parent so the title (and the new-lane form when
+   open) stays visible no matter how far you scroll. Background matches the
+   pane so scrolling content disappears cleanly underneath.
+
+   min-height matches the .btn-icon height (28px) so the Tasks heading
+   (eyebrow only) reads at the same visual weight as the Lanes heading
+   (eyebrow + plus button). flex-column + justify-content:center vertically
+   centers content within the min-height box. */
+.lanes-section > .section-head,
+.tasks-section > .section-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel);
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 28px;
+}
+.lanes-section > .section-body,
+.tasks-section > .section-body {
+  padding: 0 16px 16px 16px;
+}
+
+/* Shared scrollbar styling for both internal scrollers in the lanes pane. */
+.pane-lanes > .lanes-section::-webkit-scrollbar,
+.pane-lanes > .tasks-section::-webkit-scrollbar         { width: 8px; }
+.pane-lanes > .lanes-section::-webkit-scrollbar-track,
+.pane-lanes > .tasks-section::-webkit-scrollbar-track   { background: transparent; }
+.pane-lanes > .lanes-section::-webkit-scrollbar-thumb,
+.pane-lanes > .tasks-section::-webkit-scrollbar-thumb   { background: var(--border-strong); border-radius: 4px; }
+.pane-lanes > .lanes-section::-webkit-scrollbar-thumb:hover,
+.pane-lanes > .tasks-section::-webkit-scrollbar-thumb:hover { background: var(--text-3); }
+/* Active pane wears the dot-grid "paper" background as a subtle full-pane
+   texture. 26px gap + sub-pixel dots make it almost invisible until you
+   look for it — the goal is grain, not pattern. */
+.pane-active {
+  grid-area: active;
+  background-color: var(--bg);
+  background-image: radial-gradient(circle, var(--paper-dot) 0.8px, transparent 1.2px);
+  background-size: 26px 26px;
+  background-position: 0 0;
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+}
+.pane-inbox  { grid-area: inbox;  background: var(--panel); }
+
