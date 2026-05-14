@@ -40,8 +40,9 @@ import cortexRecipeSession from "./skills/cortex/recipes/session-id.md" with { t
 // --- Methodology skills (Plan 4) ------------------------------------------
 import plannerSkillMd from "./skills/cortex-planner/SKILL.md" with { type: "file" };
 import implementerSkillMd from "./skills/cortex-implementer/SKILL.md" with { type: "file" };
+import researchSkillMd from "./skills/cortex-research/SKILL.md" with { type: "file" };
 
-export type SkillName = "cortex" | "cortex-planner" | "cortex-implementer";
+export type SkillName = "cortex" | "cortex-planner" | "cortex-implementer" | "cortex-research";
 
 // Map relative path inside the skill dir → embedded blob path. The relPath
 // becomes the on-disk name under skillDir(name).
@@ -65,6 +66,9 @@ const SKILLS: Record<SkillName, Manifest> = {
   },
   "cortex-implementer": {
     "SKILL.md": implementerSkillMd,
+  },
+  "cortex-research": {
+    "SKILL.md": researchSkillMd,
   },
 };
 

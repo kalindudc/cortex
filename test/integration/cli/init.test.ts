@@ -22,7 +22,7 @@ import { Store } from "../../../src/store.ts";
 // Expected shipped skill names. Hardcoded (not derived from listSkills())
 // so the test fails LOUD if a skill is removed without an explicit test
 // update.
-const EXPECTED_SKILLS = ["cortex", "cortex-planner", "cortex-implementer"] as const;
+const EXPECTED_SKILLS = ["cortex", "cortex-planner", "cortex-implementer", "cortex-research"] as const;
 
 // Real user-home paths we MUST NOT touch.
 const REAL_DB = path.join(os.homedir(), ".config", "cortex", "cortex.db");

@@ -25,26 +25,27 @@ This skill persists the plan as the body of a cortex task. Multiple plans for on
 
 Plans are stored in cortex — not as files. Three cortex specifics apply.
 
-1. SESSION ID — every `cortex update` REQUIRES author attribution. PREFERRED: if your harness has the `cortex_update` tool, call that tool for every update (auto-attributes via your harness session; updates round-trip via `cortex resume <task-id>`). FALLBACK: if `cortex_update` is unavailable, generate ONE id at the start of your agent session, hold in working memory, and reuse it for the lifetime of the session:
-   ```bash
-   SESSION_ID="planner-$(openssl rand -hex 4)"   # e.g. planner-7f3a9201
-   ```
-   Format `<role>-<8 hex>`, max 80 chars, no newlines. NEVER store in env vars (sandboxed sub-shells throw them away) or in repo files (two agents collapse into one identity in the audit trail). The `cortex update <id> --as "$SESSION_ID" -m "..."` examples below are the fallback path — keep using them when the tool is unavailable.
+1. ALWAYS use the `cortex_update` tool, call that tool for every update. If the tool does not exist follow the Fallback Strategy.
+    Fallback strategy: generate ONE session id at the start of your agent session, hold in working memory, and reuse it for the lifetime of the session:
+    ```bash
+    SESSION_ID="planner-$(openssl rand -hex 4)"   # e.g. planner-7f3a9201
+    ```
+    Format `<role>-<8 hex>`, max 80 chars, no newlines. NEVER store in env vars (sandboxed sub-shells throw them away) or in repo files (two agents collapse into one identity in the audit trail). The `cortex update <id> --as "$SESSION_ID" -m "..."` examples below are the fallback path — keep using them when the tool is unavailable.
 
 2. PLAN BODY → cortex task. Draft the plan into a tmpfile and persist it via `--body-file`:
-   ```bash
-   PLAN=$(mktemp -t cortex-plan.XXXXXX.md)
-   # write the plan markdown to "$PLAN" using the Plan Template below
-   cortex add "<title>" --lane "$LANE" --priority <n> --body-file "$PLAN"
-   # stdout: [<id>] <title>
-   ```
-   ALWAYS use `--body-file`; NEVER inline `-b "..."` for KB-scale plans (shell escaping is a footgun).
+    ```bash
+    PLAN=$(mktemp -t cortex-plan.XXXXXX.md)
+    # write the plan markdown to "$PLAN" using the Plan Template below
+    cortex add "<title>" --lane "$LANE" --priority <n> --body-file "$PLAN"
+    # stdout: [<id>] <title>
+    ```
+    ALWAYS use `--body-file`; NEVER inline `-b "..."` for KB-scale plans (shell escaping is a footgun).
 
 3. DEFAULT LANE = current repository directory name:
-   ```bash
-   LANE=$(git rev-parse --show-toplevel 2>/dev/null | xargs basename || basename "$PWD")
-   ```
-   Override only when the user explicitly names a different lane.
+    ```bash
+    LANE=$(git rev-parse --show-toplevel 2>/dev/null | xargs basename || basename "$PWD")
+    ```
+    Override only when the user explicitly names a different lane.
 
 4. TAGS — every plan task MUST carry the `plan` tag. Plans inside a stack MUST also carry a stack-slug tag derived automatically from the feature title (NEVER prompt the user):
   ```bash

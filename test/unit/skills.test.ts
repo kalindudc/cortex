@@ -78,7 +78,7 @@ describe("cortex base skill — Plan 3 leaf files", () => {
 // the sibling skill so the harness skill-picker doesn't fire both on
 // overlapping prompts.
 describe("methodology skills — standalone discipline", () => {
-  const methodologySkills: SkillName[] = ["cortex-planner", "cortex-implementer"];
+  const methodologySkills: SkillName[] = ["cortex-planner", "cortex-implementer", "cortex-research"];
   for (const name of methodologySkills) {
     test(`${name}: substantial body (≥ 4 KB) and embeds cortex CLI essentials`, async () => {
       const dir = path.join(tmpDir, name);
@@ -115,6 +115,17 @@ describe("methodology skills — standalone discipline", () => {
     // The implementer description tells the picker to use the planner for drafting.
     expect(implementer).toContain("cortex-planner");
   });
+
+  // cortex-research must disambiguate against BOTH siblings: planning work is
+  // for cortex-planner, execution is for cortex-implementer. Without these
+  // names in the body, the pi skill-picker can fire cortex-research on
+  // prompts that should route to planner/implementer.
+  test("cortex-research disambiguates from cortex-planner and cortex-implementer", async () => {
+    await writeSkill("cortex-research", path.join(tmpDir, "cortex-research"));
+    const research = fs.readFileSync(path.join(tmpDir, "cortex-research", "SKILL.md"), "utf8");
+    expect(research).toContain("cortex-planner");
+    expect(research).toContain("cortex-implementer");
+  });
 });
 
 // --- pi-extension manifest -----------------------------------------------
@@ -146,7 +157,7 @@ describe("writeExtension — every shipped extension", () => {
 // --- gap-closers: registry + path resolution + error branches --------------
 describe("skills: registry + path resolution", () => {
   test("listSkills() returns every shipped skill name (deterministic order)", () => {
-    const expected: SkillName[] = ["cortex", "cortex-planner", "cortex-implementer"];
+    const expected: SkillName[] = ["cortex", "cortex-planner", "cortex-implementer", "cortex-research"];
     expect(listSkills()).toEqual(expected);
   });
 

@@ -19,18 +19,19 @@ The plan body is read once at the start and is NEVER mutated during execution. P
 
 The plan source and per-task progress markers live in cortex — not as files. Three cortex specifics apply.
 
-1. SESSION ID — every `cortex update` REQUIRES author attribution. PREFERRED: if your harness has the `cortex_update` tool, call that tool for every update (auto-attributes via your harness session; updates round-trip via `cortex resume <task-id>`). FALLBACK: if `cortex_update` is unavailable, generate ONE id at the start of your agent session, hold in working memory, and reuse it for the lifetime of the session:
-   ```bash
-   SESSION_ID="implementer-$(openssl rand -hex 4)"   # e.g. implementer-1c0ed4a8
-   ```
-   Format `<role>-<8 hex>`, max 80 chars, no newlines. NEVER store in env vars (sandboxed sub-shells throw them away) or in repo files (two agents collapse into one identity in the audit trail). The `cortex update <id> --as "$SESSION_ID" -m "..."` examples below are the fallback path — keep using them when the tool is unavailable.
+1. ALWAYS use the `cortex_update` tool, call that tool for every update. If the tool does not exist follow the Fallback Strategy.
+    Fallback strategy: generate ONE session id at the start of your agent session, hold in working memory, and reuse it for the lifetime of the session:
+    ```bash
+    SESSION_ID="implementer-$(openssl rand -hex 4)"   # e.g. implementer-1c0ed4a8
+    ```
+    Format `<role>-<8 hex>`, max 80 chars, no newlines. NEVER store in env vars (sandboxed sub-shells throw them away) or in repo files (two agents collapse into one identity in the audit trail). The `cortex update <id> --as "$SESSION_ID" -m "..."` examples below are the fallback path — keep using them when the tool is unavailable.
 
 2. PLAN BODY ← cortex task. Fetch the plan with:
-   ```bash
-   cortex show <id> --json | jq -r '.task.status'
-   cortex show <id> --json | jq -r '.task.body' > /tmp/plan-<id>.md
-   ```
-   The task body is the plan markdown. Read it in FULL; do NOT mutate it (body is owned by cortex-planner).
+    ```bash
+    cortex show <id> --json | jq -r '.task.status'
+    cortex show <id> --json | jq -r '.task.body' > /tmp/plan-<id>.md
+    ```
+    The task body is the plan markdown. Read it in FULL; do NOT mutate it (body is owned by cortex-planner).
 
 3. PROGRESS → cortex updates. Post one cortex update per Low-Level Task as the canonical completion marker (the cortex task body is NEVER mutated to record progress):
     ```bash
