@@ -19,6 +19,14 @@ import { render } from "preact";
 // `pnpm run serve:dev`); in production it 404s and the EventSource quietly
 // no-ops. See src/ui/dev-reload.ts.
 import "./dev-reload.ts";
+// Side-effect import: seeds selectedId from localStorage and registers an
+// effect that persists activeTask.id back. Must come before refresh() below
+// so the seed beats the first task fetch.
+import "./state/lastTask.ts";
+// Side-effect import: seeds the showAllTasks toggle from localStorage and
+// registers an effect that persists subsequent toggles. Must come before
+// refresh() so the seed beats the first paint of the sidebar.
+import "./state/showAllTasks.ts";
 import App from "./components/App.tsx";
 import { refresh } from "./state/refresh.ts";
 import { meAuthor, paletteOpen, paletteQuery, modal, migrationsPending } from "./state/signals.ts";

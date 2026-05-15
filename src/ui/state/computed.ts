@@ -4,7 +4,7 @@
 
 import { computed, type ReadonlySignal } from "@preact/signals";
 import type { Task, Update } from "../api/types.ts";
-import { tasks, filters, selectedId, updates } from "./signals.ts";
+import { tasks, filters, selectedId, showAllTasks, updates } from "./signals.ts";
 
 // Sentinel value for "filter to untagged tasks". Picked to be collision-free
 // against TAG_NAME_RE (/^[a-z0-9_@-]{1,32}$/, src/store.ts:55) — the null
@@ -40,11 +40,21 @@ export const filteredTasks: ReadonlySignal<Task[]> = computed(() => {
 export const tasksInLane = filteredTasks;
 
 export const activeTask: ReadonlySignal<Task | null> = computed(() => {
-  const list = filteredTasks.value;
+  // Two-stage filter:
+  //   1. selectedId branch runs against the UNGATED pool — an explicit user
+  //      selection (click in sidebar OR restored from localStorage) wins
+  //      over the showAllTasks toggle. Toggling the eye off while reading
+  //      a done task must not yank it from the active pane, and a stored
+  //      selectedId pointing at a done task must restore on reload.
+  //   2. The priority fallback applies the showAllTasks gate so a lane of
+  //      only-done tasks (with no selection) doesn't surface one through
+  //      the back door even though the sidebar hides it.
+  const base = filteredTasks.value;
   if (selectedId.value != null) {
-    const t = list.find(x => x.id === selectedId.value);
+    const t = base.find(x => x.id === selectedId.value);
     if (t) return t;
   }
+  const list = showAllTasks.value ? base : base.filter(t => t.status !== "done");
   // Fall back to the highest-priority open task in the current view.
   return list.find(t => t.status !== "done") ?? list[0] ?? null;
 });
