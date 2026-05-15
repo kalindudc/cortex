@@ -52,3 +52,9 @@
 .palette-foot .kbd { margin-right: 4px; }
 .overlay-top { padding-top: 12vh; }
 
+/* Search-result rows reuse .palette-row but carry a status dot inline. */
+.palette-row .dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  flex-shrink: 0;
+}
+

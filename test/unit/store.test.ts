@@ -39,6 +39,46 @@ describe("Store: tasks", () => {
     s.close();
   });
 
+  test("listTasks({ search }) filters by title or body substring", () => {
+    const s = open();
+    s.addTask({ title: "Alpha task", body: "some body" });
+    s.addTask({ title: "Beta task", body: "alpha is here" });
+    s.addTask({ title: "Gamma", body: "nothing" });
+    const results = s.listTasks({ search: "alpha" }).map(t => t.title);
+    expect(results.sort()).toEqual(["Alpha task", "Beta task"]);
+    s.close();
+  });
+
+  test("listTasks({ title }) filters by title substring only", () => {
+    const s = open();
+    s.addTask({ title: "Alpha task", body: "beta is here" });
+    s.addTask({ title: "Beta task", body: "alpha is here" });
+    const results = s.listTasks({ title: "alpha" }).map(t => t.title);
+    expect(results).toEqual(["Alpha task"]);
+    s.close();
+  });
+
+  test("listTasks({ tagQuery }) filters by tag name substring", () => {
+    const s = open();
+    const t1 = s.addTask({ title: "a" });
+    const t2 = s.addTask({ title: "b" });
+    s.setTaskTags(t1.id, ["bugfix", "ui"]);
+    s.setTaskTags(t2.id, ["feature"]);
+    const results = s.listTasks({ tagQuery: "bug" }).map(t => t.title);
+    expect(results).toEqual(["a"]);
+    s.close();
+  });
+
+  test("listTasks combines search with status filter", () => {
+    const s = open();
+    const t1 = s.addTask({ title: "Alpha bug" });
+    s.setStatus(t1.id, "done");
+    s.addTask({ title: "Beta bug" });
+    const results = s.listTasks({ search: "bug", status: "open" }).map(t => t.title);
+    expect(results).toEqual(["Beta bug"]);
+    s.close();
+  });
+
   test("editTask updates only provided fields and bumps updated", async () => {
     const s = open();
     const t = s.addTask({ title: "x", body: "orig", priority: 1 });

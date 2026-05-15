@@ -65,6 +65,12 @@ export default defineCommand({
       valueHint: "a,b,c",
       description: "filter to tasks that carry every listed tag (AND)",
     },
+    search: {
+      type: "string",
+      alias: "q",
+      valueHint: "text",
+      description: "search tasks. @text searches titles, #text searches tags",
+    },
   },
   run({ args }) {
     if (args.status && !STATUSES.includes(args.status as TaskStatus)) {
@@ -89,12 +95,20 @@ export default defineCommand({
       const raw = renderTagsTruncated(tags);
       return raw ? c("90", raw) : "";
     };
+    const searchOpts: { search?: string; title?: string; tagQuery?: string } = {};
+    if (args.search) {
+      const s = args.search.trim();
+      if (s.startsWith("@")) searchOpts.title = s.slice(1).trim();
+      else if (s.startsWith("#")) searchOpts.tagQuery = s.slice(1).trim();
+      else searchOpts.search = s;
+    }
     const store = Store.open();
     try {
       const rows = store.listTasks({
         lane: args.lane || undefined,
         status: (args.status as TaskStatus) || undefined,
         tags: tagFilter,
+        ...searchOpts,
       });
       if (args.json) {
         console.log(JSON.stringify(rows));

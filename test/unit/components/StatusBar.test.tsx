@@ -97,10 +97,14 @@ describe("StatusBar", () => {
     }
   });
 
-  test("palette hint always renders with a 'P' key indicator", () => {
+  test("palette hint renders both 'K' and 'P' key indicators", () => {
     const { container } = render(<StatusBar />);
-    const kbdEl = container.querySelector(".hint .kbd");
-    expect(kbdEl).toBeTruthy();
-    expect(kbdEl?.textContent ?? "").toContain("P");
+    const kbdEls = container.querySelectorAll(".hint .kbd");
+    expect(kbdEls.length).toBeGreaterThanOrEqual(2);
+    const texts = Array.from(kbdEls)
+      .map(el => el.textContent ?? "")
+      .join(" ");
+    expect(texts).toContain("K");
+    expect(texts).toContain("P");
   });
 });

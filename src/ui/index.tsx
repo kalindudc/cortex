@@ -21,7 +21,7 @@ import { render } from "preact";
 import "./dev-reload.ts";
 import App from "./components/App.tsx";
 import { refresh } from "./state/refresh.ts";
-import { meAuthor, paletteOpen, modal } from "./state/signals.ts";
+import { meAuthor, paletteOpen, paletteQuery, modal } from "./state/signals.ts";
 import { closeAllPopovers } from "./state/popovers.ts";
 
 // PostUpdateForm publishes its submit closure to window.__cortexPostUpdate
@@ -131,10 +131,17 @@ document.addEventListener("click", (e: MouseEvent) => {
 window.addEventListener("keydown", (e: KeyboardEvent) => {
   const meta = e.metaKey || e.ctrlKey;
 
-  // Toggle palette.
-  if (meta && (e.key === "p" || e.key === "k")) {
+  // Open palette in command mode (mod+p) or search mode (mod+k).
+  if (meta && e.key === "p") {
     e.preventDefault();
-    paletteOpen.value = !paletteOpen.value;
+    if (!paletteQuery.value.startsWith("/")) paletteQuery.value = `/${paletteQuery.value}`;
+    paletteOpen.value = true;
+    return;
+  }
+  if (meta && e.key === "k") {
+    e.preventDefault();
+    if (paletteQuery.value.startsWith("/")) paletteQuery.value = paletteQuery.value.slice(1);
+    paletteOpen.value = true;
     return;
   }
 
@@ -173,6 +180,7 @@ window.addEventListener("keydown", (e: KeyboardEvent) => {
     // handler.
     if (paletteOpen.value) {
       paletteOpen.value = false;
+      paletteQuery.value = "";
       return;
     }
     if (modal.value) {

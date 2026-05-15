@@ -164,6 +164,12 @@ export type ListTasksFilter = {
   status?: TaskStatus;
   /** AND semantics: task must carry every listed tag. */
   tags?: string[];
+  /** Free-text search across title and body (case-insensitive substring). */
+  search?: string;
+  /** Title-only search (case-insensitive substring). */
+  title?: string;
+  /** Tag-name search (case-insensitive substring). */
+  tagQuery?: string;
 };
 
 const now = (): number => Date.now();
@@ -325,6 +331,21 @@ export class Store {
         `t.id IN (SELECT task_id FROM task_tags WHERE tag_name IN (${placeholders}) GROUP BY task_id HAVING COUNT(DISTINCT tag_name) = ?)`,
       );
       params.push(...filter.tags, filter.tags.length);
+    }
+    if (filter.search) {
+      const q = `%${filter.search.toLowerCase()}%`;
+      clauses.push(`(LOWER(t.title) LIKE ? OR LOWER(COALESCE(t.body, '')) LIKE ?)`);
+      params.push(q, q);
+    }
+    if (filter.title) {
+      const q = `%${filter.title.toLowerCase()}%`;
+      clauses.push(`LOWER(t.title) LIKE ?`);
+      params.push(q);
+    }
+    if (filter.tagQuery) {
+      const q = `%${filter.tagQuery.toLowerCase()}%`;
+      clauses.push(`t.id IN (SELECT task_id FROM task_tags WHERE LOWER(tag_name) LIKE ?)`);
+      params.push(q);
     }
     const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
     // priority ASC so 0 (highest) sorts first; tie-break by oldest-created.

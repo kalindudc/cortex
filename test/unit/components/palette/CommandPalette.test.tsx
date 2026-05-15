@@ -17,14 +17,20 @@ mock.module("../../../../src/ui/components/palette/buildCommands.ts", () => ({
     { id: "gamma", label: "Gamma", icon: "plus", action: action3 },
   ],
 }));
+mock.module("../../../../src/ui/lib/fuzzy.ts", () => ({
+  searchTasks: () => [],
+}));
 
 import { render, fireEvent } from "@testing-library/preact";
 import { CommandPalette } from "../../../../src/ui/components/palette/CommandPalette.tsx";
-import { paletteOpen } from "../../../../src/ui/state/signals.ts";
+import { paletteOpen, paletteQuery, tasks, selectedId } from "../../../../src/ui/state/signals.ts";
 
 describe("CommandPalette", () => {
   beforeEach(() => {
     paletteOpen.value = true;
+    paletteQuery.value = "/";
+    tasks.value = [];
+    selectedId.value = null;
     action1.mockClear();
     action2.mockClear();
     action3.mockClear();
@@ -59,10 +65,11 @@ describe("CommandPalette", () => {
     expect(paletteOpen.value).toBe(false);
   });
 
-  test("typing into the search input filters the list", () => {
+  test("typing into the search input filters the command list", () => {
+    paletteQuery.value = "/";
     const { container } = render(<CommandPalette />);
     const input = container.querySelector(".palette-input") as HTMLInputElement;
-    fireEvent.input(input, { target: { value: "gam" } });
+    fireEvent.input(input, { target: { value: "/gam" } });
     const rows = container.querySelectorAll(".palette-row");
     expect(rows.length).toBe(1);
     expect(rows[0].textContent).toContain("Gamma");
@@ -84,5 +91,72 @@ describe("CommandPalette", () => {
     const input = container.querySelector(".palette-input") as HTMLInputElement;
     fireEvent.keyDown(input, { key: "Escape" });
     expect(paletteOpen.value).toBe(true);
+  });
+
+  test("empty query in search mode shows no results", () => {
+    paletteQuery.value = "";
+    const { container } = render(<CommandPalette />);
+    const rows = container.querySelectorAll(".palette-row");
+    expect(rows.length).toBe(0);
+    expect(container.textContent).toContain("No matching tasks");
+  });
+
+  test("typing / switches to command mode and shows commands", () => {
+    paletteQuery.value = "";
+    const { container } = render(<CommandPalette />);
+    const input = container.querySelector(".palette-input") as HTMLInputElement;
+    fireEvent.input(input, { target: { value: "/" } });
+    const rows = container.querySelectorAll(".palette-row");
+    expect(rows.length).toBe(3);
+    expect(rows[0].textContent).toContain("Alpha");
+  });
+
+  test("backspacing / returns to search mode", () => {
+    paletteQuery.value = "/";
+    const { container } = render(<CommandPalette />);
+    const input = container.querySelector(".palette-input") as HTMLInputElement;
+    fireEvent.input(input, { target: { value: "" } });
+    const rows = container.querySelectorAll(".palette-row");
+    expect(rows.length).toBe(0);
+    expect(container.textContent).toContain("No matching tasks");
+  });
+
+  test("search mode renders task results from searchTasks", () => {
+    paletteQuery.value = "";
+    tasks.value = [
+      { id: 1, lane: "now", title: "Find me", body: "", status: "open", priority: 1, created: 0, updated: 0, tags: [] },
+    ];
+    mock.module("../../../../src/ui/lib/fuzzy.ts", () => ({
+      searchTasks: () => [{ task: tasks.value[0], score: 10 }],
+    }));
+    const { container } = render(<CommandPalette />);
+    const rows = container.querySelectorAll(".palette-row");
+    expect(rows.length).toBe(1);
+    expect(rows[0].textContent).toContain("Find me");
+  });
+
+  test("selecting a search result sets selectedId and closes palette", () => {
+    paletteQuery.value = "";
+    tasks.value = [
+      {
+        id: 7,
+        lane: "now",
+        title: "Select me",
+        body: "",
+        status: "open",
+        priority: 2,
+        created: 0,
+        updated: 0,
+        tags: [],
+      },
+    ];
+    mock.module("../../../../src/ui/lib/fuzzy.ts", () => ({
+      searchTasks: () => [{ task: tasks.value[0], score: 10 }],
+    }));
+    const { container } = render(<CommandPalette />);
+    const rows = container.querySelectorAll(".palette-row");
+    fireEvent.click(rows[0]);
+    expect(selectedId.value).toBe(7);
+    expect(paletteOpen.value).toBe(false);
   });
 });

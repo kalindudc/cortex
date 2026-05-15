@@ -9,10 +9,13 @@ import type { JSX, VNode } from "preact";
 import { useEffect, useRef } from "preact/hooks";
 import { useSignal } from "@preact/signals";
 
-import { paletteOpen } from "../../state/signals.ts";
+import { paletteOpen, paletteQuery, tasks, selectedId } from "../../state/signals.ts";
 import { showError } from "../../api/errors.ts";
 import { Icon } from "../Icon.tsx";
+import { PriorityChip } from "../chips/PriorityChip.tsx";
 import { buildCommands, type Command } from "./buildCommands.ts";
+import { searchTasks } from "../../lib/fuzzy.ts";
+import type { Task } from "../../api/types.ts";
 
 interface Scope {
   title: string;
@@ -20,7 +23,7 @@ interface Scope {
 }
 
 export function CommandPalette(): VNode {
-  const query = useSignal("");
+  const query = paletteQuery;
   const cursor = useSignal(0);
   // Scope stack: each entry is { title, cmds }. Empty stack = root scope
   // (rebuilt from buildCommands() every render so it tracks live signals).
@@ -41,21 +44,31 @@ export function CommandPalette(): VNode {
   });
 
   const cmds = stack.value.length === 0 ? buildCommands() : stack.value[stack.value.length - 1].cmds;
+  const isCommandMode = query.value.startsWith("/") || stack.value.length > 0;
+  const searchQuery = isCommandMode ? query.value.slice(1) : query.value;
+
   // Word-split (fuzzy-ish) match: split the query on whitespace and require
   // EVERY token to appear (substring) in either the label or id, in any
   // order. Lets "filter tag" match "Filter by tags…" which strict substring
   // search would miss because "by" sits between the tokens. Predictable +
   // cheap; no scoring/ranking complexity.
-  const tokens = query.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  const filtered =
+  const tokens = searchQuery.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const filteredCommands =
     tokens.length === 0
       ? cmds
       : cmds.filter(c => {
           const hay = `${c.label} ${c.id}`.toLowerCase();
           return tokens.every(t => hay.includes(t));
         });
-  const safeCursor = Math.min(cursor.value, Math.max(0, filtered.length - 1));
+  const searchResults = !isCommandMode ? searchTasks(tasks.value, searchQuery) : [];
+  const activeList = isCommandMode ? filteredCommands : searchResults;
+  const safeCursor = Math.min(cursor.value, Math.max(0, activeList.length - 1));
   const inSubmenu = stack.value.length > 0;
+
+  const selectTask = (task: Task) => {
+    selectedId.value = task.id;
+    paletteOpen.value = false;
+  };
 
   // Pop one scope level. Resets query + cursor so the parent menu shows
   // unfiltered. Re-focuses the input — keyboard users should never lose
@@ -115,7 +128,9 @@ export function CommandPalette(): VNode {
           placeholder={
             inSubmenu
               ? `Pick a ${stack.value[stack.value.length - 1].title.toLowerCase()}\u2026`
-              : "Type a command\u2026"
+              : isCommandMode
+                ? "Type a command\u2026"
+                : "Search tasks\u2026"
           }
           autoFocus
           value={query.value}
@@ -126,14 +141,19 @@ export function CommandPalette(): VNode {
           onKeyDown={(e: KeyboardEvent) => {
             if (e.key === "ArrowDown") {
               e.preventDefault();
-              cursor.value = Math.min(filtered.length - 1, safeCursor + 1);
+              cursor.value = Math.min(activeList.length - 1, safeCursor + 1);
             } else if (e.key === "ArrowUp") {
               e.preventDefault();
               cursor.value = Math.max(0, safeCursor - 1);
             } else if (e.key === "Enter") {
               e.preventDefault();
-              const c = filtered[safeCursor];
-              if (c) exec(c);
+              if (isCommandMode) {
+                const c = filteredCommands[safeCursor];
+                if (c) exec(c);
+              } else {
+                const r = searchResults[safeCursor];
+                if (r) selectTask(r.task);
+              }
             }
             // Submenu navigation. ArrowLeft / Backspace (when query empty) /
             // Escape all pop one level. At root, Escape falls through to the
@@ -152,12 +172,12 @@ export function CommandPalette(): VNode {
           }}
         />
         <div class="palette-list">
-          {filtered.length === 0 ? (
+          {activeList.length === 0 ? (
             <div class="meta" style="padding:12px">
-              No matching commands
+              {isCommandMode ? "No matching commands" : "No matching tasks"}
             </div>
-          ) : (
-            filtered.map((c, i) => (
+          ) : isCommandMode ? (
+            filteredCommands.map((c, i) => (
               <button
                 class={`palette-row${i === safeCursor ? " active" : ""}`}
                 onMouseEnter={() => (cursor.value = i)}
@@ -167,6 +187,19 @@ export function CommandPalette(): VNode {
                 <span class="grow">{c.label}</span>
                 {c.hint ? <span class="meta num">{c.hint}</span> : null}
                 {c.submenu ? <Icon name="chevronDown" className="rotate-90-ccw" /> : null}
+              </button>
+            ))
+          ) : (
+            searchResults.map((r, i) => (
+              <button
+                class={`palette-row${i === safeCursor ? " active" : ""}`}
+                onMouseEnter={() => (cursor.value = i)}
+                onClick={() => selectTask(r.task)}
+              >
+                <span class={`dot dot-status-${r.task.status}`}></span>
+                <span class="grow">{r.task.title}</span>
+                <span class="meta">{r.task.lane}</span>
+                <PriorityChip priority={r.task.priority} />
               </button>
             ))
           )}

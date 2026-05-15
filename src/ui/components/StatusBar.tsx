@@ -65,6 +65,8 @@ export function StatusBar(): VNode {
         {...tip("Open the command palette")}
       >
         <Icon name="keyboard" size={12} />
+        <span class="kbd">{kbd("K")}</span>
+        <span class="meta">/</span>
         <span class="kbd">{kbd("P")}</span>
       </button>
     </div>

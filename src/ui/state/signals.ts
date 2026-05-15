@@ -96,6 +96,7 @@ export const tagsPopover = signal<boolean>(false);
 // inline <input> with local state — no global popover bookkeeping.)
 export const lanePopover = signal<boolean>(false);
 export const paletteOpen = signal<boolean>(false);
+export const paletteQuery = signal<string>("");
 // modal kinds: 'confirm-delete' | 'lane-edit' | 'confirm-lane-delete'
 export const modal = signal<{ kind: string; [k: string]: unknown } | null>(null);
 
