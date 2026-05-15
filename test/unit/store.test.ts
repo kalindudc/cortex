@@ -519,3 +519,90 @@ describe("Store: listAuthorsLast24h", () => {
     s.close();
   });
 });
+
+describe("Store: notifications", () => {
+  test("addNotification round-trips with default read=false", () => {
+    const s = open();
+    s.addNotification({ status: "open", title: "hi", message: "m" });
+    const rows = s.listNotifications();
+    expect(rows[0].read).toBe(false);
+    s.close();
+  });
+
+  test("listNotifications orders by created DESC", async () => {
+    const s = open();
+    s.addNotification({ status: "open", title: "a", message: "m" });
+    await Bun.sleep(2);
+    s.addNotification({ status: "open", title: "b", message: "m" });
+    await Bun.sleep(2);
+    s.addNotification({ status: "open", title: "c", message: "m" });
+    expect(s.listNotifications().map(n => n.title)).toEqual(["c", "b", "a"]);
+    s.close();
+  });
+
+  test("markNotificationRead flips read flag for one row only", () => {
+    const s = open();
+    const n1 = s.addNotification({ status: "open", title: "a", message: "m" });
+    s.addNotification({ status: "open", title: "b", message: "m" });
+    s.markNotificationRead(n1.id);
+    expect(s.listNotifications().filter(n => n.read).length).toBe(1);
+    s.close();
+  });
+
+  test("markNotificationUnread flips a read row back to unread (only)", () => {
+    const s = open();
+    const n1 = s.addNotification({ status: "open", title: "a", message: "m" });
+    const n2 = s.addNotification({ status: "open", title: "b", message: "m" });
+    s.markNotificationRead(n1.id);
+    s.markNotificationRead(n2.id);
+    s.markNotificationUnread(n1.id);
+    const list = s.listNotifications();
+    expect(list.find(n => n.id === n1.id)?.read).toBe(false);
+    expect(list.find(n => n.id === n2.id)?.read).toBe(true);
+    s.close();
+  });
+
+  test("markAllNotificationsRead flips every unread row to read", () => {
+    const s = open();
+    s.addNotification({ status: "open", title: "a", message: "m" });
+    s.addNotification({ status: "open", title: "b", message: "m" });
+    s.addNotification({ status: "open", title: "c", message: "m" });
+    s.markAllNotificationsRead();
+    expect(s.listNotifications().every(n => n.read)).toBe(true);
+    s.close();
+  });
+
+  test("dismissNotification deletes one row", () => {
+    const s = open();
+    const n1 = s.addNotification({ status: "open", title: "a", message: "m" });
+    s.addNotification({ status: "open", title: "b", message: "m" });
+    s.dismissNotification(n1.id);
+    expect(s.listNotifications().length).toBe(1);
+    s.close();
+  });
+
+  test("clearNotifications empties the table", () => {
+    const s = open();
+    s.addNotification({ status: "open", title: "a", message: "m" });
+    s.addNotification({ status: "open", title: "b", message: "m" });
+    s.addNotification({ status: "open", title: "c", message: "m" });
+    s.clearNotifications();
+    expect(s.listNotifications()).toEqual([]);
+    s.close();
+  });
+
+  test("removing a task cascades and drops its notifications", () => {
+    const s = open();
+    const t = s.addTask({ title: "t" });
+    s.addNotification({ task_id: t.id, status: "open", title: "a", message: "m" });
+    s.removeTask(t.id);
+    expect(s.listNotifications()).toEqual([]);
+    s.close();
+  });
+
+  test("addNotification rejects status not in TaskStatus enum (CHECK constraint)", () => {
+    const s = open();
+    expect(() => s.addNotification({ status: "bogus" as never, title: "a", message: "m" })).toThrow();
+    s.close();
+  });
+});

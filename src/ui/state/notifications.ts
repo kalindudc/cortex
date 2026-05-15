@@ -1,64 +1,160 @@
-// Notifications drawer state — a capped in-memory ring of alerts the user
-// might want to revisit. Drives the bell-trigger badge in StatusBar plus
-// the right-anchored slide-in NotificationDrawer.
+// Notifications drawer state — server-persisted feed + ephemeral local
+// errors. Drives the bell-trigger badge in StatusBar plus the right-anchored
+// slide-in NotificationDrawer.
 //
-// Sources that push entries:
-//   - SSE task.added            → kind "added"
-//   - SSE task.updated (status transition) → "status" or "blocked"
-//   - api/errors.showError      → "error"
+// Two parallel sources, merged for rendering:
 //
-// Persistence is intentionally NONE — the OS notification (`Notification`)
-// remains the durable surface for `blocked` transitions; this drawer is
-// session-scoped scratch space.
+//   1. notifications (server-driven, persisted) — populated by refresh()
+//      from GET /api/notifications and updated live by the SSE
+//      "notification.added" handler in src/ui/index.tsx. These survive a
+//      dashboard reload because the server writes a row on every
+//      task.added and on every PATCH /api/tasks/:id/status that actually
+//      changes the status. Each row carries a `status` (TaskStatus) that
+//      drives the dot color via `dot-status-${status}` — the same CSS
+//      class family task rows use, so no bespoke notification colors are
+//      needed.
 //
-// Ring cap is 50; oldest entries fall off when capacity is exceeded so we
-// never grow unbounded across a long-lived dashboard session.
+//   2. localErrors (ephemeral, in-memory) — populated by api/errors.ts
+//      via pushLocalError(). These exist because they fire when the
+//      server is unreachable; persisting them would be impossible (no
+//      server to write to) and surfacing stale errors after a reload
+//      would be misleading.
+//
+// The drawer renders both via a tagged-union `merged` computed signal
+// sorted newest-first. Persisted rows have positive ids (DB
+// AUTOINCREMENT); ephemeral rows have negative ids (counter starting at
+// -1). The id sign is the discriminator for read/dismiss routing — no
+// extra field needed.
 
 import { computed, signal, type ReadonlySignal, type Signal } from "@preact/signals";
 
-export type NotificationKind = "status" | "added" | "blocked" | "error";
+import type { Notification } from "../api/types.ts";
+import { api } from "../api/client.ts";
 
-export interface Notification {
-  id: number; // monotonically increasing local id
-  kind: NotificationKind;
-  taskId?: number;
-  title: string; // short heading line
-  message: string; // body line (e.g. "moved to review", error text)
-  ts: number; // Date.now()
+/** Ephemeral error toast — shape distinct from `Notification` because
+ *  these are not status events. They never round-trip to the server. */
+export interface LocalError {
+  id: number; // negative; counter starts at -1
+  title: string;
+  message: string;
+  ts: number;
   read: boolean;
 }
 
-const MAX = 50;
-
-let nextId = 1;
+/** Tagged union for the merged feed the drawer renders. */
+export type MergedRow = { kind: "notif"; row: Notification } | { kind: "error"; row: LocalError };
 
 export const notifications: Signal<Notification[]> = signal<Notification[]>([]);
+export const localErrors: Signal<LocalError[]> = signal<LocalError[]>([]);
 export const notificationsOpen: Signal<boolean> = signal<boolean>(false);
 
-export const unreadCount: ReadonlySignal<number> = computed(() =>
-  notifications.value.reduce((n, x) => n + (x.read ? 0 : 1), 0),
-);
+// Negative id counter for ephemeral local errors. KISS: id sign is the
+// persisted-vs-ephemeral discriminator. Server ids are positive
+// AUTOINCREMENT integers, so the spaces never collide.
+let nextLocalId = -1;
 
-export function pushNotification(n: Omit<Notification, "id" | "ts" | "read">): void {
-  const entry: Notification = { id: nextId++, ts: Date.now(), read: false, ...n };
-  // Newest-first ordering matches the drawer render. Cap by dropping the
-  // tail — oldest in time = lowest priority to retain.
-  const next = [entry, ...notifications.value];
-  notifications.value = next.length > MAX ? next.slice(0, MAX) : next;
+/** Merged feed of persisted notifications and ephemeral local errors,
+ *  sorted UNREAD-FIRST and then newest-first within each read-state
+ *  group. The unread-first ordering keeps fresh attention-worthy items
+ *  pinned to the top of the drawer even after a user marks them read,
+ *  so historical context drops below the fold rather than mixing in
+ *  with what still needs eyes. Both `created` (notif) and `ts` (error)
+ *  are Date.now() millisecond values. */
+export const merged: ReadonlySignal<MergedRow[]> = computed(() => {
+  const notifs: MergedRow[] = notifications.value.map(row => ({ kind: "notif", row }));
+  const errs: MergedRow[] = localErrors.value.map(row => ({ kind: "error", row }));
+  const all = [...notifs, ...errs];
+  all.sort((a, b) => {
+    // Primary: unread (read=false) sorts before read (read=true). Both
+    // row shapes carry a boolean `read` field, so the discriminator
+    // doesn't matter here.
+    const ra = a.row.read ? 1 : 0;
+    const rb = b.row.read ? 1 : 0;
+    if (ra !== rb) return ra - rb;
+    // Secondary: newest-first by created/ts inside each group.
+    const ta = a.kind === "notif" ? a.row.created : a.row.ts;
+    const tb = b.kind === "notif" ? b.row.created : b.row.ts;
+    return tb - ta;
+  });
+  return all;
+});
+
+/** Combined unread count across persisted + ephemeral. Drives the badge. */
+export const unreadCount: ReadonlySignal<number> = computed(() => {
+  const n = notifications.value.reduce((acc, x) => acc + (x.read ? 0 : 1), 0);
+  const e = localErrors.value.reduce((acc, x) => acc + (x.read ? 0 : 1), 0);
+  return n + e;
+});
+
+/** Push an ephemeral error toast. Used by api/errors.ts when a fetch
+ *  rejects — the server is the wrong place to persist these (it might
+ *  not even be reachable). */
+export function pushLocalError(input: { title: string; message: string }): void {
+  const entry: LocalError = {
+    id: nextLocalId--,
+    title: input.title,
+    message: input.message,
+    ts: Date.now(),
+    read: false,
+  };
+  localErrors.value = [entry, ...localErrors.value];
 }
 
+/** Mark one entry read. Routes by id sign. Persisted reads fire-and-forget
+ *  to the server; the local signal mutates immediately so the UI is
+ *  responsive without waiting for the round-trip. */
 export function markRead(id: number): void {
-  notifications.value = notifications.value.map(n => (n.id === id ? { ...n, read: true } : n));
+  if (id > 0) {
+    notifications.value = notifications.value.map(n => (n.id === id && !n.read ? { ...n, read: true } : n));
+    void api.markNotifRead(id).catch(() => {
+      /* swallow — next refresh() will reconcile */
+    });
+  } else {
+    localErrors.value = localErrors.value.map(e => (e.id === id && !e.read ? { ...e, read: true } : e));
+  }
 }
 
+/** Flip a read entry back to unread. Mirror of markRead — routes by id
+ *  sign, optimistic local mutation, fire-and-forget API call. The
+ *  unread-first sort in `merged` will re-pin the row to the top of the
+ *  drawer on the next render. */
+export function markUnread(id: number): void {
+  if (id > 0) {
+    notifications.value = notifications.value.map(n => (n.id === id && n.read ? { ...n, read: false } : n));
+    void api.markNotifUnread(id).catch(() => {
+      /* swallow — next refresh() will reconcile */
+    });
+  } else {
+    localErrors.value = localErrors.value.map(e => (e.id === id && e.read ? { ...e, read: false } : e));
+  }
+}
+
+/** Mark every entry read across both sources. */
 export function markAllRead(): void {
   notifications.value = notifications.value.map(n => (n.read ? n : { ...n, read: true }));
+  localErrors.value = localErrors.value.map(e => (e.read ? e : { ...e, read: true }));
+  void api.markAllNotifRead().catch(() => {
+    /* swallow */
+  });
 }
 
+/** Dismiss one entry. Routes by id sign. */
 export function dismiss(id: number): void {
-  notifications.value = notifications.value.filter(n => n.id !== id);
+  if (id > 0) {
+    notifications.value = notifications.value.filter(n => n.id !== id);
+    void api.delNotif(id).catch(() => {
+      /* swallow */
+    });
+  } else {
+    localErrors.value = localErrors.value.filter(e => e.id !== id);
+  }
 }
 
+/** Clear everything in both sources. */
 export function clearAll(): void {
   notifications.value = [];
+  localErrors.value = [];
+  void api.clearNotifs().catch(() => {
+    /* swallow */
+  });
 }

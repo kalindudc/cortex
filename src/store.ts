@@ -46,6 +46,43 @@ export type Tag = {
 };
 
 /**
+ * Server-persisted notification row backing the dashboard's bell drawer.
+ * `status` reuses the `TaskStatus` union so the UI can render the dot via
+ * the existing `dot-status-${status}` CSS class family — no bespoke
+ * notification colors. The value is a SNAPSHOT of the task's status at
+ * the moment the notification fired; later transitions on the task do NOT
+ * mutate historical rows. `read` is converted from SQLite's INTEGER 0/1
+ * to a JS boolean at the rowToNotification() boundary (SQLite has no
+ * native BOOLEAN affinity).
+ */
+export type Notification = {
+  id: number;
+  task_id: number | null;
+  author: string | null;
+  status: TaskStatus;
+  title: string;
+  message: string;
+  read: boolean;
+  created: number;
+};
+
+export type AddNotificationInput = {
+  task_id?: number | null;
+  author?: string | null;
+  status: TaskStatus;
+  title: string;
+  message: string;
+};
+
+/**
+ * Internal SQL row shape for notifications: identical to `Notification`
+ * but with `read` as the raw INTEGER 0/1 returned by SQLite. The boundary
+ * conversion happens in rowToNotification(), mirroring the rowToTask()
+ * pattern that splits `tag_csv` into `tags`.
+ */
+type NotificationRow = Omit<Notification, "read"> & { read: number };
+
+/**
  * Tag-name regex: lowercase letters, digits, `_`, `@`, `-`, length 1-32.
  * The trailing `-` inside the character class is literal (no escape needed).
  * Single source of truth — exported so the CLI flag parsers and HTTP route
@@ -256,6 +293,31 @@ export class Store {
           PRIMARY KEY(task_id, tag_name)
         );
       `);
+      // Notifications: server-persisted bell-drawer feed. New table,
+      // follows the `tags`/`task_tags` precedent — a `CREATE TABLE IF NOT
+      // EXISTS` block, no entry in pendingMigrations()/applyMigrations()
+      // (those are for schema TRANSFORMS on existing tables).
+      //
+      // task_id is nullable so future system messages without a task can
+      // land here; cascade matches `updates` so removing a task drops its
+      // notifications. `status` reuses the TaskStatus enum — see the
+      // `Notification` type for the snapshot semantics. `read` is
+      // INTEGER 0/1 because SQLite has no native BOOLEAN affinity; the
+      // boundary conversion to JS boolean lives in rowToNotification().
+      this.db.run(`
+        CREATE TABLE IF NOT EXISTS notifications (
+          id       INTEGER PRIMARY KEY AUTOINCREMENT,
+          task_id  INTEGER REFERENCES tasks(id) ON DELETE CASCADE,
+          author   TEXT,
+          status   TEXT    NOT NULL
+                   CHECK(status IN ('draft','open','review','blocked','done')),
+          title    TEXT    NOT NULL,
+          message  TEXT    NOT NULL,
+          read     INTEGER NOT NULL DEFAULT 0 CHECK(read IN (0,1)),
+          created  INTEGER NOT NULL
+        );
+      `);
+      this.db.run(`CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created DESC);`);
       this.db.run(`INSERT OR IGNORE INTO lanes (name, color, sort) VALUES ('now', '#fe8019', 0);`);
       // NOTE: pre-existing DBs may still have `wip_limit` (lanes) and
       // `focus`/`parked_at`/`park_note` (tasks) columns from earlier versions.
@@ -915,6 +977,69 @@ export class Store {
           ORDER BY last_seen DESC;`,
       )
       .all();
+  }
+
+  // ---------- notification methods ----------
+
+  /**
+   * Convert the SQLite row shape (read INTEGER 0/1) to the public
+   * `Notification` (read boolean). Mirrors rowToTask() at the data
+   * boundary so the rest of the codebase never sees the 0/1 encoding.
+   */
+  private rowToNotification(row: NotificationRow): Notification {
+    const { read, ...rest } = row;
+    return { ...rest, read: read === 1 };
+  }
+
+  /** Insert a notification row. The CHECK constraint on `status` rejects
+   *  values outside the TaskStatus enum at the SQL boundary. */
+  addNotification(input: AddNotificationInput): Notification {
+    const ts = now();
+    const taskId = input.task_id ?? null;
+    const author = input.author ?? null;
+    const row = this.db
+      .query<NotificationRow, [number | null, string | null, TaskStatus, string, string, number]>(
+        `INSERT INTO notifications (task_id, author, status, title, message, created)
+         VALUES (?, ?, ?, ?, ?, ?)
+         RETURNING *;`,
+      )
+      .get(taskId, author, input.status, input.title, input.message, ts);
+    if (!row) throw new Error("failed to insert notification");
+    return this.rowToNotification(row);
+  }
+
+  /** Newest-first listing for the bell drawer. The composite ORDER BY
+   *  (created DESC, id DESC) tie-breaks rows that share a millisecond
+   *  timestamp by insertion order, so test ordering is deterministic. */
+  listNotifications(): Notification[] {
+    const rows = this.db
+      .query<NotificationRow, []>(`SELECT * FROM notifications ORDER BY created DESC, id DESC;`)
+      .all();
+    return rows.map(r => this.rowToNotification(r));
+  }
+
+  markNotificationRead(id: number): void {
+    this.db.run(`UPDATE notifications SET read = 1 WHERE id = ?;`, [id]);
+  }
+
+  /** Flip a previously-read notification back to unread. Pairs with
+   *  markNotificationRead so a user who clicked through too quickly can
+   *  re-pin the row to the top of the drawer (the merged feed sorts
+   *  unread-first). */
+  markNotificationUnread(id: number): void {
+    this.db.run(`UPDATE notifications SET read = 0 WHERE id = ?;`, [id]);
+  }
+
+  markAllNotificationsRead(): void {
+    this.db.run(`UPDATE notifications SET read = 1 WHERE read = 0;`);
+  }
+
+  dismissNotification(id: number): void {
+    this.db.run(`DELETE FROM notifications WHERE id = ?;`, [id]);
+  }
+
+  clearNotifications(): void {
+    this.db.run(`DELETE FROM notifications;`);
   }
 
   // ---------- lane methods ----------

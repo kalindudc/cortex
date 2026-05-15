@@ -1,6 +1,6 @@
 import { test, expect, describe, beforeEach } from "bun:test";
 import { buildApp } from "../../src/server.ts";
-import { Store } from "../../src/store.ts";
+import { Store, type Notification } from "../../src/store.ts";
 
 let store: Store;
 let app: ReturnType<typeof buildApp>;
@@ -361,5 +361,140 @@ describe("server: events (SSE)", () => {
       (globalThis as { TransformStream: unknown }).TransformStream = prevTS;
       (globalThis as { WritableStream: unknown }).WritableStream = prevWS;
     }
+  });
+});
+
+describe("server: notifications", () => {
+  test("POST /api/tasks inserts a notification with status=task.status and message='created'", async () => {
+    const created = await fetchJson(req("POST", "/api/tasks", { title: "hello" }));
+    expect(created.status).toBe(201);
+    const task = created.json as { id: number; status: Notification["status"] };
+    const { status, json } = await fetchJson(req("GET", "/api/notifications"));
+    expect(status).toBe(200);
+    const list = json as Notification[];
+    expect(list.length).toBe(1);
+    expect(list[0]?.status).toBe(task.status);
+    expect(list[0]?.message).toBe("created");
+    expect(list[0]?.task_id).toBe(task.id);
+  });
+
+  test("PATCH /api/tasks/:id/status open→blocked inserts a transition notification alongside the create row", async () => {
+    const created = await fetchJson(req("POST", "/api/tasks", { title: "x" }));
+    const taskId = (created.json as { id: number }).id;
+    const patched = await fetchJson(req("PATCH", `/api/tasks/${taskId}/status`, { status: "blocked" }));
+    expect(patched.status).toBe(200);
+    const { json } = await fetchJson(req("GET", "/api/notifications"));
+    const list = json as Notification[];
+    // Two rows: the create-notification AND the open→blocked transition.
+    expect(list.length).toBe(2);
+    // Newest-first: transition row sits at index 0, create row at index 1.
+    expect(list[0]?.status).toBe("blocked");
+    expect(list[0]?.message).toContain("\u2192");
+    expect(list[1]?.message).toBe("created");
+  });
+
+  test("PATCH /api/tasks/:id/status open→open (no-op) does NOT insert a new notification row", async () => {
+    const created = await fetchJson(req("POST", "/api/tasks", { title: "x" }));
+    const taskId = (created.json as { id: number }).id;
+    const patched = await fetchJson(req("PATCH", `/api/tasks/${taskId}/status`, { status: "open" }));
+    expect(patched.status).toBe(200);
+    const { json } = await fetchJson(req("GET", "/api/notifications"));
+    const list = json as Notification[];
+    expect(list.length).toBe(1);
+    expect(list[0]?.message).toBe("created");
+  });
+
+  test("GET /api/notifications returns rows newest-first", async () => {
+    const first = await fetchJson(req("POST", "/api/tasks", { title: "first" }));
+    const second = await fetchJson(req("POST", "/api/tasks", { title: "second" }));
+    const firstId = (first.json as { id: number }).id;
+    const secondId = (second.json as { id: number }).id;
+    const { json } = await fetchJson(req("GET", "/api/notifications"));
+    const list = json as Notification[];
+    expect(list.length).toBe(2);
+    // Second-created task's notification sits at index 0 (newest first).
+    expect(list[0]?.task_id).toBe(secondId);
+    expect(list[1]?.task_id).toBe(firstId);
+  });
+
+  test("PATCH /api/notifications/:id/read flips the row's read flag to true", async () => {
+    await fetchJson(req("POST", "/api/tasks", { title: "x" }));
+    const before = (await fetchJson(req("GET", "/api/notifications"))).json as Notification[];
+    expect(before[0]?.read).toBe(false);
+    const notifId = before[0]?.id as number;
+    const r = await fetchJson(req("PATCH", `/api/notifications/${notifId}/read`));
+    expect(r.status).toBe(200);
+    expect((r.json as { ok: boolean }).ok).toBe(true);
+    const after = (await fetchJson(req("GET", "/api/notifications"))).json as Notification[];
+    expect(after[0]?.read).toBe(true);
+  });
+
+  test("PATCH /api/notifications/:id/read 400 on non-numeric id", async () => {
+    const { status, json } = await fetchJson(req("PATCH", "/api/notifications/abc/read"));
+    expect(status).toBe(400);
+    expect((json as { error: string }).error).toMatch(/invalid id/);
+  });
+
+  test("PATCH /api/notifications/:id/unread flips a read row back to unread", async () => {
+    await fetchJson(req("POST", "/api/tasks", { title: "x" }));
+    const list = (await fetchJson(req("GET", "/api/notifications"))).json as Notification[];
+    const id = list[0]?.id as number;
+    await fetchJson(req("PATCH", `/api/notifications/${id}/read`));
+    const r = await fetchJson(req("PATCH", `/api/notifications/${id}/unread`));
+    expect(r.status).toBe(200);
+    expect((r.json as { ok: boolean }).ok).toBe(true);
+    const after = (await fetchJson(req("GET", "/api/notifications"))).json as Notification[];
+    expect(after[0]?.read).toBe(false);
+  });
+
+  test("PATCH /api/notifications/:id/unread 400 on non-numeric id", async () => {
+    const { status, json } = await fetchJson(req("PATCH", "/api/notifications/abc/unread"));
+    expect(status).toBe(400);
+    expect((json as { error: string }).error).toMatch(/invalid id/);
+  });
+
+  test("POST /api/notifications/read-all flips every unread row", async () => {
+    await fetchJson(req("POST", "/api/tasks", { title: "a" }));
+    await fetchJson(req("POST", "/api/tasks", { title: "b" }));
+    const before = (await fetchJson(req("GET", "/api/notifications"))).json as Notification[];
+    expect(before.length).toBe(2);
+    expect(before.every(n => n.read === false)).toBe(true);
+    const r = await fetchJson(req("POST", "/api/notifications/read-all"));
+    expect(r.status).toBe(200);
+    expect((r.json as { ok: boolean }).ok).toBe(true);
+    const after = (await fetchJson(req("GET", "/api/notifications"))).json as Notification[];
+    expect(after.length).toBe(2);
+    expect(after.every(n => n.read === true)).toBe(true);
+  });
+
+  test("DELETE /api/notifications/:id removes that row; the rest remain", async () => {
+    await fetchJson(req("POST", "/api/tasks", { title: "a" }));
+    await fetchJson(req("POST", "/api/tasks", { title: "b" }));
+    const before = (await fetchJson(req("GET", "/api/notifications"))).json as Notification[];
+    expect(before.length).toBe(2);
+    const dropId = before[0]?.id as number;
+    const survivorId = before[1]?.id as number;
+    const r = await fetchJson(req("DELETE", `/api/notifications/${dropId}`));
+    expect(r.status).toBe(200);
+    expect((r.json as { ok: boolean }).ok).toBe(true);
+    const after = (await fetchJson(req("GET", "/api/notifications"))).json as Notification[];
+    expect(after.length).toBe(1);
+    expect(after[0]?.id).toBe(survivorId);
+  });
+
+  test("DELETE /api/notifications/:id 400 on non-numeric id", async () => {
+    const { status, json } = await fetchJson(req("DELETE", "/api/notifications/abc"));
+    expect(status).toBe(400);
+    expect((json as { error: string }).error).toMatch(/invalid id/);
+  });
+
+  test("DELETE /api/notifications empties the list", async () => {
+    await fetchJson(req("POST", "/api/tasks", { title: "a" }));
+    await fetchJson(req("POST", "/api/tasks", { title: "b" }));
+    const r = await fetchJson(req("DELETE", "/api/notifications"));
+    expect(r.status).toBe(200);
+    expect((r.json as { ok: boolean }).ok).toBe(true);
+    const { json } = await fetchJson(req("GET", "/api/notifications"));
+    expect((json as Notification[]).length).toBe(0);
   });
 });

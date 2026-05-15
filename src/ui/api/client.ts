@@ -4,7 +4,7 @@
 // browser DTOs in ./types.ts. The internal `j()` helper is file-local so
 // every method body collapses to a single fetch + JSON parse line.
 
-import type { Task, Lane, Tag, Update } from "./types.ts";
+import type { Task, Lane, Tag, Update, Notification } from "./types.ts";
 
 // Server response shape for GET /api/tags — the tag row plus the rollup
 // task_count column populated by Store.listTags(). Re-exported via
@@ -47,6 +47,17 @@ export interface ApiClient {
   addTag(b: AddTagBody): Promise<Tag>;
   editTag(n: string, b: EditTagBody): Promise<Tag>;
   delTag(n: string, force?: boolean): Promise<void>;
+  // ---- notifications ----
+  // Server-persisted bell-drawer feed (replaces the in-memory ring).
+  // markNotifRead/markAllNotifRead/delNotif/clearNotifs return void; the
+  // caller mutates the local signal optimistically and the next refresh()
+  // re-fetches the canonical state.
+  notifications(): Promise<Notification[]>;
+  markNotifRead(id: number): Promise<void>;
+  markNotifUnread(id: number): Promise<void>;
+  markAllNotifRead(): Promise<void>;
+  delNotif(id: number): Promise<void>;
+  clearNotifs(): Promise<void>;
 }
 
 const j = async <T>(p: string, init?: RequestInit): Promise<T> => {
@@ -86,4 +97,11 @@ export const api: ApiClient = {
     j<Tag>(`/api/tags/${encodeURIComponent(n)}`, { method: "PATCH", headers: JSON_HEAD, body: JSON.stringify(b) }),
   // `force` cascades the join rows. Mirrors the CLI's `cortex tag rm -f`.
   delTag: (n, force) => j<void>(`/api/tags/${encodeURIComponent(n)}${force ? "?force=1" : ""}`, { method: "DELETE" }),
+  // ---- notifications ----
+  notifications: () => j<Notification[]>("/api/notifications"),
+  markNotifRead: id => j<void>(`/api/notifications/${id}/read`, { method: "PATCH" }),
+  markNotifUnread: id => j<void>(`/api/notifications/${id}/unread`, { method: "PATCH" }),
+  markAllNotifRead: () => j<void>("/api/notifications/read-all", { method: "POST" }),
+  delNotif: id => j<void>(`/api/notifications/${id}`, { method: "DELETE" }),
+  clearNotifs: () => j<void>("/api/notifications", { method: "DELETE" }),
 };

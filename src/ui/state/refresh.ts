@@ -13,6 +13,7 @@ import { effect } from "@preact/signals";
 import { api } from "../api/client.ts";
 import { showError } from "../api/errors.ts";
 import { tasks, lanes, tags, updates, authors } from "./signals.ts";
+import { notifications } from "./notifications.ts";
 import { activeTask } from "./computed.ts";
 
 // Lazy load of the author rollup. Called when the user opens the Authors
@@ -29,10 +30,11 @@ export async function fetchAuthors(): Promise<void> {
 // Called at boot and on every SSE event from the daemon (debounced in index.tsx).
 export async function refresh(): Promise<void> {
   try {
-    const [ts, ls, tg] = await Promise.all([api.tasks(), api.lanes(), api.tags()]);
+    const [ts, ls, tg, nf] = await Promise.all([api.tasks(), api.lanes(), api.tags(), api.notifications()]);
     tasks.value = ts;
     lanes.value = ls;
     tags.value = tg;
+    notifications.value = nf;
     const at = activeTask.value;
     if (at) updates.value = { ...updates.value, [at.id]: await api.updates(at.id) };
   } catch (err) {

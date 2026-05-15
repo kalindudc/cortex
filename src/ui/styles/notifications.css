@@ -6,7 +6,10 @@
   position: fixed;
   top: 0;
   right: 0;
-  bottom: 0;
+  /* 25px = StatusBar height (24px) + its 1px top border. The drawer
+     stops above the always-visible footer so the status bar never gets
+     covered. If StatusBar height changes in misc.css, update this too. */
+  bottom: 25px;
   width: 360px;
   max-width: 90vw;
   background: var(--panel);
@@ -45,7 +48,29 @@
   transition: background var(--dur-2) var(--ease);
 }
 .notif-row:hover { background: var(--tint); }
+
+/* Unread vs read affordances. Unread keeps the full-strength title
+   weight + an accent pip in the meta line; read dims the summary,
+   drops the title to the standard 500 weight, and softens the row
+   background so the unread cluster at the top of the drawer reads as
+   the active foreground. */
+.notif-row.is-read { background: color-mix(in oklab, var(--panel) 92%, transparent); }
 .notif-row.is-read .summary { color: var(--text-2); }
+.notif-row:not(.is-read) .notif-row-body .summary { font-weight: 600; }
+
+/* Trailing accent pip in the meta line, shown only on unread rows.
+   `margin-left: auto` pushes it to the right edge of the flex meta
+   row so it sits opposite the message + timestamp. */
+.notif-unread-pip {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-left: auto;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 24%, transparent);
+}
 
 .notif-row-body {
   flex: 1;
@@ -76,16 +101,32 @@
   font-size: var(--fs-2);
 }
 
-.notif-dismiss {
+.notif-dismiss,
+.notif-mark-unread {
   align-self: flex-start;
-  margin: var(--s-2) var(--s-2) 0 0;
+  margin: var(--s-2) 0 0 0;
 }
+.notif-dismiss { margin-right: var(--s-2); }
+/* Stack the row controls vertically with a small gap. */
+.notif-row-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-self: flex-start;
+  padding: var(--s-2) var(--s-2) 0 0;
+}
+.notif-row-controls .hint-button { margin: 0; }
 
-/* Per-kind left-edge accent so a glance at the drawer reveals types. */
-.notif-kind-status   { box-shadow: inset 3px 0 0 var(--info); }
-.notif-kind-added    { box-shadow: inset 3px 0 0 var(--ok); }
-.notif-kind-blocked  { box-shadow: inset 3px 0 0 var(--err); }
-.notif-kind-error    { box-shadow: inset 3px 0 0 var(--err); }
+/* Left-edge accent stripe so a glance at the drawer reveals row type.
+   Persisted notifications mirror their status' dot color via
+   .notif-status-* (one per TaskStatus). Ephemeral local errors keep
+   .notif-kind-error (red) — errors have no status field. */
+.notif-status-draft   { box-shadow: inset 3px 0 0 var(--info); }
+.notif-status-open    { box-shadow: inset 3px 0 0 var(--text-3); }
+.notif-status-review  { box-shadow: inset 3px 0 0 var(--warn); }
+.notif-status-blocked { box-shadow: inset 3px 0 0 var(--err); }
+.notif-status-done    { box-shadow: inset 3px 0 0 var(--ok); }
+.notif-kind-error     { box-shadow: inset 3px 0 0 var(--err); }
 
 .notif-foot {
   display: flex;

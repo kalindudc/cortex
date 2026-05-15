@@ -1,6 +1,7 @@
 // NotificationDrawer — right-anchored slide-in panel listing notifications
-// newest-first. Sources its data from src/ui/state/notifications.ts; only
-// rendered when notificationsOpen.value === true.
+// newest-first. Sources its data from the merged tagged-union signal in
+// src/ui/state/notifications.ts (server-persisted notifications + ephemeral
+// local errors); only rendered when notificationsOpen.value === true.
 //
 // Mount-discipline contract: this component is conditionally mounted by
 // App so that opening + closing the drawer fully runs mount/unmount. We
@@ -9,37 +10,64 @@
 // the very first time the drawer opens).
 //
 // Row interaction:
-//   click row     → if a taskId is set, jump to it (selectedId = taskId)
-//                   AND markRead(id), then close the drawer.
+//   click row     → if it's a notif row with a task_id, jump to it
+//                   (selectedId = task_id) AND markRead(id), then close
+//                   the drawer. Error rows just markRead.
 //   click x       → dismiss(id), drawer stays open.
 //
 // Footer offers "Mark all read" + "Clear all".
+//
+// Persistence vs ephemeral routing happens inside the state module —
+// markRead/dismiss/markAllRead/clearAll inspect the id sign (positive =
+// persisted, negative = ephemeral local error) so this component never
+// branches on row.kind for write operations.
 
 import type { VNode } from "preact";
 
 import { selectedId } from "../../state/signals.ts";
 import {
-  notifications,
+  merged,
   notificationsOpen,
   markRead,
+  markUnread,
   markAllRead,
   dismiss,
   clearAll,
-  type Notification,
+  type MergedRow,
 } from "../../state/notifications.ts";
 import { fmtTime } from "../../lib/format.ts";
 import { Icon } from "../Icon.tsx";
 
-function activate(n: Notification): void {
-  if (n.taskId != null) {
-    selectedId.value = n.taskId;
+function activate(row: MergedRow): void {
+  if (row.kind === "notif" && row.row.task_id != null) {
+    selectedId.value = row.row.task_id;
   }
-  markRead(n.id);
+  markRead(row.row.id);
   notificationsOpen.value = false;
 }
 
+/** CSS class for the left-edge accent stripe. Notifications mirror their
+ *  status' dot color via `notif-status-${status}`; ephemeral errors keep
+ *  the legacy `notif-kind-error` class (red). */
+function rowAccentClass(row: MergedRow): string {
+  if (row.kind === "notif") return `notif-status-${row.row.status}`;
+  return "notif-kind-error";
+}
+
+/** CSS class for the dot. Notifications use the existing
+ *  `dot-status-${status}` family that task rows use. Errors fall back to
+ *  the blocked color (red) since errors don't have a status. */
+function rowDotClass(row: MergedRow): string {
+  if (row.kind === "notif") return `dot dot-status-${row.row.status}`;
+  return "dot dot-status-blocked";
+}
+
+function rowTimestamp(row: MergedRow): number {
+  return row.kind === "notif" ? row.row.created : row.row.ts;
+}
+
 export function NotificationDrawer(): VNode {
-  const list = notifications.value;
+  const list = merged.value;
   return (
     <aside class="notif-drawer" data-pop>
       <header class="notif-head">
@@ -55,31 +83,46 @@ export function NotificationDrawer(): VNode {
         </div>
       ) : (
         <ul class="notif-list">
-          {list.map(n => (
-            <li class={`notif-row notif-kind-${n.kind} ${n.read ? "is-read" : ""}`}>
-              <button type="button" class="notif-row-body" onClick={() => activate(n)}>
+          {list.map(entry => (
+            <li
+              key={`${entry.kind}-${entry.row.id}`}
+              class={`notif-row ${rowAccentClass(entry)} ${entry.row.read ? "is-read" : ""}`}
+            >
+              <button type="button" class="notif-row-body" onClick={() => activate(entry)}>
                 <div class="row" style="gap:8px; align-items:flex-start">
-                  <span
-                    class={`dot dot-status-${n.kind === "blocked" ? "blocked" : n.kind === "error" ? "blocked" : "open"}`}
-                  />
+                  <span class={rowDotClass(entry)} />
                   <div class="grow">
-                    <div class="summary">{n.title}</div>
+                    <div class="summary">{entry.row.title}</div>
                     <div class="meta">
-                      <span>{n.message}</span>
+                      <span>{entry.row.message}</span>
                       <span>&middot;</span>
-                      <span>{fmtTime(n.ts)}</span>
+                      <span>{fmtTime(rowTimestamp(entry))}</span>
+                      {!entry.row.read ? <span class="notif-unread-pip" role="img" aria-label="Unread" /> : null}
                     </div>
                   </div>
                 </div>
               </button>
-              <button
-                type="button"
-                class="hint hint-button notif-dismiss"
-                aria-label="Dismiss"
-                onClick={() => dismiss(n.id)}
-              >
-                <Icon name="x" size={12} />
-              </button>
+              <div class="notif-row-controls">
+                <button
+                  type="button"
+                  class="hint hint-button notif-dismiss"
+                  aria-label="Dismiss"
+                  onClick={() => dismiss(entry.row.id)}
+                >
+                  <Icon name="x" size={12} />
+                </button>
+                {entry.row.read ? (
+                  <button
+                    type="button"
+                    class="hint hint-button notif-mark-unread"
+                    aria-label="Mark as unread"
+                    title="Mark as unread"
+                    onClick={() => markUnread(entry.row.id)}
+                  >
+                    <Icon name="eyeOff" size={12} />
+                  </button>
+                ) : null}
+              </div>
             </li>
           ))}
         </ul>

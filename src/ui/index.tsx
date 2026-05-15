@@ -23,7 +23,8 @@ import App from "./components/App.tsx";
 import { refresh } from "./state/refresh.ts";
 import { meAuthor, paletteOpen, paletteQuery, modal, migrationsPending } from "./state/signals.ts";
 import { closeAllPopovers } from "./state/popovers.ts";
-import { pushNotification } from "./state/notifications.ts";
+import { notifications } from "./state/notifications.ts";
+import type { Notification } from "./api/types.ts";
 
 // PostUpdateForm publishes its submit closure to window.__cortexPostUpdate
 // so the global Cmd/Ctrl+Enter handler below can flush it. Re-declared here
@@ -89,47 +90,27 @@ const ev = new EventSource("/events");
 // the server but missing here are silently ignored — the dashboard goes
 // stale until a manual reload. (Last instance: tag.changed shipped from the
 // server but was forgotten here, so TagsPane didn't refresh on tag CRUD.)
+// notification.added is intentionally NOT in this list. Refreshing
+// tasks/lanes/tags/updates on a notification event would be wasteful;
+// the notification handler below prepends the payload directly to the
+// local signal because the SSE event IS the canonical row.
 ["task.added", "task.updated", "task.removed", "update.posted", "lane.changed", "tag.changed"].forEach(k => {
   ev.addEventListener(k, debounceRefresh);
 });
 
-// In-app notification drawer feed. Tracks the last-known status per task
-// so we only push a drawer entry on actual status transitions (the
-// debounced refresh above already handles repaint). Distinct from the
-// browser-native Notification block below — that one fires only on
-// `blocked` and only when the page is unfocused.
-const lastStatus = new Map<number, string>();
-ev.addEventListener("task.added", (e: MessageEvent) => {
+// Bell-drawer live updates. The server now persists the row and the
+// SSE payload IS the row — prepend it directly to the local signal so
+// the drawer reflects the new entry without a refetch round-trip. The
+// debounced refresh above will reconcile if the SSE event was missed.
+// (The browser-native Notification handler below stays — it fires on
+// `task.updated` for blocked transitions and is orthogonal to in-app
+// drawer persistence.)
+ev.addEventListener("notification.added", (e: MessageEvent) => {
   try {
-    const p = JSON.parse((e as MessageEvent).data) as { id: number; title: string; status: string };
-    lastStatus.set(p.id, p.status);
-    pushNotification({
-      kind: "added",
-      taskId: p.id,
-      title: `[${p.id}] ${p.title}`,
-      message: `created (${p.status})`,
-    });
+    const n = JSON.parse(e.data) as Notification;
+    notifications.value = [n, ...notifications.value];
   } catch {
     /* malformed payload — ignore */
-  }
-});
-ev.addEventListener("task.updated", (e: MessageEvent) => {
-  let p: { id: number; title: string; status: string } | null = null;
-  try {
-    p = JSON.parse(e.data);
-  } catch {
-    return;
-  }
-  if (!p) return;
-  const prev = lastStatus.get(p.id);
-  if (prev !== p.status) {
-    pushNotification({
-      kind: p.status === "blocked" ? "blocked" : "status",
-      taskId: p.id,
-      title: `[${p.id}] ${p.title}`,
-      message: `${prev ?? "open"} → ${p.status}`,
-    });
-    lastStatus.set(p.id, p.status);
   }
 });
 

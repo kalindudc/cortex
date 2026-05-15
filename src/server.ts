@@ -144,6 +144,18 @@ export function buildApp(store: Store): Hono {
       task = store.setTaskTags(task.id, body.tags);
     }
     emit({ kind: "task.added", payload: task, ts: Date.now() });
+    // Persist a bell-drawer notification so the row survives a dashboard
+    // reload (the previous in-memory ring lost everything on refresh).
+    // `status` snapshots the value the task was created with; the SSE
+    // payload IS the row so the drawer can prepend it without a refetch.
+    const notif = store.addNotification({
+      task_id: task.id,
+      author: resolveAuthor(),
+      status: task.status,
+      title: `[${task.id}] ${task.title}`,
+      message: "created",
+    });
+    emit({ kind: "notification.added", payload: notif, ts: Date.now() });
     return c.json(task, 201);
   });
 
@@ -223,7 +235,24 @@ export function buildApp(store: Store): Hono {
       author = resolveAuthor();
     }
     try {
+      // Capture prev BEFORE setStatus mutates the row — we only fire a
+      // notification on an actual status change, mirroring the
+      // dashboard's old client-side `lastStatus` Map at
+      // src/ui/index.tsx:103. The store does its own getTask lookup
+      // inside setStatus; this extra read is the cheapest way to make
+      // the transition decision server-side.
+      const prev = store.getTask(id);
       const task = store.setStatus(id, body.status, { author });
+      if (prev && prev.status !== task.status) {
+        const notif = store.addNotification({
+          task_id: task.id,
+          author,
+          status: task.status,
+          title: `[${task.id}] ${task.title}`,
+          message: `${prev.status} \u2192 ${task.status}`,
+        });
+        emit({ kind: "notification.added", payload: notif, ts: Date.now() });
+      }
       emit({ kind: "task.updated", payload: task, ts: Date.now() });
       return c.json(task);
     } catch (err) {
@@ -338,6 +367,45 @@ export function buildApp(store: Store): Hono {
   // Powers the dashboard's Authors tab. No new schema, no new column — just
   // a GROUP BY over the last 24h of updates. See Store.listAuthorsLast24h.
   app.get("/api/authors", c => c.json(store.listAuthorsLast24h()));
+
+  // ---------- notifications ----------
+  // Persisted bell-drawer feed. Read endpoint returns rows newest-first.
+  // Mutation endpoints validate :id as a number and return 400 on NaN;
+  // none of these accept a request body. No SSE emit on read/dismiss/
+  // clear — the drawer mutates its local signal optimistically and the
+  // canonical state is re-fetched on the next refresh().
+  app.get("/api/notifications", c => c.json(store.listNotifications()));
+
+  app.patch("/api/notifications/:id/read", c => {
+    const id = Number(c.req.param("id"));
+    if (!Number.isInteger(id)) return c.json({ error: "invalid id" }, 400);
+    store.markNotificationRead(id);
+    return c.json({ ok: true });
+  });
+
+  app.patch("/api/notifications/:id/unread", c => {
+    const id = Number(c.req.param("id"));
+    if (!Number.isInteger(id)) return c.json({ error: "invalid id" }, 400);
+    store.markNotificationUnread(id);
+    return c.json({ ok: true });
+  });
+
+  app.post("/api/notifications/read-all", c => {
+    store.markAllNotificationsRead();
+    return c.json({ ok: true });
+  });
+
+  app.delete("/api/notifications/:id", c => {
+    const id = Number(c.req.param("id"));
+    if (!Number.isInteger(id)) return c.json({ error: "invalid id" }, 400);
+    store.dismissNotification(id);
+    return c.json({ ok: true });
+  });
+
+  app.delete("/api/notifications", c => {
+    store.clearNotifications();
+    return c.json({ ok: true });
+  });
 
   // ---------- lanes ----------
   app.get("/api/lanes", c => c.json(store.listLanes()));
