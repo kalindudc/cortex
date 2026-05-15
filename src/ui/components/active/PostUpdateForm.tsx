@@ -72,12 +72,10 @@ export function PostUpdateForm({ task }: { task: Task }): VNode {
         />
         <span class="grow"></span>
         <span class={`char-counter num${len > 1000 ? " warn" : ""}`}>{len}/1024</span>
-        {/* Hotkey hints live in the foot strip so they stay visible while the
-             user is typing (placeholder hints disappear the moment text is
-             entered — useless when discoverability matters most). */}
-        <span class="compose-hint meta" title="Focus this textarea from anywhere">
-          <span class="kbd">{kbd("/")}</span> focus
-        </span>
+        {/* The Cmd/Ctrl+/ focus hint moved to the collapsible toggle button
+             in ActiveTaskPane so it is visible even when this form is
+             unmounted (collapsed state). Only the submit-key hint stays
+             here since it only applies while the textarea is focused. */}
         <button type="submit" class="btn btn-primary" style="height:24px; padding:0 10px">
           <span>Post</span>
           <span class="kbd">{kbd("\u21b5")}</span>

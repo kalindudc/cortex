@@ -8,7 +8,7 @@
 import type { VNode } from "preact";
 
 import { activeTask } from "../../state/computed.ts";
-import { modal, statusPopover } from "../../state/signals.ts";
+import { modal, statusPopover, postUpdateOpen } from "../../state/signals.ts";
 import { togglePopover } from "../../state/popovers.ts";
 import { api } from "../../api/client.ts";
 import { tryApi } from "../../api/errors.ts";
@@ -81,9 +81,28 @@ export function ActiveTaskPane(): VNode {
       </div>
 
       <footer class="active-foot">
-        <div class="row" style="margin-bottom:12px">
+        <div class="row" style={postUpdateOpen.value ? "margin-bottom:12px" : ""}>
           <button class="btn btn-primary" onClick={() => tryApi(() => api.setStat(at.id, next))}>
             <span>{nextLabel}</span>
+          </button>
+          <span class="grow"></span>
+          {/* Inline collapsible toggle for the Post-update form. Centered
+               in the toolbar row between the primary status-change button
+               (left) and the updated-stamp + delete-button cluster (right)
+               via flanking .grow spacers. The Cmd/Ctrl+/ hotkey hint lives
+               on this button so it is visible even when the form is
+               collapsed (the form-internal hint moved here so there's one
+               source of truth). */}
+          <button
+            type="button"
+            class="btn post-update-toggle"
+            aria-expanded={postUpdateOpen.value}
+            title={postUpdateOpen.value ? "Hide post-update form" : "Show post-update form"}
+            onClick={() => (postUpdateOpen.value = !postUpdateOpen.value)}
+          >
+            <Icon name={postUpdateOpen.value ? "chevronDown" : "chevronUp"} size={12} />
+            <span>Post update</span>
+            <span class="kbd">{kbd("/")}</span>
           </button>
           <span class="grow"></span>
           <span class="meta">Updated {fmtTime(at.updated)}</span>
@@ -99,7 +118,7 @@ export function ActiveTaskPane(): VNode {
             <Icon name="trash" />
           </button>
         </div>
-        <PostUpdateForm task={at} />
+        {postUpdateOpen.value ? <PostUpdateForm task={at} /> : null}
       </footer>
     </section>
   );

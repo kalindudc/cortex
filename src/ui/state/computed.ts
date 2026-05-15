@@ -51,7 +51,13 @@ export const activeTask: ReadonlySignal<Task | null> = computed(() => {
   //      the back door even though the sidebar hides it.
   const base = filteredTasks.value;
   if (selectedId.value != null) {
-    const t = base.find(x => x.id === selectedId.value);
+    // Filter governs the sidebar LIST only — the right-pane active task
+    // is invariant under filter changes. Look up against the UNFILTERED
+    // pool so a lane/status/tag filter that excludes the active task does
+    // NOT yank the user onto a different one. The priority-fallback branch
+    // below (selectedId == null) still operates over the filtered+gated
+    // view to honor "no selection → top of current view".
+    const t = tasks.value.find(x => x.id === selectedId.value);
     if (t) return t;
   }
   const list = showAllTasks.value ? base : base.filter(t => t.status !== "done");

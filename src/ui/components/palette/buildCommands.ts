@@ -21,7 +21,6 @@ import {
   lanes,
   tasks,
   tags,
-  selectedId,
   filters,
 } from "../../state/signals.ts";
 import { createUntitledTask } from "../../lib/createTask.ts";
@@ -141,7 +140,6 @@ export function buildCommands(): Command[] {
     icon: "eye",
     action: () => {
       setFilter("status", "review");
-      selectedId.value = null;
     },
   });
   cmds.push({
@@ -151,7 +149,6 @@ export function buildCommands(): Command[] {
     icon: "ban",
     action: () => {
       setFilter("status", "blocked");
-      selectedId.value = null;
     },
   });
   cmds.push({
@@ -161,7 +158,6 @@ export function buildCommands(): Command[] {
     icon: "rotateCcw",
     action: () => {
       clearAllFilters();
-      selectedId.value = null;
     },
   });
 
@@ -179,7 +175,6 @@ export function buildCommands(): Command[] {
         icon: "inbox",
         action: () => {
           setFilter("lane", null);
-          selectedId.value = null;
         },
       },
       ...lanes.value.map(l => ({
@@ -189,7 +184,6 @@ export function buildCommands(): Command[] {
         icon: "inbox",
         action: () => {
           setFilter("lane", l.name);
-          selectedId.value = null;
         },
       })),
     ],

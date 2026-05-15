@@ -17,6 +17,7 @@ const ICONS: Record<string, string> = {
   play: '<polygon points="5 3 19 12 5 21 5 3"/>',
   plus: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
   chevronDown: '<polyline points="6 9 12 15 18 9"/>',
+  chevronUp: '<polyline points="18 15 12 9 6 15"/>',
   moreHorizontal: '<circle cx="12" cy="12" r="1.5"/><circle cx="5" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>',
   trash:
     '<polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>',

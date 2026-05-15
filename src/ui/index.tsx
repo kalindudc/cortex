@@ -27,9 +27,15 @@ import "./state/lastTask.ts";
 // registers an effect that persists subsequent toggles. Must come before
 // refresh() so the seed beats the first paint of the sidebar.
 import "./state/showAllTasks.ts";
+// Side-effect imports: seed sidebar section-open state, filters, and the
+// post-update collapse state from localStorage; effects persist subsequent
+// changes. All three must come before refresh() so seeds beat first paint.
+import "./state/sectionOpen.ts";
+import "./state/filters.ts";
+import "./state/postUpdateOpen.ts";
 import App from "./components/App.tsx";
 import { refresh } from "./state/refresh.ts";
-import { meAuthor, paletteOpen, paletteQuery, modal, migrationsPending } from "./state/signals.ts";
+import { meAuthor, paletteOpen, paletteQuery, modal, migrationsPending, postUpdateOpen } from "./state/signals.ts";
 import { closeAllPopovers } from "./state/popovers.ts";
 import { notifications } from "./state/notifications.ts";
 import type { Notification } from "./api/types.ts";
@@ -189,11 +195,16 @@ window.addEventListener("keydown", (e: KeyboardEvent) => {
   // is always the physical key.
   if (meta && (e.key === "/" || e.code === "Slash")) {
     e.preventDefault();
-    const ta = document.getElementById("post-update-input") as HTMLTextAreaElement | null;
-    if (ta) {
-      ta.focus();
-      ta.setSelectionRange?.(ta.value.length, ta.value.length);
-    }
+    if (!postUpdateOpen.value) postUpdateOpen.value = true;
+    // Defer one frame so Preact has mounted #post-update-input when the
+    // wrapper was just expanded.
+    requestAnimationFrame(() => {
+      const ta = document.getElementById("post-update-input") as HTMLTextAreaElement | null;
+      if (ta) {
+        ta.focus();
+        ta.setSelectionRange?.(ta.value.length, ta.value.length);
+      }
+    });
     return;
   }
 

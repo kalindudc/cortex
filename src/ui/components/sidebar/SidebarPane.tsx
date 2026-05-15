@@ -136,7 +136,6 @@ function MainModePane(): VNode {
           } else {
             setFilter("status", v.status);
           }
-          selectedId.value = null;
         }}
         {...tip(
           v.status === null ? "Show every task (clears all filters)" : `Filter to ${v.label.toLowerCase()} tasks`,
@@ -188,7 +187,6 @@ function MainModePane(): VNode {
                     class={`lane-row${sel ? " selected" : ""}`}
                     onClick={() => {
                       setFilter("lane", sel ? null : l.name);
-                      selectedId.value = null;
                     }}
                     onDragOver={(e: DragEvent) => {
                       e.preventDefault();

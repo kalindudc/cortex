@@ -75,8 +75,12 @@ export const sidebarMode = signal<"main" | "tags">("main");
 export const pendingTitleFocus = signal<number | null>(null);
 export const selectedId = signal<number | null>(null);
 // Tasks-list filter toggle. false (default) = hide done tasks; true = show
-// everything. In-memory only, matching sibling sidebar signals.
+// everything. Persisted via state/showAllTasks.ts.
 export const showAllTasks = signal<boolean>(false);
+// Active-task "Post update" form collapse state. false (default) = collapsed.
+// Persisted via state/postUpdateOpen.ts. Single global boolean (not per-task)
+// by design — see the plan's Implementation Notes for the KISS rationale.
+export const postUpdateOpen = signal<boolean>(false);
 
 // ---------- popovers / overlays ----------
 // Lane creation flows through the NewLaneModal (modal.value = { kind:

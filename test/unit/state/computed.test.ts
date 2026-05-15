@@ -65,4 +65,24 @@ describe("state/computed activeTask × showAllTasks", () => {
     selectedId.value = 2;
     expect(activeTask.value?.id).toBe(2);
   });
+
+  // Regression coverage for plan 137: applying a filter that excludes the
+  // active task must NOT yank the user onto a different one. The right pane
+  // is invariant under filter changes; the filter only governs the sidebar
+  // list. Two tests cover the same one-line fix from distinct angles
+  // (lane-filter exclusion vs. status-filter exclusion via task transition)
+  // so a future refactor cannot silently regress either.
+  test("selectedId points at a task whose lane is excluded by the current filter → activeTask still returns the selected task (filter changes never yank the user off the active task)", () => {
+    tasks.value = [mkTask(1, "a", "open"), mkTask(2, "b", "open")];
+    selectedId.value = 1;
+    filters.value = { ...filters.value, lane: "b" };
+    expect(activeTask.value?.id).toBe(1);
+  });
+
+  test("active task transitions to a status excluded by the current status filter → activeTask still returns the selected task (status flips never yank the user off the active task)", () => {
+    tasks.value = [mkTask(1, "a", "done"), mkTask(2, "a", "open")];
+    selectedId.value = 1;
+    filters.value = { ...filters.value, status: "open" };
+    expect(activeTask.value?.id).toBe(1);
+  });
 });
