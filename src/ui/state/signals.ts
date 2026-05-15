@@ -101,7 +101,6 @@ export const paletteQuery = signal<string>("");
 export const modal = signal<{ kind: string; [k: string]: unknown } | null>(null);
 
 // ---------- misc ----------
-export const errorMsg = signal<string | null>(null);
 // Resolved on boot from /api/me (gh hosts.yml -> git user.name -> hostname -> "me").
 export const meAuthor = signal<string>("me");
 // Inbox tab: "updates" (default, shows the active task's update thread) or

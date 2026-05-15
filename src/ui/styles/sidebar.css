@@ -7,7 +7,7 @@
   align-items: center; gap: 8px;
   width: 100%; padding: 6px 10px; border-radius: var(--r-2);
   color: var(--text-2); text-align: left;
-  font-size: var(--fs-3);
+  font-size: var(--fs-3); line-height: 1.4;
   transition: background var(--dur-2) var(--ease), color var(--dur-2) var(--ease);
 }
 .view-row:hover    { background: var(--tint); color: var(--text); }
@@ -215,7 +215,7 @@
   align-items: center;
   gap: 6px;
   width: 100%;
-  padding: 10px 12px 4px;
+  padding: 6px 12px 2px;
   color: var(--text-3);
   font-size: var(--fs-2);
   letter-spacing: 0.04em;
@@ -235,15 +235,17 @@
 /* Sidebar section bodies. Horizontal padding kept modest (8px) so rows
    (.view-row / .lane-row / .task-row each have their own internal padding)
    use as much of the pane width as possible — the wider sidebar should
-   surface as wider rows, not extra dead space at the edges. The TOP
-   padding (8px) gives a deliberate gap below the section header so the
-   first row is never visually glued to the eyebrow text. */
-.sidebar-pane .pane-section.open > .section-body { padding: 8px 8px 8px 8px; }
+   surface as wider rows, not extra dead space at the edges. Top padding
+   (4px) gives a small breath under the section header without swallowing
+   vertical space; bottom padding (6px) pairs with the next section's
+   header top-padding (6px) to produce a deliberate ~12px inter-section
+   gap that is calm but unmistakable. */
+.sidebar-pane .pane-section.open > .section-body { padding: 4px 8px 6px; }
 
 /* Section-head padding: applies uniformly to non-toggle headers (e.g. the
    Tasks section eyebrow + show-all-tasks button row). The .section-toggle
    button inside SectionHeader brings its own padding (defined later). */
-.sidebar-pane .pane-section > .section-head { padding: 10px 12px 4px; }
+.sidebar-pane .pane-section > .section-head { padding: 6px 12px 2px; }
 
 /* ---------- filter chips strip ----------
    Lives between the Tags section and Tasks section as a flex item in

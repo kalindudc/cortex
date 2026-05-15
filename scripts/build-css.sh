@@ -46,6 +46,7 @@ SLICES=(
   tag-picker
   tooltip
   inbox
+  notifications
   active
 )
 

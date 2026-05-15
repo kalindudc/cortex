@@ -4,13 +4,14 @@
 
 import type { VNode } from "preact";
 
-import { paletteOpen, errorMsg, migrationsPending } from "../state/signals.ts";
-import { TopBar } from "./TopBar.tsx";
+import { paletteOpen, migrationsPending } from "../state/signals.ts";
+import { notificationsOpen } from "../state/notifications.ts";
 import { SidebarPane } from "./sidebar/SidebarPane.tsx";
 import { ActiveTaskPane } from "./active/ActiveTaskPane.tsx";
 import { InboxPane } from "./inbox/InboxPane.tsx";
 import { StatusBar } from "./StatusBar.tsx";
 import { CommandPalette } from "./palette/CommandPalette.tsx";
+import { NotificationDrawer } from "./notifications/NotificationDrawer.tsx";
 import { ModalRoot } from "./modals/ModalRoot.tsx";
 import { Tooltip } from "./Tooltip.tsx";
 
@@ -30,15 +31,14 @@ export default function App(): VNode {
           </span>
         </div>
       ) : null}
-      <TopBar />
       <SidebarPane />
       <ActiveTaskPane />
       <InboxPane />
       <StatusBar />
       {paletteOpen.value ? <CommandPalette /> : null}
+      {notificationsOpen.value ? <NotificationDrawer /> : null}
       <ModalRoot />
       <Tooltip />
-      {errorMsg.value ? <div class="toast">{errorMsg.value}</div> : null}
     </div>
   );
 }

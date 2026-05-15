@@ -4,9 +4,8 @@
 
 import type { VNode } from "preact";
 
-import { activeTask, inboxList } from "../../state/computed.ts";
-import { tab, authors } from "../../state/signals.ts";
-import { fetchAuthors } from "../../state/refresh.ts";
+import { activeTask, inboxList, taskAuthors } from "../../state/computed.ts";
+import { tab } from "../../state/signals.ts";
 import { fmtTime, initial } from "../../lib/format.ts";
 import { Icon } from "../Icon.tsx";
 
@@ -16,9 +15,6 @@ export function InboxPane(): VNode {
   const current = tab.value;
   const selectTab = (t: "updates" | "authors") => {
     tab.value = t;
-    // Lazy-load the author roll-up the first time (and on every subsequent
-    // click — keeps the table fresh without polling).
-    if (t === "authors") fetchAuthors();
   };
   return (
     <aside class="pane pane-inbox">
@@ -69,10 +65,10 @@ export function InboxPane(): VNode {
             ))
           )}
         </>
-      ) : authors.value.length === 0 ? (
+      ) : taskAuthors.value.length === 0 ? (
         <div class="empty">
           <Icon name="inbox" size={32} />
-          <div class="empty-title">No author activity in the last 24h.</div>
+          <div class="empty-title">No authors on this task yet.</div>
         </div>
       ) : (
         <table class="authors-table">
@@ -84,7 +80,7 @@ export function InboxPane(): VNode {
             </tr>
           </thead>
           <tbody>
-            {authors.value.map(a => (
+            {taskAuthors.value.map(a => (
               <tr>
                 <td>{a.author}</td>
                 <td class="num">{fmtTime(a.last_seen)}</td>

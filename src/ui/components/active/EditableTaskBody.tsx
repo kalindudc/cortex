@@ -51,7 +51,7 @@ export function EditableTaskBody({ task }: { task: Task }): VNode {
   // effect below to grab focus when SidebarPane has just created an
   // `untitled-<id>` task and wants the user to immediately rename it. Pure
   // imperative wiring — normal edits don't go through this.
-  const titleInputRef = useRef<HTMLInputElement>(null);
+  const titleInputRef = useRef<HTMLTextAreaElement>(null);
 
   // pendingTitleFocus consumer (one-shot semantics): if the signal matches
   // this task's id when we mount (or update), focus + select the input and
@@ -170,17 +170,37 @@ export function EditableTaskBody({ task }: { task: Task }): VNode {
           onDismiss={dismissTitle}
         />
       ) : null}
-      <input
-        ref={titleInputRef}
-        class="title-input"
-        value={titleSig.value}
-        placeholder="Task title"
-        onInput={(e: JSX.TargetedInputEvent<HTMLInputElement>) => {
-          titleSig.value = e.currentTarget.value;
-          titleSave.schedule();
-        }}
-        onBlur={() => titleSave.flush()}
-      />
+      {/* CSS-only autosize. The wrapper is a single-cell CSS grid; its
+           ::after pseudo-element mirrors the textarea content via
+           data-replicated-value and shares the same grid-area. The cell
+           sizes to the taller of {textarea, ::after} — since the textarea
+           has overflow:hidden, the visible ::after is what drives the
+           height. No JS height calc, no rAF, no scrollHeight reads.
+           Trailing space on data-replicated-value keeps the last line's
+           height stable when the value is empty. */}
+      <div class="title-input-wrap" data-replicated-value={`${titleSig.value} `}>
+        <textarea
+          ref={titleInputRef}
+          class="title-input"
+          rows={1}
+          value={titleSig.value}
+          placeholder="Task title"
+          onInput={(e: JSX.TargetedInputEvent<HTMLTextAreaElement>) => {
+            // Strip newlines defensively — task.title is a single-line semantic
+            // field even though the surface is a wrapping textarea (lane row
+            // tooltips, palette result rows, .task-title row all expect single line).
+            titleSig.value = e.currentTarget.value.replace(/\n+/g, " ");
+            titleSave.schedule();
+          }}
+          onKeyDown={(e: JSX.TargetedKeyboardEvent<HTMLTextAreaElement>) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              titleSave.flush();
+            }
+          }}
+          onBlur={() => titleSave.flush()}
+        />
+      </div>
       {bodyExternal.value !== null ? (
         <ExternalChangeBanner label="Body" incoming={bodyExternal.value} onApply={applyBody} onDismiss={dismissBody} />
       ) : null}

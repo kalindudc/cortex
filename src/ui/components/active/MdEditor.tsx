@@ -33,7 +33,7 @@ import {
   drawSelection,
   placeholder,
 } from "@codemirror/view";
-import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
+import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
 import { syntaxHighlighting, HighlightStyle } from "@codemirror/language";
 import { tags as t } from "@lezer/highlight";
@@ -46,8 +46,8 @@ const cortexHighlight = HighlightStyle.define([
   },
   { tag: t.strong, color: "var(--text)", fontWeight: "700" },
   { tag: t.emphasis, color: "var(--text)", fontStyle: "italic" },
-  { tag: t.list, color: "var(--accent)", fontWeight: "600" },
-  { tag: t.monospace, color: "var(--accent)" },
+  { tag: t.list, color: "var(--code-accent)", fontWeight: "600" },
+  { tag: t.monospace, color: "var(--code-accent)" },
   { tag: [t.link, t.url], color: "var(--info)", textDecoration: "underline", textUnderlineOffset: "2px" },
   { tag: t.quote, color: "var(--text-3)", fontStyle: "italic" },
   { tag: t.comment, color: "var(--text-3)", fontStyle: "italic" },
@@ -164,6 +164,18 @@ const cortexCmTheme = EditorView.theme({
   "&.cm-focused": { outline: "none" },
 });
 
+// Static keymap entries shared by every MdEditor instance — only the
+// `Mod-s` entry above is closure-bound (per-instance onSubmit). Exported
+// so the unit test can assert that Tab indent + Mod-z undo are wired
+// without spawning a real CodeMirror inside happy-dom.
+//
+// Order is load-bearing:
+//   defaultKeymap   — baseline editing
+//   historyKeymap   — Mod-Z / Mod-Shift-Z / Mod-Y undo+redo
+//   indentWithTab   — MUST come AFTER defaultKeymap so plain Tab still
+//                     moves keyboard focus when the editor is unfocused.
+export const staticMdKeymap = [...defaultKeymap, ...historyKeymap, indentWithTab];
+
 export interface MdEditorProps {
   value: string;
   onChange: (v: string) => void;
@@ -202,8 +214,7 @@ export function MdEditor({ value, onChange, onSubmit, placeholder: phText }: MdE
             return true;
           },
         },
-        ...defaultKeymap,
-        ...historyKeymap,
+        ...staticMdKeymap,
       ]),
       EditorView.updateListener.of(u => {
         if (u.docChanged) onChangeRef.current?.(u.state.doc.toString());

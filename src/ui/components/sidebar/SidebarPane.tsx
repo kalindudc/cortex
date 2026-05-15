@@ -39,10 +39,10 @@ import {
   sectionOpen,
   sidebarMode,
   selectedId,
-  pendingTitleFocus,
   modal,
   showAllTasks,
 } from "../../state/signals.ts";
+import { createUntitledTask } from "../../lib/createTask.ts";
 import { filteredTasks, activeTask } from "../../state/computed.ts";
 import { tip } from "../../state/tooltip.ts";
 import { api } from "../../api/client.ts";
@@ -105,21 +105,6 @@ function toggleSection(key: "views" | "lanes" | "tasks"): void {
   sectionOpen.value = { ...sectionOpen.value, [key]: !sectionOpen.value[key] };
 }
 
-// Create a new task with a placeholder title `untitled-<id>` and select it
-// so the user can immediately rename via the active-pane title input. The
-// two-request flow (POST then PATCH) is necessary because we don't know
-// the id until the server assigns it. The pendingTitleFocus signal is
-// picked up by EditableTaskBody's useEffect once the active pane re-
-// renders — a setTimeout-based document.querySelector race lost focus
-// every time Preact's reconciliation re-rendered the input.
-async function createUntitledTask(lane: string): Promise<void> {
-  const created = await tryApi(() => api.addTask({ title: "untitled", lane }));
-  if (!created?.id) return;
-  await tryApi(() => api.editTask(created.id, { title: `untitled-${created.id}` }));
-  pendingTitleFocus.value = created.id;
-  selectedId.value = created.id;
-}
-
 export function SidebarPane(): VNode {
   if (sidebarMode.value === "tags") return <TagsModePane />;
   return <MainModePane />;
@@ -130,7 +115,14 @@ function MainModePane(): VNode {
 
   // Visible task list: AND-composed with the showAllTasks UI toggle (hide
   // done tasks when off). filteredTasks already applies status/lane/tag.
-  const visibleTasks = showAllTasks.value ? filteredTasks.value : filteredTasks.value.filter(t => t.status !== "done");
+  const base = showAllTasks.value ? filteredTasks.value : filteredTasks.value.filter(t => t.status !== "done");
+  // Render-time alphabetical sort with natural numeric ordering so
+  // `task-2` precedes `task-12`. Server-side priority order is intentionally
+  // discarded HERE only — `activeTask` still consumes the priority-sorted
+  // `filteredTasks` for default-selection precedence.
+  const visibleTasks = [...base].sort((a, b) =>
+    a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: "base" }),
+  );
 
   const renderViewRow = (v: SmartView): VNode => {
     const sel = v.status === null ? f.status === null && f.lane === null && f.tag.length === 0 : f.status === v.status;

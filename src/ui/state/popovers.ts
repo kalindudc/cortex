@@ -9,6 +9,7 @@
 
 import type { Signal } from "@preact/signals";
 import { statusPopover, tagsPopover, lanePopover } from "./signals.ts";
+import { notificationsOpen } from "./notifications.ts";
 
 export function closeAllPopovers(): boolean {
   let closed = false;
@@ -22,6 +23,14 @@ export function closeAllPopovers(): boolean {
   }
   if (lanePopover.value) {
     lanePopover.value = false;
+    closed = true;
+  }
+  // The notification drawer follows the same close-on-outside-click +
+  // close-on-Esc + mutual-exclusion contract as the chip popovers, so it
+  // joins the same cascade. Drawer body + bell trigger both carry
+  // data-pop so the outside-click handler in index.tsx skips them.
+  if (notificationsOpen.value) {
+    notificationsOpen.value = false;
     closed = true;
   }
   return closed;

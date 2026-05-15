@@ -4,6 +4,15 @@
 
 import { describe, test, expect, mock, beforeEach } from "bun:test";
 
+// The 'New task' command delegates to createUntitledTask in lib/createTask.ts.
+// Mock the module BEFORE importing buildCommands so the SUT picks up the
+// spy at module-eval time. We deliberately don't run the real flow here —
+// it's covered by createTask.test.ts.
+const createUntitledTaskSpy = mock((_lane: string) => Promise.resolve());
+mock.module("../../../../src/ui/lib/createTask.ts", () => ({
+  createUntitledTask: createUntitledTaskSpy,
+}));
+
 // api.* methods are pulled into a few command actions. Stub the client so
 // nothing actually hits the wire when an action is invoked.
 const setStat = mock(() => Promise.resolve({}));
@@ -31,7 +40,7 @@ mock.module("../../../../src/ui/api/client.ts", () => ({
 }));
 
 import { buildCommands } from "../../../../src/ui/components/palette/buildCommands.ts";
-import { tasks, lanes, tags, selectedId, filters, modal } from "../../../../src/ui/state/signals.ts";
+import { tasks, lanes, tags, selectedId, filters, modal, paletteOpen } from "../../../../src/ui/state/signals.ts";
 import type { Task, Lane } from "../../../../src/ui/api/types.ts";
 import type { TagWithCount } from "../../../../src/ui/api/client.ts";
 
@@ -66,8 +75,10 @@ describe("buildCommands", () => {
     selectedId.value = null;
     filters.value = { status: null, lane: null, tag: [] };
     modal.value = null;
+    paletteOpen.value = true;
     setStat.mockClear();
     editTask.mockClear();
+    createUntitledTaskSpy.mockClear();
   });
 
   test("always-available commands appear in the root list", () => {
@@ -191,6 +202,26 @@ describe("buildCommands", () => {
     // Regression guard: SidebarPane is unified, there is no swap target.
     const cmds = buildCommands();
     expect(cmds.find(c => c.id === "sidebar-mode")).toBeUndefined();
+  });
+
+  test("'New task' invokes createUntitledTask with the active filter lane (default 'now') and closes the palette", () => {
+    // Default: filters.value.lane is null → falls back to 'now'.
+    paletteOpen.value = true;
+    const cmd = buildCommands().find(c => c.id === "new-task");
+    if (!cmd) throw new Error("expected 'new-task' command");
+    cmd.action?.();
+    expect(createUntitledTaskSpy).toHaveBeenCalledTimes(1);
+    expect(createUntitledTaskSpy).toHaveBeenLastCalledWith("now");
+    expect(paletteOpen.value).toBe(false);
+
+    // Explicit lane: filters.value.lane = 'next' → forwarded verbatim.
+    paletteOpen.value = true;
+    filters.value = { status: null, lane: "next", tag: [] };
+    const cmd2 = buildCommands().find(c => c.id === "new-task");
+    cmd2?.action?.();
+    expect(createUntitledTaskSpy).toHaveBeenCalledTimes(2);
+    expect(createUntitledTaskSpy).toHaveBeenLastCalledWith("next");
+    expect(paletteOpen.value).toBe(false);
   });
 
   test("'Delete task…' opens the confirm-delete modal", () => {

@@ -58,3 +58,30 @@ export const inboxList: ReadonlySignal<Update[]> = computed(() => {
 // Tasks currently in the blocked status. Drives the sticky red top-bar in
 // App() and the click-to-jump behaviour (selects the first one).
 export const blockedTasks: ReadonlySignal<Task[]> = computed(() => tasks.value.filter(t => t.status === "blocked"));
+
+// Authors of the active task derived from its loaded updates. Group by
+// author, take MAX(created) as last_seen and COUNT(*) as posts. Sorted
+// by most-recent post first to match the global /api/authors shape.
+// Pure client-side derivation — Update rows already include `author`
+// and `created`, so no extra fetch is needed.
+export interface TaskAuthor {
+  author: string;
+  last_seen: number;
+  posts: number;
+}
+export const taskAuthors: ReadonlySignal<TaskAuthor[]> = computed(() => {
+  const at = activeTask.value;
+  if (!at) return [];
+  const list = updates.value[at.id] ?? [];
+  const acc = new Map<string, TaskAuthor>();
+  for (const u of list) {
+    const prev = acc.get(u.author);
+    if (!prev) {
+      acc.set(u.author, { author: u.author, last_seen: u.created, posts: 1 });
+    } else {
+      prev.posts += 1;
+      if (u.created > prev.last_seen) prev.last_seen = u.created;
+    }
+  }
+  return Array.from(acc.values()).sort((a, b) => b.last_seen - a.last_seen);
+});

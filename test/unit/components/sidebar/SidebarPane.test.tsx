@@ -216,6 +216,19 @@ describe("SidebarPane", () => {
     expect(modal.value).toEqual({ kind: "new-lane" });
   });
 
+  test("renders the Tasks list naturally sorted by title (task-2 before task-12, alpha before both)", () => {
+    tasks.value = [
+      task({ id: 1, title: "task-12" }),
+      task({ id: 2, title: "task-2" }),
+      task({ id: 3, title: "alpha" }),
+    ];
+    // All three match the default empty filter; lane is null so every
+    // task passes through filteredTasks.
+    const { container } = render(<SidebarPane />);
+    const titles = Array.from(container.querySelectorAll(".task-row .task-title")).map(el => el.textContent);
+    expect(titles).toEqual(["alpha", "task-2", "task-12"]);
+  });
+
   test("clicking the Views section toggle collapses the section body", () => {
     const { container } = render(<SidebarPane />);
     // Sanity: 5 view-rows render when the section is open (SMART_VIEWS).

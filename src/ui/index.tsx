@@ -23,6 +23,7 @@ import App from "./components/App.tsx";
 import { refresh } from "./state/refresh.ts";
 import { meAuthor, paletteOpen, paletteQuery, modal, migrationsPending } from "./state/signals.ts";
 import { closeAllPopovers } from "./state/popovers.ts";
+import { pushNotification } from "./state/notifications.ts";
 
 // PostUpdateForm publishes its submit closure to window.__cortexPostUpdate
 // so the global Cmd/Ctrl+Enter handler below can flush it. Re-declared here
@@ -90,6 +91,46 @@ const ev = new EventSource("/events");
 // server but was forgotten here, so TagsPane didn't refresh on tag CRUD.)
 ["task.added", "task.updated", "task.removed", "update.posted", "lane.changed", "tag.changed"].forEach(k => {
   ev.addEventListener(k, debounceRefresh);
+});
+
+// In-app notification drawer feed. Tracks the last-known status per task
+// so we only push a drawer entry on actual status transitions (the
+// debounced refresh above already handles repaint). Distinct from the
+// browser-native Notification block below — that one fires only on
+// `blocked` and only when the page is unfocused.
+const lastStatus = new Map<number, string>();
+ev.addEventListener("task.added", (e: MessageEvent) => {
+  try {
+    const p = JSON.parse((e as MessageEvent).data) as { id: number; title: string; status: string };
+    lastStatus.set(p.id, p.status);
+    pushNotification({
+      kind: "added",
+      taskId: p.id,
+      title: `[${p.id}] ${p.title}`,
+      message: `created (${p.status})`,
+    });
+  } catch {
+    /* malformed payload — ignore */
+  }
+});
+ev.addEventListener("task.updated", (e: MessageEvent) => {
+  let p: { id: number; title: string; status: string } | null = null;
+  try {
+    p = JSON.parse(e.data);
+  } catch {
+    return;
+  }
+  if (!p) return;
+  const prev = lastStatus.get(p.id);
+  if (prev !== p.status) {
+    pushNotification({
+      kind: p.status === "blocked" ? "blocked" : "status",
+      taskId: p.id,
+      title: `[${p.id}] ${p.title}`,
+      message: `${prev ?? "open"} → ${p.status}`,
+    });
+    lastStatus.set(p.id, p.status);
+  }
 });
 
 // Separate listener (does NOT replace the debounceRefresh above) that fires

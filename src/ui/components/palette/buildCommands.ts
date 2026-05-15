@@ -22,7 +22,9 @@ import {
   tasks,
   tags,
   selectedId,
+  filters,
 } from "../../state/signals.ts";
+import { createUntitledTask } from "../../lib/createTask.ts";
 import { closeAllPopovers } from "../../state/popovers.ts";
 import { moveSelection } from "../../state/selection.ts";
 import { theme, toggleTheme } from "../../state/theme.ts";
@@ -54,7 +56,8 @@ export function buildCommands(): Command[] {
     icon: "plus",
     action: () => {
       paletteOpen.value = false;
-      setTimeout(() => document.getElementById("new-task-input")?.focus(), 0);
+      const lane = filters.value.lane || "now";
+      void createUntitledTask(lane);
     },
   });
   cmds.push({

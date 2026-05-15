@@ -75,15 +75,6 @@ input:disabled { opacity: 0.5; cursor: not-allowed; }
   font-weight: 500;
 }
 
-/* ---------- toast / error ---------- */
-.toast {
-  position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
-  padding: 10px 14px; border-radius: var(--r-3);
-  background: var(--err); color: #fff; font-size: var(--fs-3);
-  box-shadow: var(--shadow-pop); z-index: 200;
-  animation: pop var(--dur-3) var(--ease);
-}
-
 /* ---------- misc ---------- */
 .row { display: flex; align-items: center; gap: 8px; }
 .col { display: flex; flex-direction: column; gap: 8px; }
@@ -234,15 +225,50 @@ input:disabled { opacity: 0.5; cursor: not-allowed; }
 /* Always-editable title input that mirrors the old .title-2 heading
    visually. Borderless by default; focus ring uses --accent-tint to
    surface the editable affordance. The bottom border separates the title
-   from the MdEditor below — same role the previous .title-2 had. */
-.title-input {
-  display: block; width: 100%;
-  padding: 16px 24px; margin: 0;
-  border: 0; background: transparent;
-  font: 700 var(--fs-5)/1.2 var(--font-mono);
-  color: var(--text);
+   from the MdEditor below — same role the previous .title-2 had.
+
+   Autosize is CSS-only via the canonical "replicated value" grid trick:
+   .title-input-wrap is a 1×1 grid; its ::after pseudo mirrors the live
+   value via the data-replicated-value attribute and shares the same
+   grid-area as the textarea. The cell auto-sizes to the taller of the
+   two children — and since the textarea has overflow:hidden, the visible
+   ::after is what drives the height. Both children share identical
+   font/padding so they measure to the same wrapped line count. No JS
+   height math; the browser does the work. */
+.title-input-wrap {
+  display: grid;
+  width: 100%;
   border-bottom: 1px solid var(--border);
+}
+.title-input-wrap::after {
+  /* Replicated content. Trailing space on the attribute (set in JSX)
+     keeps the cell at ≥1 line when the value is empty. */
+  content: attr(data-replicated-value);
+  white-space: pre-wrap;
+  word-break: break-word;
+  visibility: hidden;
+}
+.title-input-wrap > .title-input,
+.title-input-wrap::after {
+  /* Same grid cell + identical box-model so they wrap to the same
+     line count. Anything that affects width or text metrics MUST be
+     mirrored on both selectors. */
+  grid-area: 1 / 1 / 2 / 2;
+  padding: 8px 24px;
+  margin: 0;
+  font: 700 var(--fs-5)/1.3 var(--font-mono);
+}
+.title-input {
+  border: 0;
+  background: transparent;
+  color: var(--text);
   outline: none;
+  resize: none;
+  overflow: hidden;
+  /* min-height: 0 opts out of the global textarea { min-height: 80px }
+     in base.css (intended for free-form compose surfaces, not headings).
+     With this, the textarea fully respects the grid cell height. */
+  min-height: 0;
 }
 .title-input:focus { background: var(--accent-tint); }
 

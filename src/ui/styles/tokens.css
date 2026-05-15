@@ -32,6 +32,10 @@
   --accent-hover:  #d97a4b;
   --accent-tint:   #f7e1d4;
   --accent-on:     #2c2820;
+  /* Editor-only token: light mode needs darker contrast on cream than
+     --accent provides, otherwise codeblock text + list markers are
+     unreadable. Mirrored brighter in the dark blocks below. */
+  --code-accent:   #8a3d12;
 
   /* Code selection highlight. Intentionally cool/blue-tinted so it reads
      as visibly distinct from the warm --active-line used by the active
@@ -105,6 +109,9 @@
     --accent-hover:  #ffb795;
     --accent-tint:   #2e2418;
     --accent-on:     #1d1f24;
+    /* Editor-only token: brighter in dark mode so code/list highlights
+       lift off the dark panel. Mirrors the light value at top. */
+    --code-accent:   #f5a47e;
 
     /* Cool blue-grey to contrast the warm --active-line. */
     --selection:     #2a3550;
@@ -143,6 +150,9 @@
   --accent-hover:  #ffb795;
   --accent-tint:   #2e2418;
   --accent-on:     #1d1f24;
+  /* Editor-only token: brighter in dark mode so code/list highlights
+     lift off the dark panel. Mirrors the light value at top. */
+  --code-accent:   #f5a47e;
 
   /* Cool blue-grey to contrast the warm --active-line. */
   --selection:     #2a3550;
