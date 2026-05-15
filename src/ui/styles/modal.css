@@ -12,6 +12,51 @@
   padding: 16px; display: flex; flex-direction: column; gap: 12px;
   animation: pop var(--dur-3) var(--ease);
 }
+/* Centered overlay variant. Default .overlay anchors modals near the top
+   (padding-top: 18vh + align-items: flex-start) which is fine for short
+   modals but mathematically guarantees overflow for any modal taller than
+   100vh - 18vh = 82vh. Tall modals (e.g. update-detail with a long body)
+   opt in to this variant which centers the modal vertically and keeps a
+   fixed 32px breathing room top + bottom. */
+.overlay--centered {
+  align-items: center;
+  padding: 32px 16px;
+}
+/* Wide modal variant.
+   max-height matches the centered overlay's vertical padding budget exactly
+   (100vh - 32px top - 32px bottom) so the modal never overflows the
+   viewport. overflow: hidden clips children to the modal box; without it,
+   the .md-editor below would visually escape past max-height even though
+   the .modal box itself respects the cap. */
+.modal--wide {
+  max-width: 720px;
+  max-height: calc(100vh - 64px);
+  overflow: hidden;
+}
+/* Body region of the update-detail modal — the scroll container.
+   flex: 1 absorbs remaining modal height; min-height: 0 lets it shrink
+   below content size; overflow: auto handles overflow for both the
+   empty-body hint AND the MdEditor case (see override below). */
+.update-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+/* In the modal context, let .update-body own scrolling instead of CM's
+   internal scroller. The in-page editor (active.css) bounds itself with
+   `flex: 1 1 auto; min-height: 120px; overflow: hidden` so CM's own
+   .cm-scroller can engage, but that chain doesn't compose cleanly inside
+   a nested flex modal. Setting height: auto + overflow: visible on the
+   editor + .cm-editor + .cm-scroller makes them render at natural content
+   height; .update-body's overflow: auto provides the single scrollbar. */
+.modal--wide .md-editor,
+.modal--wide .md-editor .cm-editor,
+.modal--wide .md-editor .cm-scroller {
+  height: auto;
+  flex: none;
+  overflow: visible;
+  min-height: 0;
+}
 .modal h2 { margin: 0; font-size: var(--fs-6); font-weight: 600; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
 @keyframes fade { from { opacity: 0 } to { opacity: 1 } }

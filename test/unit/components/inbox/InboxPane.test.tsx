@@ -5,7 +5,7 @@
 import { describe, test, expect, beforeEach } from "bun:test";
 import { render, fireEvent } from "@testing-library/preact";
 import { InboxPane } from "../../../../src/ui/components/inbox/InboxPane.tsx";
-import { tasks, selectedId, tab, updates } from "../../../../src/ui/state/signals.ts";
+import { tasks, selectedId, tab, updates, modal } from "../../../../src/ui/state/signals.ts";
 import type { Task, Update } from "../../../../src/ui/api/types.ts";
 
 function task(over: Partial<Task> = {}): Task {
@@ -70,6 +70,18 @@ describe("InboxPane", () => {
     const { container } = render(<InboxPane />);
     expect(container.querySelector(".empty")).toBeTruthy();
     expect(container.querySelector(".empty-title")?.textContent).toBe("No authors on this task yet.");
+  });
+
+  test("clicking an update row opens the update-detail modal with that row's payload", () => {
+    updates.value = { 1: [update({ id: 42, summary: "longform", body: "# hi" })] };
+    modal.value = null;
+    const { container } = render(<InboxPane />);
+    const row = container.querySelector(".inbox-row");
+    expect(row).toBeTruthy();
+    fireEvent.click(row as Element);
+    const m = modal.value as { kind: string; update: Update } | null;
+    expect(m?.kind).toBe("update-detail");
+    expect(m?.update.id).toBe(42);
   });
 
   test("Authors tab renders one row per distinct author derived from updates", () => {

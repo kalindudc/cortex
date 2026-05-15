@@ -67,6 +67,25 @@ describe("ModalRoot", () => {
     expect(container.textContent).toContain("bug");
   });
 
+  test("routes 'update-detail' kind to UpdateDetailModal", () => {
+    modal.value = {
+      kind: "update-detail",
+      update: {
+        id: 1,
+        task_id: 1,
+        author: "alice",
+        summary: "summary text",
+        body: "# heading",
+        severity: "progress",
+        created: 1700000000,
+      },
+    };
+    const { container } = render(<ModalRoot />);
+    expect(container.textContent).toContain("summary text");
+    expect(container.textContent).toContain("alice");
+    expect(container.querySelector(".modal--wide")).toBeTruthy();
+  });
+
   test("unknown modal kind renders nothing", () => {
     modal.value = { kind: "totally-not-a-kind" };
     const { container } = render(<ModalRoot />);

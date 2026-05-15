@@ -11,6 +11,8 @@ import { TagEditModal } from "./TagEditModal.tsx";
 import { NewLaneModal } from "./NewLaneModal.tsx";
 import { NewTagModal } from "./NewTagModal.tsx";
 import { TagFilterModal } from "./TagFilterModal.tsx";
+import { UpdateDetailModal } from "./UpdateDetailModal.tsx";
+import type { Update } from "../../api/types.ts";
 
 export function ModalRoot(): VNode | null {
   const m = modal.value;
@@ -60,6 +62,9 @@ export function ModalRoot(): VNode | null {
   }
   if (m.kind === "tag-edit") {
     return <TagEditModal name={m.name as string} close={close} />;
+  }
+  if (m.kind === "update-detail") {
+    return <UpdateDetailModal update={m.update as Update} close={close} />;
   }
   if (m.kind === "confirm-tag-delete") {
     const tagName = m.name as string;

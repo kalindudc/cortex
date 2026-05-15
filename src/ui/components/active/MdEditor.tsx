@@ -181,9 +181,13 @@ export interface MdEditorProps {
   onChange: (v: string) => void;
   onSubmit?: () => void;
   placeholder?: string;
+  // Read-only mounts the editor without contentEditable AND with state-level
+  // readOnly. Both are required: editable.of(false) blocks caret/IME, readOnly
+  // blocks programmatic dispatches. Fixed for the lifetime of this instance.
+  readOnly?: boolean;
 }
 
-export function MdEditor({ value, onChange, onSubmit, placeholder: phText }: MdEditorProps): VNode {
+export function MdEditor({ value, onChange, onSubmit, placeholder: phText, readOnly }: MdEditorProps): VNode {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   // Refs for callbacks so the editor (mounted once) always sees the latest
@@ -205,21 +209,34 @@ export function MdEditor({ value, onChange, onSubmit, placeholder: phText }: MdE
       highlightActiveLineGutter(),
       drawSelection(),
       history(),
-      keymap.of([
-        {
-          key: "Mod-s",
-          preventDefault: true,
-          run: () => {
-            onSubmitRef.current?.();
-            return true;
-          },
-        },
-        ...staticMdKeymap,
-      ]),
+      keymap.of(
+        readOnly
+          ? staticMdKeymap
+          : [
+              {
+                key: "Mod-s",
+                preventDefault: true,
+                run: () => {
+                  onSubmitRef.current?.();
+                  return true;
+                },
+              },
+              ...staticMdKeymap,
+            ],
+      ),
       EditorView.updateListener.of(u => {
         if (u.docChanged) onChangeRef.current?.(u.state.doc.toString());
       }),
     ];
+    if (readOnly) {
+      // Both flags are required to make the editor truly read-only:
+      //   EditorState.readOnly.of(true) blocks doc-mutating dispatches.
+      //   EditorView.editable.of(false) removes contentEditable so the
+      //   user cannot place a caret, select, or open the IME.
+      // Fixed per instance — modal mounts a fresh MdEditor each open.
+      exts.push(EditorState.readOnly.of(true));
+      exts.push(EditorView.editable.of(false));
+    }
     // CodeMirror's placeholder hides on focus, not on non-empty content —
     // acceptable since focus is the moment the user is committing to edit.
     if (phText) exts.push(placeholder(phText));

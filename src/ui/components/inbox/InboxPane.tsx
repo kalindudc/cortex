@@ -5,7 +5,7 @@
 import type { VNode } from "preact";
 
 import { activeTask, inboxList, taskAuthors } from "../../state/computed.ts";
-import { tab } from "../../state/signals.ts";
+import { tab, modal } from "../../state/signals.ts";
 import { fmtTime, initial } from "../../lib/format.ts";
 import { Icon } from "../Icon.tsx";
 
@@ -42,7 +42,11 @@ export function InboxPane(): VNode {
             </div>
           ) : (
             list.map(u => (
-              <div class="inbox-row">
+              <button
+                type="button"
+                class="inbox-row"
+                onClick={() => (modal.value = { kind: "update-detail", update: u })}
+              >
                 <div class="row" style="gap:10px; align-items:flex-start">
                   <span class="avatar">{initial(u.author)}</span>
                   <div class="grow">
@@ -61,7 +65,7 @@ export function InboxPane(): VNode {
                     </div>
                   </div>
                 </div>
-              </div>
+              </button>
             ))
           )}
         </>
