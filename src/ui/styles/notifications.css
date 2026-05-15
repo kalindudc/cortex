@@ -136,6 +136,37 @@
   background: var(--panel);
 }
 
+/* Footer actions ("Mark all read", "Clear all") need a visible affordance.
+   The shared base `button` reset (base.css) strips background/border/padding
+   and the global `.hint-button` styling is scoped to `.status-bar`, so
+   without a footer-specific rule these read as plain inline text. We add a
+   subtle 1px border + small padding + accent-tint hover so they read as
+   clickable without looking like primary CTAs — same restrained palette as
+   the rest of the drawer chrome. Tokens only, so theme switches
+   propagate without re-styling. */
+.notif-foot .hint-button {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-1);
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--fs-2);
+  cursor: pointer;
+  transition:
+    background var(--dur-1) var(--ease),
+    color var(--dur-1) var(--ease),
+    border-color var(--dur-1) var(--ease);
+}
+.notif-foot .hint-button:hover {
+  background: var(--accent-tint);
+  color: var(--text);
+  border-color: var(--accent);
+}
+.notif-foot .hint-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 /* ---------- StatusBar bell trigger ----------
    Reuses the .hint-button surface affordance: transparent, picks up
    var(--text) on hover. Badge sits flush against the icon. */

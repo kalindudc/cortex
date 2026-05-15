@@ -13,7 +13,18 @@
 //   click row     → if it's a notif row with a task_id, jump to it
 //                   (selectedId = task_id) AND markRead(id), then close
 //                   the drawer. Error rows just markRead.
-//   click x       → dismiss(id), drawer stays open.
+//   click x / 👁️ → dismiss(id) / markUnread(id), drawer stays open. The
+//                   row-controls cluster carries `e.stopPropagation()` so
+//                   the document-level outside-click handler in
+//                   src/ui/index.tsx never gets a chance to close the
+//                   drawer on these in-row actions — same defensive
+//                   precedent as PriorityChip / SectionHeader. Without it,
+//                   the act of mutating the merged feed (dismiss removes
+//                   the row; markUnread re-sorts and unmounts the
+//                   eye-off button itself) can detach the click target
+//                   from the DOM by the time the doc handler runs in some
+//                   browsers, defeating the `closest("[data-pop]")`
+//                   ancestor walk.
 //
 // Footer offers "Mark all read" + "Clear all".
 //
@@ -102,7 +113,12 @@ export function NotificationDrawer(): VNode {
                   </div>
                 </div>
               </button>
-              <div class="notif-row-controls">
+              {/* Stop the click bubble at the controls cluster so the
+                  global outside-click handler can't close the drawer
+                  while the user is mark/dismiss'ing several rows in a
+                  row. Per-button onClick handlers below stay focused
+                  on their data mutation and don't repeat the guard. */}
+              <div class="notif-row-controls" onClick={(e: MouseEvent) => e.stopPropagation()}>
                 <button
                   type="button"
                   class="hint hint-button notif-dismiss"

@@ -378,25 +378,56 @@ describe("server: notifications", () => {
     expect(list[0]?.task_id).toBe(task.id);
   });
 
-  test("PATCH /api/tasks/:id/status open→blocked inserts a transition notification alongside the create row", async () => {
+  test("PATCH /api/tasks/:id/status open→blocked WITH author (CLI/agent) inserts a transition notification alongside the create row", async () => {
+    const created = await fetchJson(req("POST", "/api/tasks", { title: "x" }));
+    const taskId = (created.json as { id: number }).id;
+    // Sending an explicit `author` mimics the CLI path (`cortex update --as <session>`).
+    // Attributed status changes are the only ones that fire a bell-drawer
+    // notification — the supervisor wants to know an agent moved a task,
+    // but doesn't need to be pinged about clicks they made themselves.
+    const patched = await fetchJson(
+      req("PATCH", `/api/tasks/${taskId}/status`, {
+        status: "blocked",
+        author: "agent-deadbeef",
+      }),
+    );
+    expect(patched.status).toBe(200);
+    const { json } = await fetchJson(req("GET", "/api/notifications"));
+    const list = json as Notification[];
+    // Two rows: the create-notification AND the attributed open→blocked transition.
+    expect(list.length).toBe(2);
+    // Newest-first: transition row sits at index 0, create row at index 1.
+    expect(list[0]?.status).toBe("blocked");
+    expect(list[0]?.message).toContain("\u2192");
+    expect(list[0]?.author).toBe("agent-deadbeef");
+    expect(list[1]?.message).toBe("created");
+  });
+
+  test("PATCH /api/tasks/:id/status open→blocked WITHOUT author (dashboard click) does NOT insert a transition notification", async () => {
+    // The dashboard's setStat() sends `{ status }` only — no author. That
+    // signals "the supervisor clicked this themselves", so the bell-drawer
+    // notification is suppressed (the row is already visibly updated
+    // in-app via the task.updated SSE event). Only the original create
+    // notification persists.
     const created = await fetchJson(req("POST", "/api/tasks", { title: "x" }));
     const taskId = (created.json as { id: number }).id;
     const patched = await fetchJson(req("PATCH", `/api/tasks/${taskId}/status`, { status: "blocked" }));
     expect(patched.status).toBe(200);
     const { json } = await fetchJson(req("GET", "/api/notifications"));
     const list = json as Notification[];
-    // Two rows: the create-notification AND the open→blocked transition.
-    expect(list.length).toBe(2);
-    // Newest-first: transition row sits at index 0, create row at index 1.
-    expect(list[0]?.status).toBe("blocked");
-    expect(list[0]?.message).toContain("\u2192");
-    expect(list[1]?.message).toBe("created");
+    expect(list.length).toBe(1);
+    expect(list[0]?.message).toBe("created");
   });
 
   test("PATCH /api/tasks/:id/status open→open (no-op) does NOT insert a new notification row", async () => {
     const created = await fetchJson(req("POST", "/api/tasks", { title: "x" }));
     const taskId = (created.json as { id: number }).id;
-    const patched = await fetchJson(req("PATCH", `/api/tasks/${taskId}/status`, { status: "open" }));
+    const patched = await fetchJson(
+      req("PATCH", `/api/tasks/${taskId}/status`, {
+        status: "open",
+        author: "agent-deadbeef",
+      }),
+    );
     expect(patched.status).toBe(200);
     const { json } = await fetchJson(req("GET", "/api/notifications"));
     const list = json as Notification[];

@@ -222,12 +222,17 @@ export function buildApp(store: Store): Hono {
       return c.json({ error: "invalid status" }, 400);
     }
     // Author attribution for the audit-trail row written inside setStatus.
-    // HTTP path is OPTIONAL (humans on the dashboard never type their name);
-    // fall back to the existing resolveAuthor() cascade.
+    // HTTP path is OPTIONAL: the dashboard never sends an author (the human
+    // is the supervisor, the click IS the attribution), only attributed
+    // CLI calls do (every `cortex update` requires --as <session-id>).
+    // We use that same flag below as the discriminator for whether to
+    // emit a bell-drawer notification — no point pinging the supervisor
+    // about a status change they just clicked themselves.
+    const isAttributed = body.author !== undefined;
     let author: string;
-    if (body.author !== undefined) {
+    if (isAttributed) {
       try {
-        author = validateAuthorTag(body.author);
+        author = validateAuthorTag(body.author as string);
       } catch (e) {
         return c.json({ error: (e as Error).message }, 400);
       }
@@ -243,7 +248,15 @@ export function buildApp(store: Store): Hono {
       // the transition decision server-side.
       const prev = store.getTask(id);
       const task = store.setStatus(id, body.status, { author });
-      if (prev && prev.status !== task.status) {
+      // Only emit a bell-drawer notification when the status change came
+      // from an attributed source (an agent via the CLI). Dashboard
+      // clicks are intentionally silent — the supervisor knows what
+      // they just did, and the in-app row already reflects the change
+      // via the `task.updated` SSE event below. The browser-native
+      // "task blocked" Notification (src/ui/index.tsx) is orthogonal
+      // and continues to fire for every blocked transition regardless
+      // of source.
+      if (isAttributed && prev && prev.status !== task.status) {
         const notif = store.addNotification({
           task_id: task.id,
           author,
