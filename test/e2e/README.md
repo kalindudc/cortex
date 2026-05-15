@@ -21,7 +21,17 @@ pnpm exec playwright test test/e2e/cardinal.spec.ts -g "post an update"
 First-time setup (already wired into `pnpm run test:e2e`):
 
 ```bash
-pnpm exec playwright install chromium --with-deps
+pnpm exec playwright install chromium
+```
+
+**Arch Linux note:** Playwright's `--with-deps` flag hard-codes `apt-get` and
+fails on Arch. The install command above downloads the browser binary only
+(which works on every OS). System libraries (NSS, GTK, etc.) are usually
+already present on Arch desktops. If the browser fails to launch with a
+missing-library error, install the deps via pacman:
+
+```bash
+sudo pacman -S nss alsa-lib libxss libxtst gtk3 cups libdrm
 ```
 
 ## Why Playwright runs under Node, not Bun

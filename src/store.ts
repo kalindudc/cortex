@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { dbPath, ensureConfigDir } from "./paths.ts";
 
-export type TaskStatus = "open" | "review" | "blocked" | "done";
+export type TaskStatus = "draft" | "open" | "review" | "blocked" | "done";
 export type Severity = "progress" | "review" | "blocked";
 
 export type Task = {
@@ -177,7 +177,7 @@ const now = (): number => Date.now();
 export class Store {
   private constructor(private readonly db: Database) {}
 
-  static open(path: string = dbPath()): Store {
+  static open(path: string = dbPath(), opts: { warnMigrations?: boolean } = {}): Store {
     if (path !== ":memory:") {
       ensureConfigDir();
     }
@@ -186,6 +186,14 @@ export class Store {
     db.run("PRAGMA foreign_keys = ON;");
     const store = new Store(db);
     store.migrate();
+    if (opts.warnMigrations !== false) {
+      const pending = store.pendingMigrations();
+      if (pending.length > 0) {
+        console.warn(
+          `cortex: database migrations pending (${pending.join(", ")}); run \`cortex init\` to apply them safely`,
+        );
+      }
+    }
     return store;
   }
 
@@ -205,7 +213,7 @@ export class Store {
           title    TEXT    NOT NULL,
           body     TEXT,
           status   TEXT    NOT NULL DEFAULT 'open'
-                   CHECK(status IN ('open','review','blocked','done')),
+                   CHECK(status IN ('draft','open','review','blocked','done')),
           priority INTEGER NOT NULL DEFAULT 1,
           created  INTEGER NOT NULL,
           updated  INTEGER NOT NULL,
@@ -224,18 +232,12 @@ export class Store {
           created  INTEGER NOT NULL
         );
       `);
-      // Legacy-DB warning: pre-Plan-3 DBs were created with the old 200-char
-      // CHECK. SQLite cannot ALTER a CHECK constraint, and auto-recreating the
-      // table is destructive; for a single-user tool we warn once and let the
-      // human run `cortex reset` when they want the new limit.
-      const updatesDdl = this.db
-        .query<{ sql: string | null }, []>("SELECT sql FROM sqlite_master WHERE name='updates';")
-        .get();
-      if (updatesDdl?.sql?.includes("length(summary) <= 200")) {
-        console.warn(
-          "cortex: updates table has the old 200-char limit; run `cortex reset` to enable the 1024-char limit (existing data lost).",
+      this.db.run(`
+        CREATE TABLE IF NOT EXISTS _migrations (
+          name       TEXT PRIMARY KEY,
+          applied_at INTEGER NOT NULL
         );
-      }
+      `);
       // Tag tables (Plan 5). `task_tags` cascades from BOTH parents:
       //   ON DELETE on tasks  -> mirrors `updates` so removeTask drops join rows
       //   ON DELETE on tags   -> `cortex tag rm -f` drops join rows but never tasks
@@ -261,6 +263,246 @@ export class Store {
       // carries a NOT NULL DEFAULT (or is nullable), leaving them in place is
       // harmless — our INSERT/SELECT no longer reference them.
     })();
+    // Seed _migrations for DBs created with the current schema so they don't
+    // show as pending on the next open.
+    this._seedMigrations();
+  }
+
+  /** For DBs created before the _migrations table existed, seed entries
+   *  when the schema already matches the desired state. Idempotent. */
+  private _seedMigrations(): void {
+    const tasksDdl = this.db
+      .query<{ sql: string | null }, []>("SELECT sql FROM sqlite_master WHERE name='tasks';")
+      .get();
+    if (!tasksDdl?.sql?.includes("CHECK(status IN ('open','review','blocked','done'))")) {
+      this.db.run(`INSERT OR IGNORE INTO _migrations (name, applied_at) VALUES (?, ?);`, ["tasks-status-draft", now()]);
+    }
+    const updatesDdl = this.db
+      .query<{ sql: string | null }, []>("SELECT sql FROM sqlite_master WHERE name='updates';")
+      .get();
+    if (!updatesDdl?.sql?.includes("length(summary) <= 200")) {
+      this.db.run(`INSERT OR IGNORE INTO _migrations (name, applied_at) VALUES (?, ?);`, [
+        "updates-summary-1024",
+        now(),
+      ]);
+    }
+  }
+
+  /** Return a list of pending migration names.
+   *  Checks _migrations table first, then falls back to schema inspection
+   *  for legacy DBs created before _migrations existed. */
+  pendingMigrations(): string[] {
+    const applied = new Set(
+      this.db
+        .query<{ name: string }, []>("SELECT name FROM _migrations;")
+        .all()
+        .map(r => r.name),
+    );
+    const pending: string[] = [];
+
+    if (!applied.has("tasks-status-draft")) {
+      const tasksDdl = this.db
+        .query<{ sql: string | null }, []>("SELECT sql FROM sqlite_master WHERE name='tasks';")
+        .get();
+      if (tasksDdl?.sql?.includes("CHECK(status IN ('open','review','blocked','done'))")) {
+        pending.push("tasks-status-draft");
+      }
+    }
+
+    if (!applied.has("updates-summary-1024")) {
+      const updatesDdl = this.db
+        .query<{ sql: string | null }, []>("SELECT sql FROM sqlite_master WHERE name='updates';")
+        .get();
+      if (updatesDdl?.sql?.includes("length(summary) <= 200")) {
+        pending.push("updates-summary-1024");
+      }
+    }
+
+    return pending;
+  }
+
+  /** Apply every pending migration using SQLite's safe table-rebuild pattern.
+   *  Before each migration a backup is created via VACUUM INTO. After the
+   *  data copy, row counts, integrity_check, and foreign_key_check are run.
+   *  The old table is ONLY dropped after all validations pass. If anything
+   *  fails the old table is kept, the new table is discarded, and an error
+   *  is thrown with the backup path for manual recovery.
+   *
+   *  Returns the names of migrations that were applied. */
+  applyMigrations(): string[] {
+    const pending = this.pendingMigrations();
+    if (pending.length === 0) return [];
+
+    const applied: string[] = [];
+    const ts = now();
+    const dbFile = dbPath();
+
+    for (const name of pending) {
+      // --- 1. Backup ---
+      const backupPath = `${dbFile}.bak.${name}.${ts}`;
+      try {
+        this.db.run(`VACUUM INTO '${backupPath.replace(/'/g, "''")}'`);
+      } catch (err) {
+        throw new Error(`migration ${name} aborted: backup failed (${(err as Error).message}). No changes were made.`);
+      }
+
+      // --- 2. Capture pre-migration state ---
+      const oldCounts = this._captureRowCounts(name);
+
+      // --- 3. Apply migration ---
+      let newTableName: string | undefined;
+      try {
+        newTableName = this._runMigration(name);
+      } catch (err) {
+        this._cleanupNewTable(newTableName);
+        throw new Error(
+          `migration ${name} failed during rebuild: ${(err as Error).message}\n` +
+            `Database is unchanged. Backup: ${backupPath}\n` +
+            `To restore: cp ${backupPath} ${dbFile}`,
+        );
+      }
+
+      // --- 4. Validate ---
+      const validation = this._validateMigration(name, oldCounts);
+      if (!validation.ok) {
+        this._cleanupNewTable(newTableName);
+        throw new Error(
+          `migration ${name} validation failed: ${validation.error}\n` +
+            `Database is unchanged. Backup: ${backupPath}\n` +
+            `To restore: cp ${backupPath} ${dbFile}`,
+        );
+      }
+
+      // --- 5. Record migration ---
+      this.db.run(`INSERT INTO _migrations (name, applied_at) VALUES (?, ?);`, [name, ts]);
+      applied.push(name);
+
+      // --- 6. Clean up backup ---
+      try {
+        import("node:fs").then(({ rmSync }) => rmSync(backupPath, { force: true }));
+      } catch {
+        /* non-fatal — backup can be cleaned up manually */
+      }
+    }
+
+    return applied;
+  }
+
+  /** Capture row counts for the tables affected by a given migration. */
+  private _captureRowCounts(name: string): { tasks?: number; updates?: number } {
+    const counts: { tasks?: number; updates?: number } = {};
+    if (name === "tasks-status-draft") {
+      counts.tasks = this.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM tasks;").get()?.n ?? 0;
+    } else if (name === "updates-summary-1024") {
+      counts.updates = this.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM updates;").get()?.n ?? 0;
+    }
+    return counts;
+  }
+
+  /** Run a single migration's table rebuild. Returns the name of the new
+   *  table so the caller can clean it up on failure. */
+  private _runMigration(name: string): string {
+    this.db.run("PRAGMA foreign_keys = OFF;");
+    try {
+      if (name === "tasks-status-draft") {
+        this.db.run(`
+          CREATE TABLE tasks_new (
+            id       INTEGER PRIMARY KEY AUTOINCREMENT,
+            lane     TEXT    NOT NULL DEFAULT 'now',
+            title    TEXT    NOT NULL,
+            body     TEXT,
+            status   TEXT    NOT NULL DEFAULT 'open'
+                     CHECK(status IN ('draft','open','review','blocked','done')),
+            priority INTEGER NOT NULL DEFAULT 1,
+            created  INTEGER NOT NULL,
+            updated  INTEGER NOT NULL,
+            FOREIGN KEY(lane) REFERENCES lanes(name) ON UPDATE CASCADE
+          );
+        `);
+        this.db.run(`INSERT INTO tasks_new SELECT * FROM tasks;`);
+        this.db.run(`DROP TABLE tasks;`);
+        this.db.run(`ALTER TABLE tasks_new RENAME TO tasks;`);
+        this.db.run(
+          `INSERT OR REPLACE INTO sqlite_sequence (name, seq) VALUES ('tasks', (SELECT MAX(id) FROM tasks));`,
+        );
+        return "tasks_new";
+      }
+
+      if (name === "updates-summary-1024") {
+        this.db.run(`
+          CREATE TABLE updates_new (
+            id       INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id  INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            author   TEXT    NOT NULL,
+            summary  TEXT    NOT NULL CHECK(length(summary) <= 1024),
+            body     TEXT,
+            severity TEXT    NOT NULL
+                     CHECK(severity IN ('progress','review','blocked')),
+            created  INTEGER NOT NULL
+          );
+        `);
+        this.db.run(`INSERT INTO updates_new SELECT * FROM updates;`);
+        this.db.run(`DROP TABLE updates;`);
+        this.db.run(`ALTER TABLE updates_new RENAME TO updates;`);
+        this.db.run(
+          `INSERT OR REPLACE INTO sqlite_sequence (name, seq) VALUES ('updates', (SELECT MAX(id) FROM updates));`,
+        );
+        return "updates_new";
+      }
+
+      throw new Error(`unknown migration: ${name}`);
+    } finally {
+      this.db.run("PRAGMA foreign_keys = ON;");
+    }
+  }
+
+  /** Drop a partially-created new table after a failed migration. */
+  private _cleanupNewTable(name: string | undefined): void {
+    if (!name) return;
+    try {
+      this.db.run(`DROP TABLE IF EXISTS ${name};`);
+    } catch {
+      /* best effort */
+    }
+  }
+
+  /** Validate a migration: row counts, integrity_check, foreign_key_check. */
+  private _validateMigration(
+    name: string,
+    oldCounts: { tasks?: number; updates?: number },
+  ): { ok: boolean; error?: string } {
+    // Row count
+    if (name === "tasks-status-draft") {
+      const newCount = this.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM tasks;").get()?.n ?? 0;
+      if (newCount !== oldCounts.tasks) {
+        return { ok: false, error: `tasks row count mismatch (expected ${oldCounts.tasks}, got ${newCount})` };
+      }
+    } else if (name === "updates-summary-1024") {
+      const newCount = this.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM updates;").get()?.n ?? 0;
+      if (newCount !== oldCounts.updates) {
+        return { ok: false, error: `updates row count mismatch (expected ${oldCounts.updates}, got ${newCount})` };
+      }
+    }
+
+    // Integrity check
+    const integrity = this.db.query<{ integrity_check: string }, []>("PRAGMA integrity_check;").get();
+    if (integrity?.integrity_check !== "ok") {
+      return { ok: false, error: `integrity check failed: ${integrity?.integrity_check}` };
+    }
+
+    // Foreign key check
+    const fkErrors = this.db
+      .query<{ table: string; rowid: number; parent: string; fkid: number }, []>("PRAGMA foreign_key_check;")
+      .all();
+    if (fkErrors.length > 0) {
+      const first = fkErrors[0];
+      return {
+        ok: false,
+        error: `foreign key violation on ${first.table} (row ${first.rowid}) -> ${first.parent}`,
+      };
+    }
+
+    return { ok: true };
   }
 
   // ---------- task methods ----------

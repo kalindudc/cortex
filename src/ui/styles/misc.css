@@ -145,6 +145,27 @@ input:disabled { opacity: 0.5; cursor: not-allowed; }
   background: var(--panel);
 }
 
+/* ---------- migration banner ----------
+   Fixed banner at the top of the app grid. Stretches full width, high
+   z-index so it sits above all panes. Uses warn color for urgency but
+   keeps text readable. */
+.migration-banner {
+  grid-column: 1 / -1;
+  padding: 8px 16px;
+  background: var(--warn);
+  color: #fff;
+  font-size: var(--fs-3);
+  font-weight: 500;
+  text-align: center;
+  z-index: 100;
+}
+.migration-banner code {
+  font-family: var(--font-mono);
+  background: rgba(255,255,255,0.2);
+  padding: 1px 6px;
+  border-radius: var(--r-1);
+}
+
 /* App-wide status bar (row 2 of the main grid, spans all 3 columns).
    Read-only summary: filter description on the left, counts in the middle,
    palette hint on the right. Tabular numerals so jittery counts don't

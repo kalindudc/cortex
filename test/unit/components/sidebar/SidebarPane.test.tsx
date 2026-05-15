@@ -218,8 +218,8 @@ describe("SidebarPane", () => {
 
   test("clicking the Views section toggle collapses the section body", () => {
     const { container } = render(<SidebarPane />);
-    // Sanity: 4 view-rows render when the section is open (SMART_VIEWS).
-    expect(container.querySelectorAll(".view-row").length).toBe(4);
+    // Sanity: 5 view-rows render when the section is open (SMART_VIEWS).
+    expect(container.querySelectorAll(".view-row").length).toBe(5);
     const viewsToggle = Array.from(container.querySelectorAll<HTMLButtonElement>(".section-toggle")).find(
       b => b.querySelector(".section-label")?.textContent === "Views",
     );

@@ -36,7 +36,7 @@ Plans are stored in cortex — not as files. Three cortex specifics apply.
     ```bash
     PLAN=$(mktemp -t cortex-plan.XXXXXX.md)
     # write the plan markdown to "$PLAN" using the Plan Template below
-    cortex add "<title>" --lane "$LANE" --priority <n> --body-file "$PLAN"
+    cortex add "<title>" --lane "$LANE" --priority <n> --status draft --body-file "$PLAN"
     # stdout: [<id>] <title>
     ```
     ALWAYS use `--body-file`; NEVER inline `-b "..."` for KB-scale plans (shell escaping is a footgun).
@@ -51,8 +51,8 @@ Plans are stored in cortex — not as files. Three cortex specifics apply.
   ```bash
   STACK_SLUG=$(printf '%s' "<feature title>" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9_@-' | cut -c1-32)
   # fallback if STACK_SLUG is empty (all-punctuation title): STACK_SLUG="stack-$(openssl rand -hex 3)"
-  # single plan:  cortex add "<title>" --lane "$LANE" --priority 0 --body-file "$PLAN" -t plan
-  # plan stack:   cortex add "<title>" --lane "$LANE" --priority <n> --body-file "$PLAN" -t "plan,$STACK_SLUG"
+  # single plan:  cortex add "<title>" --lane "$LANE" --priority 0 --status draft --body-file "$PLAN" -t plan
+  # plan stack:   cortex add "<title>" --lane "$LANE" --priority <n> --status draft --body-file "$PLAN" -t "plan,$STACK_SLUG"
   ```
   The stack tag lets `cortex ls -t <stack-slug>` enumerate the whole stack across lanes. The `cut -c1-32` enforces the [a-z0-9_@-]{1,32} tag-name cap.
 
@@ -320,7 +320,7 @@ Before persisting the plan to cortex, scan every task block:
 
 ## Output Format
 
-- Persist the plan as the body of a cortex task using `cortex add "<title>" --lane "$LANE" --priority <n> --body-file <plan-tmpfile>` (see Cortex persistence above for the exact recipe)
+- Persist the plan as the body of a cortex task using `cortex add "<title>" --lane "$LANE" --priority <n> --status draft --body-file <plan-tmpfile>` (see Cortex persistence above for the exact recipe)
 - Immediately after creation, attribute with `cortex update <id> --as "$SESSION_ID" -m "plan written"`
 - Inform the user of the cortex task id and provide a brief summary; the plan body is viewable via `cortex show <id>`
 
@@ -345,6 +345,7 @@ Plans always produce working software. Research informs Implementation Notes; Lo
 - DO NOT generate any other documents like PR descriptions
 - NEVER create multiple plans for the same feature / task
 - NEVER edit a `review`-status cortex task without explicit user confirmation
+- Plans MUST be created with `--status draft`. The `draft` status means "plan written, not approved for execution." Only transition out of `draft` when the user explicitly requests implementation.
 - ALWAYS use a single plan as the source of truth
 - For plan revisions, choose between `cortex edit --body-search`/`--body-replace` (anchor-based, race-safe for surgical changes) and `--body-file` (full overwrite, for restructures) based on the scope of the change — see the `cortex` skill for tradeoffs
 - MAINTAINABILITY above all else

@@ -1,7 +1,7 @@
 import { defineCommand } from "citty";
 import { Store, validateTagName, type TaskStatus, type Task } from "../store.ts";
 
-const STATUSES: TaskStatus[] = ["open", "review", "blocked", "done"];
+const STATUSES: TaskStatus[] = ["draft", "open", "review", "blocked", "done"];
 
 // Max tags to print inline per task in the `cortex ls` text view. Beyond
 // this we render `+N` to keep rows scannable. Picked by visual budget: 3
@@ -26,6 +26,7 @@ const useColor = (): boolean => !process.env.NO_COLOR && process.stdout.isTTY;
 const c = (code: string, s: string) => (useColor() ? `\x1b[${code}m${s}\x1b[0m` : s);
 
 const STATUS_BADGE: Record<TaskStatus, string> = {
+  draft: "○",
   open: "○",
   review: "◐",
   blocked: "■",
@@ -33,6 +34,7 @@ const STATUS_BADGE: Record<TaskStatus, string> = {
 };
 
 const STATUS_COLOR: Record<TaskStatus, string> = {
+  draft: "36",
   open: "37",
   review: "33",
   blocked: "31",
@@ -51,7 +53,7 @@ export default defineCommand({
     status: {
       type: "string",
       alias: "s",
-      valueHint: "open|review|blocked|done",
+      valueHint: "draft|open|review|blocked|done",
       description: `only show tasks with this status (one of: ${STATUSES.join(", ")})`,
     },
     json: {

@@ -13,6 +13,7 @@
 import type { VNode } from "preact";
 
 import { tagColor, tagPillStyleFromHex } from "../../lib/color.ts";
+import { tip } from "../../state/tooltip.ts";
 
 export interface TagPillProps {
   name: string;
@@ -25,7 +26,7 @@ export function TagPill({ name, color, interactive = false }: TagPillProps): VNo
   const style = tagPillStyleFromHex(c);
   const cls = `tag-pill${c ? " tag-pill-colored" : ""}${interactive ? " tag-pill-interactive" : ""}`;
   return (
-    <span class={cls} style={style}>
+    <span class={cls} style={style} {...tip(name)}>
       {name}
     </span>
   );

@@ -1,7 +1,15 @@
 // SMOKE-ONLY: CodeMirror editor is too coupled to DOM measurement APIs to
 // test interaction in happy-dom; cardinal flow covers it via e2e.
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import { render } from "@testing-library/preact";
+
+// EditableTaskBody.test.tsx mocks MdEditor with a stub (process-global mock).
+// We restore it here so this file tests the real component's mount output.
+mock.module("../../../../src/ui/components/active/MdEditor.tsx", () => ({
+  MdEditor: ({ value, placeholder }: { value: string; placeholder?: string }) => (
+    <div class="md-editor" data-value={value} data-placeholder={placeholder} />
+  ),
+}));
 
 import { MdEditor } from "../../../../src/ui/components/active/MdEditor.tsx";
 

@@ -44,7 +44,7 @@ export default function (pi: ExtensionAPI): void {
       promptSnippet: "Post a cortex task update with attribution to your active pi session.",
       promptGuidelines: [
         "Use cortex_update for every cortex task update — it auto-attributes to your active pi session.",
-        "Pass task_id (positive integer), message (≤1024 chars, no newlines), and optionally status (open|review|blocked|done) and body (longer detail shown).",
+        "Pass task_id (positive integer), message (≤1024 chars, no newlines), and optionally status (draft|open|review|blocked|done) and body (longer detail shown).",
         "Prefer this tool over shelling `cortex update <id> --as ... -m ...` — manually-attributed updates are NOT resumable by the user.",
         "If status is set, both a message row AND a `status → <status>` audit-trail row are written, both attributed to your session.",
       ],
@@ -56,9 +56,18 @@ export default function (pi: ExtensionAPI): void {
           description: "Short summary, max 1024 chars; no newlines",
         }),
         status: Type.Optional(
-          Type.Union([Type.Literal("open"), Type.Literal("review"), Type.Literal("blocked"), Type.Literal("done")], {
-            description: "Optional status flip",
-          }),
+          Type.Union(
+            [
+              Type.Literal("draft"),
+              Type.Literal("open"),
+              Type.Literal("review"),
+              Type.Literal("blocked"),
+              Type.Literal("done"),
+            ],
+            {
+              description: "Optional status flip",
+            },
+          ),
         ),
         body: Type.Optional(
           Type.String({

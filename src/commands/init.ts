@@ -8,7 +8,13 @@ export default defineCommand({
   meta: { name: "init", description: "initialize the cortex database" },
   async run() {
     ensureConfigDir();
-    const s = Store.open();
+    const s = Store.open(dbPath(), { warnMigrations: false });
+    const applied = s.applyMigrations();
+    if (applied.length > 0) {
+      for (const name of applied) {
+        console.log(`✓ migration applied: ${name}`);
+      }
+    }
     s.close();
     // Self-install every shipped skill (cortex, cortex-planner,
     // cortex-implementer) so coding agents have authoritative recipes on

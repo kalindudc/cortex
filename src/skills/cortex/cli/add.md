@@ -16,6 +16,7 @@ cortex add "<title>" [-l <lane>] [-p <priority>] [-b <body>]
 | `--lane` | `-l` | `now` | Lane name. Auto-created if it doesn't exist. |
 | `--priority` | `-p` | `1` | Non-negative integer. **0 = highest**, larger numbers = lower priority. |
 | `--body` | `-b` | — | Longer description shown by `cortex show <id>`. |
+| `--status` | `-s` | no | One of `draft`, `open`, `review`, `blocked`, `done`. Set the initial status of the task. |
 
 ## Example
 

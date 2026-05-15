@@ -103,7 +103,7 @@ test("palette 'New lane…' command also opens NewLaneModal (consistent path)", 
   await page.goto(url);
   const mod = process.platform === "darwin" ? "Meta" : "Control";
   await page.keyboard.press(`${mod}+KeyP`);
-  await page.locator(".palette-input").fill("new lane");
+  await page.locator(".palette-input").type("new lane");
   await page.locator(".palette-row", { hasText: "New lane" }).first().click();
   await expect(page.locator(".modal h2")).toHaveText("New lane");
 });

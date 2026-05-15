@@ -71,7 +71,8 @@ function resolveAuthor(): string {
 }
 
 const VERSION = pkg.version;
-const isStatus = (v: string): v is TaskStatus => v === "open" || v === "review" || v === "blocked" || v === "done";
+const isStatus = (v: string): v is TaskStatus =>
+  v === "draft" || v === "open" || v === "review" || v === "blocked" || v === "done";
 
 export function buildApp(store: Store): Hono {
   const app = new Hono();
@@ -102,6 +103,9 @@ export function buildApp(store: Store): Hono {
 
   // UI bootstraps the default author for the post-update form from this.
   app.get("/api/me", c => c.json({ author: resolveAuthor() }));
+
+  // UI checks for pending migrations on boot so it can show a banner.
+  app.get("/api/migrations", c => c.json({ pending: store.pendingMigrations() }));
 
   // ---------- tasks ----------
   app.get("/api/tasks", c => {

@@ -21,7 +21,7 @@ import { render } from "preact";
 import "./dev-reload.ts";
 import App from "./components/App.tsx";
 import { refresh } from "./state/refresh.ts";
-import { meAuthor, paletteOpen, paletteQuery, modal } from "./state/signals.ts";
+import { meAuthor, paletteOpen, paletteQuery, modal, migrationsPending } from "./state/signals.ts";
 import { closeAllPopovers } from "./state/popovers.ts";
 
 // PostUpdateForm publishes its submit closure to window.__cortexPostUpdate
@@ -39,7 +39,7 @@ const mountPoint = document.querySelector("main#app");
 if (!mountPoint) throw new Error("#main#app not found in document — cannot mount cortex UI");
 render(<App />, mountPoint);
 
-// One-shot bootstrap of the default post-update author.
+// One-shot bootstrap of the default post-update author + migration status.
 fetch("/api/me")
   .then(r => r.json())
   .then(d => {
@@ -47,6 +47,14 @@ fetch("/api/me")
   })
   .catch(() => {
     /* fall back to "me" — non-fatal */
+  });
+fetch("/api/migrations")
+  .then(r => r.json())
+  .then(d => {
+    if (Array.isArray(d?.pending)) migrationsPending.value = d.pending;
+  })
+  .catch(() => {
+    /* non-fatal — banner simply won't show */
   });
 
 // Ask for browser-notification permission once on first load if the user

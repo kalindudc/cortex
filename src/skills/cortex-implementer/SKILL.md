@@ -76,6 +76,16 @@ A cortex task `<id>` MUST be explicitly provided by the user. Do NOT auto-discov
 7. Read all files in the "Beginning context" section (or infer from task descriptions).
 8. Use the plan as a guide, not a strict contract; deviations can be made to achieve the overall goal but must be documented and approved by the user.
 
+### Draft-status gate (MUST check before ANY work)
+
+Before reading a single task from the plan, check the task's status:
+1. Fetch the plan's status via `cortex show <id> --json | jq -r .task.status`.
+2. If the status is `draft` or `blocked`, STOP immediately. Do NOT read the plan body. Do NOT create branches. Do NOT write code.
+3. Ask the user: "This plan is in `draft` status. Do you want me to implement it?" Wait for explicit confirmation.
+4. Only proceed after the user confirms OR the status is no longer `draft`.
+
+This gate is load-bearing. A `draft` plan is a document, not a work order.
+
 ### Resuming Partially Completed Plans
 
 If any tasks are marked completed or in progress (per step 5 above), this is a resume:
@@ -225,6 +235,7 @@ cortex update <id> --as "$SESSION_ID" -s done -m "merged"
 - NEVER git stage or git commit, do not create any commits, the user owns the commit process
 - ALWAYS load the `cortex` skill first for CLI vocabulary and status semantics
 - ALWAYS track the core protocol with TODOs or Quests, if the tooling supports it
+- NEVER implement a task that has a `draft` or `blocked` status -- STOP and ask the user for confirmation before proceeding
 - ALWAYS post ONE `cortex update` per Low-Level Task with `--as "$SESSION_ID"`
 - NEVER mutate the cortex task body -- body changes are reserved for cortex-planner
 - NEVER skip a task -- execute them in strict order

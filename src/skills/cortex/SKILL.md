@@ -1,6 +1,6 @@
 ---
 name: cortex
-description: Personal task tracker for engineers supervising parallel AI coding agents. Use to add tasks, post updates with a required session-id author tag, change task status (open/review/blocked/done), or bootstrap (init) / tear down (reset) cortex on a fresh repo.
+description: Personal task tracker for engineers supervising parallel AI coding agents. Use to add tasks, post updates with a required session-id author tag, change task status (draft/open/review/blocked/done), or bootstrap (init) / tear down (reset) cortex on a fresh repo.
 ---
 
 # Cortex
@@ -11,7 +11,7 @@ Cortex is a single-binary, single-user task tracker designed for one human super
 
 - **Single-user, localhost-only, no auth.** The daemon binds to `127.0.0.1` only. Anyone with shell access on the machine has full CRUD. Do not expose the port. There are no bearer tokens.
 - **`cortex update` REQUIRES `--as <id>`.** Generate a session id ONCE at the start of an agent session via the [session-id recipe](recipes/session-id.md), hold it in working memory, and pass it on every update. The CLI rejects updates without it (exit 1).
-- **No severity flag. Message text describes urgency.** Write `-m "ready for review"` or `-m "blocked on missing API key"` in plain prose. Structured semantics belong in `--status` (`open`/`review`/`blocked`/`done`), not in a separate severity field.
+- **No severity flag. Message text describes urgency.** Write `-m "ready for review"` or `-m "blocked on missing API key"` in plain prose. Structured semantics belong in `--status` (`draft`/`open`/`review`/`blocked`/`done`), not in a separate severity field.
 - **Every status change is also an audit-trail row.** Setting `-s` writes both the message AND a `status → <new>` row in the updates table, both attributed to `--as`. Parallel-agent status oscillation (open→blocked→open→blocked) shows up in the inbox as history rather than silently overwriting.
 - **Browser notifications fire ONLY on transitions into `blocked`.** Routine updates, `done` flips, and review handoffs do NOT pop notifications. The dashboard treats `blocked` as the one signal worth interrupting the human for.
 - **Two body-edit modes — anchor-based and full overwrite.** `cortex edit <id> --body-search "<exact unique anchor>" --body-replace "<replacement>"` performs an in-place edit that fails 409 if the anchor is missing or matches multiple times — concurrent writes detect conflicts instead of silently overwriting each other. `cortex edit -b "<full body>"` (or `--body-file`) replaces the whole body in one shot. Choose based on the scope of the change you're making. `cortex update` is for status notes; the body is the task's description. See [cli/edit.md](cli/edit.md).

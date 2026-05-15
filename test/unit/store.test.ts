@@ -15,6 +15,14 @@ describe("Store: tasks", () => {
     s.close();
   });
 
+  test("addTask accepts explicit status including draft", () => {
+    const s = open();
+    const t = s.addTask({ title: "plan", status: "draft" });
+    expect(t.status).toBe("draft");
+    expect(s.listTasks({ status: "draft" }).length).toBe(1);
+    s.close();
+  });
+
   test("listTasks filters by lane and status", () => {
     const s = open();
     s.addLane({ name: "later" });

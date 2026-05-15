@@ -31,6 +31,7 @@ export interface ApiClient {
   tasks(): Promise<Task[]>;
   lanes(): Promise<Lane[]>;
   updates(id: number): Promise<Update[]>;
+  migrations(): Promise<{ pending: string[] }>;
   addTask(b: AddTaskBody): Promise<Task>;
   editTask(id: number, b: EditTaskBody): Promise<Task>;
   setStat(id: number, status: Task["status"]): Promise<Task>;
@@ -76,6 +77,7 @@ export const api: ApiClient = {
     j<Lane>(`/api/lanes/${encodeURIComponent(n)}`, { method: "PATCH", headers: JSON_HEAD, body: JSON.stringify(b) }),
   delLane: n => j<void>(`/api/lanes/${encodeURIComponent(n)}`, { method: "DELETE" }),
   // ---- tags ----
+  migrations: () => j<{ pending: string[] }>("/api/migrations"),
   tags: () => j<TagWithCount[]>("/api/tags"),
   setTags: (id, ns) =>
     j<Task>(`/api/tasks/${id}/tags`, { method: "PATCH", headers: JSON_HEAD, body: JSON.stringify({ set: ns }) }),

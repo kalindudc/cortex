@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import { defineCommand } from "citty";
-import { Store, validateTagName, type Task } from "../store.ts";
+import { Store, validateTagName, type Task, type TaskStatus } from "../store.ts";
 import { Client, daemonUrl } from "../client.ts";
 
 /** Parse a comma-separated tag list and validate each name. Empty/blank entries
@@ -55,6 +55,12 @@ export default defineCommand({
       valueHint: "path",
       description: "read body from file (mutually exclusive with -b)",
     },
+    status: {
+      type: "string",
+      alias: "s",
+      valueHint: "draft|open|review|blocked|done",
+      description: "initial status (default: open)",
+    },
     tags: {
       type: "string",
       alias: "t",
@@ -92,6 +98,7 @@ export default defineCommand({
       lane: args.lane,
       priority: parsePriority(args.priority),
       body,
+      ...(args.status ? { status: args.status as TaskStatus } : {}),
     };
     const url = daemonUrl();
     if (url) {

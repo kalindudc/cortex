@@ -4,7 +4,7 @@
 //   "main" — the primary work surface:
 //     .pane-system    (theme + manage-tags toggle + reset filters)
 //     .sidebar-body   (flex column)
-//       section-views   — 4 built-in smart views (sized to content)
+//       section-views   — 5 built-in smart views (sized to content)
 //       section-lanes   — lane rows; body scrolls; "+" opens NewLaneModal
 //       <FilterChips/>  — only renders when at least one filter slot is set
 //       section-tasks   — collapsible; "+" creates `untitled-<id>` and
@@ -70,6 +70,13 @@ const SMART_VIEWS: SmartView[] = [
     icon: "inbox",
     status: null,
     count: ts => ts.filter(t => t.status !== "done").length,
+  },
+  {
+    id: "draft",
+    label: "Draft",
+    icon: "fileText",
+    status: "draft",
+    count: ts => ts.filter(t => t.status === "draft").length,
   },
   {
     id: "review",

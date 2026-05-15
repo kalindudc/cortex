@@ -5,17 +5,18 @@
 
 import type { TaskStatus } from "../../store.ts";
 
-export const STATUS = ["open", "review", "blocked", "done"] as const satisfies readonly TaskStatus[];
+export const STATUS = ["draft", "open", "review", "blocked", "done"] as const satisfies readonly TaskStatus[];
 export const STATUS_LABEL: Record<TaskStatus, string> = {
+  draft: "Draft",
   open: "Open",
   review: "In review",
   blocked: "Blocked",
   done: "Done",
 };
 export const nextStatusFor = (s: TaskStatus): TaskStatus =>
-  (({ open: "review", review: "done", blocked: "open", done: "open" }) as const)[s];
+  (({ draft: "open", open: "review", review: "done", blocked: "open", done: "open" }) as const)[s];
 export const nextActionLabel = (s: TaskStatus): string =>
-  (({ open: "Move to review", review: "Mark done", blocked: "Unblock", done: "Reopen" }) as const)[s];
+  (({ draft: "Publish", open: "Move to review", review: "Mark done", blocked: "Unblock", done: "Reopen" }) as const)[s];
 
 // Priority: 0 = highest. Render as P0/P1/... with urgent/high/normal styling.
 export const priorityClass = (p: number): string => (p === 0 ? "urgent" : p === 1 ? "high" : "");

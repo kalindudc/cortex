@@ -143,6 +143,24 @@
   border-left-color: var(--accent);
   color: var(--text);
 }
+/* Truncate long tag names so the picker never exceeds its fixed 280px width.
+   The pill shrinks and shows ellipsis; the full name is revealed via tooltip
+   on hover. Matches the modal's .tag-filter-row .tag-pill pattern. */
+.tag-picker-row,
+.tag-picker-create-row {
+  min-width: 0;
+}
+.tag-picker-row .tag-pill,
+.tag-picker-create-row .tag-pill {
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-block;
+  line-height: 20px;
+}
 .tag-picker-check {
   width: 14px; height: 14px;
   display: inline-flex; align-items: center; justify-content: center;

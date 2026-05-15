@@ -49,6 +49,7 @@ describe("TopBar", () => {
       task({ id: 1, status: "blocked" }),
       task({ id: 2, status: "blocked" }),
       task({ id: 3, status: "open" }),
+      task({ id: 4, status: "draft" }),
     ];
     const { container } = render(<TopBar />);
     expect(container.querySelector(".topbar.blocked")?.textContent).toContain("2 tasks");

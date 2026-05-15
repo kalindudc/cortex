@@ -28,7 +28,7 @@ cortex update <id> -m "<message>" --as <session-id> [-s <status>] [-b <body>]
 | `<id>` | (positional) | yes | Task id from `cortex ls`. |
 | `--message` | `-m` | yes | Short summary, **max 1024 chars**. No newlines. |
 | `--as` | `--author` | **REQUIRED** | Session-id author tag. Format: `<role>-<8 hex>`, max 80 chars, no newlines. See [recipes/session-id.md](../recipes/session-id.md). |
-| `--status` | `-s` | no | One of `open`, `review`, `blocked`, `done`. Flips the task and writes an audit-trail row. |
+| `--status` | `-s` | no | One of `draft`, `open`, `review`, `blocked`, `done`. Flips the task and writes an audit-trail row. |
 | `--body` | `-b` | no | Longer detail shown by `cortex show <id>`. |
 
 ## Examples

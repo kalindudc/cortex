@@ -56,18 +56,18 @@ describe("StatusPopover", () => {
     expect(document.querySelector(".popover")).toBeNull();
   });
 
-  test("renders all four status rows when open", () => {
+  test("renders all five status rows when open", () => {
     statusPopover.value = true;
     render(<StatusPopover task={fx} />);
     const rows = document.querySelectorAll(".popover-row");
-    expect(rows.length).toBe(4);
+    expect(rows.length).toBe(5);
   });
 
   test("clicking a status row calls api.setStat and closes popover", async () => {
     statusPopover.value = true;
     render(<StatusPopover task={fx} />);
     const rows = document.querySelectorAll(".popover-row");
-    fireEvent.click(rows[1]); // "review"
+    fireEvent.click(rows[2]); // "review"
     await new Promise(r => setTimeout(r, 5));
     expect(setStatMock).toHaveBeenCalledTimes(1);
     expect(setStatMock).toHaveBeenCalledWith(7, "review");

@@ -32,7 +32,7 @@ async function seedTask(
   url: string,
   lane: string,
   title: string,
-  opts: { status?: "open" | "review" | "blocked" | "done"; tags?: string[] } = {},
+  opts: { status?: "draft" | "open" | "review" | "blocked" | "done"; tags?: string[] } = {},
 ): Promise<{ id: number }> {
   const r = await fetch(`${url}/api/tasks`, {
     method: "POST",
@@ -253,7 +253,7 @@ test("command palette uses fuzzy/word-split matching: 'filter tag' matches 'Filt
   // Type a query where strict substring match would FAIL ("filter tag" does
   // not appear contiguously in "Filter by tags…") but word-split match
   // succeeds (both tokens present).
-  await input.fill("filter tag");
+  await input.type("filter tag");
   await expect(page.locator(".palette-row", { hasText: "Filter by tags" })).toBeVisible();
 });
 
@@ -262,7 +262,7 @@ test("palette 'Filter by tags…' opens the modal", async ({ url, page }) => {
   await page.goto(url);
   const mod = process.platform === "darwin" ? "Meta" : "Control";
   await page.keyboard.press(`${mod}+KeyP`);
-  await page.locator(".palette-input").fill("filter tag");
+  await page.locator(".palette-input").type("filter tag");
   await page.locator(".palette-row", { hasText: "Filter by tags" }).click();
   await expect(page.locator(".tag-filter-modal")).toBeVisible();
 });

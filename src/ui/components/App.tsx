@@ -4,7 +4,7 @@
 
 import type { VNode } from "preact";
 
-import { paletteOpen, errorMsg } from "../state/signals.ts";
+import { paletteOpen, errorMsg, migrationsPending } from "../state/signals.ts";
 import { TopBar } from "./TopBar.tsx";
 import { SidebarPane } from "./sidebar/SidebarPane.tsx";
 import { ActiveTaskPane } from "./active/ActiveTaskPane.tsx";
@@ -22,6 +22,14 @@ export default function App(): VNode {
   // the comment above CommandPalette for the full failure mode.
   return (
     <div class="contents">
+      {migrationsPending.value.length > 0 ? (
+        <div class="migration-banner">
+          <span class="migration-banner-text">
+            Database migrations pending ({migrationsPending.value.join(", ")}) — run <code>cortex init</code> to apply
+            them safely.
+          </span>
+        </div>
+      ) : null}
       <TopBar />
       <SidebarPane />
       <ActiveTaskPane />

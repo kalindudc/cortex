@@ -107,3 +107,9 @@ export const meAuthor = signal<string>("me");
 // Inbox tab: "updates" (default, shows the active task's update thread) or
 // "authors" (shows recent author activity from /api/authors).
 export const tab = signal<"updates" | "authors">("updates");
+
+// ---------- migrations ----------
+// Populated on boot from GET /api/migrations. Non-empty means the DB has
+// pending schema migrations; the UI shows a banner directing the user to
+// run `cortex init`.
+export const migrationsPending = signal<string[]>([]);

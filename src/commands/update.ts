@@ -2,7 +2,7 @@ import { defineCommand } from "citty";
 import { Store, validateAuthorTag, type TaskStatus, type Update } from "../store.ts";
 import { Client, daemonUrl } from "../client.ts";
 
-const STATUSES: TaskStatus[] = ["open", "review", "blocked", "done"];
+const STATUSES: TaskStatus[] = ["draft", "open", "review", "blocked", "done"];
 
 export default defineCommand({
   meta: {
@@ -25,7 +25,7 @@ export default defineCommand({
     status: {
       type: "string",
       alias: "s",
-      valueHint: "open|review|blocked|done",
+      valueHint: "draft|open|review|blocked|done",
       description: `change task status to one of: ${STATUSES.join(", ")}`,
     },
     body: {
