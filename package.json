@@ -19,7 +19,9 @@
     "serve:dev": "bash scripts/dev.sh",
     "deploy": "pnpm run build && rm -rf ~/bin/cortex && cp bin/cortex ~/bin/",
     "style": "node node_modules/@biomejs/biome/bin/biome check --error-on-warnings --write . && pnpm exec tsc --noEmit",
-    "style:check": "node node_modules/@biomejs/biome/bin/biome check --error-on-warnings . && pnpm exec tsc --noEmit"
+    "style:check": "node node_modules/@biomejs/biome/bin/biome check --error-on-warnings . && pnpm exec tsc --noEmit",
+    "agents:check": "pnpm exec bun scripts/check-agents.ts",
+    "agents:map": "bash scripts/build-repo-map.sh"
   },
   "dependencies": {
     "@codemirror/commands": "^6.0.0",
@@ -42,6 +44,7 @@
     "@types/bun": "latest",
     "bun": "1.1.12",
     "happy-dom": "^17.0.0",
+    "repomix": "^1.14.0",
     "typescript": "^5.7.0"
   },
   "pnpm": {

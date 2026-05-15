@@ -9,6 +9,11 @@ bin/
 # transient body buffers used by edit/show flows
 .cortex-body-*.tmp
 
+.cortex/repo-map.md
+
+# repomix swap file written by `pnpm run agents:map`
+.cortex/repo-map.md.tmp
+
 # UI bundler output (produced by `pnpm run ui:build`)
 out/
 *.tsbuildinfo

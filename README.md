@@ -1,5 +1,7 @@
 # cortex
 
+> AI coding agents working on this repo: start with [AGENTS.md](./AGENTS.md). Run `pnpm run agents:check` before pushing.
+
 Personal task tracker for engineers supervising parallel AI coding agents.
 Single self-contained binary at `home/bin/cortex` with a complete CLI, REST + SSE
 API on `127.0.0.1`, and a SQLite WAL store at `~/.config/cortex/cortex.db`.
