@@ -49,6 +49,19 @@ export function ActiveTaskPane(): VNode {
         <PriorityChipButton task={at} />
         <TagsHeaderChip task={at} />
         <span class="grow"></span>
+        {/* Render-markdown button: opens a read-only modal that renders
+             the body as GFM markdown with mermaid diagrams. Read-only —
+             editing still happens in the always-on CodeMirror editor.
+             Sits in the header next to the status-change button so the
+             "view this task" affordance lives with the other task-level
+             chips, not with the destructive delete in active-foot. */}
+        <button
+          class="btn btn-icon"
+          title="Render markdown"
+          onClick={() => (modal.value = { kind: "render-markdown", taskId: at.id })}
+        >
+          <Icon name="book-open" />
+        </button>
         <div style="position:relative" data-pop>
           <button
             class="status-pill"

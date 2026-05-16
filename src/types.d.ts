@@ -27,3 +27,8 @@ declare module "*/out/bundle.css" {
   const path: string;
   export default path;
 }
+
+declare module "*/out/mermaid.js" {
+  const path: string;
+  export default path;
+}

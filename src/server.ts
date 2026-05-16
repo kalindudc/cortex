@@ -21,6 +21,7 @@ import pkg from "../package.json" with { type: "json" };
 import indexHtmlPath from "./ui/index.html" with { type: "file" };
 import bundleJsPath from "../out/bundle.js" with { type: "file" };
 import bundleCssPath from "../out/bundle.css" with { type: "file" };
+import mermaidJsPath from "../out/mermaid.js" with { type: "file" };
 
 // Map browser route -> embedded file path + content type. Each entry is
 // served with Cache-Control: no-store so dev edits never sit invisible behind
@@ -28,6 +29,7 @@ import bundleCssPath from "../out/bundle.css" with { type: "file" };
 const UI_ASSETS: Record<string, { path: string; type: string }> = {
   "/bundle.js": { path: bundleJsPath, type: "application/javascript; charset=utf-8" },
   "/bundle.css": { path: bundleCssPath, type: "text/css; charset=utf-8" },
+  "/mermaid.js": { path: mermaidJsPath, type: "application/javascript; charset=utf-8" },
 };
 
 /**
@@ -559,8 +561,10 @@ export function buildApp(store: Store): Hono {
     };
     const bundleJsAbs = path.resolve(import.meta.dir, "..", "out", "bundle.js");
     const bundleCssAbs = path.resolve(import.meta.dir, "..", "out", "bundle.css");
+    const mermaidJsAbs = path.resolve(import.meta.dir, "..", "out", "mermaid.js");
     watchOne(bundleJsAbs);
     watchOne(bundleCssAbs);
+    watchOne(mermaidJsAbs);
 
     app.get("/api/dev-reload", c =>
       streamSSE(c, async stream => {

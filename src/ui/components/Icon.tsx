@@ -43,6 +43,12 @@ const ICONS: Record<string, string> = {
   rotateCcw: '<polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>',
   // Lucide search — search-input ornament in TagFilterModal.
   search: '<circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
+  // Lucide book-open — trigger glyph for the RenderMarkdownModal button
+  // and its `view-markdown` palette command. Two-page open-book that reads
+  // as "view the rendered version of this body". Verbatim Lucide canonical
+  // (lucide-icons/lucide v0.x icons/book-open.svg).
+  "book-open":
+    '<path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/>',
   // Lucide bell — StatusBar notification drawer trigger.
   bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
 };

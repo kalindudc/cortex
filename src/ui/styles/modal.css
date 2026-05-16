@@ -59,6 +59,57 @@
 }
 .modal h2 { margin: 0; font-size: var(--fs-6); font-weight: 600; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+/* Wider variant for RenderMarkdownModal. Layered on top of .modal--wide
+   so the cascade chain is .modal (480) → .modal--wide (720) → .modal--
+   render-markdown (almost-full-viewport). The horizontal budget mirrors
+   the vertical one (max-height: calc(100vh - 64px)) for symmetry, and the
+   1400px cap stops the modal from going stupidly wide on 4K monitors
+   where readability would suffer. */
+.modal--render-markdown {
+  max-width: min(1400px, calc(100vw - 64px));
+}
+
+/* Rendered-markdown body in RenderMarkdownModal. Reuses .update-body's
+   scroll discipline (flex:1; min-height:0; overflow:auto) — see selector
+   above. This class only adds typography + spacing + mermaid SVG sizing. */
+.markdown-rendered {
+  font-size: var(--fs-3);
+  line-height: 1.55;
+  color: var(--text);
+}
+.markdown-rendered h1,
+.markdown-rendered h2,
+.markdown-rendered h3 { margin: 16px 0 8px; font-weight: 600; }
+.markdown-rendered h1 { font-size: var(--fs-6); }
+.markdown-rendered h2 { font-size: var(--fs-5); }
+.markdown-rendered h3 { font-size: var(--fs-4); }
+.markdown-rendered p,
+.markdown-rendered ul,
+.markdown-rendered ol,
+.markdown-rendered blockquote { margin: 8px 0; }
+.markdown-rendered code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  background: var(--bg-2);
+  padding: 0 4px;
+  border-radius: var(--r-1);
+}
+.markdown-rendered pre {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  padding: 10px 12px;
+  overflow: auto;
+}
+.markdown-rendered pre code { background: transparent; padding: 0; }
+.markdown-rendered pre.mermaid { background: transparent; border: 0; padding: 0; text-align: center; }
+.markdown-rendered pre.mermaid svg { max-width: 100%; height: auto; }
+.markdown-rendered a { color: var(--accent); }
+.markdown-rendered table { border-collapse: collapse; }
+.markdown-rendered th, .markdown-rendered td {
+  border: 1px solid var(--border); padding: 4px 8px;
+}
+
 @keyframes fade { from { opacity: 0 } to { opacity: 1 } }
 @keyframes pop  { from { opacity: 0; transform: translateY(-4px) } to { opacity: 1; transform: none } }
 

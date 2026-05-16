@@ -8,8 +8,8 @@
   },
   "scripts": {
     "up": "pnpm install",
-    "ui:build": "bash scripts/build-css.sh && pnpm exec bun build src/ui/index.tsx --target browser --outdir out --sourcemap=external --minify --entry-naming bundle.[ext] --asset-naming bundle.[ext]",
-    "ui:watch": "bash scripts/build-css.sh && pnpm exec bun build src/ui/index.tsx --target browser --outdir out --sourcemap=external --entry-naming bundle.[ext] --asset-naming bundle.[ext] --watch",
+    "ui:build": "bash scripts/build-css.sh && pnpm exec bun build src/ui/index.tsx --target browser --outdir out --sourcemap=external --minify --entry-naming bundle.[ext] --asset-naming bundle.[ext] && pnpm exec bun build src/ui/mermaid-entry.ts --target browser --outdir out --sourcemap=external --minify --entry-naming mermaid.[ext]",
+    "ui:watch": "bash scripts/build-css.sh && pnpm exec bun build src/ui/mermaid-entry.ts --target browser --outdir out --sourcemap=external --entry-naming mermaid.[ext] && pnpm exec bun build src/ui/index.tsx --target browser --outdir out --sourcemap=external --entry-naming bundle.[ext] --asset-naming bundle.[ext] --watch",
     "build": "bash scripts/build.sh",
     "test": "pnpm run build && pnpm exec bun test test/unit/ test/integration/ && pnpm exec playwright install chromium && pnpm exec playwright test",
     "test:unit": "pnpm exec bun test test/unit/",
@@ -33,6 +33,8 @@
     "@preact/signals": "^1.3.0",
     "citty": "^0.1.6",
     "hono": "^4.6.0",
+    "marked": "^15.0.0",
+    "mermaid": "^11.4.0",
     "preact": "^10.24.0"
   },
   "devDependencies": {

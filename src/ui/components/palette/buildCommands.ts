@@ -123,6 +123,13 @@ export function buildCommands(): Command[] {
       },
     });
     cmds.push({
+      id: "view-markdown",
+      label: "View task as markdown",
+      hint: `[${at.id}]`,
+      icon: "book-open",
+      action: () => (modal.value = { kind: "render-markdown", taskId: at.id }),
+    });
+    cmds.push({
       id: "delete-task",
       label: "Delete task\u2026",
       hint: `[${at.id}]`,

@@ -12,6 +12,7 @@ import { NewLaneModal } from "./NewLaneModal.tsx";
 import { NewTagModal } from "./NewTagModal.tsx";
 import { TagFilterModal } from "./TagFilterModal.tsx";
 import { UpdateDetailModal } from "./UpdateDetailModal.tsx";
+import { RenderMarkdownModal } from "./RenderMarkdownModal.tsx";
 import type { Update } from "../../api/types.ts";
 
 export function ModalRoot(): VNode | null {
@@ -65,6 +66,9 @@ export function ModalRoot(): VNode | null {
   }
   if (m.kind === "update-detail") {
     return <UpdateDetailModal update={m.update as Update} close={close} />;
+  }
+  if (m.kind === "render-markdown") {
+    return <RenderMarkdownModal taskId={m.taskId as number} close={close} />;
   }
   if (m.kind === "confirm-tag-delete") {
     const tagName = m.name as string;

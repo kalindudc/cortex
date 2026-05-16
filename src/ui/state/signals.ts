@@ -101,7 +101,9 @@ export const tagsPopover = signal<boolean>(false);
 export const lanePopover = signal<boolean>(false);
 export const paletteOpen = signal<boolean>(false);
 export const paletteQuery = signal<string>("");
-// modal kinds: 'confirm-delete' | 'lane-edit' | 'confirm-lane-delete'
+// modal kinds: 'confirm-delete' | 'lane-edit' | 'confirm-lane-delete' |
+// 'new-lane' | 'new-tag' | 'tag-edit' | 'confirm-tag-delete' |
+// 'filter-tags' | 'update-detail' | 'render-markdown'
 export const modal = signal<{ kind: string; [k: string]: unknown } | null>(null);
 
 // ---------- misc ----------
