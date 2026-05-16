@@ -12,7 +12,7 @@
 import { effect } from "@preact/signals";
 import { api } from "../api/client.ts";
 import { showError } from "../api/errors.ts";
-import { tasks, lanes, tags, updates, authors } from "./signals.ts";
+import { tasks, lanes, tags, updates, authors, relatedTasks } from "./signals.ts";
 import { notifications } from "./notifications.ts";
 import { activeTask } from "./computed.ts";
 
@@ -36,7 +36,18 @@ export async function refresh(): Promise<void> {
     tags.value = tg;
     notifications.value = nf;
     const at = activeTask.value;
-    if (at) updates.value = { ...updates.value, [at.id]: await api.updates(at.id) };
+    if (at) {
+      updates.value = { ...updates.value, [at.id]: await api.updates(at.id) };
+      // Related is non-critical — swallow per-request errors so a
+      // missing/slow endpoint never blocks the rest of the dashboard.
+      try {
+        relatedTasks.value = await api.related(at.id);
+      } catch {
+        /* swallow — Related view will keep showing prior data */
+      }
+    } else {
+      relatedTasks.value = null;
+    }
   } catch (err) {
     showError(err);
   }
@@ -56,6 +67,17 @@ effect(() => {
       })
       .catch(() => {
         /* swallow — listing is non-critical */
+      });
+    // Clear stale data so the Related tab shows a loading state instead
+    // of the previous task's buckets while the fetch is in flight.
+    relatedTasks.value = null;
+    api
+      .related(at.id)
+      .then(r => {
+        relatedTasks.value = r;
+      })
+      .catch(() => {
+        /* swallow — Related is non-critical */
       });
   }
 });

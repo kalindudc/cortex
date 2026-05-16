@@ -82,3 +82,35 @@
   font-family: var(--font-mono);
 }
 
+/* ---------- @[id] / #[tag] refs in plain-text bubbles ---------- */
+/* Rendered by src/ui/lib/RefText.tsx inside .inbox-row .summary. Mirrors
+   the lezer markdown link styling in MdEditor.tsx so editor and bubble
+   look identical. */
+.cortex-ref {
+  color: var(--info);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.cortex-ref:hover { color: var(--text); }
+
+/* ---------- related tab ----------
+   Sections rendered by InboxPane > RelatedView (Mentions / Mentioned /
+   Shared tags). Each row reuses .inbox-row so hover/focus/border match
+   the Updates list; .chip-id is a small mono badge for the leading [id]. */
+.related-section + .related-section { margin-top: var(--s-1); }
+.related-empty { padding: 8px 16px; }
+.inbox-row.related-row { padding: 8px 16px; }
+.related-title {
+  color: var(--text);
+  font: 400 var(--fs-3)/1.4 var(--font-sans);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chip-id {
+  color: var(--text-3);
+  font: 600 var(--fs-1)/1 var(--font-mono);
+  flex-shrink: 0;
+}
+

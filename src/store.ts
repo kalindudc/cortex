@@ -83,6 +83,32 @@ export type AddNotificationInput = {
 type NotificationRow = Omit<Notification, "read"> & { read: number };
 
 /**
+ * Response shape of `Store.relatedTasks(id)` and `GET /api/tasks/:id/related`.
+ * Three disjoint buckets — a task appears in at most one (priority order:
+ * referencedBy > references > shared). Each list is sorted by
+ * `priority ASC, id ASC` to match the default task-list ordering.
+ */
+export type RelatedTasks = {
+  /** Other tasks whose body or update summaries contain `@id`. */
+  referencedBy: Task[];
+  /** Tasks that the active task's body or update summaries reference via `@id`. */
+  references: Task[];
+  /** Tasks that share ≥1 NON-ORGANIZATIONAL tag with the active task
+   *  (organizational tags listed in SHARED_TAG_BLOCKLIST are ignored —
+   *  see the constant for the rationale). */
+  shared: Task[];
+};
+
+/**
+ * Tags excluded from the `shared` relatedness computation. These are
+ * organizational/type tags ("this is a plan", "this is a PR description")
+ * that mark category rather than topic; including them dilutes shared
+ * relatedness to uselessness on large databases. Curated manually until
+ * we add a richer tag-kind model.
+ */
+export const SHARED_TAG_BLOCKLIST: ReadonlySet<string> = new Set(["plan", "pr-desc", "research"]);
+
+/**
  * Tag-name regex: lowercase letters, digits, `_`, `@`, `-`, length 1-32.
  * The trailing `-` inside the character class is literal (no escape needed).
  * Single source of truth — exported so the CLI flag parsers and HTTP route
@@ -90,6 +116,23 @@ type NotificationRow = Omit<Notification, "read"> & { read: number };
  * regex.
  */
 export const TAG_NAME_RE = /^[a-z0-9_@-]{1,32}$/;
+
+/**
+ * Inline reference grammar: `@<digits>` for a task ref, `#<tag-name>` for
+ * a tag ref. Word-boundary lookbehind/lookahead keep us from matching
+ * inside identifiers (`path@123`, `user@1example`) or URLs (`@123abc`),
+ * and from matching markdown headings (`# Heading` — the space after `#`
+ * is not in the tag character class so length-1 match fails).
+ *
+ * Shared by the server's `Store.relatedTasks` scan and the UI parsers in
+ * `src/ui/lib/refs.ts` / `refsExtension.ts`. Each UI consumer holds its
+ * own `RegExp` instance because `MatchDecorator` mutates `lastIndex`;
+ * this server-side instance is standalone so the module has zero UI
+ * imports. The tag character class is intentionally identical to
+ * `TAG_NAME_RE`'s body so an in-text ref cannot validate but fail to
+ * match a real tag.
+ */
+export const REF_RE = /(?<![A-Za-z0-9_])@(\d+)(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])#([a-z0-9_@-]{1,32})(?![A-Za-z0-9_])/g;
 export function validateTagName(s: string): string {
   const v = s.trim();
   if (!TAG_NAME_RE.test(v)) {
@@ -681,6 +724,115 @@ export class Store {
       )
       .get(id);
     return row ? this.rowToTask(row) : null;
+  }
+
+  /**
+   * Compute the three Related buckets for `id`. Inbound references are
+   * resolved at the SQL boundary via a bracketed `LIKE` substring search
+   * (`'%@[<id>]%'`); bracket delimiters make the match unambiguous — id 1
+   * cannot match `@[12]` because `]` immediately follows the captured id.
+   * Outbound references re-use the same `REF_RE` grammar over the active
+   * task's body + update summaries so the UI and server see one ruleset.
+   *
+   * Buckets are pairwise-disjoint: `mentions` wins over `mentioned`, both
+   * win over `shared`. The active task itself is never returned. Each
+   * bucket is materialised through `getTask()` so callers see the
+   * standard `Task` shape with tags resolved.
+   */
+  relatedTasks(id: number): RelatedTasks {
+    // --- referencedBy: other tasks whose body OR any update summary mentions `@id`.
+    //
+    // SQLite LIKE has no regex/word-boundary support, so we use a cheap
+    // substring scan (`%@123%`) and then post-filter each candidate's
+    // corpus with the canonical REF_RE on the server side. The post-filter
+    // is necessary to reject false positives like `@1234` matching
+    // `%@123%`. The LIKE pass keeps us off a full table scan when many
+    // rows clearly don't reference us.
+    const likePat = `%@${id}%`;
+    const candidateRows = this.db
+      .query<{ id: number; body: string | null }, [number, string, string]>(
+        `SELECT DISTINCT t.id, t.body
+           FROM tasks t
+           LEFT JOIN updates u ON u.task_id = t.id
+          WHERE t.id != ?
+            AND (t.body LIKE ? OR u.summary LIKE ?);`,
+      )
+      .all(id, likePat, likePat);
+    const referencedByIds = new Set<number>();
+    // Resolve referencedBy with a strict regex pass over each candidate's
+    // body + update summaries. Distinct REF_RE instance per loop iteration
+    // (matchAll consumes lastIndex internally; recreating defensively).
+    for (const row of candidateRows) {
+      if (referencedByIds.has(row.id)) continue;
+      const corpus: string[] = [];
+      if (row.body) corpus.push(row.body);
+      for (const u of this.listUpdates(row.id)) corpus.push(u.summary);
+      const text = corpus.join("\n");
+      const scan = new RegExp(REF_RE.source, REF_RE.flags);
+      for (const m of text.matchAll(scan)) {
+        if (m[1] && Number(m[1]) === id) {
+          referencedByIds.add(row.id);
+          break;
+        }
+      }
+    }
+    const referencedBy = [...referencedByIds]
+      .map(rid => this.getTask(rid))
+      .filter((t): t is Task => t !== null)
+      .sort((a, b) => a.priority - b.priority || a.id - b.id);
+    const referencedByIdSet = new Set(referencedBy.map(t => t.id));
+
+    // --- references: this task's body + update summaries -> outbound @id
+    const me = this.getTask(id);
+    const corpus: string[] = [];
+    if (me?.body) corpus.push(me.body);
+    for (const u of this.listUpdates(id)) corpus.push(u.summary);
+    const joined = corpus.join("\n");
+    const outboundIds = new Set<number>();
+    const refScan = new RegExp(REF_RE.source, REF_RE.flags);
+    for (const m of joined.matchAll(refScan)) {
+      if (m[1]) {
+        const targetId = Number(m[1]);
+        if (Number.isFinite(targetId) && targetId !== id) outboundIds.add(targetId);
+      }
+    }
+    const references = [...outboundIds]
+      .map(tid => this.getTask(tid))
+      .filter((t): t is Task => t !== null && !referencedByIdSet.has(t.id))
+      .sort((a, b) => a.priority - b.priority || a.id - b.id);
+    const referencesIdSet = new Set(references.map(t => t.id));
+
+    // --- shared: tasks sharing ≥1 NON-blocklisted tag with the active task.
+    //
+    // Build the candidate tagset in JS (filtering blocklist) instead of
+    // embedding the blocklist in SQL — the set is short-lived, comes from
+    // the live constant, and avoids parameter-binding gymnastics with
+    // dynamic IN lists. Falls back to an empty result when every tag of
+    // the active task is blocklisted (e.g. a ["plan"]-only task).
+    const myTagsRow = me?.tags ?? [];
+    const myTopicalTags = myTagsRow.filter(t => !SHARED_TAG_BLOCKLIST.has(t));
+    let shared: Task[] = [];
+    if (myTopicalTags.length > 0) {
+      // Dynamic placeholder list; safe because tag names are validated at
+      // ingest (TAG_NAME_RE) and bound via params.
+      const placeholders = myTopicalTags.map(() => "?").join(", ");
+      const sharedRows = this.db
+        .query<{ id: number }, (string | number)[]>(
+          `SELECT DISTINCT t.id
+             FROM tasks t
+             JOIN task_tags tt ON tt.task_id = t.id
+            WHERE t.id != ?
+              AND tt.tag_name IN (${placeholders})
+            ORDER BY t.priority ASC, t.id ASC;`,
+        )
+        .all(id, ...myTopicalTags);
+      shared = sharedRows
+        .map(r => this.getTask(r.id))
+        .filter((t): t is Task => t !== null && !referencedByIdSet.has(t.id) && !referencesIdSet.has(t.id))
+        .sort((a, b) => a.priority - b.priority || a.id - b.id);
+    }
+
+    return { referencedBy, references, shared };
   }
 
   editTask(id: number, fields: EditTaskFields): Task {

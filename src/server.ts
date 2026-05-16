@@ -168,6 +168,16 @@ export function buildApp(store: Store): Hono {
     return c.json(task);
   });
 
+  // GET /api/tasks/:id/related — three buckets of tasks related to :id
+  // (other tasks mentioning :id, tasks :id mentions, tasks sharing tags).
+  // Returns 404 if :id itself doesn't exist; otherwise always 200 with
+  // possibly-empty arrays. See Store.relatedTasks for bucket semantics.
+  app.get("/api/tasks/:id/related", c => {
+    const id = Number(c.req.param("id"));
+    if (!store.getTask(id)) return c.json({ error: "not found" }, 404);
+    return c.json(store.relatedTasks(id));
+  });
+
   app.patch("/api/tasks/:id", async c => {
     const id = Number(c.req.param("id"));
     const fields = (await c.req.json().catch(() => ({}))) as {

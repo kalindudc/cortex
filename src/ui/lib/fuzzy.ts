@@ -1,7 +1,19 @@
 // fuzzy.ts — Lightweight client-side task fuzzy scorer.
 //
 // No external dependency. Token-split substring match with weighted scoring:
-// title > tags > body. @prefix forces title-only; #prefix forces tag-only.
+// title > tags > body. Three special prefixes layer ON TOP of the fuzzy
+// scorer:
+//   - `@<digits>`       — exact task-id lookup (single result or empty).
+//                         Bypasses fuzzy entirely; lets the user jump to a
+//                         known task by typing its id.
+//   - `@<non-digits>`   — title-only fuzzy search (existing behaviour).
+//   - `#<exact-tag>`    — when the input matches a real tag on at least one
+//                         task, returns ALL tasks carrying that exact tag
+//                         (sorted by priority asc, id asc). Falls through
+//                         to the existing tag-substring fuzzy when no exact
+//                         tag matches — so partial typing like `#fe` still
+//                         finds `feature`.
+//   - `#<substring>`    — tag-substring fuzzy search (existing fallback).
 
 import type { Task } from "../api/types.ts";
 
@@ -12,6 +24,36 @@ export interface TaskSearchResult {
 
 export function searchTasks(tasks: Task[], query: string): TaskSearchResult[] {
   const raw = query.trim();
+
+  // --- @<digits> shortcut: exact id lookup, bypass fuzzy entirely.
+  // Matches `@123` (any positive integer); a bare `@` or `@abc` falls
+  // through to the title-fuzzy path below.
+  const idMatch = raw.match(/^@(\d+)$/);
+  if (idMatch) {
+    const id = Number(idMatch[1]);
+    const hit = tasks.find(t => t.id === id);
+    // Infinity score keeps the row pinned to the top even if a parent
+    // caller merges results from multiple searches. Empty array (no hit)
+    // is the correct "task not found" UX — the palette already shows a
+    // "No matching tasks" empty state.
+    return hit ? [{ task: hit, score: Number.POSITIVE_INFINITY }] : [];
+  }
+
+  // --- #<exact-tag> shortcut: list every task carrying that exact tag.
+  // Validates the tag name against TAG_NAME_RE shape (same char class as
+  // the store) before scanning. If no task carries the exact tag we fall
+  // through to substring fuzzy so partial typing still works.
+  const tagMatch = raw.match(/^#([a-z0-9_@-]{1,32})$/);
+  if (tagMatch) {
+    const name = tagMatch[1];
+    const hits = tasks
+      .filter(t => t.tags.includes(name))
+      .map(task => ({ task, score: 1_000_000 }))
+      .sort((a, b) => a.task.priority - b.task.priority || a.task.id - b.task.id);
+    if (hits.length > 0) return hits;
+    // No exact tag matches — fall through to substring fuzzy below.
+  }
+
   const mode = raw.startsWith("@") ? "title" : raw.startsWith("#") ? "tag" : "all";
   const q = raw.replace(/^[@#]/, "").trim().toLowerCase();
   if (!q) return [];

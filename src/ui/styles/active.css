@@ -132,3 +132,16 @@ textarea.autosize {
   height: 100%;
   width: 100%;
 }
+
+/* ---------- @id / #tag refs inside the markdown editor ---------- */
+/* Decoration.mark spans applied by src/ui/components/active/refsExtension.ts.
+   Default cursor stays `text` so caret editing isn't disrupted; the
+   modTracker ViewPlugin adds `.cm-mod-down` to the EditorView root while
+   Meta/Ctrl is held, swapping to `pointer` for the duration so Mod+click
+   has a visible clickable-link affordance. */
+.md-editor .cm-cortex-ref {
+  color: var(--info);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.md-editor .cm-mod-down .cm-cortex-ref { cursor: pointer; }

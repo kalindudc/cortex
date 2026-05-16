@@ -4,7 +4,7 @@
 // browser DTOs in ./types.ts. The internal `j()` helper is file-local so
 // every method body collapses to a single fetch + JSON parse line.
 
-import type { Task, Lane, Tag, Update, Notification } from "./types.ts";
+import type { Task, Lane, Tag, Update, Notification, RelatedTasks } from "./types.ts";
 
 // Server response shape for GET /api/tags — the tag row plus the rollup
 // task_count column populated by Store.listTags(). Re-exported via
@@ -31,6 +31,8 @@ export interface ApiClient {
   tasks(): Promise<Task[]>;
   lanes(): Promise<Lane[]>;
   updates(id: number): Promise<Update[]>;
+  /** Three-bucket Related view for the active task (see RelatedTasks in store.ts). */
+  related(id: number): Promise<RelatedTasks>;
   migrations(): Promise<{ pending: string[] }>;
   addTask(b: AddTaskBody): Promise<Task>;
   editTask(id: number, b: EditTaskBody): Promise<Task>;
@@ -74,6 +76,7 @@ export const api: ApiClient = {
   tasks: () => j<Task[]>("/api/tasks"),
   lanes: () => j<Lane[]>("/api/lanes"),
   updates: id => j<Update[]>(`/api/tasks/${id}/updates`),
+  related: id => j<RelatedTasks>(`/api/tasks/${id}/related`),
   addTask: b => j<Task>("/api/tasks", { method: "POST", headers: JSON_HEAD, body: JSON.stringify(b) }),
   editTask: (id, b) => j<Task>(`/api/tasks/${id}`, { method: "PATCH", headers: JSON_HEAD, body: JSON.stringify(b) }),
   setStat: (id, status) =>

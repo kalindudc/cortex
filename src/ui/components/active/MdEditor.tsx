@@ -35,6 +35,7 @@ import {
 } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
+import { cortexRefs } from "./refsExtension.ts";
 import { syntaxHighlighting, HighlightStyle } from "@codemirror/language";
 import { tags as t } from "@lezer/highlight";
 
@@ -227,6 +228,7 @@ export function MdEditor({ value, onChange, onSubmit, placeholder: phText, readO
       EditorView.updateListener.of(u => {
         if (u.docChanged) onChangeRef.current?.(u.state.doc.toString());
       }),
+      ...cortexRefs(),
     ];
     if (readOnly) {
       // Both flags are required to make the editor truly read-only:

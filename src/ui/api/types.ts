@@ -9,7 +9,7 @@
 // shape of GET /api/authors, which delegates to `Store.listAuthorsLast24h`
 // (returns `AuthorRow` from store.ts).
 
-export type { Task, Lane, Tag, Update, TaskStatus, Notification } from "../../store.ts";
+export type { Task, Lane, Tag, Update, TaskStatus, Notification, RelatedTasks } from "../../store.ts";
 
 // Response shape of GET /api/authors. Mirrors `AuthorRow` from store.ts but
 // re-declared here so this module remains the single source of truth for

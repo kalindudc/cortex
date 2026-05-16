@@ -6,7 +6,7 @@
 // this file imports nothing from the state/ directory (acyclic).
 
 import { signal } from "@preact/signals";
-import type { Task, Lane, Update, Author, TaskStatus } from "../api/types.ts";
+import type { Task, Lane, Update, Author, TaskStatus, RelatedTasks } from "../api/types.ts";
 
 // ---------- task data ----------
 export const tasks = signal<Task[]>([]);
@@ -109,9 +109,17 @@ export const modal = signal<{ kind: string; [k: string]: unknown } | null>(null)
 // ---------- misc ----------
 // Resolved on boot from /api/me (gh hosts.yml -> git user.name -> hostname -> "me").
 export const meAuthor = signal<string>("me");
-// Inbox tab: "updates" (default, shows the active task's update thread) or
-// "authors" (shows recent author activity from /api/authors).
-export const tab = signal<"updates" | "authors">("updates");
+// Inbox tab: "updates" (default, shows the active task's update thread),
+// "authors" (recent author activity from /api/authors), or "related"
+// (three buckets of related tasks from /api/tasks/:id/related, fetched
+// into `relatedTasks` below).
+export const tab = signal<"updates" | "authors" | "related">("updates");
+
+// Fetched RelatedTasks for the active task. null means "not yet fetched"
+// (loading) — distinct from `{mentions:[],mentioned:[],shared:[]}` which
+// means "fetched and empty". Populated by refresh.ts on every refresh AND
+// when the active task changes; consumed by InboxPane's Related tab.
+export const relatedTasks = signal<RelatedTasks | null>(null);
 
 // ---------- migrations ----------
 // Populated on boot from GET /api/migrations. Non-empty means the DB has
