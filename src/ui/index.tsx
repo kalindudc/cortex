@@ -23,6 +23,12 @@ import "./dev-reload.ts";
 // effect that persists activeTask.id back. Must come before refresh() below
 // so the seed beats the first task fetch.
 import "./state/lastTask.ts";
+// Side-effect import: seeds selectedId from /task/:id in the URL and
+// drives window.history (pushState/replaceState + popstate) off selectedId.
+// MUST come AFTER lastTask.ts so a URL seed wins over the localStorage seed
+// (URL > localStorage > priority fallback), and BEFORE refresh() so the
+// seed beats the first task fetch.
+import "./state/url.ts";
 // Side-effect import: seeds the showAllTasks toggle from localStorage and
 // registers an effect that persists subsequent toggles. Must come before
 // refresh() so the seed beats the first paint of the sidebar.

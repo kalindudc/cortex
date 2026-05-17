@@ -35,6 +35,16 @@ describe("UI: served assets (bundled)", () => {
     expect(t).toContain('type="module"');
   });
 
+  test("GET /task/:id returns the same shell + headers as / (deep-link refresh)", async () => {
+    const shell = await fetch(`${h.url}/`).then(r => r.text());
+    const r = await fetch(`${h.url}/task/123`);
+    const t = await r.text();
+    expect(r.status).toBe(200);
+    expect(r.headers.get("content-type") ?? "").toMatch(/text\/html/);
+    expect(r.headers.get("cache-control") ?? "").toMatch(/no-store/);
+    expect(t).toBe(shell);
+  });
+
   test("GET /bundle.css serves the bundled CSS with stable selectors", async () => {
     const r = await fetch(`${h.url}/bundle.css`);
     const t = await r.text();

@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import fs from "node:fs";
 import os from "node:os";
@@ -79,7 +79,12 @@ const isStatus = (v: string): v is TaskStatus =>
 export function buildApp(store: Store): Hono {
   const app = new Hono();
 
-  app.get("/", async c => {
+  // Shared by GET / and GET /task/:id — the SPA owns its own routing in the
+  // browser, but the server must return the same shell for any URL the user
+  // might land on directly (refresh, bookmark, copy-link). Headers identical
+  // to the original handler; test/integration/ui-bundle.test.ts asserts
+  // no-store survives on every shell route.
+  const serveShell = async (c: Context) => {
     // Local single-user app served from a Bun.embed bundle. We never want the
     // browser to cache the HTML; otherwise dev edits (and shipped fixes) sit
     // invisible behind a stale page until the user discovers Cmd-Shift-R.
@@ -88,7 +93,9 @@ export function buildApp(store: Store): Hono {
     // attribute we use makes Bun resolve this to a string path at runtime. Cast at
     // the boundary rather than augmenting bun-types.
     return c.html(await Bun.file(indexHtmlPath as unknown as string).text());
-  });
+  };
+  app.get("/", serveShell);
+  app.get("/task/:id", serveShell);
 
   // Static UI modules — CSS + ESM JS modules. Same no-store policy so the
   // browser always picks up the latest module graph after a reload. We use
