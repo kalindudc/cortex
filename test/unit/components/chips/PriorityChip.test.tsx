@@ -24,4 +24,13 @@ describe("PriorityChip (static)", () => {
     const el = document.querySelector(".priority-chip") as HTMLElement;
     expect(el.classList.contains("high")).toBe(true);
   });
+
+  test("renders nothing when priority is null (no DOM)", () => {
+    const { container } = render(<PriorityChip priority={null} />);
+    // The component's own container must be empty — we scope to it instead
+    // of document.querySelector because earlier tests in this file leave
+    // their chips mounted on document.body.
+    expect(container.querySelector(".priority-chip")).toBeNull();
+    expect(container.firstChild).toBeNull();
+  });
 });

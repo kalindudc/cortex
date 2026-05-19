@@ -38,12 +38,14 @@ The analysis lives as the BODY of a cortex task. Three cortex specifics apply.
     ```bash
     ANALYSIS=$(mktemp -t cortex-research.XXXXXX.md)
     # write the analysis markdown to "$ANALYSIS" using the Analysis Template below
-    cortex add "<title>" --lane "$LANE" --priority <n> \
+    cortex add "<title>" --lane "$LANE" \
       --body-file "$ANALYSIS" \
       -t "research,$TOPIC_SLUG"
     # stdout: [<id>] <title>
     ```
     ALWAYS use `--body-file`; NEVER inline `-b "..."` for KB-scale analyses (shell escaping is a footgun).
+
+    DO NOT pass `--priority` unless the user explicitly asked for one. Research notes are documents organised by the `research` + `<topic-slug>` tags, not items in a priority queue.
 
 3. DEFAULT LANE = current repository directory name:
     ```bash
@@ -55,7 +57,7 @@ The analysis lives as the BODY of a cortex task. Three cortex specifics apply.
     ```bash
     TOPIC_SLUG=$(printf '%s' "<analysis title>" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9_@-' | cut -c1-32)
     # fallback if TOPIC_SLUG is empty (all-punctuation title): TOPIC_SLUG="topic-$(openssl rand -hex 3)"
-    # cortex add "<title>" --lane "$LANE" --priority <n> --body-file "$ANALYSIS" -t "research,$TOPIC_SLUG"
+    # cortex add "<title>" --lane "$LANE" --body-file "$ANALYSIS" -t "research,$TOPIC_SLUG"
     ```
     The topic tag lets `cortex ls -t <topic-slug>` enumerate every analysis on the same subject across lanes. The `cut -c1-32` enforces the [a-z0-9_@-]{1,32} tag-name cap.
 
@@ -94,7 +96,7 @@ NEVER edit a task whose status is `review` or `done` without explicit user confi
 
 RESEARCH PHASE — small, cheap loops:
 
-For each open sub-question, in priority order:
+For each open sub-question, in the order you choose (research sub-questions don't carry a cortex priority — sequence them by dependency / cost / expected information gain):
 
 1. State the sub-question in ONE falsifiable sentence (not "look into X" — "does X support Y under condition Z?").
 2. Pick the source that can answer it: a file read beats a web search; a web search beats a multi-hour data query.

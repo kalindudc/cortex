@@ -49,7 +49,12 @@ export function searchTasks(tasks: Task[], query: string): TaskSearchResult[] {
     const hits = tasks
       .filter(t => t.tags.includes(name))
       .map(task => ({ task, score: 1_000_000 }))
-      .sort((a, b) => a.task.priority - b.task.priority || a.task.id - b.task.id);
+      // null priority sorts last — matches `(priority IS NULL)` in Store.listTasks.
+      .sort(
+        (a, b) =>
+          (a.task.priority ?? Number.POSITIVE_INFINITY) - (b.task.priority ?? Number.POSITIVE_INFINITY) ||
+          a.task.id - b.task.id,
+      );
     if (hits.length > 0) return hits;
     // No exact tag matches — fall through to substring fuzzy below.
   }

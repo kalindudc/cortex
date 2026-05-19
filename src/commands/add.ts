@@ -40,9 +40,9 @@ export default defineCommand({
     priority: {
       type: "string",
       alias: "p",
-      default: "1",
       valueHint: "int",
-      description: "priority as a non-negative integer; 0 = highest",
+      description:
+        "priority as a non-negative integer; 0 = highest. Optional — leave unset for archive/research/document tasks.",
     },
     body: {
       type: "string",
@@ -96,8 +96,8 @@ export default defineCommand({
     const payload = {
       title: args.title,
       lane: args.lane,
-      priority: parsePriority(args.priority),
       body,
+      ...(args.priority !== undefined ? { priority: parsePriority(args.priority) } : {}),
       ...(args.status ? { status: args.status as TaskStatus } : {}),
     };
     const url = daemonUrl();

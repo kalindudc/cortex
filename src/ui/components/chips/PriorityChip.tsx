@@ -21,7 +21,10 @@ import { priorityClass } from "../../lib/constants.ts";
 // nested <button> would be invalid HTML and would steal the row's click.
 // The active-task header instead uses PriorityChipButton (below), which
 // morphs into an inline <input> on click.
-export function PriorityChip({ priority }: { priority: number }): VNode {
+export function PriorityChip({ priority }: { priority: number | null }): VNode | null {
+  // Unset priority renders nothing on list-row surfaces — the chip is
+  // opt-in metadata, and visual emptiness is the correct signal.
+  if (priority === null) return null;
   return (
     <span class={`priority-chip ${priorityClass(priority)}`} title={`Priority ${priority} (0 = highest)`}>
       P{priority}
@@ -42,14 +45,14 @@ export function PriorityChip({ priority }: { priority: number }): VNode {
 // outside-click cascade re-opening logic that the old popover needed.
 export function PriorityChipButton({ task }: { task: Task }): VNode {
   const editing = useSignal(false);
-  const val = useSignal(String(task.priority));
+  const val = useSignal(String(task.priority ?? ""));
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Re-sync from prop when the task's priority changes externally (SSE
   // echo, palette quick-action). Skip while editing so we don't stomp
-  // mid-typing.
+  // mid-typing. Null → empty string so the input starts blank when unset.
   useEffect(() => {
-    if (!editing.value) val.value = String(task.priority);
+    if (!editing.value) val.value = String(task.priority ?? "");
   }, [task.priority]);
 
   // Focus + select on entering edit mode so a single keystroke replaces
@@ -64,14 +67,23 @@ export function PriorityChipButton({ task }: { task: Task }): VNode {
   }, [editing.value]);
 
   const cancel = () => {
-    val.value = String(task.priority);
+    val.value = String(task.priority ?? "");
     editing.value = false;
   };
   const commit = async () => {
-    const n = parseInt(val.value, 10);
+    const trimmed = val.value.trim();
     editing.value = false;
+    // Empty input → clear to null. No-op when already null so the user
+    // doesn't fire a redundant PATCH by clicking the unset affordance and
+    // hitting Enter.
+    if (trimmed === "") {
+      if (task.priority === null) return;
+      await tryApi(() => api.editTask(task.id, { priority: null }));
+      return;
+    }
+    const n = parseInt(trimmed, 10);
     if (Number.isNaN(n) || n < 0 || n === task.priority) {
-      val.value = String(task.priority);
+      val.value = String(task.priority ?? "");
       return;
     }
     await tryApi(() => api.editTask(task.id, { priority: n }));
@@ -96,8 +108,26 @@ export function PriorityChipButton({ task }: { task: Task }): VNode {
           }
         }}
         onBlur={cancel}
-        title="Enter commits, Esc or click-out cancels"
+        title="Enter commits, Esc or click-out cancels; empty + Enter clears"
       />
+    );
+  }
+  // Unset affordance: faint pill labelled `+ P?`. Same click → editing
+  // morph; the input starts empty (see val initialiser) so a single
+  // keystroke enters the new value.
+  if (task.priority === null) {
+    return (
+      <button
+        class="priority-chip priority-chip-unset"
+        title="Set priority"
+        onClick={(e: MouseEvent) => {
+          e.stopPropagation();
+          closeAllPopovers();
+          editing.value = true;
+        }}
+      >
+        + P?
+      </button>
     );
   }
   return (

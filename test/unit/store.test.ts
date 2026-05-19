@@ -37,13 +37,35 @@ describe("Store: tasks", () => {
     s.close();
   });
 
-  test("listTasks orders by priority ASC (0 = highest, sorts first)", () => {
+  test("listTasks orders by priority ASC (0 = highest, sorts first); null-priority falls to the end", () => {
     const s = open();
     s.addTask({ title: "normal", priority: 1 });
     s.addTask({ title: "top", priority: 0 });
     s.addTask({ title: "low", priority: 5 });
+    // No --priority flag: priority is null and the row must sort AFTER
+    // every prioritized row regardless of created-time tie-break.
+    s.addTask({ title: "unranked" });
     const order = s.listTasks().map(t => t.title);
-    expect(order).toEqual(["top", "normal", "low"]);
+    expect(order).toEqual(["top", "normal", "low", "unranked"]);
+    s.close();
+  });
+
+  test("addTask without --priority stores priority=null", () => {
+    const s = open();
+    const t = s.addTask({ title: "unranked" });
+    expect(t.priority).toBeNull();
+    expect(s.getTask(t.id)?.priority).toBeNull();
+    s.close();
+  });
+
+  test("editTask({ priority: null }) clears an existing priority back to null and persists", () => {
+    const s = open();
+    const t = s.addTask({ title: "ranked", priority: 2 });
+    expect(t.priority).toBe(2);
+    const cleared = s.editTask(t.id, { priority: null });
+    expect(cleared.priority).toBeNull();
+    // Round-trip via getTask so we exercise the read path too.
+    expect(s.getTask(t.id)?.priority).toBeNull();
     s.close();
   });
 

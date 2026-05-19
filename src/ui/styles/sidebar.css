@@ -99,6 +99,17 @@
 .priority-chip:hover { background: var(--tint-strong, var(--accent-tint)); color: var(--text); }
 .priority-chip.urgent { color: var(--accent-on); background: var(--accent); }
 .priority-chip.high   { color: var(--err);       background: transparent; border: 1px solid var(--err); }
+/* Unset (null) priority on the active-task header: a faint dashed pill
+   that reads as a call-to-action without competing with set chips. Used
+   by PriorityChipButton when task.priority === null. List-row PriorityChip
+   simply renders nothing in this case, so this rule only fires in the
+   header. */
+.priority-chip.priority-chip-unset {
+  color: var(--meta);
+  background: transparent;
+  border: 1px dashed var(--border);
+  opacity: 0.7;
+}
 
 /* Inline edit state of .priority-chip in the active-task header. The pill
    morphs into a number <input> that keeps the SAME shape + size (border-

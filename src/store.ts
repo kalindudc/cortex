@@ -10,7 +10,7 @@ export type Task = {
   title: string;
   body: string | null;
   status: TaskStatus;
-  priority: number;
+  priority: number | null;
   created: number;
   updated: number;
   tags: string[];
@@ -145,7 +145,7 @@ export type AddTaskInput = {
   title: string;
   lane?: string;
   body?: string | null;
-  priority?: number;
+  priority?: number | null;
   status?: TaskStatus;
 };
 
@@ -159,7 +159,7 @@ export type EditTaskFields = {
    *  for `bodyReplace` is allowed (deletion). */
   bodySearch?: string;
   bodyReplace?: string;
-  priority?: number;
+  priority?: number | null;
 };
 
 /** Thrown when a bodySearch/bodyReplace operation cannot apply because
@@ -294,7 +294,7 @@ export class Store {
           body     TEXT,
           status   TEXT    NOT NULL DEFAULT 'open'
                    CHECK(status IN ('draft','open','review','blocked','done')),
-          priority INTEGER NOT NULL DEFAULT 1,
+          priority INTEGER,
           created  INTEGER NOT NULL,
           updated  INTEGER NOT NULL,
           FOREIGN KEY(lane) REFERENCES lanes(name) ON UPDATE CASCADE
@@ -382,6 +382,16 @@ export class Store {
     if (!tasksDdl?.sql?.includes("CHECK(status IN ('open','review','blocked','done'))")) {
       this.db.run(`INSERT OR IGNORE INTO _migrations (name, applied_at) VALUES (?, ?);`, ["tasks-status-draft", now()]);
     }
+    // tasks-priority-nullable: seed when the live `tasks` DDL already
+    // shows `priority INTEGER` without NOT NULL / DEFAULT 1, i.e. a fresh
+    // DB created after this migration landed. Detected by absence of the
+    // pre-migration string.
+    if (tasksDdl?.sql && !tasksDdl.sql.includes("priority INTEGER NOT NULL DEFAULT 1")) {
+      this.db.run(`INSERT OR IGNORE INTO _migrations (name, applied_at) VALUES (?, ?);`, [
+        "tasks-priority-nullable",
+        now(),
+      ]);
+    }
     const updatesDdl = this.db
       .query<{ sql: string | null }, []>("SELECT sql FROM sqlite_master WHERE name='updates';")
       .get();
@@ -411,6 +421,15 @@ export class Store {
         .get();
       if (tasksDdl?.sql?.includes("CHECK(status IN ('open','review','blocked','done'))")) {
         pending.push("tasks-status-draft");
+      }
+    }
+
+    if (!applied.has("tasks-priority-nullable")) {
+      const tasksDdl = this.db
+        .query<{ sql: string | null }, []>("SELECT sql FROM sqlite_master WHERE name='tasks';")
+        .get();
+      if (tasksDdl?.sql?.includes("priority INTEGER NOT NULL DEFAULT 1")) {
+        pending.push("tasks-priority-nullable");
       }
     }
 
@@ -496,7 +515,7 @@ export class Store {
   /** Capture row counts for the tables affected by a given migration. */
   private _captureRowCounts(name: string): { tasks?: number; updates?: number } {
     const counts: { tasks?: number; updates?: number } = {};
-    if (name === "tasks-status-draft") {
+    if (name === "tasks-status-draft" || name === "tasks-priority-nullable") {
       counts.tasks = this.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM tasks;").get()?.n ?? 0;
     } else if (name === "updates-summary-1024") {
       counts.updates = this.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM updates;").get()?.n ?? 0;
@@ -519,6 +538,34 @@ export class Store {
             status   TEXT    NOT NULL DEFAULT 'open'
                      CHECK(status IN ('draft','open','review','blocked','done')),
             priority INTEGER NOT NULL DEFAULT 1,
+            created  INTEGER NOT NULL,
+            updated  INTEGER NOT NULL,
+            FOREIGN KEY(lane) REFERENCES lanes(name) ON UPDATE CASCADE
+          );
+        `);
+        this.db.run(`INSERT INTO tasks_new SELECT * FROM tasks;`);
+        this.db.run(`DROP TABLE tasks;`);
+        this.db.run(`ALTER TABLE tasks_new RENAME TO tasks;`);
+        this.db.run(
+          `INSERT OR REPLACE INTO sqlite_sequence (name, seq) VALUES ('tasks', (SELECT MAX(id) FROM tasks));`,
+        );
+        return "tasks_new";
+      }
+
+      if (name === "tasks-priority-nullable") {
+        // Schema-only: widen `priority` from `INTEGER NOT NULL DEFAULT 1`
+        // to nullable `INTEGER`. Existing rows are copied untouched
+        // (priority=1 stays priority=1). The user owns any data cleanup
+        // separately.
+        this.db.run(`
+          CREATE TABLE tasks_new (
+            id       INTEGER PRIMARY KEY AUTOINCREMENT,
+            lane     TEXT    NOT NULL DEFAULT 'now',
+            title    TEXT    NOT NULL,
+            body     TEXT,
+            status   TEXT    NOT NULL DEFAULT 'open'
+                     CHECK(status IN ('draft','open','review','blocked','done')),
+            priority INTEGER,
             created  INTEGER NOT NULL,
             updated  INTEGER NOT NULL,
             FOREIGN KEY(lane) REFERENCES lanes(name) ON UPDATE CASCADE
@@ -577,7 +624,7 @@ export class Store {
     oldCounts: { tasks?: number; updates?: number },
   ): { ok: boolean; error?: string } {
     // Row count
-    if (name === "tasks-status-draft") {
+    if (name === "tasks-status-draft" || name === "tasks-priority-nullable") {
       const newCount = this.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM tasks;").get()?.n ?? 0;
       if (newCount !== oldCounts.tasks) {
         return { ok: false, error: `tasks row count mismatch (expected ${oldCounts.tasks}, got ${newCount})` };
@@ -638,12 +685,12 @@ export class Store {
     const ts = now();
     const lane = input.lane ?? "now";
     const status: TaskStatus = input.status ?? "open";
-    const priority = input.priority ?? 1;
+    const priority = input.priority ?? null;
     const body = input.body ?? null;
     return this.db.transaction(() => {
       this.ensureLane(lane);
       const row = this.db
-        .query<{ id: number }, [string, string, string | null, TaskStatus, number, number, number]>(
+        .query<{ id: number }, [string, string, string | null, TaskStatus, number | null, number, number]>(
           `INSERT INTO tasks (lane, title, body, status, priority, created, updated)
            VALUES (?, ?, ?, ?, ?, ?, ?)
            RETURNING id;`,
@@ -696,9 +743,12 @@ export class Store {
     }
     const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
     // priority ASC so 0 (highest) sorts first; tie-break by oldest-created.
-    // GROUP_CONCAT(... ORDER BY tag_name) gives deterministic alphabetical
-    // output. COALESCE turns the empty join (no tags) into '' so the TS split
-    // produces [] uniformly.
+    // `(t.priority IS NULL)` is a 0/1 expression — sorting it ASC pushes
+    // null-priority rows AFTER all prioritized rows while preserving the
+    // created-time tie-break inside each group. GROUP_CONCAT(... ORDER BY
+    // tag_name) gives deterministic alphabetical output. COALESCE turns
+    // the empty join (no tags) into '' so the TS split produces []
+    // uniformly.
     const sql = `
       SELECT t.*,
              COALESCE(GROUP_CONCAT(tt.tag_name, ',' ORDER BY tt.tag_name), '') AS tag_csv
@@ -706,7 +756,7 @@ export class Store {
         LEFT JOIN task_tags tt ON tt.task_id = t.id
         ${where}
        GROUP BY t.id
-       ORDER BY t.priority ASC, t.created ASC;
+       ORDER BY (t.priority IS NULL), t.priority ASC, t.created ASC;
     `;
     const rows = this.db.query<TaskRow, (string | number)[]>(sql).all(...params);
     return rows.map(r => this.rowToTask(r));
@@ -779,7 +829,11 @@ export class Store {
     const referencedBy = [...referencedByIds]
       .map(rid => this.getTask(rid))
       .filter((t): t is Task => t !== null)
-      .sort((a, b) => a.priority - b.priority || a.id - b.id);
+      // null priority sorts last — mirrors the `(priority IS NULL)`
+      // ORDER BY in listTasks() so Related output matches list output.
+      .sort(
+        (a, b) => (a.priority ?? Number.POSITIVE_INFINITY) - (b.priority ?? Number.POSITIVE_INFINITY) || a.id - b.id,
+      );
     const referencedByIdSet = new Set(referencedBy.map(t => t.id));
 
     // --- references: this task's body + update summaries -> outbound @id
@@ -799,7 +853,9 @@ export class Store {
     const references = [...outboundIds]
       .map(tid => this.getTask(tid))
       .filter((t): t is Task => t !== null && !referencedByIdSet.has(t.id))
-      .sort((a, b) => a.priority - b.priority || a.id - b.id);
+      .sort(
+        (a, b) => (a.priority ?? Number.POSITIVE_INFINITY) - (b.priority ?? Number.POSITIVE_INFINITY) || a.id - b.id,
+      );
     const referencesIdSet = new Set(references.map(t => t.id));
 
     // --- shared: tasks sharing ≥1 NON-blocklisted tag with the active task.
@@ -829,7 +885,9 @@ export class Store {
       shared = sharedRows
         .map(r => this.getTask(r.id))
         .filter((t): t is Task => t !== null && !referencedByIdSet.has(t.id) && !referencesIdSet.has(t.id))
-        .sort((a, b) => a.priority - b.priority || a.id - b.id);
+        .sort(
+          (a, b) => (a.priority ?? Number.POSITIVE_INFINITY) - (b.priority ?? Number.POSITIVE_INFINITY) || a.id - b.id,
+        );
     }
 
     return { referencedBy, references, shared };

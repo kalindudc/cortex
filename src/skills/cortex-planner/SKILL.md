@@ -36,10 +36,12 @@ Plans are stored in cortex — not as files. Three cortex specifics apply.
     ```bash
     PLAN=$(mktemp -t cortex-plan.XXXXXX.md)
     # write the plan markdown to "$PLAN" using the Plan Template below
-    cortex add "<title>" --lane "$LANE" --priority <n> --status draft --body-file "$PLAN"
+    cortex add "<title>" --lane "$LANE" --status draft --body-file "$PLAN"
     # stdout: [<id>] <title>
     ```
     ALWAYS use `--body-file`; NEVER inline `-b "..."` for KB-scale plans (shell escaping is a footgun).
+
+    DO NOT pass `--priority` unless the user explicitly asked for one. Plans are documents organised by lane + `plan` tag, not items in a priority queue — see the Priority subsection below.
 
 3. DEFAULT LANE = current repository directory name:
     ```bash
@@ -51,8 +53,8 @@ Plans are stored in cortex — not as files. Three cortex specifics apply.
   ```bash
   STACK_SLUG=$(printf '%s' "<feature title>" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9_@-' | cut -c1-32)
   # fallback if STACK_SLUG is empty (all-punctuation title): STACK_SLUG="stack-$(openssl rand -hex 3)"
-  # single plan:  cortex add "<title>" --lane "$LANE" --priority 0 --status draft --body-file "$PLAN" -t plan
-  # plan stack:   cortex add "<title>" --lane "$LANE" --priority <n> --status draft --body-file "$PLAN" -t "plan,$STACK_SLUG"
+  # single plan:  cortex add "<title>" --lane "$LANE" --status draft --body-file "$PLAN" -t plan
+  # plan stack:   cortex add "<title>" --lane "$LANE" --status draft --body-file "$PLAN" -t "plan,$STACK_SLUG"
   ```
   The stack tag lets `cortex ls -t <stack-slug>` enumerate the whole stack across lanes. The `cut -c1-32` enforces the [a-z0-9_@-]{1,32} tag-name cap.
 
@@ -64,7 +66,9 @@ cortex update <id> --as "$SESSION_ID" -m "plan written"
 ```
 This is MANDATORY — `cortex add` is anonymous; the update records WHO planned it.
 
-PLAN STACKS: when a single plan exceeds the size limits and cannot be consolidated, split into a stack — N tasks under a single stack-slug tag with sequential priorities. Title each task `NN: <title>` for visual ordering in `cortex ls`. After writing the whole stack, post a summary update on plan #0 listing every task ID. STOP and confirm with the user before creating a plan stack.
+PLAN STACKS: when a single plan exceeds the size limits and cannot be consolidated, split into a stack — N tasks under a single stack-slug tag. Title each task `NN: <title>` for visual ordering in `cortex ls`; the leading `NN:` is the source of truth for stack order (no `--priority` required). After writing the whole stack, post a summary update on the first task listing every task ID. STOP and confirm with the user before creating a plan stack.
+
+PRIORITY: cortex tasks default to no priority (the SQLite column is nullable; `cortex ls` sorts un-prioritised tasks after prioritised ones, then by created-time). Plans, plan stacks, and supporting documents are organised by lane + tag, not a priority queue — do NOT pass `--priority` to `cortex add` unless the user explicitly asked for an urgency annotation. The dashboard hides the priority chip on list rows when priority is unset; `cortex show` omits the `priority:` line.
 
 REVISIONS: cortex offers two edit modes for plan bodies — anchor-based partial edits and full-body rewrites. Choose based on the scope of the revision.
 
@@ -320,7 +324,7 @@ Before persisting the plan to cortex, scan every task block:
 
 ## Output Format
 
-- Persist the plan as the body of a cortex task using `cortex add "<title>" --lane "$LANE" --priority <n> --status draft --body-file <plan-tmpfile>` (see Cortex persistence above for the exact recipe)
+- Persist the plan as the body of a cortex task using `cortex add "<title>" --lane "$LANE" --status draft --body-file <plan-tmpfile>` (see Cortex persistence above for the exact recipe; pass `--priority` only when the user asked for an urgency annotation)
 - Immediately after creation, attribute with `cortex update <id> --as "$SESSION_ID" -m "plan written"`
 - Inform the user of the cortex task id and provide a brief summary; the plan body is viewable via `cortex show <id>`
 
@@ -336,7 +340,7 @@ Plans always produce working software. Research informs Implementation Notes; Lo
 
 ## Rules
 
-- ALWAYS load the `cortex` skill first for CLI vocabulary and lane / priority / status semantics
+- ALWAYS load the `cortex` skill first for CLI vocabulary and lane / status / tag semantics
 - ALWAYS track the core protocol with TODOs or Quests, if the tooling supports it
 - ALWAYS persist the plan via `cortex add --body-file`; NEVER inline `-b "..."` for multi-KB plans
 - ALWAYS attribute the plan immediately after `cortex add` with `cortex update <id> --as "$SESSION_ID" -m "plan written"`

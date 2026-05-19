@@ -8,6 +8,7 @@ Edit a task's title, body, or priority. Body edits have two modes; prefer the an
 # Title / priority (full replace, naturally race-safe):
 cortex edit <id> -t "<new title>"
 cortex edit <id> -p <priority>
+cortex edit <id> --clear-priority   # clear back to unset (mutex with -p)
 
 # Body — prefer anchor-based partial edit (race-safe):
 cortex edit <id> --body-search "<exact unique anchor>" --body-replace "<replacement>"
@@ -19,6 +20,12 @@ cortex edit <id> --body-file <path>
 # Combined: title + partial body edit in one atomic call
 cortex edit <id> -t "<new title>" --body-search "..." --body-replace "..."
 ```
+
+## Clearing priority
+
+Use `--clear-priority` when a task is no longer urgent (the work that prompted the priority is done) or when a priority was set by mistake. The task stays in its lane and keeps its tags; only the priority flips back to unset. After clearing, `cortex show` omits the `priority:` line, the dashboard hides the priority chip on list rows, and the task sorts after every prioritised row in `cortex ls`.
+
+`--clear-priority` is mutually exclusive with `-p`; passing both exits 1.
 
 ## Why anchor-based
 

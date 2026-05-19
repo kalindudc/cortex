@@ -129,7 +129,7 @@ export function buildApp(store: Store): Hono {
       title?: string;
       lane?: string;
       body?: string | null;
-      priority?: number;
+      priority?: number | null;
       status?: TaskStatus;
       tags?: string[];
     };
@@ -192,7 +192,7 @@ export function buildApp(store: Store): Hono {
       body?: string | null;
       bodySearch?: string;
       bodyReplace?: string;
-      priority?: number;
+      priority?: number | null;
     };
     // Validate the bodySearch / bodyReplace combo at the API boundary so
     // agents get a clean 400 (not a generic 500) when they misuse the

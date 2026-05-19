@@ -73,4 +73,38 @@ describe("PriorityChipButton", () => {
     expect(editTaskMock).toHaveBeenCalledTimes(1);
     expect(editTaskMock).toHaveBeenCalledWith(1, { priority: 0 });
   });
+
+  test("renders the unset affordance (button.priority-chip-unset, title 'Set priority') when task.priority is null", () => {
+    const { container } = render(<PriorityChipButton task={{ ...fx, priority: null }} />);
+    const btn = container.querySelector("button.priority-chip") as HTMLButtonElement;
+    expect(btn).toBeTruthy();
+    expect(btn.classList.contains("priority-chip-unset")).toBe(true);
+    expect(btn.getAttribute("title")).toBe("Set priority");
+    // "+ P?" is the affordance label; collapse whitespace defensively.
+    expect(btn.textContent?.replace(/\s+/g, " ").trim()).toBe("+ P?");
+  });
+
+  test("clicking the unset affordance morphs into an empty input", async () => {
+    const { container } = render(<PriorityChipButton task={{ ...fx, priority: null }} />);
+    const btn = container.querySelector("button.priority-chip") as HTMLButtonElement;
+    fireEvent.click(btn);
+    await new Promise(r => setTimeout(r, 5));
+    const input = container.querySelector("input.priority-chip-input") as HTMLInputElement;
+    expect(input).toBeTruthy();
+    expect(input.value).toBe("");
+  });
+
+  test("empty input + Enter on a priority-set task calls api.editTask with { priority: null }", async () => {
+    editTaskMock.mockClear();
+    const { container } = render(<PriorityChipButton task={fx} />);
+    const btn = container.querySelector("button.priority-chip") as HTMLButtonElement;
+    fireEvent.click(btn);
+    await new Promise(r => setTimeout(r, 5));
+    const input = container.querySelector("input.priority-chip-input") as HTMLInputElement;
+    fireEvent.input(input, { target: { value: "" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await new Promise(r => setTimeout(r, 5));
+    expect(editTaskMock).toHaveBeenCalledTimes(1);
+    expect(editTaskMock).toHaveBeenCalledWith(1, { priority: null });
+  });
 });

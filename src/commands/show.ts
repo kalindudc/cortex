@@ -36,7 +36,7 @@ export default defineCommand({
       console.log(`[${task.id}] ${task.title}`);
       console.log(`  lane:     ${task.lane}`);
       console.log(`  status:   ${task.status}`);
-      console.log(`  priority: ${task.priority}`);
+      if (task.priority !== null) console.log(`  priority: ${task.priority}`);
       // Tags line: full alphabetical list (no truncation in `show` since the
       // user explicitly asked for the details of one task). Skipped entirely
       // when the task has no tags.

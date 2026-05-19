@@ -5,7 +5,7 @@ description: This skill should be used when the user asks to "implement plan <id
 
 # Cortex Implementer Skill
 
-CRITICAL: before using this skill, load the `cortex` skill to ensure the CLI is available and you understand the cortex workflow. This skill is a layer on top of cortex for executing implementation plans, so the basics of task creation, updates, lanes, and priorities still apply. This skill does NOT create or triage cortex tasks — it only executes plans that are already written and stored in task bodies.
+CRITICAL: before using this skill, load the `cortex` skill to ensure the CLI is available and you understand the cortex workflow. This skill is a layer on top of cortex for executing implementation plans, so the basics of task creation, updates, lanes, tags, and status still apply. This skill does NOT create or triage cortex tasks — it only executes plans that are already written and stored in task bodies.
 
 ## Purpose
 
@@ -49,20 +49,13 @@ STATUS TRANSITIONS (every command also passes `--as "$SESSION_ID"`):
 
 `blocked` is the ONE transition that fires a browser notification — use it deliberately. `done` is reserved for human-confirmed merges.
 
-LANE-LEVEL WORKFLOW: to pick the next plan from a stack (one lane = one plan stack with sequential priorities):
-```bash
-LANE=$(git rev-parse --show-toplevel 2>/dev/null | xargs basename || basename "$PWD")
-cortex ls --lane "$LANE" --status open --json | jq -c '[.[]] | min_by(.priority)'
-```
-Feed the resulting id into Plan Ingestion. Execute ONE plan per agent invocation.
-
 MULTI-AGENT COORDINATION: cortex enforces NO locks. Before starting, scan `cortex show <id> --json | jq '.updates'` for activity in the last few minutes from any author other than `$SESSION_ID`. If found, post `cortex update <id> --as "$SESSION_ID" -m "another agent active; standing down"` and exit.
 
 ---
 
 ## Plan Ingestion
 
-A cortex task `<id>` MUST be explicitly provided by the user. Do NOT auto-discover or assume a task. (Exception: "pick the next plan in lane X" — see LANE-LEVEL WORKFLOW above.)
+A cortex task `<id>` MUST be explicitly provided by the user. Do NOT auto-discover, enumerate, or auto-pick a task — the implementer always works on the one task the user names.
 
 1. If `$ARGUMENTS` contains a cortex task id, use that. Otherwise, ask the user.
 2. Fetch and read the plan body completely (see Cortex persistence > PLAN BODY ← cortex task).
@@ -242,6 +235,7 @@ cortex update <id> --as "$SESSION_ID" -s done -m "merged"
 - NEVER modify the plan's High-Level or Mid-Level Objectives
 - NEVER work on `main` branch -- always use feature branches
 - NEVER deviate from the plan without user approval
+- NEVER enumerate or auto-pick cortex tasks (no `min_by(.priority)`, no "next open plan in this lane"). The user provides exactly one task id; if none was provided, ask.
 - Follow TDD: verify tests are correct before relying on them. Update tests only with clear justification.
 - `blocked` is reserved for genuine 3-retry exhaustion or missing prerequisites; `done` is for human-confirmed merges
 - MAINTAINABILITY above all else. Follow KISS.

@@ -93,16 +93,30 @@ export function buildCommands(): Command[] {
       label: "Set priority\u2026",
       hint: `[${at.id}]`,
       icon: "star",
-      submenu: () =>
-        [0, 1, 2, 3, 5]
+      submenu: () => {
+        const numericEntries = [0, 1, 2, 3, 5]
           .filter(p => p !== at.priority)
           .map(p => ({
             id: `priority-${p}`,
             label: `P${p}${p === 0 ? " (urgent)" : ""}`,
             hint: "",
-            icon: "star",
+            icon: "star" as const,
             action: () => api.editTask(at.id, { priority: p }),
-          })),
+          }));
+        // Only offer "Clear" when there is something to clear — omitting it
+        // on already-unset tasks keeps the submenu noise-free.
+        if (at.priority === null) return numericEntries;
+        return [
+          {
+            id: "priority-clear",
+            label: "Clear priority",
+            hint: "",
+            icon: "star" as const,
+            action: () => api.editTask(at.id, { priority: null }),
+          },
+          ...numericEntries,
+        ];
+      },
     });
     cmds.push({
       id: "edit-task-tags",

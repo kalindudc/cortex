@@ -19,7 +19,10 @@ export const nextActionLabel = (s: TaskStatus): string =>
   (({ draft: "Publish", open: "Move to review", review: "Mark done", blocked: "Unblock", done: "Reopen" }) as const)[s];
 
 // Priority: 0 = highest. Render as P0/P1/... with urgent/high/normal styling.
-export const priorityClass = (p: number): string => (p === 0 ? "urgent" : p === 1 ? "high" : "");
+// Null (unset) falls through to "" — callers that render the chip at all are
+// expected to short-circuit before reaching this function, but the broader
+// signature keeps callers from having to narrow at every site.
+export const priorityClass = (p: number | null): string => (p === 0 ? "urgent" : p === 1 ? "high" : "");
 
 // Curated swatch palette for the lane color picker. null = "no color".
 export const LANE_COLORS: ReadonlyArray<string | null> = [

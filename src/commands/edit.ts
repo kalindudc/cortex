@@ -55,6 +55,10 @@ export default defineCommand({
       valueHint: "int",
       description: "new priority (non-negative integer; 0 = highest)",
     },
+    clearPriority: {
+      type: "boolean",
+      description: "clear the task's priority back to unset (mutually exclusive with --priority)",
+    },
     setTags: {
       type: "string",
       valueHint: "a,b,c",
@@ -103,7 +107,7 @@ export default defineCommand({
       body?: string | null;
       bodySearch?: string;
       bodyReplace?: string;
-      priority?: number;
+      priority?: number | null;
     } = {};
     if (args.title) patch.title = args.title;
     if (args.bodyFile) {
@@ -121,7 +125,12 @@ export default defineCommand({
       patch.bodySearch = args.bodySearch;
       patch.bodyReplace = args.bodyReplace;
     }
+    if (args.priority !== undefined && args.clearPriority) {
+      console.error("error: --priority and --clear-priority are mutually exclusive");
+      process.exit(1);
+    }
     if (args.priority) patch.priority = parsePriority(args.priority);
+    if (args.clearPriority) patch.priority = null;
     // Tag mutations: exactly one of --set-tags / --add-tag / --rm-tag may be
     // present per invocation. Mirrors the HTTP route's `set | add | remove`
     // exclusivity check; any combination yields a hard exit.
@@ -149,7 +158,9 @@ export default defineCommand({
       process.exit(1);
     }
     if (Object.keys(patch).length === 0 && tagOp === null) {
-      console.error("error: provide at least one of --title, --body, --priority, --set-tags, --add-tag, --rm-tag");
+      console.error(
+        "error: provide at least one of --title, --body, --priority, --clear-priority, --set-tags, --add-tag, --rm-tag",
+      );
       process.exit(1);
     }
     const url = daemonUrl();
