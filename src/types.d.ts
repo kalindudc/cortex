@@ -28,7 +28,10 @@ declare module "*/out/bundle.css" {
   export default path;
 }
 
-declare module "*/out/mermaid.js" {
+// Note: mermaid `.mjs` imports use the `*.mjs` ambient declaration above,
+// emitted via the generated src/ui/mermaid-manifest.generated.ts (which
+// also carries `// @ts-nocheck` for its 217 import lines).
+declare module "*.mjs" {
   const path: string;
   export default path;
 }

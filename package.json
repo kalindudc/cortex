@@ -8,8 +8,9 @@
   },
   "scripts": {
     "up": "pnpm install",
-    "ui:build": "bash scripts/build-css.sh && pnpm exec bun build src/ui/index.tsx --target browser --outdir out --sourcemap=external --minify --entry-naming bundle.[ext] --asset-naming bundle.[ext] && pnpm exec bun build src/ui/mermaid-entry.ts --target browser --outdir out --sourcemap=external --minify --entry-naming mermaid.[ext]",
-    "ui:watch": "bash scripts/build-css.sh && pnpm exec bun build src/ui/mermaid-entry.ts --target browser --outdir out --sourcemap=external --entry-naming mermaid.[ext] && pnpm exec bun build src/ui/index.tsx --target browser --outdir out --sourcemap=external --entry-naming bundle.[ext] --asset-naming bundle.[ext] --watch",
+    "gen:mermaid-manifest": "pnpm exec bun scripts/gen-mermaid-manifest.ts",
+    "ui:build": "bash scripts/build-css.sh && pnpm run gen:mermaid-manifest && pnpm exec bun build src/ui/index.tsx --target browser --outdir out --sourcemap=external --minify --entry-naming bundle.[ext] --asset-naming bundle.[ext]",
+    "ui:watch": "bash scripts/build-css.sh && pnpm run gen:mermaid-manifest && pnpm exec bun build src/ui/index.tsx --target browser --outdir out --sourcemap=external --entry-naming bundle.[ext] --asset-naming bundle.[ext] --watch",
     "build": "bash scripts/build.sh",
     "test": "pnpm run build && pnpm exec bun test test/unit/ test/integration/ && pnpm exec playwright install chromium && pnpm exec playwright test",
     "test:unit": "pnpm exec bun test test/unit/",

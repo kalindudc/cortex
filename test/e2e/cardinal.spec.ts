@@ -69,9 +69,24 @@ test("post an update on the active task via the compose form", async ({ url, pag
   // Click the task row to make it active.
   await page.locator(".task-row", { hasText: "post-update target" }).click();
   await expect(page.locator(".pane-active")).toBeVisible();
-  // Compose textarea in the active pane.
+  // Post-update form now defaults to COLLAPSED (state persists to
+  // localStorage key "cortex-post-update-open"; each Playwright test gets a
+  // fresh browser context so storage is empty and the default applies).
+  // Verify the collapsed state first: the toggle is rendered with
+  // aria-expanded="false" and the .compose form is unmounted (not in DOM).
+  const toggle = page.locator(".active-foot .post-update-toggle");
+  await expect(toggle).toBeVisible();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator(".compose")).toHaveCount(0);
+  // Click the toggle to expand; aria-expanded flips and the existing compose
+  // elements (textarea + author input + char counter + submit button) mount.
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
   const compose = page.locator(".compose textarea");
   await expect(compose).toBeVisible();
+  await expect(page.locator(".compose-foot input.author")).toBeVisible();
+  await expect(page.locator(".compose-foot .char-counter")).toBeVisible();
+  await expect(page.locator(".compose-foot button[type=submit]")).toBeVisible();
   await compose.fill("first update from e2e");
   // Submit button uses the form's onSubmit; pressing Enter alone would
   // produce a newline (textarea), so click the primary submit.

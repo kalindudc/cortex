@@ -21,7 +21,15 @@ import pkg from "../package.json" with { type: "json" };
 import indexHtmlPath from "./ui/index.html" with { type: "file" };
 import bundleJsPath from "../out/bundle.js" with { type: "file" };
 import bundleCssPath from "../out/bundle.css" with { type: "file" };
-import mermaidJsPath from "../out/mermaid.js" with { type: "file" };
+// Mermaid is shipped as 217 dynamically-imported chunks (mermaid 11's diagram
+// renderers self-register via async `import()`). Bun's bundler drops chunks
+// it can't see; bundling the npm package via `bun build` produces a broken
+// artifact where most diagram types throw `K.render is not a function` at
+// runtime. Fix: ship mermaid's pre-built `dist/` tree verbatim, one
+// `with { type: "file" }` import per chunk so `bun build --compile` embeds
+// each into the binary. The import list + route map is codegen'd by
+// `scripts/gen-mermaid-manifest.ts` from `node_modules/mermaid/dist/`.
+import { MERMAID_ASSETS } from "./ui/mermaid-manifest.generated.ts";
 
 // Map browser route -> embedded file path + content type. Each entry is
 // served with Cache-Control: no-store so dev edits never sit invisible behind
@@ -29,7 +37,9 @@ import mermaidJsPath from "../out/mermaid.js" with { type: "file" };
 const UI_ASSETS: Record<string, { path: string; type: string }> = {
   "/bundle.js": { path: bundleJsPath, type: "application/javascript; charset=utf-8" },
   "/bundle.css": { path: bundleCssPath, type: "text/css; charset=utf-8" },
-  "/mermaid.js": { path: mermaidJsPath, type: "application/javascript; charset=utf-8" },
+  // /mermaid/mermaid.esm.min.mjs + 216 chunk files under /mermaid/chunks/.
+  // Spread so the same serve loop below handles them with the same headers.
+  ...MERMAID_ASSETS,
 };
 
 /**
@@ -578,10 +588,11 @@ export function buildApp(store: Store): Hono {
     };
     const bundleJsAbs = path.resolve(import.meta.dir, "..", "out", "bundle.js");
     const bundleCssAbs = path.resolve(import.meta.dir, "..", "out", "bundle.css");
-    const mermaidJsAbs = path.resolve(import.meta.dir, "..", "out", "mermaid.js");
     watchOne(bundleJsAbs);
     watchOne(bundleCssAbs);
-    watchOne(mermaidJsAbs);
+    // No watch for mermaid: its files live in node_modules/mermaid/dist/ now
+    // (read-only, only changes on `pnpm install`). Reload-on-edit during dev
+    // is unnecessary.
 
     app.get("/api/dev-reload", c =>
       streamSSE(c, async stream => {

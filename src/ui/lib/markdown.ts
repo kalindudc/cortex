@@ -69,9 +69,12 @@ export function renderMarkdown(md: string): string {
 /**
  * Convert any `<pre class="mermaid">` blocks inside `root` to SVG.
  *
- * On first call, fetches /mermaid.js (the lazy chunk emitted by the
- * `pnpm run ui:build` second `bun build` invocation). Subsequent calls
- * reuse the cached module. Mermaid's `initialize` is called every
+ * On first call, fetches /mermaid/mermaid.esm.min.mjs — the entry point
+ * of mermaid's pre-built dist tree (shipped verbatim, NOT re-bundled).
+ * Mermaid lazy-loads ~30 diagram-type chunks on demand from
+ * /mermaid/chunks/mermaid.esm/... via async `import()`; those chunks are
+ * also embedded in the binary via scripts/gen-mermaid-manifest.ts.
+ * Subsequent calls reuse the cached module. Mermaid's `initialize` is called every
  * invocation — it's idempotent and accepts re-config, so reopening the
  * modal after a theme toggle picks up the new theme without any
  * theme-change observer wiring.
@@ -83,20 +86,22 @@ export function renderMarkdown(md: string): string {
 export async function runMermaid(root: HTMLElement): Promise<void> {
   try {
     if (!mermaidPromise) {
-      // Dynamic-import target is the BROWSER URL `/mermaid.js`, NOT the
-      // npm specifier `"mermaid"` — the latter would inline the module
-      // back into bundle.js and defeat the lazy split. We build the URL
-      // via `new URL(...)` so Bun's bundler cannot statically resolve
-      // the import target at build time (a bare literal triggers
-      // "Could not resolve: /mermaid.js"). At runtime the URL is just
-      // the browser-served `/mermaid.js` route registered in src/server.ts.
-      const url = new URL("/mermaid.js", document.baseURI).href;
+      // Dynamic-import target is the BROWSER URL
+      // `/mermaid/mermaid.esm.min.mjs`, NOT the npm specifier `"mermaid"`.
+      // The npm specifier would inline the module back into bundle.js and
+      // defeat the lazy split (and also reintroduces the bundler bug that
+      // motivated this dist-passthrough setup — see src/server.ts comment
+      // on MERMAID_ASSETS). We build the URL via `new URL(...)` so Bun's
+      // bundler cannot statically resolve the import target at build time
+      // (a bare literal triggers "Could not resolve"). At runtime the URL
+      // routes through the asset map registered in src/server.ts.
+      const url = new URL("/mermaid/mermaid.esm.min.mjs", document.baseURI).href;
       mermaidPromise = import(url).then((mod: { default: typeof import("mermaid").default }) => mod.default);
     }
     const mermaid = await mermaidPromise;
     mermaid.initialize({
       startOnLoad: false,
-      securityLevel: "strict",
+      securityLevel: "antiscript",
       theme: detectTheme(),
     });
     const nodes = root.querySelectorAll<HTMLElement>(".mermaid");
