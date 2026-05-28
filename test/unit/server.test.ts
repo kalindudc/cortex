@@ -58,6 +58,38 @@ describe("server: tasks", () => {
     expect((json as { title: string }[]).map(t => t.title)).toEqual(["b"]);
   });
 
+  test("GET /api/tasks search matches task titles and bodies", async () => {
+    store.addTask({ title: "alpha title match", body: "unrelated body", status: "open" });
+    store.addTask({ title: "body only match", body: "notes mention alpha here", status: "done" });
+    store.addTask({ title: "no match", body: "nothing relevant" });
+
+    const { json } = await fetchJson(req("GET", "/api/tasks?search=alpha"));
+    expect((json as { title: string }[]).map(t => t.title)).toEqual(["alpha title match", "body only match"]);
+
+    const filtered = await fetchJson(req("GET", "/api/tasks?search=alpha&status=open"));
+    expect((filtered.json as { title: string }[]).map(t => t.title)).toEqual(["alpha title match"]);
+  });
+
+  test("GET /api/tasks @search restricts matches to titles", async () => {
+    store.addTask({ title: "alpha title match", body: "unrelated body" });
+    store.addTask({ title: "body only match", body: "notes mention alpha here" });
+
+    const { json } = await fetchJson(req("GET", "/api/tasks?search=@alpha"));
+    expect((json as { title: string }[]).map(t => t.title)).toEqual(["alpha title match"]);
+  });
+
+  test("GET /api/tasks #search matches tag names", async () => {
+    const tagged = store.addTask({ title: "tagged task" });
+    const alsoTagged = store.addTask({ title: "also tagged" });
+    const untagged = store.addTask({ title: "untagged" });
+    store.setTaskTags(tagged.id, ["bug"]);
+    store.setTaskTags(alsoTagged.id, ["debugging"]);
+    store.setTaskTags(untagged.id, ["feature"]);
+
+    const { json } = await fetchJson(req("GET", "/api/tasks?search=%23bug"));
+    expect((json as { title: string }[]).map(t => t.title)).toEqual(["tagged task", "also tagged"]);
+  });
+
   test("POST /api/tasks creates a task", async () => {
     const { status, json } = await fetchJson(req("POST", "/api/tasks", { title: "hello" }));
     expect(status).toBe(201);

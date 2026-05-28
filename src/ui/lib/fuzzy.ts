@@ -17,9 +17,101 @@
 
 import type { Task } from "../api/types.ts";
 
+export interface TaskSearchHighlight {
+  field: "title" | "body" | "tag";
+  text: string;
+  ranges: Array<{ start: number; end: number }>;
+}
+
 export interface TaskSearchResult {
   task: Task;
   score: number;
+  highlight?: TaskSearchHighlight;
+}
+
+const BODY_EXCERPT_CONTEXT = 36;
+
+function mergeRanges(ranges: Array<{ start: number; end: number }>): Array<{ start: number; end: number }> {
+  const sorted = ranges.filter(r => r.end > r.start).sort((a, b) => a.start - b.start || a.end - b.end);
+  const merged: Array<{ start: number; end: number }> = [];
+  for (const range of sorted) {
+    const prev = merged[merged.length - 1];
+    if (!prev || range.start > prev.end) {
+      merged.push({ ...range });
+    } else {
+      prev.end = Math.max(prev.end, range.end);
+    }
+  }
+  return merged;
+}
+
+function matchRanges(text: string, query: string, tokens: string[]): Array<{ start: number; end: number }> {
+  const haystack = text.toLowerCase();
+  const terms = haystack.includes(query) ? [query] : tokens;
+  const ranges: Array<{ start: number; end: number }> = [];
+  for (const term of terms.filter(Boolean)) {
+    let from = 0;
+    for (;;) {
+      const start = haystack.indexOf(term, from);
+      if (start === -1) break;
+      ranges.push({ start, end: start + term.length });
+      from = start + term.length;
+    }
+  }
+  return mergeRanges(ranges);
+}
+
+function textHighlight(
+  field: TaskSearchHighlight["field"],
+  text: string,
+  query: string,
+  tokens: string[],
+): TaskSearchHighlight | undefined {
+  const ranges = matchRanges(text, query, tokens);
+  return ranges.length > 0 ? { field, text, ranges } : undefined;
+}
+
+function bodyHighlight(text: string, query: string, tokens: string[]): TaskSearchHighlight | undefined {
+  const ranges = matchRanges(text, query, tokens);
+  if (ranges.length === 0) return undefined;
+  const first = ranges[0];
+  const start = Math.max(0, first.start - BODY_EXCERPT_CONTEXT);
+  const end = Math.min(text.length, first.end + BODY_EXCERPT_CONTEXT);
+  const prefix = start > 0 ? "…" : "";
+  const suffix = end < text.length ? "…" : "";
+  const snippet = `${prefix}${text.slice(start, end)}${suffix}`;
+  const adjusted = ranges
+    .filter(r => r.end > start && r.start < end)
+    .map(r => ({
+      start: Math.max(r.start, start) - start + prefix.length,
+      end: Math.min(r.end, end) - start + prefix.length,
+    }));
+  return { field: "body", text: snippet, ranges: adjusted };
+}
+
+function matchingTag(tags: string[], query: string, tokens: string[]): string | undefined {
+  return (
+    tags.find(tag => tag.toLowerCase().includes(query)) ??
+    tags.find(tag => tokens.some(token => tag.toLowerCase().includes(token)))
+  );
+}
+
+function taskHighlight(
+  task: Task,
+  mode: "all" | "title" | "tag",
+  query: string,
+  tokens: string[],
+): TaskSearchHighlight | undefined {
+  if (mode === "title" || mode === "all") {
+    const highlight = textHighlight("title", task.title, query, tokens);
+    if (highlight) return highlight;
+  }
+  if (mode === "tag" || mode === "all") {
+    const tag = matchingTag(task.tags, query, tokens);
+    if (tag) return textHighlight("tag", `#${tag}`, query, tokens);
+  }
+  if (mode === "all") return bodyHighlight(task.body ?? "", query, tokens);
+  return undefined;
 }
 
 export function searchTasks(tasks: Task[], query: string): TaskSearchResult[] {
@@ -48,7 +140,10 @@ export function searchTasks(tasks: Task[], query: string): TaskSearchResult[] {
     const name = tagMatch[1];
     const hits = tasks
       .filter(t => t.tags.includes(name))
-      .map(task => ({ task, score: 1_000_000 }))
+      .map(task => {
+        const highlight = textHighlight("tag", `#${name}`, name, [name]);
+        return highlight ? { task, score: 1_000_000, highlight } : { task, score: 1_000_000 };
+      })
       // null priority sorts last — matches `(priority IS NULL)` in Store.listTasks.
       .sort(
         (a, b) =>
@@ -114,7 +209,8 @@ export function searchTasks(tasks: Task[], query: string): TaskSearchResult[] {
         }
       }
 
-      return { task, score };
+      const highlight = taskHighlight(task, mode, q, tokens);
+      return highlight ? { task, score, highlight } : { task, score };
     })
     .filter(r => r.score > 0)
     .sort((a, b) => b.score - a.score);

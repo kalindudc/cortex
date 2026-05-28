@@ -177,6 +177,39 @@ test("cortex tags via CLI: -t flag, edit add/rm/set, ls -t filter, tag rm safety
   expect(r.code).toBe(0);
 });
 
+test("cortex ls --search searches titles and bodies; @ restricts to title", async () => {
+  const ids: number[] = [];
+  try {
+    let r = await run("add", "alpha title match", "-b", "unrelated body");
+    expect(r.code).toBe(0);
+    const titleId = Number(r.stdout.match(/^\[(\d+)\]/)?.[1]);
+    expect(titleId).toBeGreaterThan(0);
+    ids.push(titleId);
+
+    r = await run("add", "body only match", "-b", "notes mention alpha here");
+    expect(r.code).toBe(0);
+    const bodyId = Number(r.stdout.match(/^\[(\d+)\]/)?.[1]);
+    expect(bodyId).toBeGreaterThan(0);
+    ids.push(bodyId);
+
+    r = await run("ls", "--search", "alpha", "--json");
+    expect(r.code).toBe(0);
+    const defaultResults = JSON.parse(r.stdout) as Array<{ id: number }>;
+    expect(defaultResults.map(t => t.id)).toContain(titleId);
+    expect(defaultResults.map(t => t.id)).toContain(bodyId);
+
+    r = await run("ls", "--search", "@alpha", "--json");
+    expect(r.code).toBe(0);
+    const titleOnlyResults = JSON.parse(r.stdout) as Array<{ id: number }>;
+    expect(titleOnlyResults.map(t => t.id)).toContain(titleId);
+    expect(titleOnlyResults.map(t => t.id)).not.toContain(bodyId);
+  } finally {
+    for (const id of ids) {
+      await run("rm", String(id), "-f");
+    }
+  }
+});
+
 test("cortex show + ls render tags in the formatted text view", async () => {
   // `cortex show` should print a 'tags:' line listing every attached tag
   // (full list, no truncation); `cortex ls` should truncate the per-task tag

@@ -10,6 +10,7 @@ import { describe, test, expect, mock, beforeEach } from "bun:test";
 const action1 = mock(() => {});
 const action2 = mock(() => {});
 const action3 = mock(() => {});
+let mockedSearchResults: unknown[] = [];
 mock.module("../../../../src/ui/components/palette/buildCommands.ts", () => ({
   buildCommands: () => [
     { id: "alpha", label: "Alpha", icon: "plus", action: action1 },
@@ -18,7 +19,7 @@ mock.module("../../../../src/ui/components/palette/buildCommands.ts", () => ({
   ],
 }));
 mock.module("../../../../src/ui/lib/fuzzy.ts", () => ({
-  searchTasks: () => [],
+  searchTasks: () => mockedSearchResults,
 }));
 
 import { render, fireEvent } from "@testing-library/preact";
@@ -34,6 +35,7 @@ describe("CommandPalette", () => {
     action1.mockClear();
     action2.mockClear();
     action3.mockClear();
+    mockedSearchResults = [];
   });
 
   test("renders all root commands with the first highlighted", () => {
@@ -96,9 +98,43 @@ describe("CommandPalette", () => {
   test("empty query in search mode shows no results", () => {
     paletteQuery.value = "";
     const { container } = render(<CommandPalette />);
+    const input = container.querySelector(".palette-input") as HTMLInputElement;
     const rows = container.querySelectorAll(".palette-row");
+    expect(input.placeholder).toBe("Search titles + bodies…");
     expect(rows.length).toBe(0);
     expect(container.textContent).toContain("No matching tasks");
+    expect(container.textContent).toContain("@ title only");
+    expect(container.textContent).toContain("# tags");
+  });
+
+  test("search mode renders highlighted body preview snippets", () => {
+    paletteQuery.value = "alpha";
+    const resultTask = {
+      id: 1,
+      lane: "now",
+      title: "Body result",
+      body: "full body text",
+      status: "open" as const,
+      priority: 1,
+      created: 0,
+      updated: 0,
+      tags: [],
+    };
+    tasks.value = [resultTask];
+    mockedSearchResults = [
+      {
+        task: resultTask,
+        score: 10,
+        highlight: { field: "body", text: "body Alpha context", ranges: [{ start: 5, end: 10 }] },
+      },
+    ];
+
+    const { container } = render(<CommandPalette />);
+    const row = container.querySelector(".palette-row");
+    expect(row?.querySelector(".task-search-title")?.textContent).toBe("Body result");
+    const preview = row?.querySelector(".task-search-preview");
+    expect(preview?.textContent).toBe("body Alpha context");
+    expect(preview?.querySelector("mark.search-hit")?.textContent).toBe("Alpha");
   });
 
   test("typing / switches to command mode and shows commands", () => {
@@ -126,9 +162,7 @@ describe("CommandPalette", () => {
     tasks.value = [
       { id: 1, lane: "now", title: "Find me", body: "", status: "open", priority: 1, created: 0, updated: 0, tags: [] },
     ];
-    mock.module("../../../../src/ui/lib/fuzzy.ts", () => ({
-      searchTasks: () => [{ task: tasks.value[0], score: 10 }],
-    }));
+    mockedSearchResults = [{ task: tasks.value[0], score: 10 }];
     const { container } = render(<CommandPalette />);
     const rows = container.querySelectorAll(".palette-row");
     expect(rows.length).toBe(1);
@@ -150,9 +184,7 @@ describe("CommandPalette", () => {
         tags: [],
       },
     ];
-    mock.module("../../../../src/ui/lib/fuzzy.ts", () => ({
-      searchTasks: () => [{ task: tasks.value[0], score: 10 }],
-    }));
+    mockedSearchResults = [{ task: tasks.value[0], score: 10 }];
     const { container } = render(<CommandPalette />);
     const rows = container.querySelectorAll(".palette-row");
     fireEvent.click(rows[0]);

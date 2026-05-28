@@ -36,6 +36,27 @@ describe("searchTasks", () => {
     expect(results[1].task.id).toBe(2); // body match second
   });
 
+  test("title matches include title highlight ranges", () => {
+    const results = searchTasks([task({ title: "Fix Alpha Bug", body: "nothing relevant" })], "alpha");
+    const highlight = results[0].highlight;
+    expect(highlight?.field).toBe("title");
+    expect(highlight?.text).toBe("Fix Alpha Bug");
+    const range = highlight?.ranges[0];
+    expect(range).toEqual({ start: 4, end: 9 });
+    expect(highlight?.text.slice(range?.start, range?.end)).toBe("Alpha");
+  });
+
+  test("default body-only matches include a short body highlight excerpt", () => {
+    const body = `${"prefix ".repeat(12)}AlphaNeedle appears here${" suffix".repeat(12)}`;
+    const results = searchTasks([task({ title: "Refactor", body })], "alphaneedle");
+    const highlight = results[0].highlight;
+    expect(highlight?.field).toBe("body");
+    expect(highlight?.text).toContain("AlphaNeedle");
+    expect(highlight?.text.length).toBeLessThan(body.length);
+    const range = highlight?.ranges[0];
+    expect(highlight?.text.slice(range?.start, range?.end)).toBe("AlphaNeedle");
+  });
+
   test("@prefix searches only titles", () => {
     const tasks = [
       task({ id: 1, title: "Parser bug", body: "There is a bug in the parser" }),
@@ -44,6 +65,7 @@ describe("searchTasks", () => {
     const results = searchTasks(tasks, "@parser");
     expect(results.length).toBe(1);
     expect(results[0].task.id).toBe(1);
+    expect(results[0].highlight?.field).toBe("title");
   });
 
   test("#prefix searches only tags", () => {
@@ -54,6 +76,7 @@ describe("searchTasks", () => {
     const results = searchTasks(tasks, "#bug");
     expect(results.length).toBe(1);
     expect(results[0].task.id).toBe(1);
+    expect(results[0].highlight).toEqual({ field: "tag", text: "#bug", ranges: [{ start: 1, end: 4 }] });
   });
 
   test("multi-token query requires all tokens (AND semantics)", () => {

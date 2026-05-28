@@ -131,7 +131,14 @@ export function buildApp(store: Store): Hono {
     const lane = c.req.query("lane");
     const statusQ = c.req.query("status");
     const status = statusQ && isStatus(statusQ) ? statusQ : undefined;
-    return c.json(store.listTasks({ lane, status }));
+    const searchArg = c.req.query("search")?.trim();
+    const searchOpts: { search?: string; title?: string; tagQuery?: string } = {};
+    if (searchArg) {
+      if (searchArg.startsWith("@")) searchOpts.title = searchArg.slice(1).trim();
+      else if (searchArg.startsWith("#")) searchOpts.tagQuery = searchArg.slice(1).trim();
+      else searchOpts.search = searchArg;
+    }
+    return c.json(store.listTasks({ lane, status, ...searchOpts }));
   });
 
   app.post("/api/tasks", async c => {

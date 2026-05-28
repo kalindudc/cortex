@@ -71,7 +71,7 @@ export default defineCommand({
       type: "string",
       alias: "q",
       valueHint: "text",
-      description: "search tasks. @text searches titles, #text searches tags",
+      description: "search task titles and bodies. @text searches titles only, #text searches tags",
     },
   },
   run({ args }) {

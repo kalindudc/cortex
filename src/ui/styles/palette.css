@@ -32,6 +32,25 @@
   text-align: left;
   transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
 }
+.palette-result-main {
+  display: flex; flex-direction: column; gap: 2px;
+  min-width: 0;
+}
+.task-search-title,
+.task-search-preview {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.task-search-preview {
+  color: var(--text-3); font-size: var(--fs-2);
+}
+mark.search-hit {
+  padding: 0 1px; border-radius: 3px;
+  color: var(--accent); background: var(--accent-tint);
+}
+.palette-row.active mark.search-hit,
+.palette-row:hover mark.search-hit {
+  color: var(--text); background: var(--tint);
+}
 /* The trailing chevron on submenu rows uses --text-3 so the affordance is
    present but quiet — the row label is what the user is reading. */
 .palette-row > .icon.rotate-90-ccw { color: var(--text-3); }

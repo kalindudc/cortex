@@ -26,11 +26,16 @@ async function seedLane(url: string, name: string): Promise<void> {
 }
 
 /** Seed a task via the REST API. Returns the created task. */
-async function seedTask(url: string, lane: string, title: string): Promise<{ id: number; title: string }> {
+async function seedTask(
+  url: string,
+  lane: string,
+  title: string,
+  opts: { body?: string } = {},
+): Promise<{ id: number; title: string }> {
   const r = await fetch(`${url}/api/tasks`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ lane, title }),
+    body: JSON.stringify({ lane, title, body: opts.body }),
   });
   if (!r.ok) throw new Error(`failed to seed task: ${r.status} ${await r.text()}`);
   return r.json();
@@ -164,6 +169,36 @@ test("open command palette with Cmd+P / Ctrl+P", async ({ url, page }) => {
   // Esc closes it.
   await page.keyboard.press("Escape");
   await expect(page.locator(".palette-input")).toHaveCount(0);
+});
+
+test("task search palette searches body text and highlights matched context", async ({ url, page }) => {
+  await seedLane(url, "inbox");
+  await seedTask(url, "inbox", "alpha-title task");
+  await seedTask(url, "inbox", "body-only task", {
+    body: "The body contains alpha-body-only as the only searchable clue.",
+  });
+  await page.goto(url);
+
+  const mod = process.platform === "darwin" ? "Meta" : "Control";
+  await page.keyboard.press(`${mod}+KeyK`);
+  const input = page.locator(".palette-input");
+  await expect(input).toBeVisible();
+  await expect(input).toHaveAttribute("placeholder", "Search titles + bodies…");
+
+  await input.fill("alpha-body-only");
+  const bodyRow = page.locator(".palette-row", { hasText: "body-only task" });
+  await expect(bodyRow).toBeVisible();
+  const preview = bodyRow.locator(".task-search-preview");
+  await expect(preview).toBeVisible();
+  await expect(preview.locator("mark.search-hit")).toHaveText("alpha-body-only");
+
+  await input.fill("@alpha-body-only");
+  await expect(page.locator(".palette-list")).toContainText("No matching tasks");
+
+  await input.fill("@alpha-title");
+  const titleRow = page.locator(".palette-row", { hasText: "alpha-title task" });
+  await expect(titleRow).toBeVisible();
+  await expect(titleRow.locator(".task-search-title mark.search-hit")).toHaveText("alpha-title");
 });
 
 test("tooltip refreshes its text on click without requiring the cursor to move (show-all-tasks toggle)", async ({

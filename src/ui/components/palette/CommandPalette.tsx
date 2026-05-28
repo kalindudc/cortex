@@ -22,6 +22,26 @@ interface Scope {
   cmds: Command[];
 }
 
+function renderHighlightedText(
+  text: string,
+  ranges: Array<{ start: number; end: number }> = [],
+): Array<string | VNode> {
+  if (ranges.length === 0) return [text];
+  const chunks: Array<string | VNode> = [];
+  let cursor = 0;
+  ranges.forEach((range, i) => {
+    if (range.start > cursor) chunks.push(text.slice(cursor, range.start));
+    chunks.push(
+      <mark class="search-hit" key={`${range.start}-${range.end}-${i}`}>
+        {text.slice(range.start, range.end)}
+      </mark>,
+    );
+    cursor = range.end;
+  });
+  if (cursor < text.length) chunks.push(text.slice(cursor));
+  return chunks;
+}
+
 export function CommandPalette(): VNode {
   const query = paletteQuery;
   const cursor = useSignal(0);
@@ -130,7 +150,7 @@ export function CommandPalette(): VNode {
               ? `Pick a ${stack.value[stack.value.length - 1].title.toLowerCase()}\u2026`
               : isCommandMode
                 ? "Type a command\u2026"
-                : "Search tasks\u2026"
+                : "Search titles + bodies\u2026"
           }
           autoFocus
           value={query.value}
@@ -197,7 +217,18 @@ export function CommandPalette(): VNode {
                 onClick={() => selectTask(r.task)}
               >
                 <span class={`dot dot-status-${r.task.status}`}></span>
-                <span class="grow">{r.task.title}</span>
+                <span class="palette-result-main grow">
+                  <span class="task-search-title">
+                    {r.highlight?.field === "title"
+                      ? renderHighlightedText(r.task.title, r.highlight.ranges)
+                      : r.task.title}
+                  </span>
+                  {r.highlight && r.highlight.field !== "title" ? (
+                    <span class="task-search-preview">
+                      {renderHighlightedText(r.highlight.text, r.highlight.ranges)}
+                    </span>
+                  ) : null}
+                </span>
                 <span class="meta">{r.task.lane}</span>
                 <PriorityChip priority={r.task.priority} />
               </button>
@@ -212,6 +243,7 @@ export function CommandPalette(): VNode {
           <span>
             <span class="kbd">&crarr;</span> select
           </span>
+          {!isCommandMode && !inSubmenu ? <span>@ title only · # tags</span> : null}
           <span>
             <span class="kbd">Esc</span> {inSubmenu ? "back" : "close"}
           </span>
