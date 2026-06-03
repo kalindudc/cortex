@@ -270,6 +270,13 @@ input:disabled { opacity: 0.5; cursor: not-allowed; }
      With this, the textarea fully respects the grid cell height. */
   min-height: 0;
 }
+/* The focused title input uses --accent-tint as its field background, so
+   the app-wide ::selection color (also --accent-tint) disappears there.
+   Use the stronger editor selection token just for title text selection. */
+.title-input::selection {
+  background: var(--selection);
+  color: var(--text);
+}
 .title-input:focus { background: var(--accent-tint); }
 
 .active-foot {
