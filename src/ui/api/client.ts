@@ -6,6 +6,12 @@
 
 import type { Task, Lane, Tag, Update, Notification, RelatedTasks } from "./types.ts";
 
+export type BackupResponse = {
+  outPath: string;
+  bytes: number;
+  stats: { lanes: number; tags: number; tasks: number; updates: number; task_tags: number; notifications: number };
+};
+
 // Server response shape for GET /api/tags — the tag row plus the rollup
 // task_count column populated by Store.listTags(). Re-exported via
 // state/signals.ts as TagWithCount; mirrored here so the api client's
@@ -34,6 +40,7 @@ export interface ApiClient {
   /** Three-bucket Related view for the active task (see RelatedTasks in store.ts). */
   related(id: number): Promise<RelatedTasks>;
   migrations(): Promise<{ pending: string[] }>;
+  backup(): Promise<BackupResponse>;
   addTask(b: AddTaskBody): Promise<Task>;
   editTask(id: number, b: EditTaskBody): Promise<Task>;
   setStat(id: number, status: Task["status"]): Promise<Task>;
@@ -92,6 +99,7 @@ export const api: ApiClient = {
   delLane: n => j<void>(`/api/lanes/${encodeURIComponent(n)}`, { method: "DELETE" }),
   // ---- tags ----
   migrations: () => j<{ pending: string[] }>("/api/migrations"),
+  backup: () => j<BackupResponse>("/api/backup", { method: "POST", headers: JSON_HEAD, body: JSON.stringify({}) }),
   tags: () => j<TagWithCount[]>("/api/tags"),
   setTags: (id, ns) =>
     j<Task>(`/api/tasks/${id}/tags`, { method: "PATCH", headers: JSON_HEAD, body: JSON.stringify({ set: ns }) }),

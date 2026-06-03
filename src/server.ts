@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { type Store, validateAuthorTag, validateTagName, BodySearchError, type TaskStatus } from "./store.ts";
+import { backupNotificationInput, createBackup, defaultBackupPath } from "./backup.ts";
 import { emit, subscribe, type CortexEvent } from "./events.ts";
 import pkg from "../package.json" with { type: "json" };
 // `with { type: "file" }` returns a string PATH (not file contents) that
@@ -409,6 +410,28 @@ export function buildApp(store: Store): Hono {
       return c.json(update, 201);
     } catch (err) {
       return c.json({ error: (err as Error).message }, 400);
+    }
+  });
+
+  // ---------- backup ----------
+  // On-demand dashboard backup. Runs inside the daemon process against a
+  // separate read-only SQLite connection, so it is safe while the daemon is
+  // serving writes. Restore remains CLI-only because it refuses a live daemon.
+  app.post("/api/backup", async c => {
+    if (store.databasePath() === ":memory:") return c.json({ error: "backup requires a file-backed database" }, 400);
+    const body = (await c.req.json().catch(() => ({}))) as { rotate?: number; outPath?: string };
+    const rotate = Number.isInteger(body.rotate) && Number(body.rotate) >= 0 ? Number(body.rotate) : 0;
+    try {
+      const outPath = typeof body.outPath === "string" && body.outPath.trim() ? body.outPath : defaultBackupPath();
+      const { doc } = await createBackup({ liveDbPath: store.databasePath(), outPath, rotate });
+      const bytes = fs.statSync(outPath).size;
+      const notification = store.addNotification(
+        backupNotificationInput({ outPath, bytes, stats: doc.stats, author: resolveAuthor() }),
+      );
+      emit({ kind: "notification.added", payload: notification, ts: Date.now() });
+      return c.json({ outPath, bytes, stats: doc.stats, notification });
+    } catch (err) {
+      return c.json({ error: (err as Error).message }, 500);
     }
   });
 

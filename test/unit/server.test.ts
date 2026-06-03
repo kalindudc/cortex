@@ -1,4 +1,7 @@
 import { test, expect, describe, beforeEach } from "bun:test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { buildApp } from "../../src/server.ts";
 import { Store, type Notification } from "../../src/store.ts";
 
@@ -27,6 +30,43 @@ const fetchJson = async (request: Request): Promise<{ status: number; json: unkn
 };
 
 describe("server: health/me", () => {
+  test("POST /api/backup writes a zip for a file-backed store", async () => {
+    const oldXdg = process.env.XDG_CONFIG_HOME;
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-server-backup-"));
+    process.env.XDG_CONFIG_HOME = tmpDir;
+    const fileStore = Store.open(path.join(tmpDir, "cortex.db"), { warnMigrations: false });
+    try {
+      fileStore.addTask({ title: "backup me" });
+      const fileApp = buildApp(fileStore);
+      const { status, json } = await (async () => {
+        const res = await fileApp.fetch(req("POST", "/api/backup", {}));
+        const text = await res.text();
+        return { status: res.status, json: text ? JSON.parse(text) : null };
+      })();
+      const payload = json as {
+        outPath: string;
+        bytes: number;
+        stats: { tasks: number };
+        notification: { title: string; message: string; task_id: number | null; status: string };
+      };
+      expect(status).toBe(200);
+      expect(payload.stats.tasks).toBe(1);
+      expect(payload.bytes).toBeGreaterThan(0);
+      expect(payload.outPath.startsWith(path.join(tmpDir, "cortex", "backups"))).toBe(true);
+      expect(fs.existsSync(payload.outPath)).toBe(true);
+      expect(payload.notification.title).toBe("Backup created");
+      expect(payload.notification.task_id).toBeNull();
+      expect(payload.notification.status).toBe("done");
+      expect(payload.notification.message).toContain("1 tasks, 0 updates");
+      expect(fileStore.listNotifications()[0]?.title).toBe("Backup created");
+    } finally {
+      fileStore.close();
+      if (oldXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = oldXdg;
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   test("GET /api/health returns ok + version", async () => {
     const { status, json } = await fetchJson(req("GET", "/api/health"));
     expect(status).toBe(200);

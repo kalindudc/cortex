@@ -61,6 +61,7 @@ export const Client = {
   moveTask: (url: string, id: number, lane: string) => request(url, "PATCH", `/api/tasks/${id}/lane`, { lane }),
   removeTask: (url: string, id: number) => request(url, "DELETE", `/api/tasks/${id}`),
   addUpdate: (url: string, id: number, b: unknown) => request(url, "POST", `/api/tasks/${id}/updates`, b),
+  backup: (url: string, b: unknown) => request(url, "POST", "/api/backup", b),
   addLane: (url: string, b: unknown) => request(url, "POST", "/api/lanes", b),
   editLane: (url: string, name: string, b: unknown) =>
     request(url, "PATCH", `/api/lanes/${encodeURIComponent(name)}`, b),

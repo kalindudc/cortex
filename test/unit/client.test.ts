@@ -192,6 +192,14 @@ describe("Client", () => {
     expect(JSON.parse(r.body ?? "")).toEqual({ message: "progress" });
   });
 
+  test("backup POSTs /api/backup with json body", async () => {
+    await Client.backup(baseUrl, { outPath: "/tmp/cortex.zip", rotate: 2 });
+    const r = only();
+    expect(r.method).toBe("POST");
+    expect(r.pathname).toBe("/api/backup");
+    expect(JSON.parse(r.body ?? "")).toEqual({ outPath: "/tmp/cortex.zip", rotate: 2 });
+  });
+
   test("addLane POSTs /api/lanes with json body", async () => {
     await Client.addLane(baseUrl, { name: "backlog" });
     const r = only();

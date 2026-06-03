@@ -255,7 +255,10 @@ export type ListTasksFilter = {
 const now = (): number => Date.now();
 
 export class Store {
-  private constructor(private readonly db: Database) {}
+  private constructor(
+    private readonly db: Database,
+    private readonly databaseFile: string,
+  ) {}
 
   static open(path: string = dbPath(), opts: { warnMigrations?: boolean } = {}): Store {
     if (path !== ":memory:") {
@@ -264,7 +267,7 @@ export class Store {
     const db = new Database(path, { strict: true, create: true });
     db.run("PRAGMA journal_mode = WAL;");
     db.run("PRAGMA foreign_keys = ON;");
-    const store = new Store(db);
+    const store = new Store(db, path);
     store.migrate();
     if (opts.warnMigrations !== false) {
       const pending = store.pendingMigrations();
@@ -1007,6 +1010,14 @@ export class Store {
       if (!full) throw new Error(`task ${id} not found`);
       return full;
     })();
+  }
+
+  databasePath(): string {
+    return this.databaseFile;
+  }
+
+  runInTransaction<T>(fn: (db: Database) => T): T {
+    return this.db.transaction(() => fn(this.db))();
   }
 
   removeTask(id: number): void {

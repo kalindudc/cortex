@@ -2,7 +2,16 @@ import { defineCommand } from "citty";
 import readline from "node:readline";
 import fs from "node:fs";
 import { Store } from "../store.ts";
-import { dbPath, pidPath, urlPath, browserUrlPath, ensureConfigDir } from "../paths.ts";
+import {
+  dbPath,
+  pidPath,
+  urlPath,
+  browserUrlPath,
+  ensureConfigDir,
+  readPid,
+  isAlive,
+  stopDaemonIfRunning,
+} from "../paths.ts";
 import { writeAllSkills, skillDir, skillsRoot, listSkills } from "../skills.ts";
 import { writeAllExtensions, extensionDir, extensionsRoot, listExtensions } from "../extensions.ts";
 
@@ -19,53 +28,6 @@ function prompt(question: string): Promise<string> {
       resolve(answer);
     });
   });
-}
-
-function readPid(): number | null {
-  if (!fs.existsSync(pidPath())) return null;
-  const pid = Number.parseInt(fs.readFileSync(pidPath(), "utf8").trim(), 10);
-  return Number.isFinite(pid) ? pid : null;
-}
-
-function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Stop the daemon if running. Idempotent: returns true on a successful stop,
- * false if no live daemon was found. Always cleans up the pid/url files.
- */
-async function stopDaemonIfRunning(): Promise<boolean> {
-  const pid = readPid();
-  let stopped = false;
-  if (pid !== null && isAlive(pid)) {
-    try {
-      process.kill(pid, "SIGTERM");
-      stopped = true;
-      // Give the daemon's SIGTERM handler ~1s to exit cleanly and remove its
-      // own pid/url files. If it doesn't, we'll force-remove below.
-      for (let i = 0; i < 20; i++) {
-        if (!isAlive(pid)) break;
-        await Bun.sleep(50);
-      }
-    } catch {
-      /* ignore — we'll wipe the files regardless */
-    }
-  }
-  // Force-cleanup any lingering daemon state files.
-  for (const p of [pidPath(), urlPath(), browserUrlPath()]) {
-    try {
-      fs.rmSync(p, { force: true });
-    } catch {
-      /* ignore */
-    }
-  }
-  return stopped;
 }
 
 export default defineCommand({

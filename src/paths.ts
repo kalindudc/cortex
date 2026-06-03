@@ -51,3 +51,60 @@ export function browserUrlPath(): string {
 export function ensureConfigDir(): void {
   fs.mkdirSync(configDir(), { recursive: true });
 }
+
+/** Directory for on-demand cortex data-only backup archives. */
+export function backupsDir(): string {
+  return path.join(configDir(), "backups");
+}
+
+/** Ensure the backup directory exists. Idempotent. */
+export function ensureBackupsDir(): void {
+  fs.mkdirSync(backupsDir(), { recursive: true });
+}
+
+export function readPid(): number | null {
+  if (!fs.existsSync(pidPath())) return null;
+  const pid = Number.parseInt(fs.readFileSync(pidPath(), "utf8").trim(), 10);
+  return Number.isFinite(pid) ? pid : null;
+}
+
+export function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Stop the daemon if running. Idempotent: returns true on a successful stop,
+ * false if no live daemon was found. Always cleans up the pid/url files.
+ */
+export async function stopDaemonIfRunning(): Promise<boolean> {
+  const pid = readPid();
+  let stopped = false;
+  if (pid !== null && isAlive(pid)) {
+    try {
+      process.kill(pid, "SIGTERM");
+      stopped = true;
+      // Give the daemon's SIGTERM handler ~1s to exit cleanly and remove its
+      // own pid/url files. If it doesn't, we'll force-remove below.
+      for (let i = 0; i < 20; i++) {
+        if (!isAlive(pid)) break;
+        await Bun.sleep(50);
+      }
+    } catch {
+      /* ignore — we'll wipe the files regardless */
+    }
+  }
+  // Force-cleanup any lingering daemon state files.
+  for (const p of [pidPath(), urlPath(), browserUrlPath()]) {
+    try {
+      fs.rmSync(p, { force: true });
+    } catch {
+      /* ignore */
+    }
+  }
+  return stopped;
+}

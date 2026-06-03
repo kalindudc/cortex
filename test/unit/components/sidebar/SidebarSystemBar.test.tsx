@@ -1,15 +1,23 @@
 // SidebarSystemBar — top app-chrome strip on the unified SidebarPane.
 //
-// Two controls: theme toggle (left) + reset-filters button (right). The
-// previous tag-filter button + popover were removed when tag filtering
-// moved to TagFilterModal (opened from the FilterChips "+ tag" affordance
-// or the command palette). Tests cover the surviving controls.
+// Covers theme, tag-management, show-done, on-demand backup, and reset
+// controls. The previous tag-filter button + popover were removed when tag
+// filtering moved to TagFilterModal (opened from the FilterChips "+ tag"
+// affordance or the command palette).
 
 import { describe, test, expect, mock, beforeEach } from "bun:test";
 
-// SidebarSystemBar imports nothing API-touching directly, but bun's
-// mock.module is process-global; matching the canonical SidebarPane stub
-// shape avoids cross-file pollution if a sibling test triggers refresh.ts.
+const backup = mock(() =>
+  Promise.resolve({
+    outPath: "/tmp/cortex/backups/cortex-test.zip",
+    bytes: 123,
+    stats: { lanes: 1, tags: 0, tasks: 2, updates: 0, task_tags: 0, notifications: 0 },
+  }),
+);
+
+// SidebarSystemBar imports one API method for the backup button, and
+// bun's mock.module is process-global; matching the canonical SidebarPane
+// stub shape avoids cross-file pollution if a sibling test triggers refresh.ts.
 mock.module("../../../../src/ui/api/client.ts", () => ({
   api: {
     tasks: mock(() => Promise.resolve([])),
@@ -29,6 +37,7 @@ mock.module("../../../../src/ui/api/client.ts", () => ({
     editTask: mock(() => Promise.resolve({})),
     postUpd: mock(() => Promise.resolve({})),
     setTags: mock(() => Promise.resolve({})),
+    backup,
   },
 }));
 
@@ -41,23 +50,26 @@ describe("SidebarSystemBar", () => {
     filters.value = { status: null, lane: null, tag: [] };
     sidebarMode.value = "main";
     showAllTasks.value = false;
+    backup.mockClear();
   });
 
-  test("main mode: renders theme + manage-tags + show-done + reset (left to right)", () => {
+  test("main mode: renders theme + manage-tags + show-done + backup + reset (left to right)", () => {
     const { container } = render(<SidebarSystemBar />);
     const themeBtn = container.querySelector("button.btn-icon[aria-label^='Switch to']");
     const tagsBtn = container.querySelector("button.btn-icon[aria-label='Manage tags']");
     const showDoneBtn = container.querySelector("button.btn-icon[aria-label='Show done tasks too']");
+    const backupBtn = container.querySelector("button.btn-icon[aria-label='Back up now']");
     const resetBtn = container.querySelector("button.btn-icon[aria-label='Reset filters']");
-    if (!themeBtn || !tagsBtn || !showDoneBtn || !resetBtn) {
-      throw new Error("expected theme + manage-tags + show-done + reset in pane-system");
+    if (!themeBtn || !tagsBtn || !showDoneBtn || !backupBtn || !resetBtn) {
+      throw new Error("expected theme + manage-tags + show-done + backup + reset in pane-system");
     }
     // Tag-FILTERING button (replaced by FilterChips '+ tag' affordance) must NOT render here.
     expect(container.querySelector("button[aria-label='Filter by tags']")).toBeNull();
-    // Order: theme → manage-tags → show-done → reset.
+    // Order: theme → manage-tags → show-done → backup → reset.
     expect(themeBtn.compareDocumentPosition(tagsBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeGreaterThan(0);
     expect(tagsBtn.compareDocumentPosition(showDoneBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeGreaterThan(0);
-    expect(showDoneBtn.compareDocumentPosition(resetBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeGreaterThan(0);
+    expect(showDoneBtn.compareDocumentPosition(backupBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeGreaterThan(0);
+    expect(backupBtn.compareDocumentPosition(resetBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeGreaterThan(0);
   });
 
   test("show-done toggle flips showAllTasks and its aria-label / icon variant", () => {
@@ -83,14 +95,26 @@ describe("SidebarSystemBar", () => {
     expect(sidebarMode.value).toBe("tags");
   });
 
-  test("tags mode: manage-tags becomes 'Back', show-done + reset are hidden (tag-mode-irrelevant controls)", () => {
+  test("tags mode: backup remains available; show-done + reset are hidden (tag-mode-irrelevant controls)", () => {
     sidebarMode.value = "tags";
     const { container } = render(<SidebarSystemBar />);
     expect(container.querySelector("button[aria-label='Back to main sidebar']")).not.toBeNull();
+    expect(container.querySelector("button[aria-label='Back up now']")).not.toBeNull();
     // Reset-filters + show-done are main-mode only.
     expect(container.querySelector("button[aria-label='Reset filters']")).toBeNull();
     expect(container.querySelector("button[aria-label='Show done tasks too']")).toBeNull();
     expect(container.querySelector("button[aria-label='Hide done tasks']")).toBeNull();
+  });
+
+  test("clicking backup calls the API and shows a saved state", async () => {
+    const { container } = render(<SidebarSystemBar />);
+    const backupBtn = container.querySelector<HTMLButtonElement>("button.btn-icon[aria-label='Back up now']");
+    if (!backupBtn) throw new Error("expected backup button");
+    fireEvent.click(backupBtn);
+    expect(backup.mock.calls).toHaveLength(1);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(container.querySelector("button.btn-icon-active[aria-label='Back up now']")).not.toBeNull();
   });
 
   test("reset-filters is disabled when no filters are active", () => {
