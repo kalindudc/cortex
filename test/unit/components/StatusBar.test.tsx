@@ -1,6 +1,6 @@
 // StatusBar — footer summary computed from signals.
 //
-// Read-only component: reads `filters`, `tasks` (and derived `filteredTasks`,
+// Read-only component: reads `filters`, `tasks` (and derived `visibleTasks`,
 // `blockedTasks`, UNTAGGED). No interactivity to drive; we just seed signal
 // state in beforeEach and assert the rendered text.
 
@@ -8,7 +8,7 @@ import { describe, test, expect, beforeEach } from "bun:test";
 import { render } from "@testing-library/preact";
 
 import { StatusBar } from "../../../src/ui/components/StatusBar.tsx";
-import { filters, tasks } from "../../../src/ui/state/signals.ts";
+import { filters, tasks, showAllTasks } from "../../../src/ui/state/signals.ts";
 import { UNTAGGED } from "../../../src/ui/state/computed.ts";
 import type { Task } from "../../../src/ui/api/types.ts";
 
@@ -31,6 +31,7 @@ describe("StatusBar", () => {
   beforeEach(() => {
     filters.value = { status: null, lane: null, tag: [] };
     tasks.value = [];
+    showAllTasks.value = false;
   });
 
   test("filter summary reads 'All tasks' when no filters set", () => {
@@ -63,6 +64,20 @@ describe("StatusBar", () => {
     const { container } = render(<StatusBar />);
     const counts = container.querySelector(".status-counts")?.textContent ?? "";
     expect(counts).toContain("1 shown");
+  });
+
+  test("shown count excludes done tasks when showAllTasks is false, includes them when true", () => {
+    tasks.value = [task({ id: 1, status: "open" }), task({ id: 2, status: "done" })];
+    const { container, rerender } = render(<StatusBar />);
+
+    let counts = container.querySelector(".status-counts")?.textContent ?? "";
+    expect(counts).toContain("1 shown");
+
+    showAllTasks.value = true;
+    rerender(<StatusBar />);
+
+    counts = container.querySelector(".status-counts")?.textContent ?? "";
+    expect(counts).toContain("2 shown");
   });
 
   test("blocked chip only appears when blockedTasks.length > 0", () => {

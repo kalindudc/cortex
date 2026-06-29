@@ -34,6 +34,15 @@ export const filteredTasks: ReadonlySignal<Task[]> = computed(() => {
   return out;
 });
 
+// Composed with the `showAllTasks` UI toggle: when false (default) done
+// tasks are hidden. Single source of truth for "what the user actually
+// sees" — consumed by both the sidebar task list and the StatusBar shown
+// count, so the two stay in lockstep.
+export const visibleTasks: ReadonlySignal<Task[]> = computed(() => {
+  const list = filteredTasks.value;
+  return showAllTasks.value ? list : list.filter(t => t.status !== "done");
+});
+
 // Legacy alias retained while call sites migrate. Delete once nothing
 // imports tasksInLane (search src/ for remaining references after the
 // SidebarPane swap lands).

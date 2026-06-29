@@ -40,10 +40,9 @@ import {
   sidebarMode,
   selectedId,
   modal,
-  showAllTasks,
 } from "../../state/signals.ts";
 import { createUntitledTask } from "../../lib/createTask.ts";
-import { filteredTasks, activeTask } from "../../state/computed.ts";
+import { visibleTasks, activeTask } from "../../state/computed.ts";
 import { tip } from "../../state/tooltip.ts";
 import { api } from "../../api/client.ts";
 import { tryApi } from "../../api/errors.ts";
@@ -113,14 +112,13 @@ export function SidebarPane(): VNode {
 function MainModePane(): VNode {
   const f = filters.value;
 
-  // Visible task list: AND-composed with the showAllTasks UI toggle (hide
-  // done tasks when off). filteredTasks already applies status/lane/tag.
-  const base = showAllTasks.value ? filteredTasks.value : filteredTasks.value.filter(t => t.status !== "done");
   // Render-time alphabetical sort with natural numeric ordering so
-  // `task-2` precedes `task-12`. Server-side priority order is intentionally
-  // discarded HERE only — `activeTask` still consumes the priority-sorted
-  // `filteredTasks` for default-selection precedence.
-  const visibleTasks = [...base].sort((a, b) =>
+  // `task-2` precedes `task-12`. The `showAllTasks` gate is applied inside
+  // the `visibleTasks` computed (state/computed.ts) — single source of truth
+  // shared with the StatusBar shown count. Server-side priority order is
+  // intentionally discarded HERE only — `activeTask` still consumes the
+  // priority-sorted `filteredTasks` for default-selection precedence.
+  const sortedTasks = [...visibleTasks.value].sort((a, b) =>
     a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: "base" }),
   );
 
@@ -228,7 +226,7 @@ function MainModePane(): VNode {
           <SectionHeader
             label="Tasks"
             open={sectionOpen.value.tasks}
-            count={visibleTasks.length}
+            count={sortedTasks.length}
             onToggle={() => toggleSection("tasks")}
             trailing={
               <button
@@ -246,10 +244,10 @@ function MainModePane(): VNode {
           />
           {sectionOpen.value.tasks ? (
             <div class="section-body">
-              {visibleTasks.length === 0 ? (
+              {sortedTasks.length === 0 ? (
                 <p class="meta">no tasks match the current filters</p>
               ) : (
-                visibleTasks.map(t => (
+                sortedTasks.map(t => (
                   <button
                     class={`task-row${activeTask.value && t.id === activeTask.value.id ? " active" : ""}`}
                     draggable={true}

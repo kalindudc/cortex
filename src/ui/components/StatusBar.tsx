@@ -2,7 +2,7 @@
 //
 // Read-only summary computed from signals:
 //   Left:   filter summary text reflecting filters.value (status / lane / tag).
-//   Middle: counts — `N shown` (filteredTasks), plus `N blocked` and
+//   Middle: counts — `N shown` (visibleTasks), plus `N blocked` and
 //           `N in review` chips when nonzero.
 //   Right:  persistent palette hint via kbd("P") from lib/keys.ts.
 //
@@ -10,7 +10,7 @@
 
 import type { VNode } from "preact";
 import { filters, paletteOpen } from "../state/signals.ts";
-import { filteredTasks, blockedTasks, UNTAGGED } from "../state/computed.ts";
+import { visibleTasks, blockedTasks, UNTAGGED } from "../state/computed.ts";
 import { tasks as allTasks } from "../state/signals.ts";
 import { notificationsOpen, unreadCount } from "../state/notifications.ts";
 import { kbd } from "../lib/keys.ts";
@@ -30,7 +30,7 @@ function describeFilters(f: { status: string | null; lane: string | null; tag: s
 
 export function StatusBar(): VNode {
   const f = filters.value;
-  const shown = filteredTasks.value.length;
+  const shown = visibleTasks.value.length;
   const blocked = blockedTasks.value.length;
   const inReview = allTasks.value.filter(t => t.status === "review").length;
 
