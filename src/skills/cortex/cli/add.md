@@ -5,7 +5,7 @@ Create a new task. Returns `[<id>] <title>` on success — capture the id for la
 ## Usage
 
 ```bash
-cortex add "<title>" [-l <lane>] [-p <priority>] [-b <body>]
+cortex add "<title>" [-l <lane>] [-p <priority>] [-b <body> | --body-file <path>] [-s <status>] [-t <tags>]
 ```
 
 ## Args
@@ -16,7 +16,9 @@ cortex add "<title>" [-l <lane>] [-p <priority>] [-b <body>]
 | `--lane` | `-l` | `now` | Lane name. Auto-created if it doesn't exist. |
 | `--priority` | `-p` | (none) | Optional. Non-negative integer. **0 = highest**, larger numbers = lower priority. Leave unset for archive/document tasks (plans, research notes, anything you organise by lane or tag rather than urgency). |
 | `--body` | `-b` | — | Longer description shown by `cortex show <id>`. |
-| `--status` | `-s` | no | One of `draft`, `open`, `review`, `blocked`, `done`. Set the initial status of the task. |
+| `--body-file` | — | — | Read the body from a file. Mutually exclusive with `-b`. ALWAYS prefer this over `-b` for KB-scale markdown (shell escaping is a footgun). |
+| `--status` | `-s` | `open` | One of `draft`, `open`, `review`, `blocked`, `done`. Set the initial status of the task. |
+| `--tags` | `-t` | — | Comma-separated tag names (e.g. `-t "plan,my-feature"`). Auto-creates missing tags. Tag names match `[a-z0-9_@-]{1,32}`. |
 
 ## Examples
 

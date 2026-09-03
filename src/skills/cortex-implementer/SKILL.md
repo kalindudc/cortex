@@ -19,12 +19,10 @@ The plan body is read once at the start and is NEVER mutated during execution. P
 
 The plan source and per-task progress markers live in cortex — not as files. Three cortex specifics apply.
 
-1. ALWAYS use the `cortex_update` tool, call that tool for every update. If the tool does not exist follow the Fallback Strategy.
-    Fallback strategy: generate ONE session id at the start of your agent session, hold in working memory, and reuse it for the lifetime of the session:
+1. ALWAYS use the `cortex_update` tool for every update when it is registered. If unavailable, generate ONE session id at session start, hold it in working memory (never env vars or repo files), and pass it via `--as` on every update — full rules in the `cortex` skill's [session-id recipe](../cortex/recipes/session-id.md):
     ```bash
     SESSION_ID="implementer-$(openssl rand -hex 4)"   # e.g. implementer-1c0ed4a8
     ```
-    Format `<role>-<8 hex>`, max 80 chars, no newlines. NEVER store in env vars (sandboxed sub-shells throw them away) or in repo files (two agents collapse into one identity in the audit trail). The `cortex update <id> --as "$SESSION_ID" -m "..."` examples below are the fallback path — keep using them when the tool is unavailable.
 
 2. PLAN BODY ← cortex task. Fetch the plan with:
     ```bash

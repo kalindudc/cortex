@@ -25,12 +25,10 @@ This skill persists the plan as the body of a cortex task. Multiple plans for on
 
 Plans are stored in cortex — not as files. Three cortex specifics apply.
 
-1. ALWAYS use the `cortex_update` tool, call that tool for every update. If the tool does not exist follow the Fallback Strategy.
-    Fallback strategy: generate ONE session id at the start of your agent session, hold in working memory, and reuse it for the lifetime of the session:
+1. ALWAYS use the `cortex_update` tool for every update when it is registered. If unavailable, generate ONE session id at session start, hold it in working memory (never env vars or repo files), and pass it via `--as` on every update — full rules in the `cortex` skill's [session-id recipe](../cortex/recipes/session-id.md):
     ```bash
     SESSION_ID="planner-$(openssl rand -hex 4)"   # e.g. planner-7f3a9201
     ```
-    Format `<role>-<8 hex>`, max 80 chars, no newlines. NEVER store in env vars (sandboxed sub-shells throw them away) or in repo files (two agents collapse into one identity in the audit trail). The `cortex update <id> --as "$SESSION_ID" -m "..."` examples below are the fallback path — keep using them when the tool is unavailable.
 
 2. PLAN BODY → cortex task. Draft the plan into a tmpfile and persist it via `--body-file`:
     ```bash
@@ -70,27 +68,7 @@ PLAN STACKS: when a single plan exceeds the size limits and cannot be consolidat
 
 PRIORITY: cortex tasks default to no priority (the SQLite column is nullable; `cortex ls` sorts un-prioritised tasks after prioritised ones, then by created-time). Plans, plan stacks, and supporting documents are organised by lane + tag, not a priority queue — do NOT pass `--priority` to `cortex add` unless the user explicitly asked for an urgency annotation. The dashboard hides the priority chip on list rows when priority is unset; `cortex show` omits the `priority:` line.
 
-REVISIONS: cortex offers two edit modes for plan bodies — anchor-based partial edits and full-body rewrites. Choose based on the scope of the revision.
-
-For surgical changes — adding a task, fixing a typo, marking a Low-Level Task `[COMPLETED]`, amending a single Implementation Note bullet — anchor-based edits make the change race-safe and force you to align on the plan's actual current state before mutating it:
-
-```bash
-cortex edit <id> \
-  --body-search '<exact unique anchor from current body>' \
-  --body-replace '<replacement>'
-cortex update <id> --as "$SESSION_ID" -m "revised: <brief summary>"
-```
-
-The anchor is matched literally and must occur exactly once. If it doesn't (the plan changed under you, or the anchor is ambiguous), the operation fails 409 — re-fetch, refine the anchor (usually by including surrounding lines for uniqueness), and retry. See the `cortex` skill's [cli/edit.md](../cortex/cli/edit.md) for the full operation reference.
-
-For larger restructures where most of the plan is changing, a full-body rewrite is the more direct path:
-
-```bash
-cortex show <id> --json | jq -r .task.body > /tmp/plan.md
-# edit /tmp/plan.md
-cortex edit <id> --body-file /tmp/plan.md
-cortex update <id> --as "$SESSION_ID" -m "revised: <brief summary>"
-```
+REVISIONS: two edit modes — anchor-based partial edit for surgical changes (adding a task, marking one `[COMPLETED]`; fails 409 on a missing or ambiguous anchor — re-fetch, refine, retry), full-body rewrite via `--body-file` for large restructures. Exact commands: the `cortex` skill's [persistence recipe](../cortex/recipes/persistence.md). After any edit post `cortex update <id> --as "$SESSION_ID" -m "revised: <brief summary>"`.
 
 NEVER edit a task whose status is `review` without explicit user confirmation — overwriting silently destroys the implementer's review handoff.
 
@@ -238,23 +216,22 @@ Claims to extract:
 - Quantitative claims: line counts, element counts, test counts
 - Negative claims: "X does not support Y", "there is no Z"
 
-Invoke multi-model critic consensus to verify claims using the critique infrastructure:
+Verification is tiered — cheap checks first, consensus only where it pays:
 
-1. Read `~/.agents/skills/critique/critics.yml` to get the available critic models
-2. Read `~/.agents/skills/critique/critic-prompt.md` to get the shared evaluation prompt
-3. Construct a `spawn` call with `tasks` array -- one task per critic model.
-   Each task's `task` field = the critic prompt + claims to verify + plan context.
-   Each task's `model` field = the model identifier from critics.yml.
-4. Collect results, extract KEEP/REJECT/ABSTAIN votes from each critic's response
-5. Apply dynamic consensus: majority KEEP = claim verified.
+TIER 1 — inline, ALWAYS, no spawns. Mechanical claims a single tool call proves:
+- File existence: `ls` / `find` the Beginning-context and pattern files
+- API/function claims: read the source or installed type definitions
+- Code snippets: verify syntax and semantics
+- Quantitative claims: count against the actual source
+Log results in "Verification Notes".
 
-If the critique infrastructure is unavailable (critics.yml missing or unreadable), perform inline verification and note the limitation in Verification Notes.
+TIER 2 — multi-model critic consensus. ONLY for claims that carry design risk:
+- Approach-level claims ("X is the right extension point", "this pattern generalizes")
+- Negative claims ("the library does not support X", "there is no existing Z")
+- External-platform behavior unprovable from the codebase
+Follow the consensus recipe at `~/.agents/skills/critique/references/consensus-recipe.md`: ONE spawned task per critic model, each covering ALL claims; majority KEEP per claim = verified.
 
-When performing inline verification (consensus unavailable):
-- For each file existence claim, verify with `ls` or `find`
-- For each API/function claim, verify by reading the source
-- For each code snippet, verify syntax and semantics
-- Log results in "Verification Notes"
+If the critique infrastructure is unavailable (recipe or critics.yml missing), verify Tier 2 claims inline as best-effort and note the limitation in Verification Notes.
 
 Any claim flagged INCORRECT: revise the plan before output. Log the revision in the "Verification Notes" section at the end of the plan.
 

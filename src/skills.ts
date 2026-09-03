@@ -36,6 +36,7 @@ import cortexCliServePath from "./skills/cortex/cli/serve.md" with { type: "file
 import cortexCliOpenPath from "./skills/cortex/cli/open.md" with { type: "file" };
 import cortexCliTagPath from "./skills/cortex/cli/tag.md" with { type: "file" };
 import cortexRecipeSession from "./skills/cortex/recipes/session-id.md" with { type: "file" };
+import cortexRecipePersistence from "./skills/cortex/recipes/persistence.md" with { type: "file" };
 
 // --- Methodology skills (Plan 4) ------------------------------------------
 import plannerSkillMd from "./skills/cortex-planner/SKILL.md" with { type: "file" };
@@ -60,6 +61,7 @@ const SKILLS: Record<SkillName, Manifest> = {
     "cli/open.md": cortexCliOpenPath,
     "cli/tag.md": cortexCliTagPath,
     "recipes/session-id.md": cortexRecipeSession,
+    "recipes/persistence.md": cortexRecipePersistence,
   },
   "cortex-planner": {
     "SKILL.md": plannerSkillMd,

@@ -27,12 +27,10 @@ Depth over ceremony: a 60-line analysis with 8 cited findings beats a 400-line e
 
 The analysis lives as the BODY of a cortex task. Three cortex specifics apply.
 
-1. ALWAYS use the `cortex_update` tool, call that tool for every update. If the tool does not exist follow the Fallback Strategy.
-    Fallback strategy: generate ONE session id at the start of your agent session, hold in working memory, and reuse it for the lifetime of the session:
+1. ALWAYS use the `cortex_update` tool for every update when it is registered. If unavailable, generate ONE session id at session start, hold it in working memory (never env vars or repo files), and pass it via `--as` on every update — full rules in the `cortex` skill's [session-id recipe](../cortex/recipes/session-id.md):
     ```bash
     SESSION_ID="research-$(openssl rand -hex 4)"   # e.g. research-9b1c4f2a
     ```
-    Format `<role>-<8 hex>`, max 80 chars, no newlines. NEVER store in env vars (sandboxed sub-shells throw them away) or in repo files (two agents collapse into one identity in the audit trail). The `cortex update <id> --as "$SESSION_ID" -m "..."` examples below are the fallback path — keep using them when the tool is unavailable.
 
 2. ANALYSIS BODY → cortex task. Draft the analysis into a tmpfile and persist via `--body-file`:
     ```bash
@@ -66,27 +64,7 @@ The analysis lives as the BODY of a cortex task. Three cortex specifics apply.
 After `cortex add`, attribute the analysis IMMEDIATELY with a cortex update
 This is MANDATORY — `cortex add` is anonymous; the update records WHO did the analysis.
 
-REVISIONS: cortex offers two edit modes for analysis bodies — anchor-based partial edits and full-body rewrites. Choose based on the scope of the revision.
-
-For surgical changes — fixing a wrong file:line citation, correcting a number, appending one finding — anchor-based edits are race-safe and force you to align on the analysis's current state before mutating it:
-
-```bash
-cortex edit <id> \
-  --body-search '<exact unique anchor from current body>' \
-  --body-replace '<replacement>'
-cortex update <id> --as "$SESSION_ID" -m "revised: <brief summary>"
-```
-
-The anchor is matched literally and must occur exactly once. If it doesn't, the operation fails 409 — re-fetch, refine the anchor (usually by including surrounding lines for uniqueness), and retry.
-
-For a full rewrite — the headline changed, or the structure no longer fits — overwrite the whole body:
-
-```bash
-cortex show <id> --json | jq -r .task.body > /tmp/analysis.md
-# edit /tmp/analysis.md
-cortex edit <id> --body-file /tmp/analysis.md
-cortex update <id> --as "$SESSION_ID" -m "revised: <brief summary>"
-```
+REVISIONS: two edit modes — anchor-based partial edit for surgical changes (fixing a citation, appending one finding; fails 409 on a missing or ambiguous anchor — re-fetch, refine, retry), full-body rewrite via `--body-file` when the structure no longer fits. Exact commands: the `cortex` skill's [persistence recipe](../cortex/recipes/persistence.md). After any edit post `cortex update <id> --as "$SESSION_ID" -m "revised: <brief summary>"`.
 
 NEVER edit a task whose status is `review` or `done` without explicit user confirmation — overwriting silently destroys someone else's downstream work.
 
@@ -238,10 +216,7 @@ Before persisting, extract verifiable claims and re-check the cheap ones inline:
 
 Optional multi-model critique pass — invoke when the headline is high-stakes (architectural recommendation, irreversible decision, contested area):
 
-1. Read `~/.agents/skills/critique/critics.yml` for available models.
-2. Read `~/.agents/skills/critique/critic-prompt.md` for the shared evaluation prompt.
-3. Spawn one task per critic with the analysis + the specific claims to challenge.
-4. Apply majority KEEP / REJECT. Revise on REJECT and log the revision in Verification Notes.
+Follow the consensus recipe at `~/.agents/skills/critique/references/consensus-recipe.md`: ONE spawned task per critic model, each covering the analysis + ALL claims to challenge; majority KEEP / REJECT per claim. Revise on REJECT and log the revision in Verification Notes.
 
 If the critique infrastructure is unavailable, perform inline verification only and note the limitation in Verification Notes.
 

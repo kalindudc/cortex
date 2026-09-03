@@ -33,3 +33,4 @@ Other commands (`ls`, `show`, `mv`, `rm`, `lane`, `stop`) follow the same shape 
 ## Recipes
 
 - [Session ID for parallel agents](recipes/session-id.md) — how to generate and carry the `--as` tag for the lifetime of an agent session.
+- [Persisting documents as cortex tasks](recipes/persistence.md) — shared mechanics for skills that store plans, reviews, or analyses as task bodies: lane derivation, `--body-file` discipline, attribution, revision modes, cross-linking.
