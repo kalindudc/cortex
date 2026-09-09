@@ -12,6 +12,7 @@ const main = defineCommand({
     add: () => import("./commands/add.ts").then(m => m.default),
     ls: () => import("./commands/ls.ts").then(m => m.default),
     show: () => import("./commands/show.ts").then(m => m.default),
+    search: () => import("./commands/search.ts").then(m => m.default),
     update: () => import("./commands/update.ts").then(m => m.default),
     edit: () => import("./commands/edit.ts").then(m => m.default),
     mv: () => import("./commands/mv.ts").then(m => m.default),

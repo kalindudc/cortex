@@ -14,7 +14,7 @@ const LS_TAG_LIMIT = 3;
  *  the caller can string-concat without conditional spaces. ANSI gray is
  *  applied at call time via the `c()` helper, not here — keep this pure for
  *  testability. */
-function renderTagsTruncated(tags: string[]): string {
+export function renderTagsTruncated(tags: string[]): string {
   if (!tags || tags.length === 0) return "";
   const head = tags.slice(0, LS_TAG_LIMIT).map(n => `#${n}`);
   const more = tags.length - LS_TAG_LIMIT;
@@ -25,7 +25,7 @@ function renderTagsTruncated(tags: string[]): string {
 const useColor = (): boolean => !process.env.NO_COLOR && process.stdout.isTTY;
 const c = (code: string, s: string) => (useColor() ? `\x1b[${code}m${s}\x1b[0m` : s);
 
-const STATUS_BADGE: Record<TaskStatus, string> = {
+export const STATUS_BADGE: Record<TaskStatus, string> = {
   draft: "○",
   open: "○",
   review: "◐",
@@ -33,7 +33,7 @@ const STATUS_BADGE: Record<TaskStatus, string> = {
   done: "✓",
 };
 
-const STATUS_COLOR: Record<TaskStatus, string> = {
+export const STATUS_COLOR: Record<TaskStatus, string> = {
   draft: "36",
   open: "37",
   review: "33",
@@ -42,7 +42,7 @@ const STATUS_COLOR: Record<TaskStatus, string> = {
 };
 
 export default defineCommand({
-  meta: { name: "ls", description: "list tasks (grouped by lane, sorted by priority)" },
+  meta: { name: "ls", description: "list tasks (grouped by lane, sorted by id)" },
   args: {
     lane: {
       type: "string",
@@ -112,6 +112,11 @@ export default defineCommand({
         tags: tagFilter,
         ...searchOpts,
       });
+      // `cortex ls` sorts by task id (ascending) by default — stable and
+      // scannable when ids are the primary handle for agent handoffs. The
+      // priority ORDER BY inside Store.listTasks is untouched so the
+      // server/UI keep their priority-first ordering; only the CLI re-sorts.
+      rows.sort((a, b) => a.id - b.id);
       if (args.json) {
         console.log(JSON.stringify(rows));
         return;

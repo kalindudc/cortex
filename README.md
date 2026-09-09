@@ -46,8 +46,9 @@ PORT=7778 pnpm run serve:dev
 | --- | --- |
 | `init` | initialize the SQLite database |
 | `add <title> [-l lane] [-p int] [-b body]` | create a task (auto-creates `lane` if missing) |
-| `ls [-l lane] [-s status] [--json]` | list tasks, grouped by lane, sorted by priority (`s` = `open\|review\|blocked\|done`) |
+| `ls [-l lane] [-s status] [--json]` | list tasks, grouped by lane, sorted by id (`s` = `open\|review\|blocked\|done`) |
 | `show <id> [--json]` | show one task with its updates |
+| `search [text] [--json]` | fuzzy-search tasks (same scorer + `@id`/`@title`/`#tag` prefixes as the dashboard palette) in an fzf picker with a `show` preview; enter copies the task id to the clipboard and prints the task like `show`; `--json` emits ranked matches without fzf |
 | `update <id> -m <msg> [-s status] [-b body]` | post an update; `status` = `open\|review\|blocked\|done` |
 | `edit <id> [-t title] [-b body] [-p int]` | edit task fields |
 | `mv <id> <lane>` | move a task to another lane (auto-creates `lane` if missing) |

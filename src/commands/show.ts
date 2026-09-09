@@ -1,5 +1,43 @@
 import { defineCommand } from "citty";
-import { Store } from "../store.ts";
+import { Store, type Task, type Update } from "../store.ts";
+
+/**
+ * Render the formatted `cortex show` text view for one task and its
+ * updates. Exported so `cortex search` can print the selected task
+ * byte-for-byte identical to `cortex show <id>` — keep the two commands
+ * in lockstep by construction, not by convention.
+ */
+export function renderTaskView(task: Task, updates: Update[]): string {
+  const lines: string[] = [];
+  lines.push(`[${task.id}] ${task.title}`);
+  lines.push(`  lane:     ${task.lane}`);
+  lines.push(`  status:   ${task.status}`);
+  if (task.priority !== null) lines.push(`  priority: ${task.priority}`);
+  // Tags line: full alphabetical list (no truncation in `show` since the
+  // user explicitly asked for the details of one task). Skipped entirely
+  // when the task has no tags.
+  if (task.tags && task.tags.length > 0) {
+    lines.push(`  tags:     ${task.tags.map(n => `#${n}`).join(" ")}`);
+  }
+  lines.push(`  created:  ${new Date(task.created).toISOString()}`);
+  lines.push(`  updated:  ${new Date(task.updated).toISOString()}`);
+  if (task.body) {
+    lines.push("", task.body);
+  }
+  if (updates.length > 0) {
+    lines.push("", "updates:");
+    for (const u of updates) {
+      const ts = new Date(u.created).toISOString();
+      lines.push(`  [${u.severity}] ${ts} ${u.author}: ${u.summary}`);
+      if (u.body) {
+        for (const line of u.body.split("\n")) {
+          lines.push(`    ${line}`);
+        }
+      }
+    }
+  }
+  return lines.join("\n");
+}
 
 export default defineCommand({
   meta: { name: "show", description: "show a task and its updates" },
@@ -33,33 +71,7 @@ export default defineCommand({
         console.log(JSON.stringify({ task, updates }));
         return;
       }
-      console.log(`[${task.id}] ${task.title}`);
-      console.log(`  lane:     ${task.lane}`);
-      console.log(`  status:   ${task.status}`);
-      if (task.priority !== null) console.log(`  priority: ${task.priority}`);
-      // Tags line: full alphabetical list (no truncation in `show` since the
-      // user explicitly asked for the details of one task). Skipped entirely
-      // when the task has no tags.
-      if (task.tags && task.tags.length > 0) {
-        console.log(`  tags:     ${task.tags.map(n => `#${n}`).join(" ")}`);
-      }
-      console.log(`  created:  ${new Date(task.created).toISOString()}`);
-      console.log(`  updated:  ${new Date(task.updated).toISOString()}`);
-      if (task.body) {
-        console.log(`\n${task.body}`);
-      }
-      if (updates.length > 0) {
-        console.log(`\nupdates:`);
-        for (const u of updates) {
-          const ts = new Date(u.created).toISOString();
-          console.log(`  [${u.severity}] ${ts} ${u.author}: ${u.summary}`);
-          if (u.body) {
-            for (const line of u.body.split("\n")) {
-              console.log(`    ${line}`);
-            }
-          }
-        }
-      }
+      console.log(renderTaskView(task, updates));
     } finally {
       store.close();
     }
