@@ -47,7 +47,10 @@ STATUS TRANSITIONS (every command also passes `--as "$SESSION_ID"`):
 
 `blocked` is the ONE transition that fires a browser notification — use it deliberately. `done` is reserved for human-confirmed merges.
 
-MULTI-AGENT COORDINATION: cortex enforces NO locks. Before starting, scan `cortex show <id> --json | jq '.updates'` for activity in the last few minutes from any author other than `$SESSION_ID`. If found, post `cortex update <id> --as "$SESSION_ID" -m "another agent active; standing down"` and exit.
+MULTI-AGENT COORDINATION: cortex enforces NO locks; an `open` status is approval, not an exclusive implementation lock. Before starting, inspect `cortex show <id> --json | jq '.updates'`, including each update's `summary`, `body`, `author`, and `created`.
+
+- Planning/research updates, approval/status transitions, and completed `task N: ...` records alone are NOT evidence of active implementation, regardless of recency or author.
+- Only pause for positive evidence of ongoing implementation by another session, such as a recent explicit start/resume or still-working update that has not been superseded by a later handoff, stop, or completion. Quote the specific evidence, post a coordination note with `cortex_update`, and ask the user how to proceed. Do NOT claim another agent is active based only on timestamps.
 
 ---
 
@@ -56,10 +59,10 @@ MULTI-AGENT COORDINATION: cortex enforces NO locks. Before starting, scan `corte
 A cortex task `<id>` MUST be explicitly provided by the user. Do NOT auto-discover, enumerate, or auto-pick a task — the implementer always works on the one task the user names.
 
 1. If `$ARGUMENTS` contains a cortex task id, use that. Otherwise, ask the user.
-2. Fetch and read the plan body completely (see Cortex persistence > PLAN BODY ← cortex task).
+2. Check the Status gate below, then fetch and read the plan body completely (see Cortex persistence > PLAN BODY ← cortex task).
 3. Extract tasks from "Low-Level Tasks" if present; for non-standard formats (analysis reports, recommendation docs), explicitly list inferred tasks and re-order by structural dependency when targeting the same file. If ambiguous, ask the user.
 4. For each task, identify: target files, functions, implementation details, verification commands.
-5. Classify status by reading the cortex update history (`cortex show <id> --json | jq -r '.updates[] | select(.message | test("^task [0-9]+:")) | .message'`):
+5. Classify status by reading the cortex update history (`cortex show <id> --json | jq -r '.updates[] | select(.summary | test("^task [0-9]+:")) | .summary'`):
    - Completed -- a `task N: ...` update from any session id already exists
    - In progress -- the most recent update is a `resuming from task N` from THIS `$SESSION_ID`
    - Pending -- no update for this N
@@ -67,15 +70,13 @@ A cortex task `<id>` MUST be explicitly provided by the user. Do NOT auto-discov
 7. Read all files in the "Beginning context" section (or infer from task descriptions).
 8. Use the plan as a guide, not a strict contract; deviations can be made to achieve the overall goal but must be documented and approved by the user.
 
-### Draft-status gate (MUST check before ANY work)
+### Status gate (MUST check before reading the plan)
 
-Before reading a single task from the plan, check the task's status:
-1. Fetch the plan's status via `cortex show <id> --json | jq -r .task.status`.
-2. If the status is `draft` or `blocked`, STOP immediately. Do NOT read the plan body. Do NOT create branches. Do NOT write code.
-3. Ask the user: "This plan is in `draft` status. Do you want me to implement it?" Wait for explicit confirmation.
-4. Only proceed after the user confirms OR the status is no longer `draft`.
+1. Verify the task exists and read its current status with `cortex show <id> --json | jq -r '.task.status'`. If missing or the lookup fails, STOP; do NOT read the plan body, create branches, or write code.
+2. `open` means planning is complete and the plan is approved for implementation. When the user explicitly requests it, proceed subject to the evidence-based coordination check. Do NOT ask whether planning has finished or re-confirm an already-approved handoff. The current task status takes precedence over older planning notes.
+3. For any non-open status (`draft`, `blocked`, `review`, or `done`), STOP and report the actual status. Ask for explicit authorization before reading the body or starting implementation; only proceed after that authorization or a transition to `open`.
 
-This gate is load-bearing. A `draft` plan is a document, not a work order.
+A `draft` plan is a document, not a work order. An `open` plan MUST NOT be treated as still being drafted because a planner posted recently.
 
 ### Resuming Partially Completed Plans
 
@@ -88,7 +89,7 @@ If any tasks are marked completed or in progress (per step 5 above), this is a r
 - Announce on cortex: `cortex update <id> --as "$SESSION_ID" -m "resuming from task <N>"`.
 - Report resume status to the user: tasks verified, tasks to resume, tasks remaining.
 
-If prior `task N: ...` updates came from a DIFFERENT author, treat as multi-agent coordination (see Cortex persistence > MULTI-AGENT COORDINATION) instead.
+Prior `task N: ...` updates from a DIFFERENT author are completion records, not proof of an active implementer. Verify that work and resume normally unless the coordination check finds separate evidence of ongoing implementation.
 
 ## Pre-Implementation Setup
 
@@ -226,7 +227,7 @@ cortex update <id> --as "$SESSION_ID" -s done -m "merged"
 - NEVER git stage or git commit, do not create any commits, the user owns the commit process
 - ALWAYS load the `cortex` skill first for CLI vocabulary and status semantics
 - ALWAYS track the core protocol with TODOs or Quests, if the tooling supports it
-- NEVER implement a task that has a `draft` or `blocked` status -- STOP and ask the user for confirmation before proceeding
+- ALWAYS check the current status before reading the plan; require `open` or explicit user authorization for a non-open status
 - ALWAYS post ONE `cortex update` per Low-Level Task with `--as "$SESSION_ID"`
 - NEVER mutate the cortex task body -- body changes are reserved for cortex-planner
 - NEVER skip a task -- execute them in strict order

@@ -129,6 +129,47 @@ describe("methodology skills — standalone discipline", () => {
   });
 });
 
+// Instruction contracts: approved planning history is not a running implementer.
+describe("cortex-implementer — approved handoffs and coordination", () => {
+  let text: string;
+
+  beforeAll(async () => {
+    const dir = path.join(tmpDir, "cortex-implementer");
+    await writeSkill("cortex-implementer", dir);
+    text = fs.readFileSync(path.join(dir, "SKILL.md"), "utf8");
+  });
+
+  test("open plans authorize requested implementation without rechecking planning", () => {
+    expect(text).toContain("`open` means planning is complete and the plan is approved for implementation.");
+    expect(text).toContain("Do NOT ask whether planning has finished");
+    expect(text).toContain("The current task status takes precedence over older planning notes.");
+  });
+
+  test("coordination requires evidence of ongoing implementation, not recent planning activity", () => {
+    expect(text).toContain("positive evidence of ongoing implementation");
+    expect(text).toContain(
+      "Planning/research updates, approval/status transitions, and completed `task N: ...` records alone are NOT evidence",
+    );
+    expect(text).toContain("has not been superseded by a later handoff, stop, or completion");
+    expect(text).not.toContain("for activity in the last few minutes from any author");
+  });
+
+  test("completion records from another session allow a verified resume", () => {
+    expect(text).toContain(
+      "`task N: ...` updates from a DIFFERENT author are completion records, not proof of an active implementer.",
+    );
+    expect(text).toContain(
+      "Verify that work and resume normally unless the coordination check finds separate evidence",
+    );
+    expect(text).not.toContain("treat as multi-agent coordination");
+  });
+
+  test("progress history reads the actual update summary field", () => {
+    expect(text).toContain('select(.summary | test("^task [0-9]+:")) | .summary');
+    expect(text).not.toContain(".message | test");
+  });
+});
+
 // --- pi-extension manifest -----------------------------------------------
 //
 // Every shipped pi extension MUST install at least one .ts file > 200 bytes
