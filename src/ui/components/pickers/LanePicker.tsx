@@ -21,7 +21,7 @@ export function LanePicker({ task }: { task: Task }): VNode {
   const select = (l: Lane) => {
     lanePopover.value = false;
     if (l.name === task.lane) return;
-    tryApi(() => api.moveLane(task.id, l.name));
+    void tryApi(() => api.moveLane(task.id, l.name)).catch(() => {});
   };
   return (
     <Picker<Lane>

@@ -1,13 +1,14 @@
-// FilterChips — renders the active `filters` slots as removable chips, plus
-// a persistent "+ tag" affordance that opens the TagFilterModal.
+// FilterChips — selected-TAG tokens inside WorkspaceFilters (W2).
 //
-// One chip per non-null slot: status, lane, and one chip per entry in the
-// tag array (OR-composed in computed.ts). The strip ALWAYS renders so the
-// "+ tag" affordance is one click away regardless of filter state — mouse
-// users would otherwise have no discoverable entry to tag filtering.
+// One removable token per entry in filters.value.tag (OR-composed in
+// computed.ts; the UNTAGGED sentinel renders as the literal word
+// "untagged"). Status and lane have their own visible selectors in
+// WorkspaceFilters, so they get no chips here, and the old '+ tag'
+// affordance is gone — the single Tags trigger lives beside the selectors.
+// Renders nothing when no tags are selected.
 
 import type { VNode } from "preact";
-import { filters, setFilter, toggleTagFilter, modal } from "../../state/signals.ts";
+import { filters, toggleTagFilter } from "../../state/signals.ts";
 import { UNTAGGED } from "../../state/computed.ts";
 import { Icon } from "../Icon.tsx";
 import { tip } from "../../state/tooltip.ts";
@@ -29,16 +30,11 @@ function Chip({ label, onRemove, removeTip }: ChipProps): VNode {
   );
 }
 
-export function FilterChips(): VNode {
-  const { status, lane, tag } = filters.value;
+export function FilterChips(): VNode | null {
+  const { tag } = filters.value;
+  if (tag.length === 0) return null;
   return (
     <div class="filter-chips">
-      {status ? (
-        <Chip label={`status: ${status}`} onRemove={() => setFilter("status", null)} removeTip="Clear status filter" />
-      ) : null}
-      {lane ? (
-        <Chip label={`lane: ${lane}`} onRemove={() => setFilter("lane", null)} removeTip="Clear lane filter" />
-      ) : null}
       {tag.map(name => (
         <Chip
           key={name}
@@ -47,16 +43,6 @@ export function FilterChips(): VNode {
           removeTip={name === UNTAGGED ? "Stop including untagged tasks" : `Remove tag filter: #${name}`}
         />
       ))}
-      <button
-        type="button"
-        class="filter-chip-add"
-        onClick={() => (modal.value = { kind: "filter-tags" })}
-        aria-label="Filter by tags"
-        {...tip("Open the tag filter")}
-      >
-        <Icon name="plus" size={11} />
-        <span>tag</span>
-      </button>
     </div>
   );
 }

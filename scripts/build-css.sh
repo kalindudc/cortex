@@ -17,7 +17,9 @@
 # Cascade order matches what styles/index.css would have looked like under
 # Bun >=1.2: tokens → base → layout → utilities (misc) → structural surfaces
 # (sidebar, chips, popover, modal, palette) → semantic widgets (tag-pill,
-# tag-picker, tooltip, inbox) → active-task pane last so its overrides win.
+# tag-picker, tooltip, inbox) → active-task pane → document (rendered-
+# Markdown typography + document-workspace chrome) LAST so its reading
+# overrides win over active/modal defaults.
 # DO NOT reorder without re-verifying the dashboard renders identically.
 #
 # When Bun >=1.2 is adopted (see future-improvements note on cortex task 24),
@@ -48,6 +50,8 @@ SLICES=(
   inbox
   notifications
   active
+  document
+  motion
 )
 
 # Verify every slice exists before we start writing.

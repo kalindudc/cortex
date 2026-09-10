@@ -13,6 +13,7 @@ import { tryApi } from "../../api/errors.ts";
 import { LANE_COLORS } from "../../lib/constants.ts";
 import { onSubmitKeys } from "../../lib/keys.ts";
 import { Icon } from "../Icon.tsx";
+import { DialogFrame } from "./DialogFrame.tsx";
 
 export function TagEditModal({ name, close }: { name: string; close: () => void }): VNode | null {
   const tg = tags.value.find(t => t.name === name);
@@ -44,12 +45,7 @@ export function TagEditModal({ name, close }: { name: string; close: () => void 
     close();
   };
   return (
-    <div
-      class="overlay"
-      onClick={(e: MouseEvent) => {
-        if ((e.target as HTMLElement).classList.contains("overlay")) close();
-      }}
-    >
+    <DialogFrame label="Edit tag" onClose={close}>
       <div class="modal" style="max-width: 420px" onKeyDown={onSubmitKeys(save)}>
         <div class="row">
           <h2 class="grow">Edit tag</h2>
@@ -104,6 +100,6 @@ export function TagEditModal({ name, close }: { name: string; close: () => void 
           </div>
         </div>
       </div>
-    </div>
+    </DialogFrame>
   );
 }

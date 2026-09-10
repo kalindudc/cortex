@@ -1,9 +1,9 @@
 // SidebarSystemBar — top app-chrome strip on the unified SidebarPane.
 //
-// Covers theme, tag-management, show-done, on-demand backup, and reset
-// controls. The previous tag-filter button + popover were removed when tag
-// filtering moved to TagFilterModal (opened from the FilterChips "+ tag"
-// affordance or the command palette).
+// Task 330 (W2): the bar keeps theme + REAL backup and gains explicit
+// management entries ('Manage lanes' / 'Manage tags') plus a 'Back to
+// tasks' affordance while a management mode is active. The show-done and
+// reset-filters toggles moved INTO WorkspaceFilters (covered there).
 
 import { describe, test, expect, mock, beforeEach } from "bun:test";
 
@@ -43,70 +43,77 @@ mock.module("../../../../src/ui/api/client.ts", () => ({
 
 import { render, fireEvent } from "@testing-library/preact";
 import { SidebarSystemBar } from "../../../../src/ui/components/sidebar/SidebarSystemBar.tsx";
-import { filters, sidebarMode, showAllTasks } from "../../../../src/ui/state/signals.ts";
+import { filters, sidebarMode, showAllTasks, workspaceQuery } from "../../../../src/ui/state/signals.ts";
+
+// Widening reader: TS narrows sidebarMode.value's literal type after a
+// direct assignment and cannot see that click handlers mutate it.
+const currentSidebarMode = (): string => sidebarMode.value;
 
 describe("SidebarSystemBar", () => {
   beforeEach(() => {
     filters.value = { status: null, lane: null, tag: [] };
+    workspaceQuery.value = "";
     sidebarMode.value = "main";
     showAllTasks.value = false;
     backup.mockClear();
   });
 
-  test("main mode: renders theme + manage-tags + show-done + backup + reset (left to right)", () => {
+  test("main mode: theme + Manage lanes + Manage tags + backup; no show-done/reset (moved into filters)", () => {
     const { container } = render(<SidebarSystemBar />);
     const themeBtn = container.querySelector("button.btn-icon[aria-label^='Switch to']");
+    const lanesBtn = container.querySelector("button.btn-icon[aria-label='Manage lanes']");
     const tagsBtn = container.querySelector("button.btn-icon[aria-label='Manage tags']");
-    const showDoneBtn = container.querySelector("button.btn-icon[aria-label='Show done tasks too']");
     const backupBtn = container.querySelector("button.btn-icon[aria-label='Back up now']");
-    const resetBtn = container.querySelector("button.btn-icon[aria-label='Reset filters']");
-    if (!themeBtn || !tagsBtn || !showDoneBtn || !backupBtn || !resetBtn) {
-      throw new Error("expected theme + manage-tags + show-done + backup + reset in pane-system");
+    if (!themeBtn || !lanesBtn || !tagsBtn || !backupBtn) {
+      throw new Error("expected theme + manage-lanes + manage-tags + backup in pane-system");
     }
-    // Tag-FILTERING button (replaced by FilterChips '+ tag' affordance) must NOT render here.
-    expect(container.querySelector("button[aria-label='Filter by tags']")).toBeNull();
-    // Order: theme → manage-tags → show-done → backup → reset.
-    expect(themeBtn.compareDocumentPosition(tagsBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeGreaterThan(0);
-    expect(tagsBtn.compareDocumentPosition(showDoneBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeGreaterThan(0);
-    expect(showDoneBtn.compareDocumentPosition(backupBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeGreaterThan(0);
-    expect(backupBtn.compareDocumentPosition(resetBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeGreaterThan(0);
+    // Moved into WorkspaceFilters:
+    expect(container.querySelector("button[aria-label='Show done tasks too']")).toBeNull();
+    expect(container.querySelector("button[aria-label='Hide done tasks']")).toBeNull();
+    expect(container.querySelector("button[aria-label='Reset filters']")).toBeNull();
+    // No Back affordance while already on the task list.
+    expect(container.querySelector("button[aria-label='Back to tasks']")).toBeNull();
   });
 
-  test("show-done toggle flips showAllTasks and its aria-label / icon variant", () => {
+  test("clicking 'Manage tags' enters tags mode WITHOUT touching filters (W2)", () => {
+    filters.value = { status: "open", lane: "now", tag: ["bug"] };
+    workspaceQuery.value = "needle";
     const { container } = render(<SidebarSystemBar />);
-    const findBtn = () =>
-      container.querySelector<HTMLButtonElement>(
-        "button[aria-label='Show done tasks too'], button[aria-label='Hide done tasks']",
-      );
-    let btn = findBtn();
-    if (!btn) throw new Error("expected show-done toggle");
-    expect(btn.getAttribute("aria-label")).toBe("Show done tasks too");
-    fireEvent.click(btn);
-    expect(showAllTasks.value).toBe(true);
-    btn = findBtn();
-    expect(btn?.getAttribute("aria-label")).toBe("Hide done tasks");
+    fireEvent.click(container.querySelector("button[aria-label='Manage tags']") as HTMLButtonElement);
+    expect(sidebarMode.value).toBe("tags");
+    expect(filters.value).toEqual({ status: "open", lane: "now", tag: ["bug"] });
+    expect(workspaceQuery.value).toBe("needle");
   });
 
-  test("clicking the manage-tags button flips sidebarMode to 'tags' (and label/icon switch)", () => {
+  test("clicking 'Manage lanes' enters lanes mode", () => {
+    const { container } = render(<SidebarSystemBar />);
+    fireEvent.click(container.querySelector("button[aria-label='Manage lanes']") as HTMLButtonElement);
+    expect(sidebarMode.value).toBe("lanes");
+  });
+
+  test("management mode shows 'Back to tasks'; clicking returns to main and preserves filters", () => {
+    filters.value = { status: "blocked", lane: null, tag: [] };
+    sidebarMode.value = "lanes";
+    const { container } = render(<SidebarSystemBar />);
+    const back = container.querySelector<HTMLButtonElement>("button[aria-label='Back to tasks']");
+    if (!back) throw new Error("expected 'Back to tasks' affordance in management mode");
+    fireEvent.click(back);
+    expect(currentSidebarMode()).toBe("main");
+    expect(filters.value.status).toBe("blocked");
+  });
+
+  test("clicking the active management toggle also returns to main", () => {
+    sidebarMode.value = "tags";
     const { container } = render(<SidebarSystemBar />);
     const tagsBtn = container.querySelector<HTMLButtonElement>("button[aria-label='Manage tags']");
     if (!tagsBtn) throw new Error("expected 'Manage tags' button");
+    expect(tagsBtn.classList.contains("btn-icon-active")).toBe(true);
     fireEvent.click(tagsBtn);
-    expect(sidebarMode.value).toBe("tags");
+    expect(currentSidebarMode()).toBe("main");
   });
 
-  test("tags mode: backup remains available; show-done + reset are hidden (tag-mode-irrelevant controls)", () => {
+  test("backup remains available in management modes and calls the real API", async () => {
     sidebarMode.value = "tags";
-    const { container } = render(<SidebarSystemBar />);
-    expect(container.querySelector("button[aria-label='Back to main sidebar']")).not.toBeNull();
-    expect(container.querySelector("button[aria-label='Back up now']")).not.toBeNull();
-    // Reset-filters + show-done are main-mode only.
-    expect(container.querySelector("button[aria-label='Reset filters']")).toBeNull();
-    expect(container.querySelector("button[aria-label='Show done tasks too']")).toBeNull();
-    expect(container.querySelector("button[aria-label='Hide done tasks']")).toBeNull();
-  });
-
-  test("clicking backup calls the API and shows a saved state", async () => {
     const { container } = render(<SidebarSystemBar />);
     const backupBtn = container.querySelector<HTMLButtonElement>("button.btn-icon[aria-label='Back up now']");
     if (!backupBtn) throw new Error("expected backup button");
@@ -115,22 +122,5 @@ describe("SidebarSystemBar", () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(container.querySelector("button.btn-icon-active[aria-label='Back up now']")).not.toBeNull();
-  });
-
-  test("reset-filters is disabled when no filters are active", () => {
-    const { container } = render(<SidebarSystemBar />);
-    const resetBtn = container.querySelector<HTMLButtonElement>("button.btn-icon[aria-label='Reset filters']");
-    if (!resetBtn) throw new Error("expected reset-filters button");
-    expect(resetBtn.disabled).toBe(true);
-  });
-
-  test("reset-filters is enabled when at least one filter is active and clears every slot", () => {
-    filters.value = { status: "blocked", lane: "now", tag: ["bug", "ui"] };
-    const { container } = render(<SidebarSystemBar />);
-    const resetBtn = container.querySelector<HTMLButtonElement>("button.btn-icon[aria-label='Reset filters']");
-    if (!resetBtn) throw new Error("expected reset-filters button");
-    expect(resetBtn.disabled).toBe(false);
-    fireEvent.click(resetBtn);
-    expect(filters.value).toEqual({ status: null, lane: null, tag: [] });
   });
 });

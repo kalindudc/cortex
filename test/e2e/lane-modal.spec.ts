@@ -6,7 +6,9 @@
 // autoFocus race was the original motivation).
 //
 // Covered:
-//   - Clicking the "+" button in the Lanes section header opens the modal
+//   - Clicking the "+" button in the Manage lanes section header opens the
+//     modal (task 330 W2: lane administration lives in the explicit
+//     'Manage lanes' sidebar mode, entered from the system bar)
 //   - The Name input is autofocused on open
 //   - Create is disabled until a non-blank name is entered
 //   - Submitting creates the lane and closes the modal
@@ -19,23 +21,29 @@ async function listLanes(url: string): Promise<Array<{ name: string }>> {
   return r.json();
 }
 
-test("clicking the Lanes section '+' button opens NewLaneModal with the Name input autofocused", async ({
-  url,
-  page,
-}) => {
-  // Seed an initial lane so the Lanes section is non-empty (the "+" button
-  // is the trailing slot of the Lanes SectionHeader, present regardless).
+/** Enter the explicit 'Manage lanes' sidebar mode (W2). */
+async function openManageLanes(page: import("@playwright/test").Page): Promise<void> {
+  await page.locator('button[aria-label="Manage lanes"]').click();
+  await expect(page.locator(".section-lanes-manage")).toBeVisible();
+}
+
+test("the Manage lanes '+' button opens NewLaneModal with the Name input autofocused", async ({ url, page }) => {
+  // Seed an initial lane so the management list is non-empty (the "+" button
+  // is the trailing slot of the Manage lanes SectionHeader, present regardless).
   await fetch(`${url}/api/lanes`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ name: "now" }),
   });
   await page.goto(url);
+  await openManageLanes(page);
 
   await page.locator('button[aria-label="New lane"]').click();
   await expect(page.locator(".modal")).toBeVisible();
   // Heading confirms NewLaneModal (vs LaneEditModal which says "Edit lane").
   await expect(page.locator(".modal h2")).toHaveText("New lane");
+  // Task 330 V3: every modal rides the one native DialogFrame — named + modal.
+  await expect(page.locator('dialog[aria-label="New lane"][open]')).toHaveCount(1);
 
   // Name input is autofocused via the ref+useEffect pattern.
   const nameInput = page.locator(".modal input").first();
@@ -49,6 +57,7 @@ test("Create button is disabled until a non-blank name is entered", async ({ url
     body: JSON.stringify({ name: "now" }),
   });
   await page.goto(url);
+  await openManageLanes(page);
   await page.locator('button[aria-label="New lane"]').click();
 
   const create = page.locator(".modal button.btn-primary", { hasText: "Create" });
@@ -68,6 +77,7 @@ test("submitting the modal creates the lane and closes the modal; the lane appea
     body: JSON.stringify({ name: "now" }),
   });
   await page.goto(url);
+  await openManageLanes(page);
 
   await page.locator('button[aria-label="New lane"]').click();
   await page.locator(".modal input").first().fill("soon");
@@ -89,6 +99,7 @@ test("Cancel closes the modal without creating a lane", async ({ url, page }) =>
     body: JSON.stringify({ name: "now" }),
   });
   await page.goto(url);
+  await openManageLanes(page);
 
   await page.locator('button[aria-label="New lane"]').click();
   await page.locator(".modal input").first().fill("ghost");

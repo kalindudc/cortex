@@ -1,233 +1,101 @@
-// SidebarPane — the unified left sidebar.
+// SidebarPane — the workspace navigation column.
 //
-// Two modes (sidebarMode signal):
-//   "main" — the primary work surface:
-//     .pane-system    (theme + manage-tags toggle + reset filters)
-//     .sidebar-body   (flex column)
-//       section-views   — 5 built-in smart views (sized to content)
-//       section-lanes   — lane rows; body scrolls; "+" opens NewLaneModal
-//       <FilterChips/>  — only renders when at least one filter slot is set
-//       section-tasks   — collapsible; "+" creates `untitled-<id>` and
-//                         selects it for inline rename. Also hosts the
-//                         show-all-tasks eye toggle.
+// Three modes (sidebarMode signal):
+//   "main" — the work surface:
+//     .pane-system        (theme + management toggles + backup)
+//     .sidebar-body
+//       <WorkspaceFilters/> — THE filtering surface (search / status / lane
+//                             / tags trigger / tag tokens / include-done /
+//                             clear all) — see WorkspaceFilters.tsx (W2/W3)
+//       section-tasks       — collapsible task list over orderedVisibleTasks;
+//                             "+" creates `untitled-<id>` and selects it
+//       lane-drop tray      — TRANSIENT: only while a task drag is active
+//                             (draggedTaskId non-null). A drop surface, NOT
+//                             a filter list (W5).
 //
-//   "tags" — single-section pane for tag CRUD:
-//     section-tags    — alphabetical tag list with edit affordance per
-//                       row; "+" opens NewTagModal. The whole pane
-//                       collapses to this one section so users have
-//                       maximum vertical real estate to manage tags.
+//   "lanes" / "tags" — explicit management panes ('Manage lanes' /
+//     'Manage tags'): rows open the existing edit modals, "+" opens the
+//     create modals. Opening a management mode never changes filters.
 //
-// New-task input + Commands button were removed from the pane foot. Their
-// roles moved to the Tasks section "+" affordance and the StatusBar's
-// clickable palette hint, respectively.
-//
-// Selection wiring is immutable via setFilter:
-//   view-row click → setFilter("status", X) (or full clear for "All tasks")
-//   lane-row click → setFilter("lane",   sel ? null : l.name)
-//   tag-filter     → toggleTagFilter(name) inside TagFilterModal
-// DnD (drag a task onto a lane row) is preserved from the old LanesPane.
+// Task rows are draggable (application/x-cortex-task-id). The header
+// LanePicker remains the click/keyboard/touch alternative for moving tasks.
 
-import type { VNode } from "preact";
+import type { ComponentChildren, VNode } from "preact";
 
 import {
   tasks,
   lanes,
   tags,
   filters,
-  setFilter,
-  clearAllFilters,
   sectionOpen,
   sidebarMode,
   selectedId,
+  draggedTaskId,
+  sidebarFilter,
   modal,
 } from "../../state/signals.ts";
 import { createUntitledTask } from "../../lib/createTask.ts";
-import { visibleTasks, activeTask } from "../../state/computed.ts";
+import { clearWorkspaceTransientState } from "../../state/workspace.ts";
+import { orderedVisibleTasks, activeTask } from "../../state/computed.ts";
 import { tip } from "../../state/tooltip.ts";
 import { api } from "../../api/client.ts";
 import { tryApi } from "../../api/errors.ts";
-import type { TaskStatus } from "../../api/types.ts";
 import { SidebarSystemBar } from "./SidebarSystemBar.tsx";
 import { SectionHeader } from "./SectionHeader.tsx";
-import { FilterChips } from "./FilterChips.tsx";
+import { WorkspaceFilters } from "./WorkspaceFilters.tsx";
+import { SidebarFilterPanel } from "./SidebarFilterPanel.tsx";
 import { Icon } from "../Icon.tsx";
 import { TagPill } from "../chips/TagPill.tsx";
 import { PriorityChip } from "../chips/PriorityChip.tsx";
-
-interface SmartView {
-  id: string;
-  label: string;
-  icon: string;
-  status: TaskStatus | null; // null = clear all filters ("All tasks")
-  count: (allTasks: { status: TaskStatus }[]) => number;
-}
-
-const SMART_VIEWS: SmartView[] = [
-  {
-    id: "all",
-    label: "All tasks",
-    icon: "inbox",
-    status: null,
-    count: ts => ts.filter(t => t.status !== "done").length,
-  },
-  {
-    id: "draft",
-    label: "Draft",
-    icon: "fileText",
-    status: "draft",
-    count: ts => ts.filter(t => t.status === "draft").length,
-  },
-  {
-    id: "review",
-    label: "In review",
-    icon: "eye",
-    status: "review",
-    count: ts => ts.filter(t => t.status === "review").length,
-  },
-  {
-    id: "blocked",
-    label: "Blocked",
-    icon: "ban",
-    status: "blocked",
-    count: ts => ts.filter(t => t.status === "blocked").length,
-  },
-  {
-    id: "done",
-    label: "Done",
-    icon: "checkCircle",
-    status: "done",
-    count: ts => ts.filter(t => t.status === "done").length,
-  },
-];
-
-function toggleSection(key: "views" | "lanes" | "tasks"): void {
-  sectionOpen.value = { ...sectionOpen.value, [key]: !sectionOpen.value[key] };
-}
+import { STATUS_LABEL } from "../../lib/constants.ts";
 
 export function SidebarPane(): VNode {
   if (sidebarMode.value === "tags") return <TagsModePane />;
+  if (sidebarMode.value === "lanes") return <LanesModePane />;
   return <MainModePane />;
+}
+
+// Shared by the three actual navigation modes: one identity and one set
+// of management/system actions, never a duplicate filter list.
+function SidebarShell({ children }: { children: ComponentChildren }): VNode {
+  return (
+    <aside class="pane pane-lanes sidebar-pane">
+      <header class="sidebar-brand">
+        <span class="brand-mark" aria-hidden="true">
+          c
+        </span>
+        <strong>cortex</strong>
+        <span class="workspace-local">local</span>
+      </header>
+      {children}
+      <SidebarSystemBar />
+      {sidebarMode.value === "main" && sidebarFilter.value != null ? (
+        <SidebarFilterPanel key={sidebarFilter.value} kind={sidebarFilter.value} />
+      ) : null}
+    </aside>
+  );
+}
+
+function toggleTasksSection(): void {
+  sectionOpen.value = { ...sectionOpen.value, tasks: !sectionOpen.value.tasks };
 }
 
 function MainModePane(): VNode {
   const f = filters.value;
-
-  // Render-time alphabetical sort with natural numeric ordering so
-  // `task-2` precedes `task-12`. The `showAllTasks` gate is applied inside
-  // the `visibleTasks` computed (state/computed.ts) — single source of truth
-  // shared with the StatusBar shown count. Server-side priority order is
-  // intentionally discarded HERE only — `activeTask` still consumes the
-  // priority-sorted `filteredTasks` for default-selection precedence.
-  const sortedTasks = [...visibleTasks.value].sort((a, b) =>
-    a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: "base" }),
-  );
-
-  const renderViewRow = (v: SmartView): VNode => {
-    const sel = v.status === null ? f.status === null && f.lane === null && f.tag.length === 0 : f.status === v.status;
-    return (
-      <button
-        type="button"
-        class={`view-row${sel ? " selected" : ""}`}
-        onClick={() => {
-          if (v.status === null) {
-            clearAllFilters();
-          } else {
-            setFilter("status", v.status);
-          }
-        }}
-        {...tip(
-          v.status === null ? "Show every task (clears all filters)" : `Filter to ${v.label.toLowerCase()} tasks`,
-        )}
-      >
-        <Icon name={v.icon} />
-        <span class="view-name">{v.label}</span>
-        <span class="view-count num">{v.count(tasks.value)}</span>
-      </button>
-    );
-  };
+  const rows = orderedVisibleTasks.value;
+  const dragging = draggedTaskId.value != null;
 
   return (
-    <aside class="pane pane-lanes sidebar-pane">
-      <SidebarSystemBar />
+    <SidebarShell>
       <div class="sidebar-body">
-        <div class={`pane-section section-views ${sectionOpen.value.views ? "open" : "closed"}`}>
-          <SectionHeader label="Views" open={sectionOpen.value.views} onToggle={() => toggleSection("views")} />
-          {sectionOpen.value.views ? <div class="section-body">{SMART_VIEWS.map(renderViewRow)}</div> : null}
-        </div>
-
-        <div class={`pane-section section-lanes ${sectionOpen.value.lanes ? "open" : "closed"}`}>
-          <SectionHeader
-            label="Lanes"
-            open={sectionOpen.value.lanes}
-            count={lanes.value.length}
-            onToggle={() => toggleSection("lanes")}
-            trailing={
-              <button
-                class="btn-icon"
-                aria-label="New lane"
-                onClick={(e: MouseEvent) => {
-                  e.stopPropagation();
-                  modal.value = { kind: "new-lane" };
-                }}
-                {...tip("Create a new lane")}
-              >
-                <Icon name="plus" />
-              </button>
-            }
-          />
-          {sectionOpen.value.lanes ? (
-            <div class="section-body">
-              {lanes.value.map(l => {
-                const open = tasks.value.filter(t => t.lane === l.name && t.status !== "done");
-                const sel = f.lane === l.name;
-                return (
-                  <button
-                    class={`lane-row${sel ? " selected" : ""}`}
-                    onClick={() => {
-                      setFilter("lane", sel ? null : l.name);
-                    }}
-                    onDragOver={(e: DragEvent) => {
-                      e.preventDefault();
-                      (e.currentTarget as HTMLElement).classList.add("dragover");
-                    }}
-                    onDragLeave={(e: DragEvent) => (e.currentTarget as HTMLElement).classList.remove("dragover")}
-                    onDrop={async (e: DragEvent) => {
-                      (e.currentTarget as HTMLElement).classList.remove("dragover");
-                      const id = Number(e.dataTransfer?.getData("application/x-cortex-task-id"));
-                      if (id) await tryApi(() => api.moveLane(id, l.name));
-                    }}
-                    title={`${open.length} open task${open.length === 1 ? "" : "s"}`}
-                  >
-                    <span class="lane-color" style={l.color ? `background: ${l.color}` : ""}></span>
-                    <span class="lane-name">{l.name}</span>
-                    <span class="lane-row-trail">
-                      <span class="lane-count num">{open.length}</span>
-                      <span
-                        class="lane-edit-btn"
-                        title="Edit lane"
-                        onClick={(e: MouseEvent) => {
-                          e.stopPropagation();
-                          modal.value = { kind: "lane-edit", name: l.name };
-                        }}
-                      >
-                        <Icon name="moreHorizontal" size={12} />
-                      </span>
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          ) : null}
-        </div>
-
-        <FilterChips />
+        <WorkspaceFilters />
 
         <div class={`pane-section section-tasks ${sectionOpen.value.tasks ? "open" : "closed"}`}>
           <SectionHeader
             label="Tasks"
             open={sectionOpen.value.tasks}
-            count={sortedTasks.length}
-            onToggle={() => toggleSection("tasks")}
+            count={rows.length}
+            onToggle={toggleTasksSection}
             trailing={
               <button
                 class="btn-icon"
@@ -244,21 +112,41 @@ function MainModePane(): VNode {
           />
           {sectionOpen.value.tasks ? (
             <div class="section-body">
-              {sortedTasks.length === 0 ? (
+              {rows.length === 0 ? (
                 <p class="meta">no tasks match the current filters</p>
               ) : (
-                sortedTasks.map(t => (
+                rows.map(t => (
                   <button
+                    key={t.id}
                     class={`task-row${activeTask.value && t.id === activeTask.value.id ? " active" : ""}`}
+                    aria-current={activeTask.value?.id === t.id ? "page" : undefined}
                     draggable={true}
-                    onDragStart={(e: DragEvent) =>
-                      e.dataTransfer?.setData("application/x-cortex-task-id", String(t.id))
-                    }
-                    onClick={() => (selectedId.value = t.id)}
+                    onDragStart={(e: DragEvent) => {
+                      e.dataTransfer?.setData("application/x-cortex-task-id", String(t.id));
+                      draggedTaskId.value = t.id;
+                    }}
+                    onDragEnd={() => {
+                      // Fires on drop AND on cancelled drags (Esc) — the
+                      // one reliable "drag is over" hook.
+                      draggedTaskId.value = null;
+                    }}
+                    onClick={() => {
+                      selectedId.value = t.id;
+                      // An EXPLICIT pick dismisses filters/navigation even
+                      // when this was already the selected or fallback task.
+                      clearWorkspaceTransientState();
+                    }}
                     {...tip(t.title)}
                   >
                     <span class={`dot dot-status-${t.status}`}></span>
-                    <span class="task-title">{t.title}</span>
+                    <span class="task-row-main">
+                      <span class="task-title">{t.title}</span>
+                      <span class="task-row-meta">
+                        <span class="num">@{t.id}</span>
+                        <span aria-hidden="true">·</span>
+                        <span>{STATUS_LABEL[t.status]}</span>
+                      </span>
+                    </span>
                     <PriorityChip priority={t.priority} />
                   </button>
                 ))
@@ -266,27 +154,118 @@ function MainModePane(): VNode {
             </div>
           ) : null}
         </div>
+
+        {dragging ? <LaneDropTray /> : null}
       </div>
-    </aside>
+    </SidebarShell>
+  );
+}
+
+// Transient drop tray, mounted ONLY during an actual task drag (W5). Each
+// row is a drop target for the dragged task; dropping moves the task via
+// the existing moveLane API. Deliberately NOT buttons and NOT filter rows —
+// keyboard/touch moves go through the header LanePicker instead.
+function LaneDropTray(): VNode {
+  const finishDrop = async (e: DragEvent, laneName: string): Promise<void> => {
+    (e.currentTarget as HTMLElement).classList.remove("dragover");
+    // Prefer the drag payload MIME; fall back to the signal (covers test
+    // environments and any browser that withholds dataTransfer on drop).
+    const fromData = Number(e.dataTransfer?.getData("application/x-cortex-task-id"));
+    const id = fromData > 0 ? fromData : draggedTaskId.value;
+    draggedTaskId.value = null;
+    if (id != null && id > 0) await tryApi(() => api.moveLane(id, laneName));
+  };
+  return (
+    <fieldset class="lane-drop-tray" aria-label="Move to lane">
+      <legend class="lane-drop-title">Move to lane</legend>
+      {lanes.value.map(l => (
+        <div
+          key={l.name}
+          class="lane-drop-target"
+          onDragOver={(e: DragEvent) => {
+            e.preventDefault();
+            (e.currentTarget as HTMLElement).classList.add("dragover");
+          }}
+          onDragLeave={(e: DragEvent) => (e.currentTarget as HTMLElement).classList.remove("dragover")}
+          onDrop={(e: DragEvent) => void finishDrop(e, l.name)}
+        >
+          <span class="lane-color" style={l.color ? `background: ${l.color}` : ""}></span>
+          <span class="lane-name">{l.name}</span>
+        </div>
+      ))}
+    </fieldset>
+  );
+}
+
+// Lane-management mode: one section listing every lane with an edit
+// affordance per row + a "+" trailing button to open NewLaneModal. Rows
+// open LaneEditModal (rename / recolor / delete with the existing default-
+// lane and nonempty-lane protections). NO filtering happens here (W5).
+function LanesModePane(): VNode {
+  const sorted = [...lanes.value].sort((a, b) => a.sort - b.sort || a.name.localeCompare(b.name));
+  return (
+    <SidebarShell>
+      <div class="sidebar-body">
+        <div class="pane-section section-lanes-manage open">
+          <div class="section-head">
+            <div class="row">
+              <h1 class="eyebrow grow">Manage lanes</h1>
+              <span class="meta num" style="margin-right:6px">
+                {sorted.length}
+              </span>
+              <button
+                class="btn-icon"
+                aria-label="New lane"
+                onClick={() => (modal.value = { kind: "new-lane" })}
+                {...tip("Create a new lane")}
+              >
+                <Icon name="plus" />
+              </button>
+            </div>
+          </div>
+          <div class="section-body">
+            {sorted.length === 0 ? (
+              <p class="meta">no lanes yet — click + to create one</p>
+            ) : (
+              sorted.map(l => {
+                const open = tasks.value.filter(t => t.lane === l.name && t.status !== "done").length;
+                return (
+                  <button
+                    class="lane-row"
+                    onClick={() => (modal.value = { kind: "lane-edit", name: l.name })}
+                    {...tip(`Edit lane '${l.name}' (${open} open task${open === 1 ? "" : "s"})`)}
+                  >
+                    <span class="lane-color" style={l.color ? `background: ${l.color}` : ""}></span>
+                    <span class="lane-name">{l.name}</span>
+                    <span class="lane-row-trail">
+                      <span class="lane-count num">{open}</span>
+                      <span class="lane-edit-btn" title="Edit lane">
+                        <Icon name="moreHorizontal" size={12} />
+                      </span>
+                    </span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      </div>
+    </SidebarShell>
   );
 }
 
 // Tag-management mode: single section listing every tag with edit affordance
-// per row + a "+" trailing button to open NewTagModal. Mirrors the lanes-
-// section UX so users have the same mental model for "manage <thing>". The
-// pane chrome (system bar, FilterChips strip) is intentionally absent in
-// this mode — tag MANAGEMENT is its own surface, distinct from tag
-// FILTERING (which lives in the FilterChips strip + TagFilterModal).
+// per row + a "+" trailing button to open NewTagModal. Tag FILTERING lives
+// in WorkspaceFilters; this pane is management only.
 function TagsModePane(): VNode {
   const sortedTags = [...tags.value].sort((a, b) => a.name.localeCompare(b.name));
   return (
-    <aside class="pane pane-lanes sidebar-pane">
-      <SidebarSystemBar />
+    <SidebarShell>
       <div class="sidebar-body">
         <div class="pane-section section-tags-manage open">
           <div class="section-head">
             <div class="row">
-              <h1 class="eyebrow grow">Tags</h1>
+              <h1 class="eyebrow grow">Manage tags</h1>
               <span class="meta num" style="margin-right:6px">
                 {sortedTags.length}
               </span>
@@ -323,6 +302,6 @@ function TagsModePane(): VNode {
           </div>
         </div>
       </div>
-    </aside>
+    </SidebarShell>
   );
 }

@@ -1,9 +1,9 @@
-// SidebarPane — the unified left sidebar (Views + Lanes section, FilterChips,
-// task list). Tags are no longer a section: they live in the SidebarSystemBar
-// tag-filter button (covered by SidebarSystemBar.test.tsx). These tests
-// exercise the public surface: section headers, view/lane row clicks →
-// filters wiring, FilterChips strip, and task-list filtering. Component is
-// wired to global signals, so we reset every signal in beforeEach.
+// SidebarPane — the workspace navigation column (task 330 layout): the
+// system bar, ONE WorkspaceFilters surface, and the task list. Lane/tag
+// MANAGEMENT are explicit sidebar modes ('Manage lanes' / 'Manage tags')
+// with their own panes; opening them never changes filters (W2). During an
+// actual task drag a transient 'Move to lane' tray appears (W5) — it is a
+// drop surface, not a filter list.
 
 import { describe, test, expect, mock, beforeEach } from "bun:test";
 
@@ -45,9 +45,12 @@ import {
   sidebarMode,
   selectedId,
   showAllTasks,
+  workspaceQuery,
+  draggedTaskId,
   modal,
   paletteOpen,
   statusPopover,
+  sidebarFilter,
 } from "../../../../src/ui/state/signals.ts";
 import type { Task, Lane } from "../../../../src/ui/api/types.ts";
 
@@ -79,75 +82,75 @@ describe("SidebarPane", () => {
     sectionOpen.value = { views: true, lanes: true, tasks: true };
     selectedId.value = null;
     showAllTasks.value = false;
+    workspaceQuery.value = "";
+    draggedTaskId.value = null;
     modal.value = null;
     paletteOpen.value = false;
     statusPopover.value = false;
+    sidebarFilter.value = null;
     sidebarMode.value = "main";
   });
 
-  test("renders three section headers in main mode: Views, Lanes, Tasks", () => {
+  test("main mode renders WorkspaceFilters + Tasks section; no Views/Lanes filter sections (W2)", () => {
+    lanes.value = [lane({ name: "now" }), lane({ name: "later" })];
     const { container } = render(<SidebarPane />);
+    // One workspace filtering surface.
+    expect(container.querySelectorAll(".workspace-filters").length).toBe(1);
+    // Tasks is the only collapsible section left.
     const labels = Array.from(container.querySelectorAll(".section-toggle .section-label")).map(el => el.textContent);
-    expect(labels).toContain("Views");
-    expect(labels).toContain("Lanes");
-    expect(labels).toContain("Tasks");
-    // Tag-management lives in tags-mode, not as a main-mode section.
-    expect(labels).not.toContain("Tags");
+    expect(labels).toEqual(["Tasks"]);
+    // The permanent Views/Lanes filter row lists are gone.
+    expect(container.querySelector(".view-row")).toBeNull();
   });
 
-  test("clicking the 'In review' view-row sets filters.value.status to 'review'", () => {
-    tasks.value = [task({ status: "review" })];
+  test("exactly one persistent lane selector and one tag-filter entry (validation-gate invariant)", () => {
+    lanes.value = [lane({ name: "now" })];
     const { container } = render(<SidebarPane />);
-    const viewRow = Array.from(container.querySelectorAll<HTMLButtonElement>(".section-body button")).find(b =>
-      (b.textContent ?? "").includes("In review"),
-    );
-    if (!viewRow) throw new Error("expected an 'In review' view-row");
-    fireEvent.click(viewRow);
-    expect(filters.value.status).toBe("review");
+    expect(container.querySelectorAll("button[aria-label='Lane filter']").length).toBe(1);
+    expect(container.querySelectorAll("button[aria-label='Filter by tags']").length).toBe(1);
+    expect(container.querySelectorAll(".filter-chip-add").length).toBe(0);
   });
 
-  test("clicking the 'All tasks' view-row clears every filter slot (including tag array)", () => {
-    filters.value = { status: "blocked", lane: "now", tag: ["bug", "ui"] };
-    const { container } = render(<SidebarPane />);
-    const viewRow = Array.from(container.querySelectorAll<HTMLButtonElement>(".section-body button")).find(b =>
-      (b.textContent ?? "").includes("All tasks"),
-    );
-    if (!viewRow) throw new Error("expected an 'All tasks' view-row");
-    fireEvent.click(viewRow);
-    expect(filters.value).toEqual({ status: null, lane: null, tag: [] });
-  });
-
-  test("clicking a lane row toggles filters.value.lane on/off", () => {
-    lanes.value = [lane({ name: "next" })];
-    const { container } = render(<SidebarPane />);
-    const laneRow = Array.from(container.querySelectorAll<HTMLButtonElement>(".lane-row")).find(
-      b => b.querySelector(".lane-name")?.textContent === "next",
-    );
-    if (!laneRow) throw new Error("expected a 'next' lane-row");
-    fireEvent.click(laneRow);
-    expect(filters.value.lane).toBe("next");
-    fireEvent.click(laneRow);
-    expect(filters.value.lane).toBeNull();
-  });
-
-  test("FilterChips strip renders one chip per active filter slot (3-tag array → 5 chips)", () => {
-    filters.value = { status: "review", lane: "now", tag: ["bug", "ui", "infra"] };
-    const { container } = render(<SidebarPane />);
-    // status + lane + 3 tags = 5 chips
-    expect(container.querySelectorAll(".filter-chip").length).toBe(5);
-  });
-
-  test("task list shows only filteredTasks (status filter narrows to 1 row)", () => {
+  test("task list shows only visible tasks (status filter narrows to 1 row)", () => {
     tasks.value = [task({ id: 1, status: "open" }), task({ id: 2, status: "blocked" })];
     filters.value = { status: "blocked", lane: null, tag: [] };
     const { container } = render(<SidebarPane />);
     expect(container.querySelectorAll(".task-row").length).toBe(1);
   });
 
+  test("task list follows orderedVisibleTasks: natural title order (task-2 before task-12)", () => {
+    tasks.value = [
+      task({ id: 1, title: "task-12" }),
+      task({ id: 2, title: "task-2" }),
+      task({ id: 3, title: "alpha" }),
+    ];
+    const { container } = render(<SidebarPane />);
+    const titles = Array.from(container.querySelectorAll(".task-row .task-title")).map(el => el.textContent);
+    expect(titles).toEqual(["alpha", "task-2", "task-12"]);
+  });
+
+  test("nonempty workspace query orders rows by search relevance", () => {
+    tasks.value = [
+      task({ id: 1, title: "zzz", body: "needle in body" }),
+      task({ id: 2, title: "needle title" }),
+      task({ id: 3, title: "unrelated" }),
+    ];
+    workspaceQuery.value = "needle";
+    const { container } = render(<SidebarPane />);
+    const titles = Array.from(container.querySelectorAll(".task-row .task-title")).map(el => el.textContent);
+    expect(titles).toEqual(["needle title", "zzz"]);
+  });
+
+  test("clicking a task row selects it", () => {
+    tasks.value = [task({ id: 7, title: "pick me" })];
+    const { container } = render(<SidebarPane />);
+    const row = container.querySelector<HTMLButtonElement>(".task-row");
+    if (!row) throw new Error("expected a task row");
+    fireEvent.click(row);
+    expect(selectedId.value).toBe(7);
+  });
+
   test("clicking the Tasks section '+' button creates a task and selects it", async () => {
-    // The api stub's addTask returns Promise.resolve({}); override per-test
-    // to return a fake created task with an id so the editTask + selection
-    // flow can complete deterministically.
     const { api } = await import("../../../../src/ui/api/client.ts");
     const addTaskMock = api.addTask as unknown as ReturnType<typeof mock>;
     addTaskMock.mockImplementationOnce(() => Promise.resolve({ id: 42 }));
@@ -159,10 +162,6 @@ describe("SidebarPane", () => {
     if (!newTaskBtn) throw new Error("expected Tasks section '+' button");
     fireEvent.click(newTaskBtn);
 
-    // createUntitledTask awaits TWO chained tryApi calls (POST then PATCH)
-    // before setting selectedId. Each tryApi adds a couple of microtasks.
-    // setTimeout(0) drains the microtask queue + advances one macrotask
-    // tick — enough for the whole chain to settle.
     await new Promise(r => setTimeout(r, 0));
     await new Promise(r => setTimeout(r, 0));
     expect(addTaskMock).toHaveBeenCalledTimes(1);
@@ -171,7 +170,20 @@ describe("SidebarPane", () => {
     expect(selectedId.value).toBe(42);
   });
 
-  test("Tasks section toggle hides the task list body", () => {
+  test("new task is created in the selected lane filter (or 'now')", async () => {
+    const { api } = await import("../../../../src/ui/api/client.ts");
+    const addTaskMock = api.addTask as unknown as ReturnType<typeof mock>;
+    addTaskMock.mockClear();
+    addTaskMock.mockImplementationOnce(() => Promise.resolve({ id: 43 }));
+    filters.value = { status: null, lane: "later", tag: [] };
+
+    const { container } = render(<SidebarPane />);
+    fireEvent.click(container.querySelector<HTMLButtonElement>('button[aria-label="New task"]') as HTMLButtonElement);
+    await new Promise(r => setTimeout(r, 0));
+    expect((addTaskMock.mock.calls[0]?.[0] as { lane?: string } | undefined)?.lane).toBe("later");
+  });
+
+  test("Tasks section toggle hides the task list body (collapse preference kept)", () => {
     tasks.value = [task({ id: 1 })];
     const { container } = render(<SidebarPane />);
     expect(container.querySelectorAll(".task-row").length).toBe(1);
@@ -184,62 +196,95 @@ describe("SidebarPane", () => {
     expect(container.querySelectorAll(".task-row").length).toBe(0);
   });
 
-  test("sidebarMode='tags' renders TagsModePane (single TAGS section, no Views/Lanes/Tasks)", () => {
+  // ---- management modes (W2/W5) ----
+
+  test("sidebarMode='tags' renders the 'Manage tags' pane without changing filters", () => {
+    filters.value = { status: "open", lane: "now", tag: ["bug"] };
     sidebarMode.value = "tags";
+    tags.value = [{ name: "bug", color: null, created: 0, task_count: 2 }];
     const { container } = render(<SidebarPane />);
-    // Eyebrow label of the only section is 'Tags'.
-    expect(container.querySelector(".section-head .eyebrow")?.textContent).toBe("Tags");
-    // Main-mode sections are absent.
-    const labels = Array.from(container.querySelectorAll(".section-toggle .section-label")).map(el => el.textContent);
-    expect(labels).not.toContain("Views");
-    expect(labels).not.toContain("Lanes");
-    // 'New tag' "+" button surfaces in the section header.
+    expect(container.querySelector(".section-head .eyebrow")?.textContent).toBe("Manage tags");
     expect(container.querySelector('button[aria-label="New tag"]')).not.toBeNull();
+    // Opening management never changes filters (W2).
+    expect(filters.value).toEqual({ status: "open", lane: "now", tag: ["bug"] });
   });
 
-  test("tags mode '+' button dispatches the new-tag modal", () => {
+  test("tags mode '+' button dispatches the new-tag modal; row click opens tag-edit", () => {
     sidebarMode.value = "tags";
+    tags.value = [{ name: "bug", color: null, created: 0, task_count: 2 }];
     const { container } = render(<SidebarPane />);
-    const newTagBtn = container.querySelector<HTMLButtonElement>('button[aria-label="New tag"]');
-    if (!newTagBtn) throw new Error("expected '+ New tag' button");
-    fireEvent.click(newTagBtn);
+    fireEvent.click(container.querySelector<HTMLButtonElement>('button[aria-label="New tag"]') as HTMLButtonElement);
     expect(modal.value).toEqual({ kind: "new-tag" });
+    const row = container.querySelector<HTMLButtonElement>(".lane-row");
+    if (!row) throw new Error("expected a tag row");
+    fireEvent.click(row);
+    expect(modal.value).toEqual({ kind: "tag-edit", name: "bug" });
   });
 
-  test("clicking the Lanes section's '+' button dispatches the new-lane modal", () => {
+  test("sidebarMode='lanes' renders the 'Manage lanes' pane: new-lane + lane-edit dispatch, no filtering", () => {
+    filters.value = { status: null, lane: "now", tag: [] };
+    sidebarMode.value = "lanes";
+    lanes.value = [lane({ name: "now" }), lane({ name: "later" })];
     const { container } = render(<SidebarPane />);
-    // The trailing slot inside the Lanes SectionHeader holds a btn-icon
-    // with aria-label="New lane". (The '+' affordance.)
-    const newLaneBtn = container.querySelector<HTMLButtonElement>('button[aria-label="New lane"]');
-    if (!newLaneBtn) throw new Error("expected New lane '+' button");
-    fireEvent.click(newLaneBtn);
+    expect(container.querySelector(".section-head .eyebrow")?.textContent).toBe("Manage lanes");
+
+    fireEvent.click(container.querySelector<HTMLButtonElement>('button[aria-label="New lane"]') as HTMLButtonElement);
     expect(modal.value).toEqual({ kind: "new-lane" });
-  });
 
-  test("renders the Tasks list naturally sorted by title (task-2 before task-12, alpha before both)", () => {
-    tasks.value = [
-      task({ id: 1, title: "task-12" }),
-      task({ id: 2, title: "task-2" }),
-      task({ id: 3, title: "alpha" }),
-    ];
-    // All three match the default empty filter; lane is null so every
-    // task passes through filteredTasks.
-    const { container } = render(<SidebarPane />);
-    const titles = Array.from(container.querySelectorAll(".task-row .task-title")).map(el => el.textContent);
-    expect(titles).toEqual(["alpha", "task-2", "task-12"]);
-  });
-
-  test("clicking the Views section toggle collapses the section body", () => {
-    const { container } = render(<SidebarPane />);
-    // Sanity: 5 view-rows render when the section is open (SMART_VIEWS).
-    expect(container.querySelectorAll(".view-row").length).toBe(5);
-    const viewsToggle = Array.from(container.querySelectorAll<HTMLButtonElement>(".section-toggle")).find(
-      b => b.querySelector(".section-label")?.textContent === "Views",
+    const row = Array.from(container.querySelectorAll<HTMLButtonElement>(".lane-row")).find(
+      b => b.querySelector(".lane-name")?.textContent === "later",
     );
-    if (!viewsToggle) throw new Error("expected a Views section-toggle");
-    fireEvent.click(viewsToggle);
-    expect(sectionOpen.value.views).toBe(false);
-    // Body unmounts when sectionOpen.value.views flips false.
-    expect(container.querySelectorAll(".view-row").length).toBe(0);
+    if (!row) throw new Error("expected a 'later' lane row");
+    fireEvent.click(row);
+    expect(modal.value).toEqual({ kind: "lane-edit", name: "later" });
+    // Management rows never touch filters (W5).
+    expect(filters.value.lane).toBe("now");
+  });
+
+  // ---- drag & drop (W5) ----
+
+  test("dragging a task reveals the transient 'Move to lane' tray; dragend clears it", () => {
+    tasks.value = [task({ id: 5, title: "drag me" })];
+    lanes.value = [lane({ name: "now" }), lane({ name: "later" })];
+    const { container } = render(<SidebarPane />);
+    expect(container.querySelector("[aria-label='Move to lane']")).toBeNull();
+
+    const row = container.querySelector<HTMLButtonElement>(".task-row");
+    if (!row) throw new Error("expected a task row");
+    fireEvent.dragStart(row);
+    expect(draggedTaskId.value).toBe(5);
+    const tray = container.querySelector("[aria-label='Move to lane']");
+    if (!tray) throw new Error("expected the Move-to-lane tray during drag");
+    expect(tray.querySelectorAll(".lane-drop-target").length).toBe(2);
+
+    fireEvent.dragEnd(row);
+    expect(draggedTaskId.value).toBeNull();
+    expect(container.querySelector("[aria-label='Move to lane']")).toBeNull();
+  });
+
+  test("dropping a dragged task on a tray target moves it to that lane", async () => {
+    const { api } = await import("../../../../src/ui/api/client.ts");
+    const moveLaneMock = api.moveLane as unknown as ReturnType<typeof mock>;
+    moveLaneMock.mockClear();
+
+    tasks.value = [task({ id: 5, title: "drag me" })];
+    lanes.value = [lane({ name: "now" }), lane({ name: "later" })];
+    const { container } = render(<SidebarPane />);
+    const row = container.querySelector<HTMLButtonElement>(".task-row");
+    if (!row) throw new Error("expected a task row");
+    fireEvent.dragStart(row);
+
+    const target = Array.from(container.querySelectorAll<HTMLElement>(".lane-drop-target")).find(el =>
+      (el.textContent ?? "").includes("later"),
+    );
+    if (!target) throw new Error("expected a 'later' drop target");
+    fireEvent.drop(target);
+    await new Promise(r => setTimeout(r, 0));
+    expect(moveLaneMock).toHaveBeenCalledTimes(1);
+    expect(moveLaneMock).toHaveBeenCalledWith(5, "later");
+    // Drop clears the transient drag state.
+    expect(draggedTaskId.value).toBeNull();
+    // Dropping on the tray is a MOVE, not a filter change (W5).
+    expect(filters.value.lane).toBeNull();
   });
 });

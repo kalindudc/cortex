@@ -31,12 +31,22 @@ const defaultScheduler: Scheduler = {
   clear: id => clearTimeout(id as ReturnType<typeof setTimeout>),
 };
 
+export interface AutosaveApi {
+  schedule: () => void;
+  flush: () => void;
+  // Drop pending (unsent) work without committing: clears both timers and
+  // the dirty flag. Used when an external conflict pauses autosaves or a
+  // superseded edit is abandoned (Apply). Already-committed work is
+  // unaffected — a sent PATCH cannot be revoked.
+  cancel: () => void;
+}
+
 export function useAutosave(
   commit: () => void | Promise<void>,
   idleMs: number = 600,
   maxMs: number = 3000,
   scheduler: Scheduler = defaultScheduler,
-): { schedule: () => void; flush: () => void } {
+): AutosaveApi {
   // commitRef refreshes every render so the latest closure (with current
   // signal values) is what fires when timers tick — mirrors the
   // onChangeRef pattern inside MdEditor.
@@ -46,8 +56,7 @@ export function useAutosave(
   const maxTimer = useRef<unknown>(null);
   const dirty = useRef(false);
 
-  const flush = () => {
-    if (!dirty.current) return;
+  const clearTimers = () => {
     if (idleTimer.current !== null) {
       scheduler.clear(idleTimer.current);
       idleTimer.current = null;
@@ -56,8 +65,16 @@ export function useAutosave(
       scheduler.clear(maxTimer.current);
       maxTimer.current = null;
     }
+  };
+  const flush = () => {
+    if (!dirty.current) return;
+    clearTimers();
     dirty.current = false;
     commitRef.current?.();
+  };
+  const cancel = () => {
+    clearTimers();
+    dirty.current = false;
   };
   const schedule = () => {
     dirty.current = true;
@@ -73,5 +90,5 @@ export function useAutosave(
   // re-mounts on every task switch).
   useEffect(() => () => flush(), []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { schedule, flush };
+  return { schedule, flush, cancel };
 }

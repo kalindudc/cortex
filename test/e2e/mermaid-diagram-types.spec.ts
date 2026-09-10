@@ -118,17 +118,18 @@ extendedTest("every mermaid diagram type renders to a real SVG (not the error bo
 
   await page.goto(url);
   await page.locator(".task-row", { hasText: "mermaid-matrix" }).click();
-  await page.locator('.active-header button[title="Render markdown"]').click();
-  await expect(page.locator(".modal--wide")).toBeVisible();
+  // Task 330: reading is IN PLACE — the Document/Read panel renders the
+  // body through the shared MarkdownView (no modal to open).
+  await expect(page.locator(".doc-reader .markdown-view h1")).toHaveText("Mermaid diagram type matrix");
 
-  // Wait for all N mermaid blocks to have an SVG at all. mermaid.run()
-  // processes them in batch; auto-wait on count covers the lazy import +
-  // parse + render round-trip without a fixed sleep.
-  const allSvgs = page.locator(".markdown-rendered pre.mermaid svg");
+  // Wait for all N mermaid blocks to have an SVG at all. Renders are queued
+  // serially per block; auto-wait on count covers the lazy import + parse +
+  // render round-trip without a fixed sleep.
+  const allSvgs = page.locator(".doc-reader pre.mermaid svg");
   await expect(allSvgs).toHaveCount(CASES.length, { timeout: 20_000 });
 
   // Now assert each block individually: probe label present, no error text.
-  const blocks = page.locator(".markdown-rendered pre.mermaid");
+  const blocks = page.locator(".doc-reader pre.mermaid");
   for (let i = 0; i < CASES.length; i++) {
     const c = CASES[i];
     const block: Locator = blocks.nth(i);

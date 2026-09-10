@@ -60,6 +60,8 @@
      so it reads as a hint of grain rather than a pattern. */
   --paper-dot: rgba(64, 58, 48, 0.15);
 
+  --control-height: 32px;
+  --status-height: 32px;
   --r-1: 4px;  --r-2: 6px;  --r-3: 8px;  --r-4: 12px;  --r-pill: 9999px;
   --s-1: 4px;  --s-2: 8px;  --s-3: 12px;  --s-4: 16px;  --s-5: 20px;  --s-6: 24px;  --s-7: 32px;
 
@@ -71,10 +73,11 @@
   --fs-1: 11px; --fs-2: 12px; --fs-3: 13px; --fs-4: 14px;
   --fs-5: 15px; --fs-6: 17px; --fs-7: 20px; --fs-8: 24px;
 
-  --ease:    cubic-bezier(0.25, 0.46, 0.45, 0.94);
-  --dur-1:   120ms;
-  --dur-2:   160ms;
-  --dur-3:   240ms;
+  /* Shared interaction scale: immediate feedback, quick surfaces, drawers. */
+  --ease:    cubic-bezier(0.2, 0.8, 0.2, 1);
+  --dur-1:   90ms;
+  --dur-2:   140ms;
+  --dur-3:   180ms;
 
   --shadow-pop: 0 1px 2px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
   --shadow-cmd: 0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06);

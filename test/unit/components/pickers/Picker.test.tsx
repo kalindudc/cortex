@@ -40,6 +40,23 @@ describe("Picker", () => {
     expect(rows[0].textContent).toBe("bravo");
   });
 
+  test("catalog search shows the full list and finds late case-insensitive AND keywords", () => {
+    const catalog = Array.from({ length: 2000 }, (_, index) => ({
+      name: `queue-${String(index).padStart(4, "0")}-ui`,
+    }));
+    const props = makeProps({ items: catalog, isSelected: item => item.name === "queue-1999-ui" });
+    const { container } = render(<Picker {...props} />);
+    expect(container.querySelectorAll(".picker-row").length).toBe(2000);
+    expect(container.textContent).toContain("queue-1999-ui");
+    expect(container.querySelector(".catalog-search-hint")?.textContent).toContain("2000 of 2000 entries");
+    fireEvent.input(getSearch(), { target: { value: "UI 1999 QuE" } });
+    expect(container.querySelectorAll(".picker-row").length).toBe(1);
+    expect(container.querySelector(".picker-row")?.textContent).toBe("queue-1999-ui");
+    expect(props.onSelect).not.toHaveBeenCalled();
+    fireEvent.keyDown(getSearch(), { key: "Enter" });
+    expect(props.onSelect).toHaveBeenCalledWith(catalog[1999]);
+  });
+
   test("ArrowDown moves cursor; Enter calls onSelect for that item", async () => {
     const props = makeProps();
     render(<Picker {...props} />);

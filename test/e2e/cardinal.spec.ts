@@ -74,12 +74,13 @@ test("post an update on the active task via the compose form", async ({ url, pag
   // Click the task row to make it active.
   await page.locator(".task-row", { hasText: "post-update target" }).click();
   await expect(page.locator(".pane-active")).toBeVisible();
-  // Post-update form now defaults to COLLAPSED (state persists to
-  // localStorage key "cortex-post-update-open"; each Playwright test gets a
-  // fresh browser context so storage is empty and the default applies).
-  // Verify the collapsed state first: the toggle is rendered with
-  // aria-expanded="false" and the .compose form is unmounted (not in DOM).
-  const toggle = page.locator(".active-foot .post-update-toggle");
+  // Task 330: a task opens in Document/Read. The composer lives in the
+  // Activity tab, AFTER the thread, as a collapsed '+ Post update'
+  // disclosure (state persists to localStorage key "cortex-post-update-open";
+  // each Playwright test gets a fresh browser context so storage is empty
+  // and the default applies). Reveal Activity through the one APG tablist.
+  await page.getByRole("tab", { name: "Activity" }).click();
+  const toggle = page.locator(".activity-compose .post-update-toggle");
   await expect(toggle).toBeVisible();
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
   await expect(page.locator(".compose")).toHaveCount(0);
@@ -96,9 +97,10 @@ test("post an update on the active task via the compose form", async ({ url, pag
   // Submit button uses the form's onSubmit; pressing Enter alone would
   // produce a newline (textarea), so click the primary submit.
   await page.locator(".compose-foot button[type=submit]").click();
-  // Updates render in the inbox pane (.pane-inbox) under .summary rows, not
-  // inline in the active pane. Auto-wait for the SSE round-trip.
-  await expect(page.locator(".pane-inbox .summary", { hasText: "first update from e2e" })).toBeVisible();
+  // The new update renders as an expandable card in the Activity thread
+  // (newest first). Auto-wait for the SSE round-trip / API echo (deduped).
+  await expect(page.locator(".activity-thread .update-card", { hasText: "first update from e2e" })).toBeVisible();
+  await expect(page.locator(".activity-thread .update-card", { hasText: "first update from e2e" })).toHaveCount(1);
 });
 
 test("change status via the status pill popover", async ({ url, page }) => {
@@ -106,10 +108,10 @@ test("change status via the status pill popover", async ({ url, page }) => {
   await seedTask(url, "inbox", "status-change target");
   await page.goto(url);
   await page.locator(".task-row", { hasText: "status-change target" }).click();
-  // The status pill is .status-pill in the active header; popover rows are
-  // .popover-row with the human label ("In review", not "review" — see
-  // src/ui/lib/constants.ts STATUS_LABEL).
-  await page.locator(".active-header .status-pill").click();
+  // The status pill is .status-pill in the task header (TaskHeader, task
+  // 330); popover rows are .popover-row with the human label ("In review",
+  // not "review" — see src/ui/lib/constants.ts STATUS_LABEL).
+  await page.locator(".workspace-toolbar .status-pill").click();
   await page.locator(".popover-row", { hasText: "In review" }).click();
   // Task row's status dot reflects "review" once the PATCH echoes back.
   await expect(page.locator(".task-row .dot-status-review")).toBeVisible();
@@ -139,10 +141,11 @@ test("inline-edit a task title — autosave fires and survives reload", async ({
   const t = await seedTask(url, "inbox", "rename-me");
   await page.goto(url);
   await page.locator(".task-row", { hasText: "rename-me" }).click();
-  // EditableTaskBody renders the title as <input class="title-input"> inside
-  // .pane-active. fill() replaces the value and dispatches onInput, which
-  // calls titleSave.schedule().
-  const titleInput = page.locator(".pane-active .title-input");
+  // Clicking the title itself reveals the wrapping textarea. The same
+  // draft owner handles input and serialized autosave; blur flushes it.
+  await expect(page.locator(".task-header .task-title-display")).toHaveText("rename-me");
+  await page.locator(".task-header .task-title-trigger").click();
+  const titleInput = page.locator(".task-header .title-input");
   await expect(titleInput).toBeVisible();
   await titleInput.fill("renamed-by-e2e");
   // Tab away to blur — flushes the autosave debounce immediately.

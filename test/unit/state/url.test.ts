@@ -17,8 +17,8 @@
 //   - test/unit/state/url.seed-invalid.test.ts — garbage-URL seed gate
 //   - test/unit/state/url.popstate.test.ts    — Back/Forward via popstate
 
-import { describe, test, expect, beforeEach } from "bun:test";
-import { selectedId } from "../../../src/ui/state/signals.ts";
+import { describe, test, expect, beforeEach, spyOn } from "bun:test";
+import { selectedId, filters, workspaceQuery, pendingHeadingFragment } from "../../../src/ui/state/signals.ts";
 
 // happy-dom defaults the document location to `about:blank`, an opaque
 // origin where History.replaceState/pushState silently no-op (pathname
@@ -72,5 +72,45 @@ describe("state/url", () => {
     // pathname-equality short-circuit in the effect would catch it anyway.
     selectedId.value = 11;
     expect(window.location.pathname).toBe("/task/11");
+  });
+
+  test("filter/query changes NEVER push task history or alter the task URL", () => {
+    selectedId.value = 7;
+    const push = spyOn(window.history, "pushState");
+    push.mockClear();
+    filters.value = { status: "review", lane: "next", tag: ["bug"] };
+    workspaceQuery.value = "outside current lane";
+    expect(window.location.pathname).toBe("/task/7");
+    expect(push).not.toHaveBeenCalled();
+    push.mockRestore();
+  });
+
+  test("clearing a deleted selection clears its stale heading target", () => {
+    selectedId.value = 7;
+    pendingHeadingFragment.value = { taskId: 7, id: "deleted-heading" };
+    selectedId.value = null;
+    expect(window.location.pathname).toBe("/");
+    expect(pendingHeadingFragment.value).toBeNull();
+  });
+});
+
+// ---- heading fragments (task 330, N1) ----
+describe("state/url parseHeadingFragment", () => {
+  test("valid fragment alongside a task id passes through", async () => {
+    const { parseHeadingFragment } = await import("../../../src/ui/state/url.ts");
+    expect(parseHeadingFragment("#task-5-beta", 5)).toBe("task-5-beta");
+  });
+
+  test("fragment WITHOUT a task path is rejected (no second router)", async () => {
+    const { parseHeadingFragment } = await import("../../../src/ui/state/url.ts");
+    expect(parseHeadingFragment("#task-5-beta", null)).toBeNull();
+  });
+
+  test("empty and non-slug fragments are rejected", async () => {
+    const { parseHeadingFragment } = await import("../../../src/ui/state/url.ts");
+    expect(parseHeadingFragment("", 5)).toBeNull();
+    expect(parseHeadingFragment("#", 5)).toBeNull();
+    expect(parseHeadingFragment("#<script>", 5)).toBeNull();
+    expect(parseHeadingFragment("#a b", 5)).toBeNull();
   });
 });

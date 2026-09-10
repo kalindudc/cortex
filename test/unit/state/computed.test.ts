@@ -11,11 +11,11 @@
 // `beforeEach` reset to a known baseline.
 
 import { describe, test, expect, beforeEach } from "bun:test";
-import { tasks, filters, selectedId, showAllTasks } from "../../../src/ui/state/signals.ts";
-import { activeTask } from "../../../src/ui/state/computed.ts";
+import { tasks, filters, selectedId, showAllTasks, workspaceQuery } from "../../../src/ui/state/signals.ts";
+import { activeTask, visibleTasks, orderedVisibleTasks } from "../../../src/ui/state/computed.ts";
 import type { Task } from "../../../src/ui/api/types.ts";
 
-const mkTask = (id: number, lane: string, status: Task["status"], priority = 0): Task => ({
+const mkTask = (id: number, lane: string, status: Task["status"], priority = 0, over: Partial<Task> = {}): Task => ({
   id,
   lane,
   title: `task ${id}`,
@@ -25,6 +25,7 @@ const mkTask = (id: number, lane: string, status: Task["status"], priority = 0):
   created: 0,
   updated: 0,
   tags: [],
+  ...over,
 });
 
 describe("state/computed activeTask × showAllTasks", () => {
@@ -33,6 +34,7 @@ describe("state/computed activeTask × showAllTasks", () => {
     filters.value = { status: null, lane: null, tag: [] };
     selectedId.value = null;
     showAllTasks.value = false;
+    workspaceQuery.value = "";
   });
 
   test("lane with only done tasks + showAllTasks=false → activeTask is null", () => {
@@ -83,6 +85,128 @@ describe("state/computed activeTask × showAllTasks", () => {
     tasks.value = [mkTask(1, "a", "done"), mkTask(2, "a", "open")];
     selectedId.value = 1;
     filters.value = { ...filters.value, status: "open" };
+    expect(activeTask.value?.id).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Workspace-plan (task 330) coverage: W3 full-pool search intersection and
+// W4 Done-view exception + display ordering.
+// ---------------------------------------------------------------------------
+
+describe("state/computed workspace query intersection (W3)", () => {
+  beforeEach(() => {
+    tasks.value = [];
+    filters.value = { status: null, lane: null, tag: [] };
+    selectedId.value = null;
+    showAllTasks.value = false;
+    workspaceQuery.value = "";
+  });
+
+  test("empty query means no search restriction", () => {
+    tasks.value = [mkTask(1, "a", "open"), mkTask(2, "b", "open")];
+    workspaceQuery.value = "   ";
+    expect(visibleTasks.value.length).toBe(2);
+  });
+
+  test("query AND status AND lane AND tag compose predictably", () => {
+    tasks.value = [
+      mkTask(1, "a", "open", 0, { title: "needle one", tags: ["bug"] }),
+      mkTask(2, "a", "open", 0, { title: "needle two" }),
+      mkTask(3, "b", "open", 0, { title: "needle three", tags: ["bug"] }),
+      mkTask(4, "a", "blocked", 0, { title: "needle four", tags: ["bug"] }),
+      mkTask(5, "a", "open", 0, { title: "haystack", tags: ["bug"] }),
+    ];
+    workspaceQuery.value = "needle";
+    filters.value = { status: "open", lane: "a", tag: ["bug"] };
+    expect(visibleTasks.value.map(t => t.id)).toEqual([1]);
+  });
+
+  test("exact #tag resolution runs against the FULL pool before lane intersection", () => {
+    // Full pool carries an exact 'feature' tag (task 2, lane b). With the
+    // lane-a filter active, a pool-after-filter search would MISS the exact
+    // tag and fall through to substring fuzzy, wrongly matching task 1
+    // ('feature-x'). Full-pool exact resolution → [task 2] ∩ lane a = [].
+    tasks.value = [
+      mkTask(1, "a", "open", 0, { tags: ["feature-x"] }),
+      mkTask(2, "b", "open", 0, { tags: ["feature"] }),
+    ];
+    filters.value = { ...filters.value, lane: "a" };
+    workspaceQuery.value = "#feature";
+    expect(visibleTasks.value).toEqual([]);
+  });
+
+  test("@id lookup bypasses fuzzy and intersects with filters", () => {
+    tasks.value = [mkTask(9, "a", "open"), mkTask(10, "b", "open")];
+    workspaceQuery.value = "@9";
+    expect(visibleTasks.value.map(t => t.id)).toEqual([9]);
+    filters.value = { ...filters.value, lane: "b" };
+    expect(visibleTasks.value).toEqual([]);
+  });
+});
+
+describe("state/computed Done-view exception (W4)", () => {
+  beforeEach(() => {
+    tasks.value = [];
+    filters.value = { status: null, lane: null, tag: [] };
+    selectedId.value = null;
+    showAllTasks.value = false;
+    workspaceQuery.value = "";
+  });
+
+  test("status filter 'done' shows done tasks even when showAllTasks=false", () => {
+    tasks.value = [mkTask(1, "a", "done"), mkTask(2, "a", "open")];
+    filters.value = { ...filters.value, status: "done" };
+    expect(visibleTasks.value.map(t => t.id)).toEqual([1]);
+  });
+
+  test("activeTask fallback honors the Done-view exception", () => {
+    tasks.value = [mkTask(1, "a", "done")];
+    filters.value = { ...filters.value, status: "done" };
+    // No explicit selection; fallback pool must include the done task in
+    // the Done view even though showAllTasks is false.
+    expect(activeTask.value?.id).toBe(1);
+  });
+
+  test("outside the Done view the include-done toggle keeps its meaning", () => {
+    tasks.value = [mkTask(1, "a", "done"), mkTask(2, "a", "open")];
+    expect(visibleTasks.value.map(t => t.id)).toEqual([2]);
+    showAllTasks.value = true;
+    // visibleTasks preserves server order ([1(done), 2(open)]) — display
+    // ordering is orderedVisibleTasks' concern.
+    expect(visibleTasks.value.map(t => t.id)).toEqual([1, 2]);
+  });
+});
+
+describe("state/computed orderedVisibleTasks display order (W4)", () => {
+  beforeEach(() => {
+    tasks.value = [];
+    filters.value = { status: null, lane: null, tag: [] };
+    selectedId.value = null;
+    showAllTasks.value = false;
+    workspaceQuery.value = "";
+  });
+
+  test("empty query → natural title order (task-2 before task-12), server priority discarded", () => {
+    tasks.value = [mkTask(12, "a", "open", 0, { title: "task-12" }), mkTask(2, "a", "open", 5, { title: "task-2" })];
+    expect(orderedVisibleTasks.value.map(t => t.id)).toEqual([2, 12]);
+  });
+
+  test("nonempty query → search relevance order", () => {
+    tasks.value = [
+      mkTask(1, "a", "open", 0, { title: "zzz", body: "needle in body" }),
+      mkTask(2, "a", "open", 0, { title: "needle title" }),
+    ];
+    workspaceQuery.value = "needle";
+    // Title match outscores body match regardless of title sort order.
+    expect(orderedVisibleTasks.value.map(t => t.id)).toEqual([2, 1]);
+  });
+
+  test("activeTask fallback keeps server-priority order, not display order", () => {
+    // 'beta' has the better (lower) priority but sorts after 'alpha' by
+    // title. With no explicit selection the fallback must follow server
+    // priority order (W4: preserve server-priority fallback).
+    tasks.value = [mkTask(1, "a", "open", 0, { title: "beta" }), mkTask(2, "a", "open", 5, { title: "alpha" })];
     expect(activeTask.value?.id).toBe(1);
   });
 });

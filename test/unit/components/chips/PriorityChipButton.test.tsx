@@ -42,11 +42,12 @@ const fx: Task = {
 };
 
 describe("PriorityChipButton", () => {
-  test("renders as a button showing P{n}", () => {
+  test("renders as a labeled trigger showing Priority: P{n}", () => {
     render(<PriorityChipButton task={fx} />);
     const btn = document.querySelector("button.priority-chip") as HTMLButtonElement;
     expect(btn).toBeTruthy();
-    expect(btn.textContent).toBe("P2");
+    expect(btn.querySelector(".prop-label")?.textContent).toBe("Priority:");
+    expect(btn.textContent).toContain("P2");
   });
 
   test("clicking morphs into a number input prefilled with the priority", async () => {
@@ -74,14 +75,12 @@ describe("PriorityChipButton", () => {
     expect(editTaskMock).toHaveBeenCalledWith(1, { priority: 0 });
   });
 
-  test("renders the unset affordance (button.priority-chip-unset, title 'Set priority') when task.priority is null", () => {
+  test("renders the 'Set priority' affordance when task.priority is null (H1: no cryptic '+ P?')", () => {
     const { container } = render(<PriorityChipButton task={{ ...fx, priority: null }} />);
     const btn = container.querySelector("button.priority-chip") as HTMLButtonElement;
     expect(btn).toBeTruthy();
     expect(btn.classList.contains("priority-chip-unset")).toBe(true);
-    expect(btn.getAttribute("title")).toBe("Set priority");
-    // "+ P?" is the affordance label; collapse whitespace defensively.
-    expect(btn.textContent?.replace(/\s+/g, " ").trim()).toBe("+ P?");
+    expect(btn.textContent?.replace(/\s+/g, " ").trim()).toBe("Set priority");
   });
 
   test("clicking the unset affordance morphs into an empty input", async () => {
@@ -106,5 +105,54 @@ describe("PriorityChipButton", () => {
     await new Promise(r => setTimeout(r, 5));
     expect(editTaskMock).toHaveBeenCalledTimes(1);
     expect(editTaskMock).toHaveBeenCalledWith(1, { priority: null });
+  });
+
+  test("fractions are REJECTED, not truncated (H2)", async () => {
+    editTaskMock.mockClear();
+    const { container } = render(<PriorityChipButton task={fx} />);
+    fireEvent.click(container.querySelector("button.priority-chip") as HTMLButtonElement);
+    await new Promise(r => setTimeout(r, 5));
+    const input = container.querySelector("input.priority-chip-input") as HTMLInputElement;
+    fireEvent.input(input, { target: { value: "1.5" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await new Promise(r => setTimeout(r, 5));
+    expect(editTaskMock).toHaveBeenCalledTimes(0); // no truncated PATCH of 1
+  });
+
+  test("negative values are rejected", async () => {
+    editTaskMock.mockClear();
+    const { container } = render(<PriorityChipButton task={fx} />);
+    fireEvent.click(container.querySelector("button.priority-chip") as HTMLButtonElement);
+    await new Promise(r => setTimeout(r, 5));
+    const input = container.querySelector("input.priority-chip-input") as HTMLInputElement;
+    fireEvent.input(input, { target: { value: "-2" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await new Promise(r => setTimeout(r, 5));
+    expect(editTaskMock).toHaveBeenCalledTimes(0);
+  });
+
+  test("Escape cancels editing without a PATCH", async () => {
+    editTaskMock.mockClear();
+    const { container } = render(<PriorityChipButton task={fx} />);
+    fireEvent.click(container.querySelector("button.priority-chip") as HTMLButtonElement);
+    await new Promise(r => setTimeout(r, 5));
+    const input = container.querySelector("input.priority-chip-input") as HTMLInputElement;
+    fireEvent.input(input, { target: { value: "4" } });
+    fireEvent.keyDown(input, { key: "Escape" });
+    await new Promise(r => setTimeout(r, 5));
+    expect(editTaskMock).toHaveBeenCalledTimes(0);
+    expect(container.querySelector("input.priority-chip-input")).toBeNull();
+  });
+
+  test("blur cancels editing without a PATCH (H2)", async () => {
+    editTaskMock.mockClear();
+    const { container } = render(<PriorityChipButton task={fx} />);
+    fireEvent.click(container.querySelector("button.priority-chip") as HTMLButtonElement);
+    await new Promise(r => setTimeout(r, 5));
+    const input = container.querySelector("input.priority-chip-input") as HTMLInputElement;
+    fireEvent.input(input, { target: { value: "4" } });
+    fireEvent.blur(input);
+    await new Promise(r => setTimeout(r, 5));
+    expect(editTaskMock).toHaveBeenCalledTimes(0);
   });
 });

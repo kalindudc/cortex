@@ -1,8 +1,9 @@
 // ExternalChangeBanner — banner shown above a field when an external write
 // (another agent, the CLI) changed the value while the user has unsaved
-// local edits to that same field. Apply adopts the external value; Dismiss
-// keeps the user's version (next autosave will overwrite the agent's write
-// — explicitly, not silently).
+// local edits to that same field. Apply adopts the external value; 'Keep
+// my changes' keeps the user's version and explicitly queues it over the
+// external write (task 330 D3 — the label states the domain meaning; the
+// onDismiss callback name is retained for compatibility).
 
 import type { VNode } from "preact";
 
@@ -32,7 +33,7 @@ export function ExternalChangeBanner({ label, incoming, onApply, onDismiss }: Ex
           Apply
         </button>
         <button type="button" class="btn" onClick={onDismiss}>
-          Dismiss
+          Keep my changes
         </button>
       </div>
     </div>

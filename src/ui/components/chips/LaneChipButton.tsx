@@ -15,27 +15,37 @@
 import type { VNode } from "preact";
 
 import type { Task } from "../../api/types.ts";
-import { lanePopover } from "../../state/signals.ts";
+import { lanePopover, draggedTaskId } from "../../state/signals.ts";
 import { togglePopover } from "../../state/popovers.ts";
 import { laneColor } from "../../lib/color.ts";
 import { LanePicker } from "../pickers/LanePicker.tsx";
+import { Icon } from "../Icon.tsx";
 
 export function LaneChipButton({ task }: { task: Task }): VNode {
   return (
     <div style="position:relative" data-pop>
       <button
-        class="lane-chip lane-chip-button"
+        class="prop-trigger lane-chip-button"
         data-pop
         draggable={true}
-        title={`Lane: ${task.lane} — click to move, drag to reorder`}
-        onDragStart={(e: DragEvent) => e.dataTransfer?.setData("application/x-cortex-task-id", String(task.id))}
+        title={`Lane: ${task.lane} — click to move, or drag onto a lane`}
+        onDragStart={(e: DragEvent) => {
+          e.dataTransfer?.setData("application/x-cortex-task-id", String(task.id));
+          // Reveal the sidebar's transient Move-to-lane tray (W5).
+          draggedTaskId.value = task.id;
+        }}
+        onDragEnd={() => {
+          draggedTaskId.value = null;
+        }}
         onClick={(e: MouseEvent) => {
           e.stopPropagation();
           togglePopover(lanePopover);
         }}
       >
+        <span class="prop-label">Lane:</span>
         {laneColor(task.lane) ? <span class="lane-color" style={`background: ${laneColor(task.lane)}`}></span> : null}
-        <span>{task.lane}</span>
+        <span class="prop-value">{task.lane}</span>
+        <Icon name="chevronDown" size={10} />
       </button>
       {lanePopover.value ? <LanePicker task={task} /> : null}
     </div>

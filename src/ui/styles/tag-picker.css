@@ -194,37 +194,37 @@
 }
 .tag-picker-create-row .icon { color: var(--accent); flex-shrink: 0; }
 
-/* ===== TagFilterModal (kind:'filter-tags') =====
-   Modal multi-select for filters.tag. Layout mirrors .tag-picker but the
-   container is a .modal (overlay + box-shadow) instead of a popover, and
-   we add a top "selected summary" strip showing already-picked tags as
-   removable mini-chips. Class names are scoped (tag-filter-*) so future
-   tag-picker tweaks don't accidentally style the modal. */
-.tag-filter-modal {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 14px;
-}
-.tag-filter-modal h2 { font-size: var(--fs-4); }
+/* ===== Sidebar tag filter (NOT the task metadata picker above) =====
+   Search/summary/list share a bounded scroll area, keeping Done reachable
+   even in short landscape or with many selected tags. The sidebar owns
+   the surface's border/radius/width and its common header. */
+.tag-filter-content { display: flex; flex-direction: column; min-height: 0; }
+.tag-filter-scroll { display: flex; flex-direction: column; gap: 8px; padding: 8px; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
 .tag-filter-search {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 10px;
+  padding: 0 8px;
+  min-height: 36px;
+  flex-shrink: 0;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: var(--r-2);
+  border-radius: var(--r-pill);
 }
 .tag-filter-search .icon { color: var(--text-3); flex-shrink: 0; }
 .tag-filter-search input {
   flex: 1;
+  min-width: 0;
+  width: 100%;
+  padding: 7px 0;
   border: 0;
   background: transparent;
-  font: var(--fs-3) var(--font-sans);
+  font: 12px/1.5 var(--font-sans);
   color: var(--text);
   outline: none;
 }
+.tag-filter-search input:focus { box-shadow: none; outline: none; }
+.tag-filter-search:focus-within { border-color: var(--info); outline: 2px solid var(--info); outline-offset: -2px; }
 /* Reset default <fieldset> chrome (browsers default to a thin border + small
    inline padding). The fieldset is purely semantic here — it groups the
    selected-tag mini-chips and carries an sr-only <legend> for screen readers. */
@@ -236,7 +236,7 @@
   margin: 0;
   background: var(--accent-tint);
   border: 1px solid var(--border);
-  border-radius: var(--r-2);
+  border-radius: var(--r-3);
   min-width: 0;
 }
 .sr-only {
@@ -254,19 +254,22 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 20px;
-  padding: 0 4px 0 8px;
+  min-height: 24px;
+  max-width: 100%;
+  padding: 0 2px 0 6px;
   background: var(--bg);
   border: 1px solid var(--border-strong);
   border-radius: var(--r-pill);
   font-size: var(--fs-2);
 }
+.tag-filter-summary-chip > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tag-filter-summary-chip .x {
+  flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   border: 0;
   background: transparent;
@@ -276,13 +279,15 @@
 }
 .tag-filter-summary-chip .x:hover { background: var(--tint-strong); color: var(--text); }
 .tag-filter-list {
-  max-height: 280px;
-  overflow-y: auto;
+  border: 0;
+  min-inline-size: 0;
+  flex: 0 0 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 0;
-  margin: 0 -4px;
-  padding: 0 4px;
+  margin: 0;
+  padding: 0;
   scrollbar-width: thin;
   scrollbar-color: var(--border-strong) transparent;
 }
@@ -295,18 +300,19 @@
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 4px 8px;
+  min-height: 36px;
+  padding: 7px 8px;
   border-radius: var(--r-2);
   cursor: pointer;
   background: transparent;
   border: 0;
   text-align: left;
   color: var(--text);
-  font-family: inherit;
-  font-size: var(--fs-3);
+  font: 12px/1.5 var(--font-sans);
 }
 .tag-filter-row:hover { background: var(--tint); }
-.tag-filter-row.cursor {
+.tag-filter-row:focus-visible {
+  outline: none;
   background: var(--accent-tint);
   box-shadow: inset 2px 0 0 var(--accent);
 }
@@ -342,7 +348,7 @@
 .tag-filter-untagged-label {
   color: var(--text-2);
   font-style: italic;
-  font-size: var(--fs-3);
+  font-size: 12px;
 }
 .tag-filter-row.selected .tag-filter-untagged-label { color: var(--text); }
 .tag-filter-count {
@@ -357,12 +363,14 @@
 .tag-filter-foot {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding-top: 10px;
+  gap: 4px;
+  padding: 8px;
+  flex-shrink: 0;
   border-top: 1px solid var(--border);
-  font-size: var(--fs-2);
+  font-size: 11px;
 }
-.tag-filter-count-hint { margin-right: 4px; }
+.tag-filter-foot .btn { padding: 0 8px; min-height: 32px; font-size: 11px; }
+.tag-filter-count-hint { margin: 0 auto; white-space: nowrap; font-size: 10px; }
 
 /* Subtle text-link button used in modal footers. The Clear-all action in
    TagFilterModal uses this so it reads as a tertiary action next to the
@@ -375,4 +383,11 @@
 .btn-link:hover { background: transparent; color: var(--text); text-decoration: underline; }
 .btn-link:disabled,
 .btn-link:disabled:hover { color: var(--text-4); cursor: not-allowed; text-decoration: none; }
+
+@media (max-width: 900px) {
+  .tag-filter-row, .tag-filter-search input { min-height: 44px; }
+  .tag-filter-search { padding: 0 8px; }
+  .tag-filter-foot .btn { min-height: 44px; }
+  .tag-filter-summary-chip .x { width: 32px; height: 32px; }
+}
 

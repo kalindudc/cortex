@@ -21,8 +21,32 @@
 // a target that has been removed from the DOM and assert the drawer
 // does NOT close.
 
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
 import { fireEvent, render } from "@testing-library/preact";
+
+// Row actions dispatch REAL api methods (state/notifications.ts: dismiss →
+// api.delNotif, markUnread → api.markNotifUnread). Without this mock the
+// suite still passed but emitted uncaught TypeErrors from whichever other
+// file's api mock happened to be installed last (task 330 Verification
+// Notes). Mock explicitly and assert the dispatch, so the coverage is real.
+const delNotif = mock((_id: number) => Promise.resolve());
+const markNotifUnread = mock((_id: number) => Promise.resolve());
+const markNotifRead = mock((_id: number) => Promise.resolve());
+const markAllNotifRead = mock(() => Promise.resolve());
+mock.module("../../../../src/ui/api/client.ts", () => ({
+  api: {
+    tasks: mock(() => Promise.resolve([])),
+    lanes: mock(() => Promise.resolve([])),
+    tags: mock(() => Promise.resolve([])),
+    updates: mock(() => Promise.resolve([])),
+    related: mock(() => Promise.resolve({ referencedBy: [], references: [], shared: [] })),
+    notifications: mock(() => Promise.resolve([])),
+    delNotif,
+    markNotifUnread,
+    markNotifRead,
+    markAllNotifRead,
+  },
+}));
 
 import { NotificationDrawer } from "../../../../src/ui/components/notifications/NotificationDrawer.tsx";
 import { notifications, localErrors, notificationsOpen } from "../../../../src/ui/state/notifications.ts";
@@ -55,6 +79,8 @@ describe("NotificationDrawer row actions", () => {
     notifications.value = [];
     localErrors.value = [];
     notificationsOpen.value = true;
+    delNotif.mockClear();
+    markNotifUnread.mockClear();
     document.addEventListener("click", outsideClickHandler);
   });
 
@@ -70,6 +96,9 @@ describe("NotificationDrawer row actions", () => {
     if (!(dismissBtn instanceof HTMLButtonElement)) throw new Error("dismiss button not rendered");
     fireEvent.click(dismissBtn);
     expect(notificationsOpen.value).toBe(true);
+    // Newest-first: the first rendered row is id 2.
+    expect(delNotif).toHaveBeenCalledTimes(1);
+    expect(delNotif).toHaveBeenCalledWith(2);
     document.body.removeChild(container);
   });
 
@@ -81,6 +110,8 @@ describe("NotificationDrawer row actions", () => {
     if (!(unreadBtn instanceof HTMLButtonElement)) throw new Error("mark-unread button not rendered");
     fireEvent.click(unreadBtn);
     expect(notificationsOpen.value).toBe(true);
+    expect(markNotifUnread).toHaveBeenCalledTimes(1);
+    expect(markNotifUnread).toHaveBeenCalledWith(1);
     document.body.removeChild(container);
   });
 

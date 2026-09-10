@@ -3,7 +3,7 @@
 // and the name is a valid tag name.
 //
 // Behavior:
-//   - Click a row → toggles the tag on the task (api.setTags with the new set)
+//   - Click a row → adds/removes that tag association (no stale set replacement)
 //   - Type to filter; case-insensitive substring match. Cursor resets to row 0.
 //   - Arrow Down/Up moves a keyboard cursor through (filtered + create row);
 //     wraps at edges. Cursor highlight is a subtle bg + accent left-border —
@@ -29,6 +29,7 @@ import { tags, type TagWithCount } from "../../state/signals.ts";
 import { api } from "../../api/client.ts";
 import { tryApi } from "../../api/errors.ts";
 import { isValidTagName } from "../../lib/constants.ts";
+import { searchCatalog, catalogSearchHint } from "../../lib/catalogSearch.ts";
 import { TagPill } from "../chips/TagPill.tsx";
 import { Icon } from "../Icon.tsx";
 
@@ -40,6 +41,13 @@ const isCreateRow = (r: Row): r is CreateRow => (r as CreateRow).__create === tr
 export function TagPicker({ task }: { task: Task }): VNode {
   const search = useSignal("");
   const cursor = useSignal(0);
+  const live = useRef(true);
+  useEffect(
+    () => () => {
+      live.current = false;
+    },
+    [],
+  );
   // Ref to the scrollable list container so the cursor effect (below) can
   // scoped-querySelector the highlighted row without leaking out of THIS
   // picker instance (defensive against multiple pickers, even though only
@@ -75,8 +83,8 @@ export function TagPicker({ task }: { task: Task }): VNode {
     ...allByName.filter(t => attachedAtOpen.value.has(t.name)),
     ...allByName.filter(t => !attachedAtOpen.value.has(t.name)),
   ];
-  const q = search.value.trim().toLowerCase();
-  const filtered = q ? sorted.filter(t => t.name.toLowerCase().includes(q)) : sorted;
+  const results = searchCatalog(sorted, search.value, tag => tag.name);
+  const filtered = results.items;
   const attached = new Set(task.tags || []);
   const trimmedRaw = search.value.trim();
   const exactMatch = allByName.some(t => t.name === trimmedRaw);
@@ -89,25 +97,23 @@ export function TagPicker({ task }: { task: Task }): VNode {
   // Clamp cursor in case items shrank (e.g. user typed a more-specific filter).
   if (cursor.value > items.length - 1) cursor.value = Math.max(0, items.length - 1);
 
-  const apply = async (nextSet: Set<string>) => {
-    await tryApi(() => api.setTags(task.id, Array.from(nextSet)));
-    // Don't close the picker — multi-edit UX. Outside-click handles dismiss.
+  const apply = async (name: string, mode: "add" | "remove"): Promise<boolean> => {
+    try {
+      await tryApi(() => (mode === "add" ? api.addTaskTag(task.id, name) : api.removeTaskTag(task.id, name)));
+      return true;
+    } catch {
+      // tryApi reports the failure. Keep the picker and failed search text.
+      return false;
+    }
   };
 
-  const toggle = (name: string) => {
-    const next = new Set(attached);
-    if (next.has(name)) next.delete(name);
-    else next.add(name);
-    return apply(next);
-  };
+  const toggle = (name: string) => apply(name, attached.has(name) ? "remove" : "add");
 
   const create = async (name?: string) => {
     const n = (name ?? trimmedRaw).trim();
     if (!n || !isValidTagName(n)) return;
     // setTaskTags auto-creates the tag row via INSERT OR IGNORE in store.ts.
-    const next = new Set(attached);
-    next.add(n);
-    await apply(next);
+    if (!(await apply(n, "add")) || !live.current) return;
     // Keep the newly-attached tag visible at the top for the rest of this
     // picker session by adding it to the attachedAtOpen snapshot.
     const snap = new Set(attachedAtOpen.value);
@@ -125,7 +131,11 @@ export function TagPicker({ task }: { task: Task }): VNode {
   };
 
   const onSearchKey = (e: KeyboardEvent) => {
-    if (e.key === "ArrowDown") {
+    if (e.isComposing) return;
+    if ((e.key === "Home" || e.key === "End") && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+      e.preventDefault();
+      cursor.value = e.key === "Home" ? 0 : Math.max(0, items.length - 1);
+    } else if (e.key === "ArrowDown") {
       e.preventDefault();
       if (items.length === 0) return;
       cursor.value = (cursor.value + 1) % items.length;
@@ -164,12 +174,17 @@ export function TagPicker({ task }: { task: Task }): VNode {
         <input
           ref={searchRef}
           autoFocus
+          type="search"
+          aria-label="Search or create tags"
           placeholder="Search or create tag…"
           value={search.value}
           onInput={onSearchInput}
           onKeyDown={onSearchKey}
         />
       </div>
+      <p class="catalog-search-hint" role="status">
+        {catalogSearchHint(results)}
+      </p>
       <div class="tag-picker-list" ref={listRef}>
         {items.length === 0 ? (
           <p class="tag-picker-empty meta">no tags match&mdash;type a new name to create one</p>
@@ -210,7 +225,7 @@ export function TagPicker({ task }: { task: Task }): VNode {
           })
         )}
       </div>
-      {trimmedRaw && !canCreate && !exactMatch ? (
+      {trimmedRaw && !canCreate && !exactMatch && results.matched === 0 && !/\s/.test(trimmedRaw) ? (
         <div class="tag-picker-foot">
           <p class="meta" style="margin:0; padding:6px 10px">
             {"invalid tag name (must match [a-z0-9_@-]{1,32})"}

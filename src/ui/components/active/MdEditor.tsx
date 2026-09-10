@@ -177,6 +177,14 @@ const cortexCmTheme = EditorView.theme({
 //                     moves keyboard focus when the editor is unfocused.
 export const staticMdKeymap = [...defaultKeymap, ...historyKeymap, indentWithTab];
 
+// Narrow typed imperative surface handed to the owner via onReady (D4):
+// focus the editor, or ask CodeMirror to re-measure after the host is
+// revealed from `hidden` (CM cannot measure display:none content).
+export interface MdEditorHandle {
+  focus(): void;
+  requestMeasure(): void;
+}
+
 export interface MdEditorProps {
   value: string;
   onChange: (v: string) => void;
@@ -186,9 +194,24 @@ export interface MdEditorProps {
   // readOnly. Both are required: editable.of(false) blocks caret/IME, readOnly
   // blocks programmatic dispatches. Fixed for the lifetime of this instance.
   readOnly?: boolean;
+  // Hide WITHOUT unmounting (D4): the same EditorView instance (cursor,
+  // undo history, pending edits) survives Read/Activity/Related passes.
+  // `hidden` removes the host from layout AND the a11y/tab order, so
+  // hidden editors are never keyboard-focusable (V3). Default: visible.
+  visible?: boolean;
+  // Receives the typed handle once the EditorView exists; null on unmount.
+  onReady?: (handle: MdEditorHandle | null) => void;
 }
 
-export function MdEditor({ value, onChange, onSubmit, placeholder: phText, readOnly }: MdEditorProps): VNode {
+export function MdEditor({
+  value,
+  onChange,
+  onSubmit,
+  placeholder: phText,
+  readOnly,
+  visible,
+  onReady,
+}: MdEditorProps): VNode {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   // Refs for callbacks so the editor (mounted once) always sees the latest
@@ -196,8 +219,10 @@ export function MdEditor({ value, onChange, onSubmit, placeholder: phText, readO
   // identities every time.
   const onChangeRef = useRef(onChange);
   const onSubmitRef = useRef(onSubmit);
+  const onReadyRef = useRef(onReady);
   onChangeRef.current = onChange;
   onSubmitRef.current = onSubmit;
+  onReadyRef.current = onReady;
 
   useEffect(() => {
     const exts = [
@@ -249,12 +274,17 @@ export function MdEditor({ value, onChange, onSubmit, placeholder: phText, readO
       parent: hostRef.current,
     });
     viewRef.current = view;
+    onReadyRef.current?.({
+      focus: () => view.focus(),
+      requestMeasure: () => view.requestMeasure(),
+    });
     return () => {
+      onReadyRef.current?.(null);
       view.destroy();
       viewRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // mount once; the editor is the source of truth for in-flight edits.
 
-  return <div class="md-editor" ref={hostRef}></div>;
+  return <div class="md-editor" hidden={visible === false} ref={hostRef}></div>;
 }

@@ -8,28 +8,57 @@
 // being added without the Esc handler being updated.
 
 import type { Signal } from "@preact/signals";
-import { statusPopover, tagsPopover, lanePopover } from "./signals.ts";
+import {
+  statusPopover,
+  tagsPopover,
+  lanePopover,
+  taskActionsPopover,
+  sidebarFilter,
+  type SidebarFilter,
+} from "./signals.ts";
 import { notificationsOpen } from "./notifications.ts";
 
-export function closeAllPopovers(): boolean {
-  let closed = false;
-  if (statusPopover.value) {
+// Only deliberate dismissal (selection / Done / Escape) restores focus.
+// Outside clicks and navigation MUST leave focus with the clicked target.
+export function closeSidebarFilter(restoreFocus = false): boolean {
+  const kind = sidebarFilter.peek();
+  if (kind == null) return false;
+  sidebarFilter.value = null;
+  if (restoreFocus) document.getElementById(`sidebar-filter-${kind}-trigger`)?.focus({ preventScroll: true });
+  return true;
+}
+
+export function toggleSidebarFilter(kind: SidebarFilter): void {
+  const wasOpen = sidebarFilter.peek() === kind;
+  closeAllPopovers();
+  if (!wasOpen) sidebarFilter.value = kind;
+}
+
+// Fallback task churn still clears stale metadata, but leaves the sidebar's
+// live filter session alone. All explicit retargeting uses the default.
+export function closeAllPopovers({ preserveSidebar = false }: { preserveSidebar?: boolean } = {}): boolean {
+  let closed = preserveSidebar ? false : closeSidebarFilter();
+  if (statusPopover.peek()) {
     statusPopover.value = false;
     closed = true;
   }
-  if (tagsPopover.value) {
+  if (tagsPopover.peek()) {
     tagsPopover.value = false;
     closed = true;
   }
-  if (lanePopover.value) {
+  if (lanePopover.peek()) {
     lanePopover.value = false;
+    closed = true;
+  }
+  if (taskActionsPopover.peek()) {
+    taskActionsPopover.value = false;
     closed = true;
   }
   // The notification drawer follows the same close-on-outside-click +
   // close-on-Esc + mutual-exclusion contract as the chip popovers, so it
   // joins the same cascade. Drawer body + bell trigger both carry
   // data-pop so the outside-click handler in index.tsx skips them.
-  if (notificationsOpen.value) {
+  if (notificationsOpen.peek()) {
     notificationsOpen.value = false;
     closed = true;
   }

@@ -6,10 +6,8 @@
   position: fixed;
   top: 0;
   right: 0;
-  /* 25px = StatusBar height (24px) + its 1px top border. The drawer
-     stops above the always-visible footer so the status bar never gets
-     covered. If StatusBar height changes in misc.css, update this too. */
-  bottom: 25px;
+  /* Same token as StatusBar: also respects its larger mobile targets. */
+  bottom: var(--status-height);
   width: 360px;
   max-width: 90vw;
   background: var(--panel);
@@ -18,11 +16,6 @@
   display: flex;
   flex-direction: column;
   z-index: 250;
-  animation: slideInRight var(--dur-3) var(--ease);
-}
-@keyframes slideInRight {
-  from { transform: translateX(100%); opacity: 0.6; }
-  to   { transform: translateX(0);     opacity: 1;   }
 }
 
 .notif-head {
@@ -74,6 +67,7 @@
 
 .notif-row-body {
   flex: 1;
+  min-width: 0;
   background: none;
   border: 0;
   text-align: left;
@@ -88,7 +82,7 @@
 }
 .notif-row-body .summary {
   color: var(--text);
-  font: 500 var(--fs-3)/1.4 var(--font-mono);
+  font: 500 var(--fs-3)/1.5 var(--font-sans);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -96,6 +90,8 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
   margin-top: 4px;
   color: var(--text-3);
   font-size: var(--fs-2);
@@ -116,6 +112,12 @@
   padding: var(--s-2) var(--s-2) 0 0;
 }
 .notif-row-controls .hint-button { margin: 0; }
+.notif-head .hint-button, .notif-row-controls .hint-button { display: inline-flex; align-items: center; justify-content: center; width: var(--control-height); height: var(--control-height); color: var(--text-2); border-radius: var(--r-2); }
+.notif-head .hint-button:hover, .notif-row-controls .hint-button:hover { background: var(--tint); color: var(--text); }
+@media (max-width: 900px) {
+  .notif-head .hint-button, .notif-row-controls .hint-button, .notif-bell { min-width: 44px; min-height: 44px; }
+  .notif-foot .hint-button { min-height: 44px; }
+}
 
 /* Left-edge accent stripe so a glance at the drawer reveals row type.
    Persisted notifications mirror their status' dot color via

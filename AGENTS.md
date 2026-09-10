@@ -73,6 +73,13 @@ Note: If a `repo-map` does not exist, run `pnpm run agents:map` to generate one.
 - ALL SQLite access goes through the `Store` class in `src/store.ts`. Never open `bun:sqlite` from anywhere else.
 - Author tags on `cortex update` follow `<role>-<8 hex>` (legacy fallback) OR `pi-<full-uuidv7>` (when issued via the `cortex_update` pi tool — preferred because pi-attributed updates are resumable).
 - `scripts/` are Bun scripts when they need type-checking or stdlib parity (`scripts/watch-css.ts` is the precedent); thin orchestration stays in bash. macOS bash 3.2 must keep working — no associative arrays, no GNU awk extensions.
+- ONE sanitized rendering boundary for untrusted Markdown: `src/ui/lib/markdown.ts` (marked → DOMPurify HTML profile; Mermaid → `mermaid.render` in an inert staging element → DOMPurify SVG profile) consumed only through `src/ui/components/active/MarkdownView.tsx`. Never insert parsed HTML anywhere else, never concatenate untrusted HTML after sanitizing, and fail CLOSED (source view) when `DOMPurify.isSupported` is false.
+- Every actual modal surface (management/confirmation dialogs, the command palette, the mobile navigation drawer) renders through `src/ui/components/modals/DialogFrame.tsx` (native `<dialog>` + `showModal`). Sidebar filtering uses the nonmodal `src/ui/components/sidebar/SidebarFilterPanel.tsx`; the legacy filter-tags modal kind redirects there. Do not add ad-hoc overlay/`role="dialog"` wrappers.
+- Interactive per-tag membership changes use `api.addTaskTag` / `api.removeTaskTag` (existing PATCH add/remove modes), not whole-list replacement from a stale UI snapshot. Removing a header pill MUST NOT delete the tag definition.
+- Lane/tag dropdown search is OPTIONAL: `src/ui/lib/catalogSearch.ts` returns every entry for an empty query and every literal, case-insensitive AND-keyword match otherwise. NEVER impose a result cap or forced-refinement policy.
+- Mode shortcut matching/hints live in `src/ui/lib/keys.ts`; route actions through `requestMode`, preserve common browser shortcuts and AltGr text input, and suspend mode changes behind overlays. Browser coverage lives in `test/e2e/workspace-shortcuts.spec.ts`.
+- `preferredReaderMode` is the browser-persisted Read/Edit/Split choice; `readerMode` is the effective view (heading links may temporarily show Read). NEVER reset the preference on task navigation or title editing; only explicit mode choices update it.
+- `src/ui/styles/motion.css` owns shared motion (90/140/180ms; opacity/transform keyframes; localized tag-remove width transitions). NEVER defer state/focus or remount editors just to animate. Respect live reduced-motion changes and keep sidebar filter sessions alive during fallback-task changes; explicit task navigation still dismisses them.
 
 ## 6. Testing
 
@@ -81,7 +88,7 @@ different I/O assumptions:
 
 - `test/unit/` — `bun:test`, fast, isolated. Preloads `test/setup-happy-dom.ts` via `bunfig.toml` so DOM tests run without a browser. NEVER import `src/store.ts` directly here without giving the test its own tmp `CORTEX_DB` (see `test/unit/paths.test.ts` for the env-swap pattern). Aim for one unit test file per source file.
 - `test/integration/` — `bun:test` against the COMPILED `bin/cortex`. Requires `pnpm run build` first; `pnpm run test:integration` does this.
-- `test/e2e/` — `@playwright/test` + Chromium against the live dev server.
+- `test/e2e/` — `@playwright/test` + Chromium against the compiled binary (per-test isolated daemon, see `test/e2e/fixtures/cortex-server.ts`). Sanitizer behavior is certified ONLY here: happy-dom cannot run DOMPurify, so `test/unit/` mocks `dompurify` as a passthrough and `test/e2e/document-safety.spec.ts` carries the real hostile-Markdown / Mermaid probes. Browser-only geometry, inertness and focus behavior live in `test/e2e/document-workspace.spec.ts`; `test/e2e/workspace-presentation.spec.ts` checks prototype layout/control geometry and `test/e2e/workspace-motion.spec.ts` checks rapid interactions, reduced motion and unchanged-SSE identity; `test/e2e/workspace-preferences.spec.ts` checks saved-mode navigation, reloads and temporary heading views. Attached sidebar filtering is covered by `test/e2e/sidebar-filters.spec.ts`.
 
 `pnpm test` runs all three. Snapshot tests live alongside their unit file; do not commit Playwright traces.
 
@@ -99,6 +106,9 @@ different I/O assumptions:
 - `src/server.ts` — REST routes, SSE event stream, dev-reload route.
 - `src/ui/components/App.tsx` — UI entry; routes signals into views.
 - `src/ui/state/signals.ts` — global signal store + derived computed.
+- `src/ui/state/workspace.ts` — document-workspace controller (query/body-mode preference persistence, Document entry, `requestMode` / `requestPostUpdate` / `revealSidebarFilter`, transient-state reset, narrow-viewport tracking).
+- `src/ui/components/active/TaskToolbar.tsx` — workspace actions and Read/Edit/Split; `TaskHeader` owns only the document identity/metadata and shared title draft.
+- `src/ui/lib/markdown.ts` — the sanitized Markdown/Mermaid rendering boundary (see §5).
 - `src/skills/` — markdown skill bodies embedded by `cortex init`.
 - `src/extensions/pi.ts` — pi extension surface (custom tools).
 - `.cortex/repo-map.md` — full tree-sitter signature dump (deep search).

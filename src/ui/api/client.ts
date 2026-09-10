@@ -53,6 +53,8 @@ export interface ApiClient {
   // ---- tags ----
   tags(): Promise<TagWithCount[]>;
   setTags(id: number, ns: string[]): Promise<Task>;
+  addTaskTag(id: number, name: string): Promise<Task>;
+  removeTaskTag(id: number, name: string): Promise<Task>;
   addTag(b: AddTagBody): Promise<Tag>;
   editTag(n: string, b: EditTagBody): Promise<Tag>;
   delTag(n: string, force?: boolean): Promise<void>;
@@ -103,6 +105,11 @@ export const api: ApiClient = {
   tags: () => j<TagWithCount[]>("/api/tags"),
   setTags: (id, ns) =>
     j<Task>(`/api/tasks/${id}/tags`, { method: "PATCH", headers: JSON_HEAD, body: JSON.stringify({ set: ns }) }),
+  // Existing server delta modes preserve unrelated concurrent tag changes.
+  addTaskTag: (id, name) =>
+    j<Task>(`/api/tasks/${id}/tags`, { method: "PATCH", headers: JSON_HEAD, body: JSON.stringify({ add: [name] }) }),
+  removeTaskTag: (id, name) =>
+    j<Task>(`/api/tasks/${id}/tags`, { method: "PATCH", headers: JSON_HEAD, body: JSON.stringify({ remove: [name] }) }),
   addTag: b => j<Tag>("/api/tags", { method: "POST", headers: JSON_HEAD, body: JSON.stringify(b) }),
   editTag: (n, b) =>
     j<Tag>(`/api/tags/${encodeURIComponent(n)}`, { method: "PATCH", headers: JSON_HEAD, body: JSON.stringify(b) }),

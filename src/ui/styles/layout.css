@@ -1,45 +1,34 @@
 /* ---------- layout ---------- */
-/* 3-column × 2-row main grid. Row 1 holds the three panes (lanes/active/
-   inbox); row 2 is the app-wide status bar that spans all three columns. */
+/* 2-column × 2-row main grid (task 330): navigation sidebar + the document
+   workspace; row 2 is the app-wide status bar spanning both columns. Task
+   context (Activity/Related/Authors) lives INSIDE the workspace tablist,
+   not in a third column. */
 main {
   display: grid;
-  grid-template-columns: 280px 1fr 340px;
-  grid-template-rows: 1fr auto;
+  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
   grid-template-areas:
-    "lanes active inbox"
-    "status status status";
-  height: 100vh;
+    "lanes active"
+    "status status";
+  height: 100dvh;
   overflow: hidden;
+}
+main:has(> .focus-reading) {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "active" "status";
 }
 .status-bar { grid-area: status; }
 .pane { overflow: auto; display: flex; flex-direction: column; min-height: 0; }
-/* Sidebar pane: per-section scroll model with content-aware packing.
-   The pane is a fixed flex column; .sidebar-body holds the section stack
-   between .pane-system (top) and .pane-foot (bottom) which stay pinned via
-   flex-shrink:0 in misc.css. Each .pane-section inside .sidebar-body is
-   itself a flex column whose body owns its own overflow-y — a long lane
-   list never pushes the task list out of view, and collapsing one section
-   gives the open ones more room.
-
-   Sizing model (the "pack to content, give Tasks the rest, never starve
-   Tasks" rule):
-     .section-views — 0 0 auto: 4 fixed rows, sized to content.
-     .section-lanes — 0 1 auto: sized to its content; can SHRINK if Tasks
-                                 demands its floor (then internal scroll).
-     .section-tags  — 0 1 auto: same as lanes.
-     .section-tasks — 1 0 33.333%: basis = 1/3 of .sidebar-body, grow=1
-                                    (takes all extra space when Lanes/Tags
-                                    are short), shrink=0 (NEVER goes below
-                                    its 1/3 floor). Long task lists scroll
-                                    inside Tasks rather than evicting it.
-     .closed        — 0 0 auto: header-only when collapsed.
-
-   min-height:0 on each open shrinkable section (and on .sidebar-body) is
-   load-bearing — without it, flex children refuse to shrink below their
-   intrinsic content size and the inner overflow-y never engages. The
-   60px floor on Lanes/Tags keeps at least the header + ~1 row visible
-   even when Tasks is claiming most of the column. */
-.pane-lanes  { grid-area: lanes; background: var(--panel); overflow: hidden; }
+/* Sidebar pane: one scrolling task section under a fixed filter surface.
+   The pane is a fixed flex column; .sidebar-body stacks WorkspaceFilters
+   (flex-shrink:0, its own border) above the Tasks section, which claims
+   ALL remaining vertical space and owns its internal overflow-y. The
+   transient lane-drop tray (drag only) pins to the bottom via margin-top
+   auto. min-height:0 on the body and open section is load-bearing —
+   without it flex children refuse to shrink and inner scroll never
+   engages. Management modes reuse the same skeleton with a single
+   section (.section-lanes-manage / .section-tags-manage). */
+.pane-lanes  { grid-area: lanes; background: var(--panel); overflow: hidden; border-right: 1px solid var(--border); }
 .sidebar-pane { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 .sidebar-pane > .sidebar-body {
   flex: 1 1 auto;
@@ -55,12 +44,11 @@ main {
   overflow: hidden;
 }
 .sidebar-pane .pane-section.closed { flex: 0 0 auto; }
-/* Tasks gets the lion's share of the sidebar; Lanes is content-sized but
-   capped so a long lane list never crowds the task list. With max-height
-   30%, Lanes scrolls internally past ~6–7 lanes; Tasks claims the rest. */
-.sidebar-pane .pane-section.section-views.open { flex: 0 0 auto; }
-.sidebar-pane .pane-section.section-lanes.open { flex: 0 1 auto; min-height: 60px; max-height: 30%; }
-.sidebar-pane .pane-section.section-tasks.open { flex: 1 0 50%; min-height: 50%; }
+/* The task list (and each management list) takes every remaining pixel of
+   the sidebar column; long lists scroll internally. */
+.sidebar-pane .pane-section.section-tasks.open,
+.sidebar-pane .pane-section.section-lanes-manage.open,
+.sidebar-pane .pane-section.section-tags-manage.open { flex: 1 1 auto; min-height: 0; }
 /* Reset the global .pane-section { padding: 16px } from misc.css inside the
    sidebar so section content uses the full pane width — the global rule is
    intended for the active/inbox panes, but inside the sidebar it'd inset
@@ -80,17 +68,57 @@ main {
 .sidebar-pane .pane-section.open > .section-body::-webkit-scrollbar-track   { background: transparent; }
 .sidebar-pane .pane-section.open > .section-body::-webkit-scrollbar-thumb   { background: var(--border-strong); border-radius: 4px; }
 .sidebar-pane .pane-section.open > .section-body::-webkit-scrollbar-thumb:hover { background: var(--text-3); }
-/* Active pane wears the dot-grid "paper" background as a subtle full-pane
-   texture. 26px gap + sub-pixel dots make it almost invisible until you
-   look for it — the goal is grain, not pattern. */
+/* Document workspace pane. Plain reading surface — the paper-dot texture
+   moved to the EDITOR surface only (V1: no texture behind rendered prose).
+   Padding gives the document a comfortable gutter; the reader's max
+   measure (document.css) bounds the prose line length. */
 .pane-active {
   grid-area: active;
   background-color: var(--bg);
-  background-image: radial-gradient(circle, var(--paper-dot) 0.8px, transparent 1.2px);
-  background-size: 26px 26px;
-  background-position: 0 0;
-  border-left: 1px solid var(--border);
-  border-right: 1px solid var(--border);
+  padding: 0;
+  min-width: 0;
+  overflow: hidden;
 }
-.pane-inbox  { grid-area: inbox;  background: var(--panel); }
+/* InboxPane now renders INSIDE the document workspace (context tab) — it
+   keeps its own class for inbox.css but must not paint a second panel
+   surface or grid placement there. */
+.pane-inbox { background: transparent; }
 
+
+/* ---------- narrow viewports (task 330, V2) ----------
+   <= 900px: ONE column. The sidebar is no longer inline — App renders it
+   inside the labeled navigation drawer (DialogFrame, modal.css) opened from
+   the mobile bar. The status bar keeps its own row. No page-level
+   horizontal scrolling: every pane owns its overflow. The 900px breakpoint
+   is the same query state/workspace.ts feeds into narrowViewport, so the
+   component tree and the grid can never disagree. */
+.mobile-bar { display: none; }
+@media (max-width: 900px) {
+  main {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto 1fr auto;
+    grid-template-areas:
+      "bar"
+      "active"
+      "status";
+    height: 100dvh;
+  }
+  .mobile-bar {
+    grid-area: bar;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+    min-height: 44px;
+  }
+  .mobile-bar .nav-toggle { width: 44px; height: 44px; }
+  .mobile-bar-title { font-weight: 600; font-size: var(--fs-3); }
+  .pane-active {
+    border-left: 0;
+    padding: 0;
+    min-width: 0;
+  }
+  .migration-banner { grid-column: 1 / -1; }
+}

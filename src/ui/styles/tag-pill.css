@@ -30,6 +30,23 @@
 }
 .tag-pill-interactive:hover { filter: brightness(1.05); }
 
+/* Compact at rest: the remove button stays keyboard-reachable, but has
+   no reserved width. Hover/focus expands its local space (motion.css).
+   Touch users get a persistent target; pending removal stays visible. */
+.tag-pill-removable { --tag-remove-size: 24px; gap: 0; padding: 0 8px; }
+.tag-pill-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tag-remove { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 0; height: var(--tag-remove-size); margin-left: 0; padding: 0; border: 0; border-radius: var(--r-pill); color: inherit; background: transparent; opacity: 0; transform: translateX(-3px); overflow: hidden; pointer-events: none; }
+.tag-pill-removable:hover .tag-remove,
+.tag-pill-removable:focus-within .tag-remove,
+.tag-pill-removable .tag-remove:disabled { width: var(--tag-remove-size); margin-left: 4px; opacity: 1; transform: translateX(0); pointer-events: auto; }
+.tag-remove:hover { background: color-mix(in srgb, currentColor 12%, transparent); }
+.tag-remove:focus-visible { outline-offset: -2px; }
+.tag-pill-removable .tag-remove:disabled { opacity: .45; cursor: progress; }
+@media (hover: none), (pointer: coarse) {
+  .tag-pill-removable .tag-remove { width: var(--tag-remove-size); margin-left: 4px; opacity: 1; transform: translateX(0); pointer-events: auto; }
+  .tag-pill-removable .tag-remove:disabled { opacity: .45; }
+}
+
 /* When a color IS supplied: derive perceived-lightness, text color, border.
    The luminance formula (W3C) is multiplied 0.2126/0.7152/0.0722 onto RGB.
    --lightness-switch is a step function: 1 when bg is dark (text → white),

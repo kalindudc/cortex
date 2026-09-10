@@ -1,0 +1,82 @@
+/* One motion contract for the workspace.
+   90ms: direct control feedback; 140ms: menus/content; 180ms: drawers.
+   No stagger, animation delays, pane-layout animation or JS queues.
+   The compact tag-remove affordance alone transitions its small inline
+   footprint; editor and document panel dimensions are never animated.
+   State/focus changes happen first. Closing removes the live surface at
+   once so an outgoing dialog/composer can never intercept another action.
+   Keyframes intentionally have NO forwards fill: transforms must not leave
+   a containing block behind for fixed metadata sheets or CodeMirror. */
+@keyframes ui-content-in { from { opacity: .65; } to { opacity: 1; } }
+@keyframes ui-menu-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes ui-dialog-in {
+  from { opacity: 0; transform: translateY(6px) scale(.985); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes ui-drawer-in {
+  from { opacity: .6; transform: translateX(-20px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes ui-notifications-in {
+  from { opacity: .6; transform: translateX(20px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes ui-backdrop-in { from { opacity: 0; } to { opacity: 1; } }
+
+.popover, .sidebar-filter-surface { animation: ui-menu-in var(--dur-2) var(--ease); }
+.modal { animation: ui-dialog-in var(--dur-2) var(--ease); }
+.nav-drawer-body { animation: ui-drawer-in var(--dur-3) var(--ease); }
+.notif-drawer { animation: ui-notifications-in var(--dur-3) var(--ease); }
+dialog.dialog-frame[open]::backdrop { animation: ui-backdrop-in var(--dur-2) var(--ease); }
+
+/* Opacity ONLY on document/editor ancestors: transforming one would change
+   fixed-popover positioning and CodeMirror's selection/caret geometry. A
+   same-task SSE/metadata rerender doesn't remount these nodes, so it never
+   restarts the animation. Hidden editors keep their existing lifetime. */
+.task-header,
+.doc-reader,
+.doc-context:not([hidden]),
+.editable-task-body:not([hidden]),
+.update-card-body,
+.activity-compose .compose,
+.doc-stale-notice,
+.external-change-banner,
+.lane-drop-tray,
+.update-source[open] pre {
+  animation: ui-content-in var(--dur-2) var(--ease);
+}
+.doc-tabs [role="tab"] { transition: color var(--dur-1) var(--ease), border-color var(--dur-2) var(--ease); }
+.doc-mode-switch button { transition: background-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease), box-shadow var(--dur-1) var(--ease); }
+.prop-trigger, .task-title-trigger, .ws-filter-trigger, .ws-tags-button, .ws-done-button, .ws-clear,
+.update-card-toggle, .post-update-toggle, .doc-outline-link, .popover-row, .sidebar-filter-option {
+  transition: background-color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
+}
+.tag-remove { transition: width var(--dur-2) var(--ease), margin-left var(--dur-2) var(--ease), opacity var(--dur-1) var(--ease), transform var(--dur-2) var(--ease), background-color var(--dur-1) var(--ease); }
+.workspace-toolbar .btn, .workspace-toolbar .btn-icon, .compose-submit {
+  transition: transform var(--dur-1) var(--ease), background-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
+}
+.workspace-toolbar .btn:active:not(:disabled),
+.workspace-toolbar .btn-icon:active:not(:disabled),
+.compose-submit:active:not(:disabled) { transform: translateY(1px); }
+.update-disclosure, .compose-disclosure, .doc-outline-title::before, .ws-filter-trigger > .icon { transition: transform var(--dur-1) var(--ease); }
+.update-card-toggle[aria-expanded="true"] .update-disclosure { transform: rotate(180deg); }
+.post-update-toggle[aria-expanded="true"] .compose-disclosure { transform: rotate(45deg); }
+
+/* Live preference changes cancel ongoing motion as well as future motion.
+   This includes legacy tooltip/notification transitions and pseudo-elements;
+   don't use near-zero durations or retain an invisible outgoing overlay. */
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur-1: 0ms; --dur-2: 0ms; --dur-3: 0ms; }
+  main *, main *::before, main *::after, dialog.dialog-frame::backdrop {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+  .workspace-toolbar .btn:active:not(:disabled),
+  .workspace-toolbar .btn-icon:active:not(:disabled),
+  .compose-submit:active:not(:disabled),
+  .color-swatch:hover { transform: none; }
+}

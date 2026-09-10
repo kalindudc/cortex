@@ -81,8 +81,14 @@ export function PriorityChipButton({ task }: { task: Task }): VNode {
       await tryApi(() => api.editTask(task.id, { priority: null }));
       return;
     }
-    const n = parseInt(trimmed, 10);
-    if (Number.isNaN(n) || n < 0 || n === task.priority) {
+    // Priority is null or a NONNEGATIVE INTEGER. Fractions and negatives
+    // are rejected outright — never truncated to a nearby integer (H2).
+    if (!/^\d+$/.test(trimmed)) {
+      val.value = String(task.priority ?? "");
+      return;
+    }
+    const n = Number(trimmed);
+    if (!Number.isSafeInteger(n) || n === task.priority) {
       val.value = String(task.priority ?? "");
       return;
     }
@@ -95,7 +101,8 @@ export function PriorityChipButton({ task }: { task: Task }): VNode {
         ref={inputRef}
         type="number"
         min="0"
-        class={`priority-chip priority-chip-input ${priorityClass(task.priority)}`}
+        class={`prop-trigger priority-chip priority-chip-input ${priorityClass(task.priority)}`}
+        aria-label="Priority"
         value={val.value}
         onInput={(e: JSX.TargetedInputEvent<HTMLInputElement>) => (val.value = e.currentTarget.value)}
         onKeyDown={(e: KeyboardEvent) => {
@@ -112,27 +119,27 @@ export function PriorityChipButton({ task }: { task: Task }): VNode {
       />
     );
   }
-  // Unset affordance: faint pill labelled `+ P?`. Same click → editing
-  // morph; the input starts empty (see val initialiser) so a single
-  // keystroke enters the new value.
+  // Unset affordance: quiet labeled call-to-action (H1: 'Set priority',
+  // not a cryptic '+ P?'). Same click → editing morph; the input starts
+  // empty (see val initialiser) so a single keystroke enters the value.
   if (task.priority === null) {
     return (
       <button
-        class="priority-chip priority-chip-unset"
-        title="Set priority"
+        class="prop-trigger priority-chip priority-chip-unset"
+        title="Set priority (0 = highest)"
         onClick={(e: MouseEvent) => {
           e.stopPropagation();
           closeAllPopovers();
           editing.value = true;
         }}
       >
-        + P?
+        Set priority
       </button>
     );
   }
   return (
     <button
-      class={`priority-chip ${priorityClass(task.priority)}`}
+      class={`prop-trigger priority-chip ${priorityClass(task.priority)}`}
       title={`Priority ${task.priority} (0 = highest) — click to edit`}
       onClick={(e: MouseEvent) => {
         e.stopPropagation();
@@ -142,7 +149,8 @@ export function PriorityChipButton({ task }: { task: Task }): VNode {
         editing.value = true;
       }}
     >
-      P{task.priority}
+      <span class="prop-label">Priority:</span>
+      <span class="prop-value">P{task.priority}</span>
     </button>
   );
 }

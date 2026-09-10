@@ -39,11 +39,31 @@ import "./state/showAllTasks.ts";
 import "./state/sectionOpen.ts";
 import "./state/filters.ts";
 import "./state/postUpdateOpen.ts";
+// Side-effect import: seeds the workspace query preference and registers
+// browser body-mode preference and task-entry effect. MUST come after the filter/
+// collapse seeds above (its effects read those signals) and BEFORE
+// mount/refresh below so defaults beat the first paint.
+import "./state/workspace.ts";
 import App from "./components/App.tsx";
 import { refresh } from "./state/refresh.ts";
-import { meAuthor, paletteOpen, paletteQuery, modal, migrationsPending, postUpdateOpen } from "./state/signals.ts";
-import { closeAllPopovers } from "./state/popovers.ts";
-import { notifications } from "./state/notifications.ts";
+import { clearWorkspaceTransientState, requestPostUpdate, requestMode } from "./state/workspace.ts";
+import { activeTask } from "./state/computed.ts";
+import { IS_MAC, matchModeShortcut } from "./lib/keys.ts";
+import {
+  meAuthor,
+  paletteOpen,
+  paletteQuery,
+  modal,
+  migrationsPending,
+  navigationOpen,
+  sidebarFilter,
+  statusPopover,
+  lanePopover,
+  tagsPopover,
+  taskActionsPopover,
+} from "./state/signals.ts";
+import { closeAllPopovers, closeSidebarFilter } from "./state/popovers.ts";
+import { notifications, notificationsOpen } from "./state/notifications.ts";
 import type { Notification } from "./api/types.ts";
 
 // PostUpdateForm publishes its submit closure to window.__cortexPostUpdate
@@ -175,13 +195,59 @@ document.addEventListener("click", (e: MouseEvent) => {
 // ---------- global keyboard shortcuts ----------
 // No single-key hotkeys (they hijack typing in inputs). Only meta-modified:
 //   ⌘/Ctrl + P  or  ⌘/Ctrl + K   -> toggle command palette
-//   ⌘/Ctrl + /                   -> jump cursor into the post-update textarea
+//   ⌘/Ctrl + /                   -> reveal Activity + focus its inline composer
 //   ⌘/Ctrl + Enter               -> post the update (works while focused in textarea)
-//   Esc                          -> close palette -> modal -> popover
+//   ⌘+Option / Ctrl+Alt + 1/2/3  -> Read / Edit / Split (left Alt on Windows/Linux)
+//   Esc                          -> close palette -> modal -> workspace transients
+// Modifier tracking is not an animation/state queue. It only distinguishes
+// deliberate Ctrl+left-Alt from AltGr, including Firefox's AltGraph behavior.
+const heldAlt = new Set<string>();
+const trackAlt = (event: KeyboardEvent): void => {
+  if (event.code !== "AltLeft" && event.code !== "AltRight") return;
+  if (event.type === "keydown") heldAlt.add(event.code);
+  else heldAlt.delete(event.code);
+};
+window.addEventListener("keydown", trackAlt, true);
+window.addEventListener("keyup", trackAlt, true);
+window.addEventListener("blur", () => heldAlt.clear());
 window.addEventListener("keydown", (e: KeyboardEvent) => {
+  // Respect handled events and in-flight IME composition — a component
+  // that already acted on the key (or an active composition) must not be
+  // double-handled by the global layer.
+  if (e.defaultPrevented || e.isComposing) return;
   const meta = e.metaKey || e.ctrlKey;
+  const mode = matchModeShortcut(e, IS_MAC, heldAlt);
+  if (mode != null) {
+    // Consume our chord but never mutate content behind an active overlay,
+    // repeat a held-key action, or act without a task. AltGr was excluded
+    // by the matcher, so international character entry remains untouched.
+    e.preventDefault();
+    if (
+      e.repeat ||
+      !activeTask.peek() ||
+      paletteOpen.peek() ||
+      modal.peek() ||
+      navigationOpen.peek() ||
+      sidebarFilter.peek() ||
+      statusPopover.peek() ||
+      lanePopover.peek() ||
+      tagsPopover.peek() ||
+      taskActionsPopover.peek() ||
+      notificationsOpen.peek()
+    )
+      return;
+    requestMode(mode, mode === "read" ? "reader" : "body");
+    return;
+  }
 
-  // Open palette in command mode (mod+p) or search mode (mod+k).
+  // Palette/modal own the top keyboard layer. Except for Escape (which
+  // closes the top layer below), global commands must not mutate hidden
+  // workspace content behind an overlay.
+  if (e.key !== "Escape" && (paletteOpen.peek() || modal.peek() != null)) return;
+
+  // Open palette in command mode (mod+p) or search mode (mod+k). Retarget
+  // any lower drawer/popover/drag layer first.
+  if (meta && (e.key === "p" || e.key === "k")) clearWorkspaceTransientState();
   if (meta && e.key === "p") {
     e.preventDefault();
     if (!paletteQuery.value.startsWith("/")) paletteQuery.value = `/${paletteQuery.value}`;
@@ -195,22 +261,14 @@ window.addEventListener("keydown", (e: KeyboardEvent) => {
     return;
   }
 
-  // Focus post-update textarea from anywhere. Match BOTH e.key === "/" (US
-  // layouts) and e.code === "Slash" (layout-independent) because non-US
-  // keyboard layouts produce different glyphs for the slash key, but e.code
-  // is always the physical key.
+  // Post an update from anywhere (A3): ONE entry point — select Activity,
+  // expand the composer disclosure, scroll + focus its textarea. Match BOTH
+  // e.key === "/" (US layouts) and e.code === "Slash" (layout-independent)
+  // because non-US keyboard layouts produce different glyphs for the slash
+  // key, but e.code is always the physical key. No active task → no-op.
   if (meta && (e.key === "/" || e.code === "Slash")) {
     e.preventDefault();
-    if (!postUpdateOpen.value) postUpdateOpen.value = true;
-    // Defer one frame so Preact has mounted #post-update-input when the
-    // wrapper was just expanded.
-    requestAnimationFrame(() => {
-      const ta = document.getElementById("post-update-input") as HTMLTextAreaElement | null;
-      if (ta) {
-        ta.focus();
-        ta.setSelectionRange?.(ta.value.length, ta.value.length);
-      }
-    });
+    requestPostUpdate();
     return;
   }
 
@@ -242,6 +300,14 @@ window.addEventListener("keydown", (e: KeyboardEvent) => {
       modal.value = null;
       return;
     }
-    if (closeAllPopovers()) return;
+    // Sidebar filters are nonmodal children of navigation, not task-owned
+    // popovers. Escape dismisses only the filter and restores its trigger;
+    // preventDefault also prevents the native drawer's cancel action.
+    if (closeSidebarFilter(true)) {
+      e.preventDefault();
+      return;
+    }
+    // Metadata popovers, navigation and drag state share the full reset.
+    if (clearWorkspaceTransientState()) return;
   }
 });

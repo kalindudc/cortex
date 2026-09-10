@@ -8,7 +8,7 @@ import { describe, test, expect, beforeEach } from "bun:test";
 import { render } from "@testing-library/preact";
 
 import { StatusBar } from "../../../src/ui/components/StatusBar.tsx";
-import { filters, tasks, showAllTasks } from "../../../src/ui/state/signals.ts";
+import { filters, tasks, showAllTasks, workspaceQuery } from "../../../src/ui/state/signals.ts";
 import { UNTAGGED } from "../../../src/ui/state/computed.ts";
 import type { Task } from "../../../src/ui/api/types.ts";
 
@@ -32,6 +32,7 @@ describe("StatusBar", () => {
     filters.value = { status: null, lane: null, tag: [] };
     tasks.value = [];
     showAllTasks.value = false;
+    workspaceQuery.value = "";
   });
 
   test("filter summary reads 'All tasks' when no filters set", () => {
@@ -110,6 +111,22 @@ describe("StatusBar", () => {
       const counts = container.querySelector(".status-counts")?.textContent ?? "";
       expect(counts).toContain("in review");
     }
+  });
+
+  test("filter summary is query-aware: active search term appears in the hint", () => {
+    workspaceQuery.value = "needle";
+    const { container } = render(<StatusBar />);
+    const text = container.querySelector(".filter-summary")?.textContent ?? "";
+    expect(text).toContain("needle");
+    expect(text).not.toBe("All tasks");
+  });
+
+  test("shown count reflects the query intersection (shared visibleTasks)", () => {
+    tasks.value = [task({ id: 1, title: "needle one" }), task({ id: 2, title: "haystack" })];
+    workspaceQuery.value = "needle";
+    const { container } = render(<StatusBar />);
+    const counts = container.querySelector(".status-counts")?.textContent ?? "";
+    expect(counts).toContain("1 shown");
   });
 
   test("palette hint renders both 'K' and 'P' key indicators", () => {

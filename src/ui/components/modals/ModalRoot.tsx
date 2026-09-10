@@ -2,8 +2,11 @@
 // Switches on `modal.value.kind`. Returns null when no modal is open.
 
 import type { VNode } from "preact";
+import { useEffect } from "preact/hooks";
 
 import { modal, filters, setFilter, selectedId } from "../../state/signals.ts";
+import { clearWorkspaceTransientState } from "../../state/workspace.ts";
+import { DialogFrame } from "./DialogFrame.tsx";
 import { api } from "../../api/client.ts";
 import { tryApi } from "../../api/errors.ts";
 import { LaneEditModal } from "./LaneEditModal.tsx";
@@ -17,14 +20,16 @@ import type { Update } from "../../api/types.ts";
 
 export function ModalRoot(): VNode | null {
   const m = modal.value;
+  // Single active layer (V3): a modal opening retargets the lower transient
+  // layers (mobile drawer, drag tray, popovers) before it takes the top.
+  useEffect(() => {
+    if (m != null && m.kind !== "filter-tags") clearWorkspaceTransientState();
+  }, [m?.kind]);
   if (!m) return null;
   const close = () => (modal.value = null);
-  const overlayClick = (e: MouseEvent) => {
-    if ((e.target as HTMLElement).classList.contains("overlay")) close();
-  };
   if (m.kind === "confirm-delete") {
     return (
-      <div class="overlay" onClick={overlayClick}>
+      <DialogFrame label="Delete task" onClose={close}>
         <div class="modal">
           <h2>Delete task?</h2>
           <p class="meta" style="margin:0">
@@ -46,7 +51,7 @@ export function ModalRoot(): VNode | null {
             </button>
           </div>
         </div>
-      </div>
+      </DialogFrame>
     );
   }
   if (m.kind === "lane-edit") {
@@ -74,7 +79,7 @@ export function ModalRoot(): VNode | null {
     const tagName = m.name as string;
     const taskCount = (m.taskCount as number) ?? 0;
     return (
-      <div class="overlay" onClick={overlayClick}>
+      <DialogFrame label="Delete tag" onClose={close}>
         <div class="modal">
           <h2>
             Delete tag <span class="meta">#{tagName}</span>?
@@ -106,13 +111,13 @@ export function ModalRoot(): VNode | null {
             </button>
           </div>
         </div>
-      </div>
+      </DialogFrame>
     );
   }
   if (m.kind === "confirm-lane-delete") {
     const laneName = m.name as string;
     return (
-      <div class="overlay" onClick={overlayClick}>
+      <DialogFrame label="Delete lane" onClose={close}>
         <div class="modal">
           <h2>
             Delete lane <span class="meta">{laneName}</span>?
@@ -137,7 +142,7 @@ export function ModalRoot(): VNode | null {
             </button>
           </div>
         </div>
-      </div>
+      </DialogFrame>
     );
   }
   return null;

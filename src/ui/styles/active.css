@@ -1,27 +1,17 @@
-/* ---------- update form ---------- */
-.compose {
-  display: flex; flex-direction: column;
-  border: 1px solid var(--border); border-radius: var(--r-3);
-  background: var(--bg);
-  transition: border-color var(--dur-2) var(--ease), box-shadow var(--dur-2) var(--ease);
-}
-.compose:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-tint); }
-.compose textarea {
-  border: 0; box-shadow: none; padding: 10px 12px; min-height: 56px;
-  background: transparent; resize: none;
-}
+/* Inline Activity composer. Labels and controls share the same family as
+   the document metadata; no miniature fixed-height submit overrides. */
+.compose { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--r-3); background: var(--bg); min-width: 0; }
+.compose:focus-within { border-color: var(--border-strong); box-shadow: 0 0 0 2px var(--panel); }
+.compose-label { padding: 14px 14px 0; color: var(--text-2); font: 500 12px/1.5 var(--font-sans); }
+.compose textarea { border: 0; box-shadow: none; padding: 10px 14px 14px; background: transparent; resize: none; font: 14px/1.7 var(--font-sans); }
 .compose textarea:focus { outline: none; box-shadow: none; }
-.compose-foot {
-  display: flex; align-items: center; gap: 8px;
-  padding: 6px 8px 6px 12px; border-top: 1px solid var(--border);
-}
-.compose-foot input.author {
-  height: 24px; padding: 0 6px; width: 80px; font-size: var(--fs-2);
-  border: 1px solid transparent; background: transparent;
-}
-.compose-foot input.author:hover { border-color: var(--border); }
-.compose-foot input.author:focus { border-color: var(--accent); background: var(--bg); }
-.char-counter { font-size: var(--fs-1); color: var(--text-3); }
+.compose-foot { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 16px; padding: 10px 12px; border-top: 1px solid var(--border); background: color-mix(in srgb, var(--panel) 45%, transparent); border-radius: 0 0 var(--r-3) var(--r-3); }
+.compose-author { display: flex; align-items: center; gap: 8px; flex: 1 1 180px; min-width: 0; }
+.compose-author label { color: var(--text-2); font: 11px/1.5 var(--font-sans); }
+.compose-foot input.author { height: var(--control-height); width: 140px; flex: 1 1 auto; min-width: 0; max-width: 220px; padding: 0 8px; border: 1px solid var(--border); background: var(--bg); font: 12px/1.5 var(--font-sans); }
+.compose-foot input.author:hover { border-color: var(--border-strong); }
+.compose-submit-row { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-left: auto; }
+.char-counter { color: var(--text-2); font: 10px/1.5 var(--font-mono); white-space: nowrap; }
 .char-counter.warn { color: var(--err); }
 /* Hotkey hint chip in the compose-foot. Sits inline with the char counter
    and Post button so it stays visible while typing (placeholders vanish on
@@ -37,7 +27,7 @@
    The task description does NOT use this — it uses the CodeMirror-backed
    .md-editor below, which has its own bounded scroll and gutter. */
 textarea.autosize {
-  min-height: 80px;
+  min-height: 100px;
   overflow: hidden;     /* never scroll — JS keeps height = scrollHeight */
   resize: none;
 }
@@ -51,7 +41,8 @@ textarea.autosize {
    visible without dominating the editing surface. */
 .external-change-banner {
   display: flex; align-items: center; gap: 12px;
-  margin: 8px 24px; padding: 8px 12px;
+  margin: 8px 0; padding: 8px 12px;
+  flex-shrink: 0;
   background: var(--accent-tint);
   border: 1px solid var(--accent);
   border-left-width: 3px;
@@ -104,7 +95,13 @@ textarea.autosize {
   flex: 1;
   min-height: 0;
   width: 100%;
+  /* Editor-only paper-dot texture (V1): the grain marks the WRITING
+     surface; rendered prose stays clean. */
+  background-image: radial-gradient(circle, var(--paper-dot) 0.8px, transparent 1.2px);
+  background-size: 26px 26px;
+  background-position: 0 0;
 }
+.editable-task-body[hidden] { display: none; }
 /* ---------- .md-editor (CodeMirror-backed task description) ----------
    Single always-editable mode. This stylesheet only owns the wrapper
    sizing/affordance — the editor's chrome (gutter colors, active line,
@@ -123,6 +120,9 @@ textarea.autosize {
   background: transparent;
   overflow: hidden;
 }
+/* Author `display: block` above would otherwise beat the UA `[hidden]`
+   rule — a hidden (Read-mode) editor MUST leave layout and the tab order. */
+.md-editor[hidden] { display: none; }
 .md-editor .cm-scroller, .md-editor .cm-content { cursor: text; }
 .md-editor .cm-gutters { cursor: default; }
 /* CodeMirror's root is .cm-editor; fill our wrappers exactly in BOTH modes
@@ -145,3 +145,9 @@ textarea.autosize {
   text-underline-offset: 2px;
 }
 .md-editor .cm-mod-down .cm-cortex-ref { cursor: pointer; }
+
+@media (max-width: 900px) {
+  .compose-foot input.author, .compose-submit { min-height: 44px; }
+  .external-change-banner { flex-wrap: wrap; }
+  .external-change-actions .btn { min-height: 44px; }
+}

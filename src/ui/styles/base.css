@@ -29,12 +29,10 @@ input, textarea {
 ::placeholder { color: var(--text-3); }
 
 button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
-/* All editable controls render in the monospace stack. The dashboard is a
-   developer tool; user-typed content (task titles, descriptions, update
-   bodies, lane names) reads better in mono. UI chrome (eyebrows, buttons,
-   meta labels) stays sans for visual contrast. */
+/* Controls belong to the same sans-serif UI family as their labels.
+   Monospace is reserved for code/source, identifiers and numeric badges. */
 input, textarea, select {
-  font: 400 var(--fs-3) var(--font-mono);
+  font: 400 var(--fs-3)/1.5 var(--font-sans);
   color: inherit; background: var(--bg);
   border: 1px solid var(--border); border-radius: var(--r-2);
   padding: 6px 10px; transition: border-color var(--dur-2) var(--ease), box-shadow var(--dur-2) var(--ease);
@@ -44,5 +42,8 @@ input:focus, textarea:focus, select:focus {
   outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-tint);
 }
 textarea { width: 100%; min-height: 80px; resize: vertical; line-height: 1.5; }
-a { color: var(--accent); text-decoration: none; }
+a { color: var(--code-accent); text-decoration: none; }
+button:focus-visible, a:focus-visible, summary:focus-visible, select:focus-visible {
+  outline: 2px solid var(--info); outline-offset: 2px;
+}
 

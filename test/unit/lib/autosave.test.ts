@@ -54,14 +54,14 @@ function makeScheduler(): {
 }
 
 // Tiny harness that mounts the hook and exposes its return value to the test.
-// `apiRef.current` is updated each render with the latest { schedule, flush }.
-let apiRef: { current: { schedule: () => void; flush: () => void } | null } = { current: null };
+// `apiRef.current` is updated each render with the latest api surface.
+let apiRef: { current: { schedule: () => void; flush: () => void; cancel: () => void } | null } = { current: null };
 
 // Unwrap helper. If the Harness was rendered, apiRef.current is set; if not,
 // the test setup is broken and we want a loud failure instead of a silent
 // nullable-deref. Avoids the non-null `!` operator (Biome treats it as
 // lint/style/noNonNullAssertion error).
-function api(): { schedule: () => void; flush: () => void } {
+function api(): { schedule: () => void; flush: () => void; cancel: () => void } {
   if (!apiRef.current) throw new Error("Harness not mounted: apiRef.current is null");
   return apiRef.current;
 }
@@ -182,5 +182,59 @@ describe("useAutosave", () => {
     unmount();
 
     expect(commit).toHaveBeenCalledTimes(0);
+  });
+
+  // ---- cancel() (task 330: pause/discard unsent work without committing) ----
+
+  test("cancel() clears both timers WITHOUT committing", () => {
+    const commit = mock(() => {});
+    const { scheduler, pending } = makeScheduler();
+
+    render(h(Harness, { commit, scheduler }));
+    api().schedule();
+    expect(pending.size).toBe(2);
+
+    api().cancel();
+
+    expect(commit).toHaveBeenCalledTimes(0);
+    expect(pending.size).toBe(0);
+  });
+
+  test("flush() after cancel() is a no-op (nothing dirty anymore)", () => {
+    const commit = mock(() => {});
+    const { scheduler } = makeScheduler();
+
+    render(h(Harness, { commit, scheduler }));
+    api().schedule();
+    api().cancel();
+    api().flush();
+
+    expect(commit).toHaveBeenCalledTimes(0);
+  });
+
+  test("unmount after cancel() does not resurrect the cancelled commit", () => {
+    const commit = mock(() => {});
+    const { scheduler } = makeScheduler();
+
+    const { unmount } = render(h(Harness, { commit, scheduler }));
+    api().schedule();
+    api().cancel();
+    unmount();
+
+    expect(commit).toHaveBeenCalledTimes(0);
+  });
+
+  test("schedule() after cancel() re-arms both timers normally", () => {
+    const commit = mock(() => {});
+    const { scheduler, pending, fireFirstWithMs } = makeScheduler();
+
+    render(h(Harness, { commit, scheduler }));
+    api().schedule();
+    api().cancel();
+    api().schedule();
+
+    expect(pending.size).toBe(2);
+    fireFirstWithMs(600);
+    expect(commit).toHaveBeenCalledTimes(1);
   });
 });

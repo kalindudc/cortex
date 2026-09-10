@@ -22,13 +22,13 @@
 .palette-breadcrumb .meta { font-size: var(--fs-2); }
 
 .palette-list {
-  max-height: 360px; overflow: auto; padding: 4px;
+  max-height: 400px; min-height: 0; flex: 1 1 auto; overflow: auto; padding: 6px;
 }
 .palette-row {
   display: grid; grid-template-columns: 14px 1fr auto auto;
   align-items: center; gap: 10px;
-  width: 100%; padding: 8px 12px; border-radius: var(--r-2);
-  color: var(--text-2); font-size: var(--fs-4);
+  width: 100%; min-height: 38px; padding: 9px 12px; border-radius: var(--r-2);
+  color: var(--text-2); font-size: var(--fs-3);
   text-align: left;
   transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
 }
@@ -63,13 +63,16 @@ mark.search-hit {
 .palette-row:hover { background: var(--tint); color: var(--text); }
 .palette-row.active { background: var(--accent-tint); color: var(--text); }
 .palette-foot {
-  display: flex; gap: 16px; padding: 10px 16px;
+  display: flex; gap: 12px; flex-wrap: wrap; flex-shrink: 0; padding: 10px 16px;
   border-top: 1px solid var(--border);
   background: var(--panel);
   font-size: var(--fs-1);
 }
 .palette-foot .kbd { margin-right: 4px; }
-.overlay-top { padding-top: 12vh; }
+@media (max-width: 900px) {
+  .palette-row { min-height: 44px; }
+  .palette-input { flex-shrink: 0; }
+}
 
 /* Search-result rows reuse .palette-row but carry a status dot inline. */
 .palette-row .dot {

@@ -20,6 +20,7 @@ import { tryApi } from "../../api/errors.ts";
 import { LANE_COLORS } from "../../lib/constants.ts";
 import { onSubmitKeys } from "../../lib/keys.ts";
 import { Icon } from "../Icon.tsx";
+import { DialogFrame } from "./DialogFrame.tsx";
 
 export function NewLaneModal({ close }: { close: () => void }): VNode {
   const name = useSignal("");
@@ -52,12 +53,7 @@ export function NewLaneModal({ close }: { close: () => void }): VNode {
   };
 
   return (
-    <div
-      class="overlay"
-      onClick={(e: MouseEvent) => {
-        if ((e.target as HTMLElement).classList.contains("overlay")) close();
-      }}
-    >
+    <DialogFrame label="New lane" onClose={close}>
       <div class="modal" style="max-width: 420px" onKeyDown={onSubmitKeys(save)}>
         <div class="row">
           <h2 class="grow">New lane</h2>
@@ -117,6 +113,6 @@ export function NewLaneModal({ close }: { close: () => void }): VNode {
           </button>
         </div>
       </div>
-    </div>
+    </DialogFrame>
   );
 }

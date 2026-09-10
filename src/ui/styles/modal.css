@@ -1,115 +1,66 @@
-/* ---------- modal / overlay ---------- */
-.overlay {
-  position: fixed; inset: 0; z-index: 100;
-  display: flex; align-items: flex-start; justify-content: center;
-  padding-top: 18vh; background: rgba(0,0,0,0.32);
-  animation: fade var(--dur-2) var(--ease);
-}
-.modal {
-  width: 100%; max-width: 480px;
-  background: var(--bg); border: 1px solid var(--border);
-  border-radius: var(--r-4); box-shadow: var(--shadow-cmd);
-  padding: 16px; display: flex; flex-direction: column; gap: 12px;
-  animation: pop var(--dur-3) var(--ease);
-}
-/* Centered overlay variant. Default .overlay anchors modals near the top
-   (padding-top: 18vh + align-items: flex-start) which is fine for short
-   modals but mathematically guarantees overflow for any modal taller than
-   100vh - 18vh = 82vh. Tall modals (e.g. update-detail with a long body)
-   opt in to this variant which centers the modal vertically and keeps a
-   fixed 32px breathing room top + bottom. */
-.overlay--centered {
-  align-items: center;
-  padding: 32px 16px;
-}
-/* Wide modal variant.
-   max-height matches the centered overlay's vertical padding budget exactly
-   (100vh - 32px top - 32px bottom) so the modal never overflows the
-   viewport. overflow: hidden clips children to the modal box; without it,
-   the .md-editor below would visually escape past max-height even though
-   the .modal box itself respects the cap. */
-.modal--wide {
-  max-width: 720px;
-  max-height: calc(100vh - 64px);
-  overflow: hidden;
-}
-/* Body region of the update-detail modal — the scroll container.
-   flex: 1 absorbs remaining modal height; min-height: 0 lets it shrink
-   below content size; overflow: auto handles overflow for both the
-   empty-body hint AND the MdEditor case (see override below). */
-.update-body {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: auto;
-}
-/* In the modal context, let .update-body own scrolling instead of CM's
-   internal scroller. The in-page editor (active.css) bounds itself with
-   `flex: 1 1 auto; min-height: 120px; overflow: hidden` so CM's own
-   .cm-scroller can engage, but that chain doesn't compose cleanly inside
-   a nested flex modal. Setting height: auto + overflow: visible on the
-   editor + .cm-editor + .cm-scroller makes them render at natural content
-   height; .update-body's overflow: auto provides the single scrollbar. */
-.modal--wide .md-editor,
-.modal--wide .md-editor .cm-editor,
-.modal--wide .md-editor .cm-scroller {
-  height: auto;
-  flex: none;
-  overflow: visible;
-  min-height: 0;
-}
-.modal h2 { margin: 0; font-size: var(--fs-6); font-weight: 600; }
-.modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
-/* Wider variant for RenderMarkdownModal. Layered on top of .modal--wide
-   so the cascade chain is .modal (480) → .modal--wide (720) → .modal--
-   render-markdown (almost-full-viewport). The horizontal budget mirrors
-   the vertical one (max-height: calc(100vh - 64px)) for symmetry, and the
-   1400px cap stops the modal from going stupidly wide on 4K monitors
-   where readability would suffer. */
-.modal--render-markdown {
-  max-width: min(1400px, calc(100vw - 64px));
-}
-
-/* Rendered-markdown body in RenderMarkdownModal. Reuses .update-body's
-   scroll discipline (flex:1; min-height:0; overflow:auto) — see selector
-   above. This class only adds typography + spacing + mermaid SVG sizing. */
-.markdown-rendered {
-  font-size: var(--fs-3);
-  line-height: 1.55;
+/* The native dialog owns modality. Its transparent viewport wrapper owns
+   positioning; the modal uses the SAME gutter budget for its height cap. */
+dialog.dialog-frame {
+  --dialog-top: clamp(16px, 12dvh, 112px);
+  --dialog-bottom: 24px;
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  max-width: 100vw;
+  height: 100dvh;
+  max-height: 100dvh;
+  margin: 0;
+  padding: var(--dialog-top) 24px var(--dialog-bottom);
+  border: 0;
+  background: transparent;
   color: var(--text);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  overflow: hidden;
+  outline: none;
 }
-.markdown-rendered h1,
-.markdown-rendered h2,
-.markdown-rendered h3 { margin: 16px 0 8px; font-weight: 600; }
-.markdown-rendered h1 { font-size: var(--fs-6); }
-.markdown-rendered h2 { font-size: var(--fs-5); }
-.markdown-rendered h3 { font-size: var(--fs-4); }
-.markdown-rendered p,
-.markdown-rendered ul,
-.markdown-rendered ol,
-.markdown-rendered blockquote { margin: 8px 0; }
-.markdown-rendered code {
-  font-family: var(--font-mono);
-  font-size: 0.92em;
-  background: var(--bg-2);
-  padding: 0 4px;
-  border-radius: var(--r-1);
-}
-.markdown-rendered pre {
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-2);
-  padding: 10px 12px;
+dialog.dialog-frame:not([open]) { display: none; }
+dialog.dialog-frame::backdrop { background: rgba(0, 0, 0, .32); }
+.modal {
+  width: 100%;
+  max-width: 480px;
+  min-width: 0;
+  min-height: 0;
+  max-height: calc(100dvh - var(--dialog-top) - var(--dialog-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
   overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r-4);
+  background: var(--bg);
+  box-shadow: var(--shadow-cmd);
 }
-.markdown-rendered pre code { background: transparent; padding: 0; }
-.markdown-rendered pre.mermaid { background: transparent; border: 0; padding: 0; text-align: center; }
-.markdown-rendered pre.mermaid svg { max-width: 100%; height: auto; }
-.markdown-rendered a { color: var(--accent); }
-.markdown-rendered table { border-collapse: collapse; }
-.markdown-rendered th, .markdown-rendered td {
-  border: 1px solid var(--border); padding: 4px 8px;
+.modal h2 { margin: 0; color: var(--text); font: 600 19px/1.35 var(--font-sans); letter-spacing: -.02em; }
+.modal .meta { color: var(--text-2); line-height: 1.6; }
+.modal input:not([type="checkbox"]), .modal select { min-height: var(--control-height); font-family: var(--font-sans); }
+.modal-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; padding-top: 4px; }
+.modal--wide { max-width: 760px; overflow: hidden; }
+.modal--render-markdown { max-width: 960px; }
+.update-body { flex: 1 1 auto; min-height: 0; overflow: auto; scrollbar-width: thin; }
+.update-body .markdown-view { margin: 0 auto; }
+
+/* One navigation identity inside the left sheet, with its close button
+   aligned to the brand rather than another stacked application header. */
+dialog.dialog-frame--sheet { --dialog-top: 0px; --dialog-bottom: 0px; padding: 0; align-items: stretch; justify-content: flex-start; }
+.nav-drawer-body { position: relative; width: min(320px, calc(100vw - 24px)); height: 100dvh; min-width: 0; display: flex; flex-direction: column; background: var(--panel); border-right: 1px solid var(--border); box-shadow: var(--shadow-cmd); }
+.nav-drawer-head { position: absolute; top: 14px; right: 10px; display: flex; z-index: 1; }
+.nav-drawer-body .sidebar-brand { padding-right: 64px; }
+.nav-drawer-body .workspace-local { display: none; }
+.nav-drawer-body .pane-lanes { flex: 1 1 auto; min-height: 0; height: auto; border-right: 0; }
+@media (max-height: 560px), (max-width: 900px) {
+  dialog.dialog-frame { --dialog-top: 12px; --dialog-bottom: 12px; padding-left: 12px; padding-right: 12px; }
+  dialog.dialog-frame--sheet { --dialog-top: 0px; --dialog-bottom: 0px; padding: 0; }
+  .modal { padding: 18px; }
 }
-
-@keyframes fade { from { opacity: 0 } to { opacity: 1 } }
-@keyframes pop  { from { opacity: 0; transform: translateY(-4px) } to { opacity: 1; transform: none } }
-
+@media (max-width: 900px) {
+  .modal .btn, .modal .btn-icon, .nav-drawer-head .btn-icon { min-width: 44px; min-height: 44px; }
+  .modal input:not([type="checkbox"]), .modal select { min-height: 44px; }
+}

@@ -191,4 +191,34 @@ describe("CommandPalette", () => {
     expect(selectedId.value).toBe(7);
     expect(paletteOpen.value).toBe(false);
   });
+
+  test("task selection reveals the Document tab WITHOUT clearing workspace filters (task 330 W4)", async () => {
+    const { filters, workspaceQuery, tab } = await import("../../../../src/ui/state/signals.ts");
+    const currentTab = (): string => tab.value;
+    paletteQuery.value = "";
+    filters.value = { status: "open", lane: "now", tag: ["bug"] };
+    workspaceQuery.value = "needle";
+    tab.value = "updates";
+    tasks.value = [
+      {
+        id: 8,
+        lane: "elsewhere",
+        title: "Outside the filters",
+        body: "",
+        status: "draft",
+        priority: null,
+        created: 0,
+        updated: 0,
+        tags: [],
+      },
+    ];
+    mockedSearchResults = [{ task: tasks.value[0], score: 10 }];
+    const { container } = render(<CommandPalette />);
+    fireEvent.click(container.querySelectorAll(".palette-row")[0]);
+    expect(selectedId.value).toBe(8);
+    expect(currentTab()).toBe("document"); // revealed
+    // Global search is global; selecting a result preserves the filters.
+    expect(filters.value).toEqual({ status: "open", lane: "now", tag: ["bug"] });
+    expect(workspaceQuery.value).toBe("needle");
+  });
 });

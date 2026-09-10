@@ -9,7 +9,7 @@
 // No interactivity beyond hover tooltips on the count chips.
 
 import type { VNode } from "preact";
-import { filters, paletteOpen } from "../state/signals.ts";
+import { filters, paletteOpen, workspaceQuery } from "../state/signals.ts";
 import { visibleTasks, blockedTasks, UNTAGGED } from "../state/computed.ts";
 import { tasks as allTasks } from "../state/signals.ts";
 import { notificationsOpen, unreadCount } from "../state/notifications.ts";
@@ -17,8 +17,11 @@ import { kbd } from "../lib/keys.ts";
 import { tip } from "../state/tooltip.ts";
 import { Icon } from "./Icon.tsx";
 
-function describeFilters(f: { status: string | null; lane: string | null; tag: string[] }): string {
+function describeFilters(f: { status: string | null; lane: string | null; tag: string[] }, query: string): string {
   const parts: string[] = [];
+  // The workspace search query is a first-class filter term (W3) — lead
+  // with it so the summary reads like the composed filter it is.
+  if (query.trim() !== "") parts.push(`“${query.trim()}”`);
   if (f.status) parts.push(f.status);
   if (f.lane) parts.push(f.lane);
   // Multi-tag is OR-composed in computed.ts; render each entry as its own
@@ -36,7 +39,7 @@ export function StatusBar(): VNode {
 
   return (
     <div class="status-bar">
-      <span class="filter-summary">{describeFilters(f)}</span>
+      <span class="filter-summary">{describeFilters(f, workspaceQuery.value)}</span>
       <span class="grow"></span>
       <span class="status-counts">
         <span class="num" {...tip("Tasks matching the current filters")}>

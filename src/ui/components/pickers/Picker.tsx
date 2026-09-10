@@ -14,7 +14,7 @@
 //
 // Props:
 //   items        : T[]                                          — already sorted by caller
-//   filterText   : (item: T) => string                          — returned string is .toLowerCase().includes(query)-matched
+//   filterText   : (item: T) => string                          — literal AND-keyword match over the full catalog
 //   onSelect     : (item: T) => void                            — fired on row click + Enter on cursor
 //   renderRow    : ({item, isSelected, isCursor, onClick, onMouseMove}) => vnode
 //   isSelected?  : (item: T) => boolean   (default: () => false)
@@ -28,6 +28,7 @@
 import type { JSX, VNode } from "preact";
 import { useEffect, useRef } from "preact/hooks";
 import { useSignal } from "@preact/signals";
+import { searchCatalog, catalogSearchHint } from "../../lib/catalogSearch.ts";
 
 export interface PickerRenderRowArgs<T> {
   item: T;
@@ -85,8 +86,8 @@ export function Picker<T>({
     return () => clearTimeout(t);
   }, []);
 
-  const q = query.value.trim().toLowerCase();
-  const filtered = q ? items.filter(it => filterText(it).toLowerCase().includes(q)) : items;
+  const results = searchCatalog(items, query.value, filterText);
+  const filtered = results.items;
 
   // Optional create-row vnode. The CALLER decides whether the create
   // affordance shows for THIS query (e.g. non-empty + no exact match +
@@ -116,7 +117,11 @@ export function Picker<T>({
   };
 
   const onSearchKey = (e: KeyboardEvent) => {
-    if (e.key === "ArrowDown") {
+    if (e.isComposing) return;
+    if ((e.key === "Home" || e.key === "End") && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+      e.preventDefault();
+      cursor.value = e.key === "Home" ? 0 : Math.max(0, totalRows - 1);
+    } else if (e.key === "ArrowDown") {
       e.preventDefault();
       if (totalRows === 0) return;
       cursor.value = (cursor.value + 1) % totalRows;
@@ -150,12 +155,17 @@ export function Picker<T>({
         <input
           ref={searchRef}
           autoFocus
+          type="search"
+          aria-label={placeholder.replace(/…$/, "")}
           placeholder={placeholder}
           value={query.value}
           onInput={onSearchInput}
           onKeyDown={onSearchKey}
         />
       </div>
+      <p class="catalog-search-hint" role="status">
+        {catalogSearchHint(results)}
+      </p>
       <div class="picker-list" ref={listRef}>
         {totalRows === 0 ? (
           <p class="picker-empty meta">{emptyText}</p>

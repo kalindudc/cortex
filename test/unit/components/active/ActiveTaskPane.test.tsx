@@ -1,15 +1,17 @@
+// ActiveTaskPane — after task 330 it is the workspace shell for the active
+// task: empty state when nothing is selected, an outside-filter notice with
+// a Clear-filters action (W4), and the TaskDocument keyed by task id.
+
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 import { fireEvent, render } from "@testing-library/preact";
 
-// Stub the api before the component pulls it in. We don't assert on these
-// calls in this file — but ActiveTaskPane's children (LaneChip / StatusPopover
-// / PostUpdateForm / EditableTaskBody) all import the api at module load.
 mock.module("../../../../src/ui/api/client.ts", () => ({
   api: {
     tasks: mock(() => Promise.resolve([])),
     lanes: mock(() => Promise.resolve([])),
     tags: mock(() => Promise.resolve([])),
     updates: mock(() => Promise.resolve([])),
+    related: mock(() => Promise.resolve({ referencedBy: [], references: [], shared: [] })),
     addTask: mock(() => Promise.resolve({})),
     editTask: mock(() => Promise.resolve({})),
     setStat: mock(() => Promise.resolve({})),
@@ -26,8 +28,29 @@ mock.module("../../../../src/ui/api/client.ts", () => ({
   },
 }));
 
+// Passthrough sanitizer (broken under happy-dom; e2e certifies scrubbing).
+mock.module("dompurify", () => ({
+  default: {
+    isSupported: true,
+    sanitize: (html: string) => html,
+    addHook: () => {},
+    removeHook: () => {},
+  },
+}));
+
 import { ActiveTaskPane } from "../../../../src/ui/components/active/ActiveTaskPane.tsx";
-import { lanes, modal, selectedId, filters, statusPopover, tags, tasks } from "../../../../src/ui/state/signals.ts";
+import {
+  lanes,
+  modal,
+  selectedId,
+  filters,
+  statusPopover,
+  tags,
+  tasks,
+  workspaceQuery,
+  tab,
+  readerMode,
+} from "../../../../src/ui/state/signals.ts";
 
 const makeTask = (over: Record<string, unknown> = {}) => ({
   id: 7,
@@ -42,13 +65,6 @@ const makeTask = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-const _findButton = (root: ParentNode, text: string): HTMLButtonElement | null => {
-  for (const btn of Array.from(root.querySelectorAll<HTMLButtonElement>("button"))) {
-    if (btn.textContent?.includes(text)) return btn;
-  }
-  return null;
-};
-
 describe("ActiveTaskPane", () => {
   beforeEach(() => {
     tasks.value = [];
@@ -56,6 +72,9 @@ describe("ActiveTaskPane", () => {
     tags.value = [];
     selectedId.value = null;
     filters.value = { status: null, lane: null, tag: [] };
+    workspaceQuery.value = "";
+    tab.value = "document";
+    readerMode.value = "read";
     statusPopover.value = false;
     modal.value = null;
   });
@@ -67,16 +86,14 @@ describe("ActiveTaskPane", () => {
     expect(container.textContent).toContain("All caught up");
   });
 
-  test("renders the task title and id chip when activeId points at a task", () => {
+  test("renders the TaskDocument (title display + id) for the active task", () => {
     tasks.value = [makeTask({ id: 42, title: "Wire up routing" })];
     selectedId.value = 42;
     const { container } = render(<ActiveTaskPane />);
     expect(container.querySelector(".empty")).toBeFalsy();
-    const titleInput = container.querySelector(".title-input") as HTMLInputElement;
-    expect(titleInput).toBeTruthy();
-    expect(titleInput.value).toBe("Wire up routing");
-    const chip = container.querySelector(".meta.num");
-    expect(chip?.textContent).toBe("[42]");
+    expect(container.querySelector(".task-document")).toBeTruthy();
+    expect(container.querySelector(".task-title-display")?.textContent).toBe("Wire up routing");
+    expect(container.querySelector(".task-id")?.textContent).toBe("[42]");
   });
 
   test("status pill click toggles the StatusPopover open", () => {
@@ -84,12 +101,33 @@ describe("ActiveTaskPane", () => {
     selectedId.value = 1;
     const { container } = render(<ActiveTaskPane />);
     expect(statusPopover.value).toBe(false);
-    expect(container.querySelector(".popover")).toBeFalsy();
     const pill = container.querySelector(".status-pill") as HTMLButtonElement;
     expect(pill).toBeTruthy();
     fireEvent.click(pill);
     expect(statusPopover.value).toBe(true);
-    // Popover renders after the signal flips.
     expect(container.querySelector(".popover")).toBeTruthy();
+  });
+
+  test("explains an active task outside the current filters and offers Clear filters (W4)", () => {
+    tasks.value = [makeTask({ id: 7, lane: "a" }), makeTask({ id: 8, lane: "b", title: "other" })];
+    selectedId.value = 7;
+    filters.value = { status: null, lane: "b", tag: [] };
+    const { container } = render(<ActiveTaskPane />);
+    const notice = container.querySelector(".outside-filter-notice");
+    if (!notice) throw new Error("expected outside-filter notice");
+    expect(notice.textContent).toContain("outside the current filters");
+    const clear = notice.querySelector("button");
+    if (!clear) throw new Error("expected Clear filters action");
+    fireEvent.click(clear);
+    expect(filters.value).toEqual({ status: null, lane: null, tag: [] });
+    // The task itself never changed.
+    expect(selectedId.value).toBe(7);
+  });
+
+  test("no notice when the active task is inside the visible rows", () => {
+    tasks.value = [makeTask({ id: 7 })];
+    selectedId.value = 7;
+    const { container } = render(<ActiveTaskPane />);
+    expect(container.querySelector(".outside-filter-notice")).toBeNull();
   });
 });

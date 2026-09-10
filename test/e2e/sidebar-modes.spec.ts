@@ -66,6 +66,9 @@ test("Tasks section '+' creates an untitled-<id> task; the active pane title inp
 test("lane-edit '...' icon is hidden by default and fades in only when the row is hovered", async ({ url, page }) => {
   await seedLane(url, "inbox");
   await page.goto(url);
+  // Task 330 W2: lane rows (with their edit affordance) live in the explicit
+  // 'Manage lanes' mode — the main surface has ONE lane selector, not a list.
+  await page.locator('button[aria-label="Manage lanes"]').click();
 
   // Resolve the lane-row + edit btn handles up front.
   const laneRow = page.locator(".lane-row", { hasText: "inbox" }).first();
@@ -90,22 +93,32 @@ test("manage-tags toggle: pane swaps to the TAGS-only section and back", async (
   await seedLane(url, "inbox");
   await page.goto(url);
 
-  // Main mode: Views/Lanes/Tasks section toggles all visible.
+  // Main mode (task 330 W2): ONE workspace filter surface + the Tasks
+  // section. The permanent Views/Lanes filter sections are gone — exactly one
+  // persistent lane selector and one tag-filter trigger exist.
   const labelsBefore = await page.locator(".section-toggle .section-label").allTextContents();
-  expect(labelsBefore).toContain("Views");
-  expect(labelsBefore).toContain("Lanes");
   expect(labelsBefore).toContain("Tasks");
+  expect(labelsBefore).not.toContain("Views");
+  expect(labelsBefore).not.toContain("Lanes");
+  await expect(page.locator(".workspace-filters")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Lane filter", exact: true })).toHaveCount(1);
+  await expect(page.locator('button[aria-label="Filter by tags"]')).toHaveCount(1);
 
-  // Click the manage-tags button in the system bar.
+  // Click the manage-tags button in the system bar. Entering management
+  // never changes filters merely by opening.
+  await page.getByRole("button", { name: "Status filter", exact: true }).click();
+  await page.getByRole("option", { name: "Blocked", exact: true }).click();
   await page.locator('button[aria-label="Manage tags"]').click();
 
-  // Tags-mode: ONLY the Tags section eyebrow renders; main-mode collapsibles are gone.
-  await expect(page.locator(".section-head .eyebrow")).toHaveText("Tags");
+  // Tags-mode: ONLY the labeled 'Manage tags' section renders; main-mode
+  // collapsibles are gone.
+  await expect(page.locator(".section-head .eyebrow")).toHaveText("Manage tags");
   await expect(page.locator(".section-toggle")).toHaveCount(0);
 
-  // The "Manage tags" button is now "Back to main sidebar".
-  await page.locator('button[aria-label="Back to main sidebar"]').click();
+  // 'Back to tasks' returns to the workspace with the filter untouched.
+  await page.locator('button[aria-label="Back to tasks"]').click();
   await expect(page.locator(".section-toggle .section-label", { hasText: "Tasks" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Status filter", exact: true })).toContainText("Blocked");
 });
 
 test("tag-management '+' opens NewTagModal; saving creates a tag that appears in the list", async ({ url, page }) => {

@@ -1,3 +1,16 @@
+/* Screen-reader-only text — visually removed, still announced. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* ---------- typography ---------- */
 .eyebrow {
   font-size: var(--fs-1); font-weight: 600;
@@ -17,8 +30,9 @@
 /* ---------- buttons ---------- */
 .btn {
   display: inline-flex; align-items: center; gap: 6px;
-  height: 28px; padding: 0 10px; border-radius: var(--r-2);
+  height: var(--control-height); padding: 0 12px; border: 1px solid var(--border); border-radius: var(--r-2);
   color: var(--text-2); background: transparent;
+  justify-content: center; flex-shrink: 0; font-weight: 500;
   transition: background var(--dur-2) var(--ease), color var(--dur-2) var(--ease);
   font-size: var(--fs-3);
 }
@@ -26,14 +40,14 @@
 .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .btn .kbd { margin-left: 4px; }
 .btn-primary {
-  background: var(--accent); color: var(--accent-on);
+  background: var(--accent); color: var(--accent-on); border-color: transparent;
   transition: background var(--dur-2) var(--ease);
 }
 .btn-primary:hover { background: var(--accent-hover); color: var(--accent-on); }
 .btn-icon {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 28px; height: 28px; padding: 0; border-radius: var(--r-2);
-  color: var(--text-3);
+  width: var(--control-height); height: var(--control-height); padding: 0; border-radius: var(--r-2);
+  color: var(--text-2); flex-shrink: 0;
   transition: background var(--dur-2) var(--ease), color var(--dur-2) var(--ease);
 }
 .btn-icon:hover { color: var(--text); background: var(--tint); }
@@ -89,19 +103,16 @@ input:disabled { opacity: 0.5; cursor: not-allowed; }
 .pane-section { padding: 16px; }
 .pane-section + .pane-section { padding-top: 0; }
 
-/* App-level system controls strip at the top of the left sidebar.
-   Holds the tag-filter trigger (left), theme toggle, and reset-filters
-   button (right). A spacer .grow span between them keeps the tag-filter
-   button anchored left while theme + reset stay right-aligned. flex-shrink:0
-   keeps the strip pinned at the top of .sidebar-pane while .sidebar-body
-   absorbs all vertical overflow. */
+/* App-level navigation tools at the foot of the sidebar. Management,
+   theme and backup stay available without competing with task filtering. */
 .pane-system {
   flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
 }
 /* Active variant for icon-only buttons that carry persistent state
    (tag-filter button when at least one tag is selected). Subtle accent
@@ -164,8 +175,9 @@ input:disabled { opacity: 0.5; cursor: not-allowed; }
 .status-bar {
   display: flex;
   align-items: center;
-  gap: 16px;
-  height: 24px;
+  gap: 12px;
+  height: var(--status-height);
+  min-width: 0;
   padding: 0 12px;
   border-top: 1px solid var(--border);
   background: var(--panel);
@@ -174,8 +186,8 @@ input:disabled { opacity: 0.5; cursor: not-allowed; }
   font-variant-numeric: tabular-nums;
 }
 .status-bar .grow { flex: 1; }
-.status-bar .filter-summary { color: var(--text-2); }
-.status-bar .status-counts { display: inline-flex; gap: 4px; }
+.status-bar .filter-summary { color: var(--text-2); min-width: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-bar .status-counts { display: inline-flex; gap: 4px; white-space: nowrap; font-size: 10px; }
 .status-bar .hint { display: inline-flex; align-items: center; gap: 4px; }
 /* Clickable variant: same visual as .hint but button-resetted + interactive.
    Hover surfaces a subtle accent-tint wash so users know it's actionable. */
@@ -193,35 +205,6 @@ input:disabled { opacity: 0.5; cursor: not-allowed; }
 .status-bar .hint-button:hover { background: var(--accent-tint); color: var(--text); }
 .status-bar .hint-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
-.active-header {
-  display: flex; align-items: center; gap: 10px;
-  padding: 16px 24px; border-bottom: 1px solid var(--border);
-}
-/* Header chip alignment: the priority chip stays compact (16px) in list
-   rows so the sidebar lane list keeps its density, but in the active-task
-   header it sits next to .lane-chip and .tags-chip which are 20px pills.
-   Bump priority-chip ONLY here so all three header chips share a baseline. */
-.active-header .priority-chip {
-  height: 20px; min-width: 28px; padding: 0 10px;
-}
-/* Active task body: ALWAYS a flex column whose only scroll surface is the
-   MdEditor inside (.editable-task-body > .md-editor owns internal scroll).
-   The header above and the post-update form / footer below stay pinned,
-   so the title input and the action row are always reachable regardless
-   of description length. Replaces the older nested scroll where the body
-   itself owned overflow:auto and could push chrome past the viewport.
-
-   Padding is ZERO here: the editor extends edge-to-edge of the pane so it
-   doesn't read as a floating slab inside a padded frame. Padding is
-   redistributed to the title input below — the editor itself stays flush. */
-.active-body {
-  padding: 0;
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
 /* Always-editable title input that mirrors the old .title-2 heading
    visually. Borderless by default; focus ring uses --accent-tint to
    surface the editable affordance. The bottom border separates the title
@@ -252,11 +235,13 @@ input:disabled { opacity: 0.5; cursor: not-allowed; }
 .title-input-wrap::after {
   /* Same grid cell + identical box-model so they wrap to the same
      line count. Anything that affects width or text metrics MUST be
-     mirrored on both selectors. */
+     mirrored on both selectors. Metrics match .task-title-display
+     (document.css) so entering/leaving title editing never reflows. */
   grid-area: 1 / 1 / 2 / 2;
-  padding: 8px 24px;
+  padding: 0;
   margin: 0;
-  font: 700 var(--fs-5)/1.3 var(--font-mono);
+  font: 650 var(--fs-7, 22px) / 1.3 var(--font-sans);
+  color: var(--text);
 }
 .title-input {
   border: 0;
@@ -279,8 +264,12 @@ input:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 .title-input:focus { background: var(--accent-tint); }
 
-.active-foot {
-  padding: 16px 24px; border-top: 1px solid var(--border); background: var(--panel);
+@media (max-width: 900px) {
+  :root { --status-height: 44px; }
+  .status-bar { gap: 6px; padding: 0 10px; font-size: 10px; }
+  .status-bar .status-counts > span:not(:first-child) { display: none; }
+  .status-bar .hint-button { min-width: 44px; min-height: 44px; }
+  .status-bar .hint-button .meta, .status-bar .hint-button .kbd:last-child { display: none; }
 }
 
 

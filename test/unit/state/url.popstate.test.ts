@@ -54,6 +54,40 @@ describe("state/url popstate", () => {
     expect(selectedId.value).toBeNull();
   });
 
+  test("popstate to /task/9#frag restores the task AND stages the heading fragment", async () => {
+    const { pendingHeadingFragment } = await import("../../../src/ui/state/signals.ts");
+    const currentFragment = (): { taskId: number; id: string } | null => pendingHeadingFragment.value;
+    pendingHeadingFragment.value = null;
+    window.history.pushState(null, "", "/task/9#task-9-setup");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    expect(selectedId.value).toBe(9);
+    expect(currentFragment()).toEqual({ taskId: 9, id: "task-9-setup" });
+    pendingHeadingFragment.value = null;
+  });
+
+  test("popstate to a plain task path clears any stale pending fragment", async () => {
+    const { pendingHeadingFragment } = await import("../../../src/ui/state/signals.ts");
+    pendingHeadingFragment.value = { taskId: 99, id: "stale-frag" };
+    window.history.pushState(null, "", "/task/6");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    expect(selectedId.value).toBe(6);
+    expect(pendingHeadingFragment.value).toBeNull();
+  });
+
+  test("same-task hash navigation stages the heading and reveals Document/Read", async () => {
+    const { pendingHeadingFragment, tab, readerMode } = await import("../../../src/ui/state/signals.ts");
+    const currentTab = (): string => tab.value;
+    const currentMode = (): string => readerMode.value;
+    selectedId.value = 9;
+    tab.value = "updates";
+    readerMode.value = "edit";
+    window.history.pushState(null, "", "/task/9#task-9-details");
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+    expect(pendingHeadingFragment.value).toEqual({ taskId: 9, id: "task-9-details" });
+    expect(currentTab()).toBe("document");
+    expect(currentMode()).toBe("read");
+  });
+
   test("popstate-driven write does NOT trigger an extra pushState (pathname-equality short-circuit)", () => {
     // Push /task/4 then dispatch popstate so the handler writes 4 into
     // selectedId. The effect fires synchronously after the signal write

@@ -1,6 +1,8 @@
 import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
 
 const setTagsMock = mock(() => Promise.resolve({}));
+const addTaskTagMock = mock(() => Promise.resolve({}));
+const removeTaskTagMock = mock(() => Promise.resolve({}));
 // Full api surface to avoid cross-file mock pollution.
 mock.module("../../../../src/ui/api/client.ts", () => ({
   api: {
@@ -18,6 +20,8 @@ mock.module("../../../../src/ui/api/client.ts", () => ({
     editLane: mock(() => Promise.resolve({})),
     delLane: mock(() => Promise.resolve(undefined)),
     setTags: setTagsMock,
+    addTaskTag: addTaskTagMock,
+    removeTaskTag: removeTaskTagMock,
     addTag: mock(() => Promise.resolve({})),
     editTag: mock(() => Promise.resolve({})),
     delTag: mock(() => Promise.resolve(undefined)),
@@ -46,6 +50,8 @@ const getSearch = () => document.querySelector(".tag-picker-search input") as HT
 describe("TagPicker", () => {
   beforeEach(() => {
     setTagsMock.mockClear();
+    addTaskTagMock.mockClear();
+    removeTaskTagMock.mockClear();
     tagsPopover.value = true;
     tags.value = [
       { name: "bug", color: null, created: 0, task_count: 1 },
@@ -66,16 +72,17 @@ describe("TagPicker", () => {
     expect(rows[1].textContent).toContain("ui");
   });
 
-  test("clicking an attached tag detaches it via api.setTags (without it)", async () => {
+  test("clicking an attached tag removes only that association (no stale whole-list overwrite)", async () => {
     render(<TagPicker task={fx} />);
     const rows = document.querySelectorAll(".tag-picker-row");
     fireEvent.click(rows[0]); // "bug" — currently attached
     await new Promise(r => setTimeout(r, 5));
-    expect(setTagsMock).toHaveBeenCalledTimes(1);
-    expect(setTagsMock).toHaveBeenCalledWith(11, []);
+    expect(removeTaskTagMock).toHaveBeenCalledTimes(1);
+    expect(removeTaskTagMock).toHaveBeenCalledWith(11, "bug");
+    expect(setTagsMock).not.toHaveBeenCalled();
   });
 
-  test("typing a brand-new tag name + Enter triggers api.setTags with appended name", async () => {
+  test("typing a new tag + Enter adds that association without replacing other tags", async () => {
     render(<TagPicker task={fx} />);
     const input = getSearch();
     fireEvent.input(input, { target: { value: "newtag" } });
@@ -83,11 +90,41 @@ describe("TagPicker", () => {
     // After filtering, the create row is the only item — cursor sits at 0.
     fireEvent.keyDown(input, { key: "Enter" });
     await new Promise(r => setTimeout(r, 5));
-    expect(setTagsMock).toHaveBeenCalledTimes(1);
-    const [taskId, names] = setTagsMock.mock.calls[0] as unknown as [number, string[]];
-    expect(taskId).toBe(11);
-    expect(names).toContain("newtag");
-    expect(names).toContain("bug"); // attached preserved
+    expect(addTaskTagMock).toHaveBeenCalledTimes(1);
+    expect(addTaskTagMock).toHaveBeenCalledWith(11, "newtag");
+    expect(setTagsMock).not.toHaveBeenCalled(); // no stale snapshot sent back
+  });
+
+  test("a failed add keeps the new-tag search text for retry", async () => {
+    // Bun 1.1.12 can eagerly create mockRejectedValueOnce's promise;
+    // reject only at dispatch, after the SUT has installed its catch.
+    addTaskTagMock.mockImplementationOnce(() => Promise.reject(new Error("offline")));
+    render(<TagPicker task={fx} />);
+    const input = getSearch();
+    fireEvent.input(input, { target: { value: "retrytag" } });
+    await new Promise(resolve => setTimeout(resolve, 5));
+    fireEvent.keyDown(input, { key: "Enter" });
+    await new Promise(resolve => setTimeout(resolve, 5));
+    expect(input.value).toBe("retrytag");
+  });
+
+  test("catalog search shows all rows and finds late keyword matches without mutating tags", () => {
+    tags.value = Array.from({ length: 2000 }, (_, index) => ({
+      name: `queue-${String(index).padStart(4, "0")}-ui`,
+      color: null,
+      created: 0,
+      task_count: 1,
+    }));
+    const { container } = render(<TagPicker task={{ ...fx, tags: ["queue-1999-ui"] }} />);
+    expect(container.querySelectorAll(".tag-picker-row").length).toBe(2000);
+    expect(container.querySelector(".tag-picker-row.selected")?.textContent).toContain("queue-1999-ui");
+    expect(container.querySelector(".catalog-search-hint")?.textContent).toContain("2000 of 2000 entries");
+    fireEvent.input(getSearch(), { target: { value: "1999 UI QuE" } });
+    expect(container.querySelectorAll(".tag-picker-row").length).toBe(1);
+    expect(container.querySelector(".tag-picker-row.selected")?.textContent).toContain("queue-1999-ui");
+    expect(addTaskTagMock).not.toHaveBeenCalled();
+    expect(removeTaskTagMock).not.toHaveBeenCalled();
+    expect(setTagsMock).not.toHaveBeenCalled();
   });
 
   test("ArrowDown cycles cursor among rows", async () => {

@@ -1,6 +1,6 @@
-// TagFilterModal — multi-select tag filter for filters.tag (array; OR
-// semantics in computed.ts:filteredTasks). Live commit on each toggle;
-// modal stays open for batch picking; Done/Esc/overlay-click close.
+// Tag-filter content migrated from the former modal into the attached
+// sidebar panel. Keep the original multi-select/OR/untagged assertions.
+// Legacy modal-kind redirection is covered by ModalRoot.test.tsx.
 
 import { describe, test, expect, mock, beforeEach } from "bun:test";
 
@@ -27,8 +27,8 @@ mock.module("../../../../src/ui/api/client.ts", () => ({
 }));
 
 import { render, fireEvent } from "@testing-library/preact";
-import { TagFilterModal } from "../../../../src/ui/components/modals/TagFilterModal.tsx";
-import { tags, filters } from "../../../../src/ui/state/signals.ts";
+import { TagFilterPanel as TagFilterModal } from "../../../../src/ui/components/sidebar/TagFilterPanel.tsx";
+import { tags, filters, workspaceQuery } from "../../../../src/ui/state/signals.ts";
 import { UNTAGGED } from "../../../../src/ui/state/computed.ts";
 import type { TagWithCount } from "../../../../src/ui/api/client.ts";
 
@@ -36,17 +36,18 @@ function tag(over: Partial<TagWithCount> = {}): TagWithCount {
   return { name: "bug", color: null, created: 0, task_count: 0, ...over };
 }
 
-describe("TagFilterModal", () => {
+describe("TagFilterPanel", () => {
   beforeEach(() => {
     tags.value = [];
     filters.value = { status: null, lane: null, tag: [] };
   });
 
-  test("renders heading 'Filter by tags', search input, Untagged sentinel, and one row per tag", () => {
+  test("renders named search input, Untagged sentinel, and one row per tag without a dialog", () => {
     tags.value = [tag({ name: "bug" }), tag({ name: "ui" })];
     const close = mock(() => {});
-    const { container, getByText } = render(<TagFilterModal close={close} />);
-    expect(getByText("Filter by tags")).toBeTruthy();
+    const { container, getByRole } = render(<TagFilterModal close={close} />);
+    expect(getByRole("searchbox", { name: "Search tags" })).toBeTruthy();
+    expect(container.querySelector("dialog, .modal, .overlay")).toBeNull();
     expect(container.querySelector(".tag-filter-search input")).not.toBeNull();
     const rows = container.querySelectorAll(".tag-filter-row");
     // Untagged sentinel + 2 tags
@@ -54,7 +55,7 @@ describe("TagFilterModal", () => {
     expect(container.querySelector(".tag-filter-untagged-row")).not.toBeNull();
   });
 
-  test("clicking a tag row commits to filters.tag (live commit; modal stays open)", () => {
+  test("clicking a tag row commits to filters.tag (live commit; panel stays open)", () => {
     tags.value = [tag({ name: "bug" })];
     const close = mock(() => {});
     const { container } = render(<TagFilterModal close={close} />);
@@ -63,8 +64,9 @@ describe("TagFilterModal", () => {
     if (!bugRow) throw new Error("expected a 'bug' row");
     fireEvent.click(bugRow);
     expect(filters.value.tag).toEqual(["bug"]);
-    // close was NOT called — modal stays open for batch picking.
+    // close was NOT called — the panel stays open for batch picking.
     expect(close).toHaveBeenCalledTimes(0);
+    expect(bugRow.getAttribute("aria-pressed")).toBe("true");
   });
 
   test("clicking the Untagged sentinel toggles UNTAGGED in filters.tag", () => {
@@ -121,6 +123,42 @@ describe("TagFilterModal", () => {
     );
     if (!clear) throw new Error("expected 'Clear all' button");
     expect(clear.disabled).toBe(true);
+  });
+
+  test("tag catalog search shows every row by default, matches keywords and keeps live selections", () => {
+    tags.value = Array.from({ length: 2000 }, (_, index) =>
+      tag({ name: `queue-${String(index).padStart(4, "0")}-ui` }),
+    );
+    filters.value = { status: "review", lane: "now", tag: ["queue-1999-ui"] };
+    workspaceQuery.value = "task needle";
+    const close = mock(() => {});
+    const { container, getByRole } = render(<TagFilterModal close={close} />);
+    const search = getByRole("searchbox", { name: "Search tags" });
+    expect(container.querySelectorAll(".tag-filter-row").length).toBe(2001);
+    expect(container.querySelector(".tag-filter-untagged-row")).not.toBeNull();
+    expect(container.querySelector(".catalog-search-hint")?.textContent).toContain("2001 of 2001 entries");
+    expect(container.querySelector(".catalog-search-hint")?.textContent).not.toContain("Refine search");
+    fireEvent.input(search, { target: { value: "1999 QUE UI" } });
+    expect(container.querySelectorAll(".tag-filter-row").length).toBe(1);
+    expect(getByRole("button", { name: "Include #queue-1999-ui", exact: true }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    expect(container.querySelector(".catalog-search-hint")?.textContent).toContain("1 of 2001 entries");
+    expect(filters.value).toEqual({ status: "review", lane: "now", tag: ["queue-1999-ui"] });
+    expect(workspaceQuery.value).toBe("task needle");
+    fireEvent.input(search, { target: { value: "1998 ui" } });
+    fireEvent.keyDown(search, { key: "Enter" });
+    expect(filters.value.tag).toEqual(["queue-1999-ui", "queue-1998-ui"]);
+    expect(container.querySelectorAll(".tag-filter-summary-chip").length).toBe(2);
+    expect(close).not.toHaveBeenCalled();
+    fireEvent.input(search, { target: { value: "no match" } });
+    fireEvent.keyDown(search, { key: "ArrowDown" });
+    fireEvent.keyDown(search, { key: "Enter" });
+    expect(container.querySelectorAll(".tag-filter-row").length).toBe(0);
+    expect(filters.value.tag).toHaveLength(2);
+    fireEvent.click(getByRole("button", { name: "Remove tag filter: #queue-1999-ui", exact: true }));
+    expect(filters.value.tag).toEqual(["queue-1998-ui"]);
+    expect(document.activeElement).toBe(search);
   });
 
   test("typing in the search filters tag rows by case-insensitive substring", async () => {

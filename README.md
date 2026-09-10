@@ -135,40 +135,141 @@ SSE clients receive a `heartbeat` event every 15 s.
 
 ## Dashboard
 
-`cortex serve` opens a 3-pane single-page dashboard at `http://127.0.0.1:7777/`:
+`cortex serve` opens a document-first single-page dashboard at
+`http://127.0.0.1:7777/` (two columns on desktop; a navigation drawer at
+≤ 900 px):
 
-- **Lanes** (left, 220 px) — the top system bar includes theme, tag-management, show-done, `Back up now`, and reset-filters controls. Below it: colored dot + name + open-count for each lane.
-  Hover any lane row for an inline `⋮` button that opens the lane editor
-  (rename, color picker, sort, delete — with safety: cannot delete `now` or
-  non-empty lanes). Below the lanes: a list of tasks in the current filter
-  (or all tasks), each with a status dot and `Pn` priority chip. Rows span
-  the full sidebar width so the priority chips line up. New-task input is
-  pinned to the bottom.
-- **Active task** (center) — one task at a time. `[id]` + lane chip (with
-  lane color) + `Pn` priority chip + status pill (one pill, click for popover).
-  Click-to-edit title and body. Smart primary action button
-  (`Move to review` / `Mark done` / `Unblock` / `Reopen`) plus a `…` overflow
-  menu (Edit / Delete) that opens upward to avoid overflowing the pane.
-  Post-update compose box with author defaulting to the resolved identity
-  from `/api/me`.
-- **Inbox** (right, 340 px) — reverse-chronological updates for the active
-  task with author avatar + relative timestamps.
+- **Navigation** (left, 280 px) — a workspace identity and ONE filter surface:
+  a search box (`@id`, `@title-only`, `#tag`, body/title text), status and
+  lane selectors, `Filter by tags` (multi-select, OR semantics, plus an
+  `untagged` sentinel), an include-done toggle and `Clear all`.
+  Status, lane and tags open matching **attached sidebar panels**, not
+  browser-native dropdowns or a centered filtering dialog. Panels align to
+  the sidebar, highlight their trigger, and stay within the available
+  viewport. Lane and tag dropdowns have optional keyword search: an empty
+  query shows every entry, and typing filters the full catalog using
+  case-insensitive AND matching (for example, `platform api` matches both
+  words anywhere in the name). There is no result cap or forced narrowing.
+  The task-header lane/tag pickers use the same search behavior. Typing
+  does not change a filter or task membership until you choose an entry.
+  Tag selection stays open for batch picking, even when the
+  filtered list's fallback task changes. Selected tags render as removable tokens. Search runs against
+  the full task pool first, then intersects with the structured filters, so
+  `#tag` still resolves exactly even when matching tasks live in another
+  lane. The **Tasks** section lists the filtered tasks (status dot, title,
+  `Pn` chip, task ID and status) with a `+` for a new untitled task.
+  Theme, `Manage lanes`, `Manage tags` and `Back up now` stay at the foot of
+  the sidebar. Filters govern the list
+  only — the explicitly selected task never changes under you; if it falls
+  outside the filters the workspace says so and offers `Clear filters`.
+  `Manage lanes` / `Manage tags` are explicit modes (rename, color, sort,
+  delete with safety: cannot delete `now` or non-empty lanes; tag deletion
+  shows the cascade count) with a `Back to tasks` affordance; entering them
+  never changes filters.
+- **Document** (center) — tasks open in your saved Read/Edit/Split mode
+  (Read is the default for a new browser). The header
+  shows `[id]` once and a large wrapping title—click it (or focus it and
+  press Enter/Space) to edit in place. Enter/Escape finish editing and return
+  focus to the title; blur flushes without stealing focus. The quiet property
+  row has `Lane: …`, `Priority: Pn` / `Set priority` (integer or blank to
+  clear), removable tag pills, and a single `+` button to add tags. Each
+  rounded pill is compact at rest and smoothly expands its `×` control on
+  hover or keyboard focus—no reserved empty remove-button space. Touch
+  devices keep the remove target visible. It detaches the tag from this
+  task, not the tag definition. Tag additions
+  and removals use the API's delta modes rather than replacing a stale tag list. The workspace toolbar keeps the smart next-status action
+  (`Move to review` / `Mark done` / `Unblock` / `Reopen`), status popup,
+  `Focus reading` / `Show navigation`, and a `⋯` task-actions menu holding
+  `Delete task` (confirmed). The title and prose share an inset reading column.
+  One tablist — **Document / Activity / Related / Authors** — and, on the
+  Document tab, a **Read / Edit / Split** switch. Your choice is saved in
+  browser localStorage and reused across task switches, reloads and new tabs;
+  only the preference enum is stored, never raw task drafts. Heading links
+  temporarily reveal Read without changing the saved preference. Read renders sanitized
+  Markdown (GFM tables, task lists, code with copy controls, Mermaid
+  diagrams, clickable `@id`/`#tag` refs) with an outline rail; Edit and
+  Split use the same CodeMirror instance, which stays mounted (cursor, undo
+  and pending edits survive switching modes or tabs). Edits autosave
+  (600 ms idle / 3 s max; `Cmd/Ctrl + S` flushes), external changes to a
+  dirty field show Apply / Keep my changes, and unsaved drafts are kept in
+  memory per task while you navigate.
+- **Activity** (a Document tab, not a third column) — the task's updates as
+  newest-first expandable cards (summary, author, time, severity, rendered
+  body + Markdown source). A collapsed `+ Post update` composer sits after
+  the thread; drafts are kept per task. **Related** shows referenced-by /
+  references / shared-tag buckets with an explicit loading, error + retry
+  and confirmed-empty state; **Authors** is the per-task rollup.
+
+Rendering is a single sanitized boundary: Markdown → `marked` → DOMPurify
+(HTML profile: no scripts, styles, forms, iframes, raw SVG/MathML,
+`javascript:`/`data:` URLs) and Mermaid → `mermaid.render` in an inert
+staging element → DOMPurify (SVG profile) → the reader. Documents without
+diagrams never load the Mermaid chunk.
+
+Motion is deliberately short: 90 ms for control feedback, 140 ms for menus
+and content, and 180 ms for drawers. State and focus changes never wait for
+animation; dismissal removes the live surface immediately. Reduced-motion
+preferences disable decorative animations and transitions, including when
+changed while a surface is open. Metadata/SSE refreshes don't replay the
+unchanged document's reveal animation. Tag remove controls use a localized
+140 ms width/fade reveal; this does not animate document/editor dimensions.
 
 ### Keyboard
 
-No single-key hotkeys (they hijack typing in inputs). Three globals:
+No single-key hotkeys (they hijack typing in inputs). Globals:
 
-- `Cmd/Ctrl + P` or `Cmd/Ctrl + K` — toggle command palette
-- `Cmd/Ctrl + /` — jump cursor into the post-update textarea from anywhere
-- `Cmd/Ctrl + Enter` — post the update (works while focused in the textarea)
-- `Esc` — close palette → modal → popover → editing mode
+- `Cmd/Ctrl + P` or `Cmd/Ctrl + K` — command palette (command / search mode)
+- `Cmd/Ctrl + /` — reveal Activity, expand the composer and focus it
+- `Cmd/Ctrl + Enter` — post the update (while focused in the composer)
+- `Cmd/Ctrl + S` — flush the description/title autosave now (inside the editor)
+- `Esc` — close palette → modal → popovers / drawer / drag tray
 
-The command palette is the primary interface for everything: new task, switch
-task, edit, change status, change priority, lane edit/delete/filter, etc.
-Type to filter, `↑`/`↓` to navigate, `Enter` to execute.
+Quick body-mode shortcuts follow the controls' left-to-right order:
+
+| Mode | Mac | Windows / Linux |
+| --- | --- | --- |
+| Read | `Cmd + Option + 1` | `Ctrl + Alt + 1` |
+| Edit | `Cmd + Option + 2` | `Ctrl + Alt + 2` |
+| Split | `Cmd + Option + 3` | `Ctrl + Alt + 3` |
+
+Use the number row and **left Alt** on Windows/Linux; AltGr character input
+is left untouched. The shortcuts work from CodeMirror, focus the selected
+surface, and save your mode preference. They are suspended while dialogs,
+menus or navigation own the keyboard, and ignore IME/handled events and
+held-key repeats. The mode control shows the chord modifier once as a
+"super key" (⌘⌥ / Ctrl+Alt) with a per-button digit (1/2/3); full hints
+stay in tooltips and palette commands.
+
+These avoid the common browser tab-selection (`Cmd/Ctrl + 1–9`), reload,
+search and save shortcuts listed by [Chrome](https://support.google.com/chrome/answer/157179),
+[Safari](https://support.apple.com/guide/safari/keyboard-and-other-shortcuts-cpsh003/mac)
+and [Edge](https://support.microsoft.com/en-us/microsoft-edge/keyboard-shortcuts-in-microsoft-edge-50d3edab-30d9-c7e4-21ce-37fe2713cfad).
+Custom OS/extension mappings can still intercept them. Alt-key handling follows
+[the documented platform differences](https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/getModifierState).
+
+Inside the Document tablist: `←`/`→`/`Home`/`End` move focus between tabs,
+`Enter`/`Space` activate the focused tab. Sidebar filter panels are nonmodal:
+`↑`/`↓`/`Home`/`End` navigate choices, `Enter`/`Space` choose, and `Esc` closes
+the panel and returns focus to its trigger. Outside clicks dismiss without
+stealing focus. The palette's `Filter by tags…` command reveals this same
+sidebar panel, including on phones and from focus reading.
+
+Dialogs (palette, lane/tag editors, confirmations, the mobile navigation
+drawer) remain native modal dialogs: Tab is trapped, the background is inert,
+and focus returns to the opener on close. Opening a filter inside mobile
+navigation does not open another dialog or dismiss the drawer.
+
+The command palette is the primary interface for everything: new task,
+switch task (global search — selecting a result keeps your filters), Read
+document / Edit description / Split / Edit title, Post an update, change
+status / priority / tags, lane filter / edit / delete, Manage lanes /
+Manage tags, theme. Type to filter, `↑`/`↓` to navigate, `Enter` to execute.
 
 ### Drag & drop
 
-Drag a task title onto a lane button to move it; drag onto a status pill to
-change status.
+Start dragging a task row and a transient **Move to lane** tray appears at
+the bottom of the navigation column; drop the task on a lane to move it.
+The tray is not a filter list and disappears when the drag ends (or on
+`Esc`). The `Lane:` control in the header is the click/keyboard/touch
+alternative.
 

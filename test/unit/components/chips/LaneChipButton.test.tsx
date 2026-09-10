@@ -54,11 +54,15 @@ describe("LaneChipButton", () => {
     lanes.value = [];
   });
 
-  test("renders the lane name and a draggable button", () => {
+  test("renders a quiet labeled trigger (Lane: <name>) with a chevron, still draggable", () => {
     render(<LaneChipButton task={fx} />);
     const btn = document.querySelector("button.lane-chip-button") as HTMLButtonElement;
     expect(btn).toBeTruthy();
+    // H1: quiet property trigger — explicit label + value + chevron.
+    expect(btn.querySelector(".prop-label")?.textContent).toBe("Lane:");
     expect(btn.textContent).toContain("todo");
+    expect(btn.querySelector(".icon")).not.toBeNull(); // chevron affordance
+    // W5: the header chip remains the drag source with the task-id MIME.
     expect(btn.getAttribute("draggable")).toBe("true");
   });
 

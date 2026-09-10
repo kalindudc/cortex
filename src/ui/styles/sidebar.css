@@ -1,22 +1,102 @@
-/* ---------- view row (top-level non-lane filters like "All tasks") ----------
-   Distinct from .lane-row because views aren't lanes — they have no color
-   swatch column and no edit affordance, just an icon + label + count. Kept
-   visually similar enough that selection state reads the same. */
-.view-row {
-  display: grid; grid-template-columns: 14px 1fr auto;
-  align-items: center; gap: 8px;
-  width: 100%; padding: 6px 10px; border-radius: var(--r-2);
-  color: var(--text-2); text-align: left;
-  font-size: var(--fs-3); line-height: 1.4;
-  transition: background var(--dur-2) var(--ease), color var(--dur-2) var(--ease);
+/* Navigation hierarchy: identity, one filter surface, readable task rows,
+   then persistent management/system tools. */
+.sidebar-brand { display: flex; align-items: center; gap: 9px; padding: 22px 18px 18px; flex-shrink: 0; }
+.sidebar-brand strong { font-size: 18px; letter-spacing: -.03em; font-weight: 650; }
+.brand-mark { display: inline-grid; place-items: center; width: 25px; height: 25px; border-radius: 7px; background: var(--accent); color: var(--accent-on); font: 700 19px/1 var(--font-mono); flex-shrink: 0; }
+.workspace-local { margin-left: auto; padding: 2px 6px; border-radius: var(--r-1); background: var(--tint); color: var(--text-2); font-size: 10px; }
+.workspace-filters { display: flex; flex-direction: column; flex-shrink: 0; gap: 10px; padding: 0 14px 16px; border-bottom: 1px solid var(--border); }
+.ws-search-label { color: var(--text-2); font-size: 11px; margin-bottom: -5px; }
+.ws-search { display: flex; align-items: center; gap: 7px; min-height: 36px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--r-2); background: var(--bg); color: var(--text-2); }
+.ws-search:focus-within { border-color: var(--info); outline: 2px solid var(--info); outline-offset: 1px; }
+.ws-search input { width: 100%; min-width: 0; padding: 7px 0; border: 0; border-radius: 0; background: transparent; font: 12px/1.5 var(--font-sans); color: var(--text); }
+.ws-search input:focus { outline: none; box-shadow: none; }
+.ws-search input::placeholder { color: var(--text-2); }
+.ws-controls { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+.ws-select { display: flex; flex-direction: column; gap: 5px; min-width: 0; color: var(--text-2); font-size: 11px; }
+.ws-filter-trigger { display: flex; align-items: center; justify-content: space-between; gap: 6px; width: 100%; min-width: 0; min-height: var(--control-height); padding: 0 9px; border: 1px solid var(--border); border-radius: var(--r-2); background: var(--bg); font: 12px/1.5 var(--font-sans); color: var(--text-2); text-align: left; }
+.ws-filter-trigger > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-filter-trigger > .icon { flex-shrink: 0; }
+.ws-filter-trigger:hover, .ws-filter-trigger.active { border-color: var(--border-strong); color: var(--text); }
+.ws-filter-actions { display: flex; align-items: center; gap: 8px; }
+.ws-tags-button, .ws-done-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: var(--control-height); padding: 0 9px; border: 1px solid var(--border); border-radius: var(--r-2); color: var(--text-2); background: var(--bg); font: 12px/1.5 var(--font-sans); }
+.ws-tags-button { min-width: 84px; border-radius: var(--r-pill); }
+.ws-done-button { flex: 1; background: transparent; border-color: transparent; }
+.ws-tags-button:hover, .ws-done-button:hover { background: var(--tint); color: var(--text); }
+.ws-tags-button.active, .ws-done-button.active { border-color: var(--border-strong); color: var(--text); background: var(--tint); }
+.ws-filter-count { font-size: 10px; }
+.ws-filter-trigger[aria-expanded="true"], .ws-tags-button[aria-expanded="true"] { border-color: var(--accent); background: var(--accent-tint); color: var(--text); box-shadow: 0 0 0 1px var(--accent-tint); }
+.ws-filter-trigger[aria-expanded="true"] > .icon { transform: rotate(180deg); }
+
+/* Sidebar-owned, nonmodal attached panels. No fixed viewport sheet, portal,
+   overlay or backdrop. The search field supplies the same left/width for
+   every panel; local absolute positioning follows the drawer as it enters. */
+.sidebar-pane { position: relative; }
+.sidebar-filter-panel { position: absolute; z-index: 60; display: flex; flex-direction: column; min-width: 0; min-height: 0; margin: 0; }
+.sidebar-filter-surface { display: flex; flex-direction: column; min-height: 0; max-height: inherit; width: 100%; border: 1px solid var(--border-strong); border-radius: var(--r-4); background: var(--bg); box-shadow: var(--shadow-pop); overflow: hidden; }
+.sidebar-filter-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 8px 5px 12px; border-bottom: 1px solid var(--border); background: var(--panel); flex-shrink: 0; }
+.sidebar-filter-head h2 { margin: 0; font: 600 12px/1.5 var(--font-sans); color: var(--text); }
+.sidebar-filter-head .btn-icon { width: 28px; height: 28px; }
+.sidebar-single-filter { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.sidebar-filter-search { padding: 8px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.catalog-search-field { display: flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 9px; border: 1px solid var(--border); border-radius: var(--r-pill); background: var(--panel); }
+.catalog-search-field > .icon { color: var(--text-2); flex-shrink: 0; }
+.catalog-search-field input { width: 100%; min-width: 0; padding: 7px 0; border: 0; background: transparent; font: 12px/1.5 var(--font-sans); }
+.catalog-search-field input:focus { box-shadow: none; outline: none; }
+.catalog-search-field:focus-within { border-color: var(--info); outline: 2px solid var(--info); outline-offset: -2px; }
+.catalog-search-hint { margin: 0; color: var(--text-2); font: 10px/1.5 var(--font-sans); flex-shrink: 0; overflow-wrap: anywhere; }
+.sidebar-filter-search .catalog-search-hint { margin-top: 6px; }
+.picker > .catalog-search-hint, .tag-picker > .catalog-search-hint { padding: 6px 10px; }
+.sidebar-filter-choices { flex: 1 1 auto; padding: 4px; overflow-y: auto; min-height: 0; scrollbar-width: thin; }
+.sidebar-filter-option { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 7px 8px; border-radius: var(--r-2); color: var(--text-2); font: 12px/1.5 var(--font-sans); text-align: left; }
+.sidebar-filter-option > span:last-child { overflow-wrap: anywhere; min-width: 0; }
+.sidebar-filter-option:hover { background: var(--tint); color: var(--text); }
+.sidebar-filter-option:focus-visible { outline: none; background: var(--accent-tint); box-shadow: inset 2px 0 0 var(--accent); color: var(--text); }
+.sidebar-filter-option[aria-selected="true"] { color: var(--text); }
+.sidebar-filter-check { display: inline-flex; align-items: center; width: 14px; flex-shrink: 0; color: var(--accent); }
+.ws-filter-foot { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.ws-search-hint { color: var(--text-2); font: 10px/1.5 var(--font-mono); }
+.ws-clear { min-height: 24px; padding: 2px 4px; color: var(--text-2); font-size: 11px; border-radius: var(--r-1); }
+.ws-clear:not(:disabled):hover { color: var(--text); background: var(--tint); }
+.ws-clear:disabled { opacity: .45; cursor: default; }
+.pane-system .sidebar-manage { width: auto; gap: 6px; padding: 0 8px; font: 12px/1.5 var(--font-sans); }
+.sidebar-back { display: inline-flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; margin-bottom: 4px; padding: 4px 8px; border-radius: var(--r-2); font: 12px/1.5 var(--font-sans); color: var(--text-2); }
+.sidebar-back:hover { background: var(--tint); color: var(--text); }
+
+/* ---------- transient 'Move to lane' drop tray (W5) ----------
+   Mounted ONLY while a task drag is active. Pinned to the bottom of the
+   sidebar body so it never displaces the list mid-drag. */
+.lane-drop-tray {
+  flex-shrink: 0;
+  margin: auto 0 0;
+  padding: 8px;
+  border: 0;
+  border-top: 1px solid var(--accent);
+  background: var(--panel);
+  min-width: 0;
 }
-.view-row:hover    { background: var(--tint); color: var(--text); }
-.view-row.selected { background: var(--tint); color: var(--text); }
-.view-row.dragover { background: var(--accent-tint); color: var(--text); }
-.view-row .view-name  { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.view-row .view-count { font-size: var(--fs-2); color: var(--text-3); font-variant-numeric: tabular-nums; }
-.view-row .icon       { color: var(--text-3); }
-.view-row.selected .icon { color: var(--text); }
+.lane-drop-tray .lane-drop-title {
+  padding: 0 4px 6px;
+  color: var(--text-3);
+  font-size: var(--fs-1);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.lane-drop-target {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-2);
+  color: var(--text-2);
+  font-size: var(--fs-3);
+  margin-bottom: 4px;
+}
+.lane-drop-target.dragover {
+  background: var(--accent-tint);
+  border-color: var(--accent);
+  color: var(--text);
+}
 
 /* ---------- lane row ----------
    Trailing slot (.lane-row-trail) holds BOTH .lane-count and .lane-edit-btn
@@ -82,10 +162,11 @@
 .lane-edit-btn:hover { color: var(--text); background: var(--tint-strong); }
 
 /* Task priority chip — small monospace badge after the title.
-   In list rows it stays a static <span> badge (PriorityChip).
-   In the active-task header it's promoted to a <button> via
-   PriorityChipButton; the button affordances (cursor + hover) below apply
-   to BOTH because the .priority-chip class is shared. */
+   In list rows it stays a static <span> badge (PriorityChip) — NOT a
+   control, so no cursor/hover affordance (task 330 H2: do not restyle
+   static badges as clickable). The active-task header promotes it to a
+   <button> via PriorityChipButton; button-scoped rules below add the
+   interactive treatment only there. */
 .priority-chip {
   display: inline-flex; align-items: center; justify-content: center;
   height: 16px; min-width: 24px; padding: 0 6px;
@@ -93,23 +174,15 @@
   color: var(--text-3); background: var(--tint);
   border-radius: var(--r-pill); flex-shrink: 0;
   font-variant-numeric: tabular-nums;
-  cursor: pointer; border: 0;
+  cursor: default; border: 0;
   transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
 }
-.priority-chip:hover { background: var(--tint-strong, var(--accent-tint)); color: var(--text); }
+button.priority-chip { cursor: pointer; }
+button.priority-chip:hover { background: var(--tint-strong, var(--accent-tint)); color: var(--text); }
 .priority-chip.urgent { color: var(--accent-on); background: var(--accent); }
 .priority-chip.high   { color: var(--err);       background: transparent; border: 1px solid var(--err); }
-/* Unset (null) priority on the active-task header: a faint dashed pill
-   that reads as a call-to-action without competing with set chips. Used
-   by PriorityChipButton when task.priority === null. List-row PriorityChip
-   simply renders nothing in this case, so this rule only fires in the
-   header. */
-.priority-chip.priority-chip-unset {
-  color: var(--meta);
-  background: transparent;
-  border: 1px dashed var(--border);
-  opacity: 0.7;
-}
+/* The header's unset-priority affordance is owned by document.css.
+   Static list badges never render for null priorities. */
 
 /* Inline edit state of .priority-chip in the active-task header. The pill
    morphs into a number <input> that keeps the SAME shape + size (border-
@@ -167,19 +240,22 @@
    hover/active background ragged across the column. */
 .task-row {
   display: grid; grid-template-columns: 14px 1fr auto;
-  align-items: center; gap: 8px;
-  width: 100%;
-  padding: 4px 8px; border-radius: var(--r-2);
+  align-items: start; gap: 8px;
+  width: 100%; min-height: 58px;
+  padding: 10px; border-radius: var(--r-2);
   color: var(--text-2);
   transition: background var(--dur-2) var(--ease), color var(--dur-2) var(--ease);
   cursor: pointer;
   text-align: left;
 }
 .task-row:hover { background: var(--tint); color: var(--text); }
-.task-row.active { background: var(--tint); color: var(--text); }
-/* Sidebar task list — default sans (keeps mono reserved for the main view's
-   title + description so the editor area is the visual focus). */
-.task-row .task-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-3); }
+.task-row.active { background: var(--tint); color: var(--text); box-shadow: inset 3px 0 0 var(--accent); }
+.task-row > .dot { margin-top: 5px; }
+.task-row > .priority-chip { margin-top: 2px; }
+.task-row-main { display: flex; flex-direction: column; min-width: 0; gap: 4px; }
+.task-row .task-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font: 500 12px/1.5 var(--font-sans); overflow-wrap: anywhere; }
+.task-row-meta { display: flex; align-items: center; gap: 5px; color: var(--text-2); font: 10px/1.5 var(--font-sans); }
+.task-row-meta .num { font-family: var(--font-mono); }
 
 /* ===== Tag-row layout override (within unified SidebarPane Tags section) =====
    Base .lane-row is `display: grid; grid-template-columns: 8px 1fr auto auto`,
@@ -226,10 +302,11 @@
   align-items: center;
   gap: 6px;
   width: 100%;
-  padding: 6px 12px 2px;
-  color: var(--text-3);
-  font-size: var(--fs-2);
-  letter-spacing: 0.04em;
+  padding: 10px 14px;
+  color: var(--text-2);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
   text-transform: uppercase;
   text-align: left;
   background: transparent;
@@ -256,41 +333,41 @@
 /* Section-head padding: applies uniformly to non-toggle headers (e.g. the
    Tasks section eyebrow + show-all-tasks button row). The .section-toggle
    button inside SectionHeader brings its own padding (defined later). */
-.sidebar-pane .pane-section > .section-head { padding: 6px 12px 2px; }
+.sidebar-pane .pane-section > .section-head { padding: 12px 14px 6px; }
+.sidebar-pane .section-body > .meta { padding: 8px 12px; line-height: 1.6; }
 
-/* ---------- filter chips strip ----------
-   Lives between the Tags section and Tasks section as a flex item in
-   .sidebar-body. Renders nothing (component returns null) when no slots
-   are active, so the Tasks section can claim the freed vertical space.
-   Hairline borders separate it from the sections above and below. */
+/* ---------- selected-tag token strip ----------
+   Lives INSIDE .workspace-filters (W2). Renders nothing (component returns
+   null) when no tags are selected. */
 .filter-chips {
   flex-shrink: 0;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  padding: 8px 12px;
-  background: var(--panel);
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
+  max-height: 96px;
+  overflow-y: auto;
 }
 .filter-chip {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 22px;
-  padding: 0 4px 0 8px;
+  min-height: 28px;
+  max-width: 100%;
+  padding: 0 2px 0 8px;
+  border: 1px solid var(--border);
   border-radius: var(--r-pill);
   background: var(--tint);
   color: var(--text);
   font-size: var(--fs-2);
 }
-.filter-chip .filter-chip-label { white-space: nowrap; }
+.filter-chip .filter-chip-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .filter-chip .x {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
   padding: 0;
   border: 0;
   border-radius: var(--r-1);
@@ -301,30 +378,22 @@
 }
 .filter-chip .x:hover { color: var(--text); background: var(--tint-strong, var(--accent-tint)); }
 
-/* The dashed "+ tag" affordance lives at the end of the filter-chips strip
-   regardless of how many chips precede it. Dashed border + transparent
-   background distinguishes it from active chips so it reads as an action
-   rather than state. Hover lifts to the accent-tint to match other clickable
-   chrome. */
-.filter-chip-add {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 22px;
-  padding: 0 8px 0 6px;
-  border-radius: var(--r-pill);
-  background: transparent;
-  border: 1px dashed var(--border-strong);
-  color: var(--text-3);
-  font-family: var(--font-sans);
-  font-size: var(--fs-2);
-  cursor: pointer;
-  transition: background var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
+@media (max-width: 900px) {
+  .ws-search { min-height: 44px; }
+  .ws-filter-trigger, .ws-tags-button, .ws-done-button, .ws-clear { min-height: 44px; }
+  .sidebar-filter-option, .sidebar-filter-head .btn-icon, .catalog-search-field input { min-height: 44px; }
+  .sidebar-filter-head .btn-icon { min-width: 44px; }
+  .sidebar-filter-head { padding-top: 0; padding-bottom: 0; }
+  .pane-system .btn-icon, .sidebar-back { min-width: 44px; min-height: 44px; }
+  .sidebar-pane .lane-row { min-height: 44px; }
+  .filter-chip .x { width: 32px; height: 32px; }
 }
-.filter-chip-add:hover {
-  background: var(--accent-tint);
-  border-color: var(--accent);
-  color: var(--text);
+
+/* In landscape the navigation itself can scroll rather than clip its
+   filter controls. Its sibling popup remains bounded to the sidebar. */
+@media (max-height: 560px) {
+  .sidebar-pane > .sidebar-body { overflow-y: auto; }
+  .sidebar-pane .pane-section.section-tasks.open { flex: 0 0 auto; overflow: visible; }
+  .sidebar-pane .pane-section.section-tasks.open > .section-body { overflow: visible; }
 }
-.filter-chip-add .icon { color: currentColor; }
 

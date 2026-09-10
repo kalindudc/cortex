@@ -5,7 +5,7 @@
 // updates lives in ./refresh.ts. Other state/ slices import from here freely;
 // this file imports nothing from the state/ directory (acyclic).
 
-import { signal } from "@preact/signals";
+import { batch, signal } from "@preact/signals";
 import type { Task, Lane, Update, Author, TaskStatus, RelatedTasks } from "../api/types.ts";
 
 // ---------- task data ----------
@@ -46,27 +46,78 @@ export function toggleTagFilter(name: string): void {
   const next = cur.includes(name) ? cur.filter(n => n !== name) : [...cur, name];
   setFilter("tag", next);
 }
+// Workspace search query (W3). A SEPARATE signal from `filters` so the
+// legacy cortex-filters storage payload keeps its shape; persisted under
+// its own versioned key by state/workspace.ts. Empty/whitespace-only means
+// "no search restriction". Composed with the structured filters in
+// computed.ts (full-pool search FIRST, then intersection).
+export const workspaceQuery = signal<string>("");
+// Clear-all clears every filtering slot INCLUDING the query, in one batch
+// so downstream computeds settle once. It intentionally does NOT touch the
+// include-done preference (showAllTasks) — that is a display preference,
+// not a filter (W3).
 export function clearAllFilters(): void {
-  filters.value = { status: null, lane: null, tag: [] };
+  batch(() => {
+    filters.value = { status: null, lane: null, tag: [] };
+    workspaceQuery.value = "";
+  });
 }
 export function hasActiveFilters(): boolean {
   const f = filters.value;
-  return f.status !== null || f.lane !== null || f.tag.length > 0;
+  return f.status !== null || f.lane !== null || f.tag.length > 0 || workspaceQuery.value.trim() !== "";
 }
-// Per-section open/closed state for the unified SidebarPane. Tag-FILTERING
-// lives in TagFilterModal (FilterChips "+ tag" affordance / command palette);
-// tag MANAGEMENT lives in the dedicated tags-mode SidebarPane (toggled via
-// SidebarSystemBar). In-memory only; defaults reset on reload (matches how
-// theme.ts deferred persistence until later).
+// Per-section open/closed state for the unified SidebarPane. Filtering
+// lives in WorkspaceFilters and its attached panels; management lives in
+// the dedicated sidebar modes. In-memory only; defaults reset on reload.
 export const sectionOpen = signal<{ views: boolean; lanes: boolean; tasks: boolean }>({
   views: true,
   lanes: true,
   tasks: true,
 });
-// Sidebar mode toggle. "main" shows Views + Lanes + Tasks; "tags" swaps the
-// pane to a single TAGS management section (add / edit tags). Toggled by
-// the hash-icon button in SidebarSystemBar. Live, in-memory only.
-export const sidebarMode = signal<"main" | "tags">("main");
+// Sidebar mode toggle. "main" is the workspace surface (filters + task
+// list); "tags" and "lanes" are explicit MANAGEMENT modes (labeled 'Manage
+// tags' / 'Manage lanes' with a Back-to-tasks affordance). Entering a
+// management mode never changes the active filters (W2). Live, in-memory
+// only.
+export const sidebarMode = signal<"main" | "tags" | "lanes">("main");
+// Sidebar filters are navigation-owned, NOT active-task metadata popovers.
+// A fallback active-task change during live filtering must not close them.
+// One discriminant gives the three attached panels mutual exclusion.
+export type SidebarFilter = "status" | "lane" | "tags";
+export const sidebarFilter = signal<SidebarFilter | null>(null);
+
+// ---------- document workspace (task 330) ----------
+// Body mode preference is global to this browser, not per task. Keep the
+// effective view separate: a heading link can temporarily reveal Read
+// without overwriting the user's preferred Edit/Split mode.
+export type ReaderMode = "read" | "edit" | "split";
+export const preferredReaderMode = signal<ReaderMode>("read");
+export const readerMode = signal<ReaderMode>("read");
+// Mobile/narrow-viewport navigation drawer visibility (V2). Desktop keeps
+// the sidebar inline and ignores this signal.
+export const navigationOpen = signal<boolean>(false);
+// true at <= 900px (V2). Seeded + tracked from matchMedia by
+// state/workspace.ts; App swaps the inline sidebar for the drawer frame and
+// TaskDocument collapses the outline into a disclosure. Tests set it
+// directly (happy-dom's matchMedia never matches).
+export const narrowViewport = signal<boolean>(false);
+// Focus reading hides the navigation column without becoming another
+// data/view implementation (W1). Sticky across task navigation.
+export const focusReading = signal<boolean>(false);
+// Task id currently being dragged from the task list. Non-null ONLY during
+// an actual drag — reveals the transient 'Move to lane' destination tray
+// (W5). Cleared on drop/dragend/Escape and by clearWorkspaceTransientState.
+export const draggedTaskId = signal<number | null>(null);
+// One-shot editor (body) focus request, mirroring pendingTitleFocus below:
+// holds the task id whose editor should grab focus once mounted/revealed.
+// Set via workspace.requestMode(mode, "body"); consumed by TaskDocument.
+export const pendingBodyFocus = signal<number | null>(null);
+// Keyboard mode switching focuses the rendered reader once it is visible.
+export const pendingReaderFocus = signal<number | null>(null);
+// Monotonic counter bumped by workspace.requestPostUpdate() (A3). The
+// inline composer subscribes and, on change, expands/scrolls/focuses its
+// textarea. A counter (not boolean) so repeated requests re-focus.
+export const postUpdateFocusRequest = signal<number>(0);
 // Task id whose title-input should grab focus on next mount. Set by the
 // "+ New task" affordance in SidebarPane (createUntitledTask) so the user
 // can immediately rename the auto-generated `untitled-<id>` placeholder.
@@ -99,6 +150,10 @@ export const tagsPopover = signal<boolean>(false);
 // (Priority no longer needs a popover signal: PriorityChipButton uses an
 // inline <input> with local state — no global popover bookkeeping.)
 export const lanePopover = signal<boolean>(false);
+// Task-actions menu (header "⋯" trigger — holds Delete task). Same
+// outside-click/Esc contract as the chip popovers; included in
+// closeAllPopovers().
+export const taskActionsPopover = signal<boolean>(false);
 export const paletteOpen = signal<boolean>(false);
 export const paletteQuery = signal<string>("");
 // modal kinds: 'confirm-delete' | 'lane-edit' | 'confirm-lane-delete' |
@@ -109,17 +164,40 @@ export const modal = signal<{ kind: string; [k: string]: unknown } | null>(null)
 // ---------- misc ----------
 // Resolved on boot from /api/me (gh hosts.yml -> git user.name -> hostname -> "me").
 export const meAuthor = signal<string>("me");
-// Inbox tab: "updates" (default, shows the active task's update thread),
-// "authors" (recent author activity from /api/authors), or "related"
-// (three buckets of related tasks from /api/tasks/:id/related, fetched
-// into `relatedTasks` below).
-export const tab = signal<"updates" | "authors" | "related">("updates");
+// Task-content tab (one APG tablist in TaskDocument): "document" (default,
+// the rendered/editable task body), "updates" (Activity — the active
+// task's update thread + inline composer), "authors" (per-task author
+// rollup), or "related" (three buckets from /api/tasks/:id/related,
+// fetched into `relatedTasks` below).
+export const tab = signal<"document" | "updates" | "authors" | "related">("document");
 
 // Fetched RelatedTasks for the active task. null means "not yet fetched"
-// (loading) — distinct from `{mentions:[],mentioned:[],shared:[]}` which
-// means "fetched and empty". Populated by refresh.ts on every refresh AND
-// when the active task changes; consumed by InboxPane's Related tab.
+// (loading) — distinct from `{referencedBy:[],references:[],shared:[]}`
+// which means "fetched and CONFIRMED empty". Populated by refresh.ts
+// (generation-guarded — N2); consumed by the Related tab.
 export const relatedTasks = signal<RelatedTasks | null>(null);
+// Typed, TASK-KEYED load/error state for the Related fetch (N2): published
+// ONLY for the still-current request/task generation, so a slow failure for
+// task A can never paint an error (or spinner) under task B. The generation
+// makes concurrent same-task requests observable in tests/debugging.
+export interface RelatedLoadingState {
+  taskId: number;
+  generation: number;
+}
+export interface RelatedErrorState {
+  taskId: number;
+  message: string;
+}
+export const relatedLoading = signal<RelatedLoadingState | null>(null);
+export const relatedError = signal<RelatedErrorState | null>(null);
+// Heading fragment carried by the URL (`/task/5#task-5-beta`), consumed by
+// TaskDocument once that TASK's Markdown has rendered. Keying prevents a
+// delayed/deleted task-A target from scrolling task B.
+export interface PendingHeadingFragment {
+  taskId: number;
+  id: string;
+}
+export const pendingHeadingFragment = signal<PendingHeadingFragment | null>(null);
 
 // ---------- migrations ----------
 // Populated on boot from GET /api/migrations. Non-empty means the DB has

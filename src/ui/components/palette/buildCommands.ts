@@ -22,14 +22,18 @@ import {
   tasks,
   tags,
   filters,
+  tab,
+  pendingTitleFocus,
 } from "../../state/signals.ts";
 import { createUntitledTask } from "../../lib/createTask.ts";
 import { closeAllPopovers } from "../../state/popovers.ts";
 import { moveSelection } from "../../state/selection.ts";
+import { requestMode, requestPostUpdate, revealSidebarFilter } from "../../state/workspace.ts";
+import { sidebarMode } from "../../state/signals.ts";
 import { theme, toggleTheme } from "../../state/theme.ts";
 import { api } from "../../api/client.ts";
 import { STATUS, STATUS_LABEL } from "../../lib/constants.ts";
-import { kbd } from "../../lib/keys.ts";
+import { kbd, modeShortcutHint } from "../../lib/keys.ts";
 
 export interface Command {
   id: string;
@@ -61,12 +65,14 @@ export function buildCommands(): Command[] {
   });
   cmds.push({
     id: "post-update",
-    label: "Focus post-update box",
+    label: "Post an update",
     hint: kbd("/"),
     icon: "eye",
     action: () => {
       paletteOpen.value = false;
-      setTimeout(() => document.getElementById("post-update-input")?.focus(), 0);
+      // ONE entry point (A3): reveals Activity, expands the composer
+      // disclosure and focuses its textarea. No active task → no-op.
+      requestPostUpdate();
     },
   });
   cmds.push({ id: "next", label: "Next task", hint: "", icon: "chevronDown", action: () => moveSelection(+1) });
@@ -136,12 +142,39 @@ export function buildCommands(): Command[] {
         setTimeout(() => (document.querySelector(".tag-picker-search input") as HTMLElement | null)?.focus(), 0);
       },
     });
+    // Reading is IN PLACE now: the old view-markdown modal entry retargets
+    // to Document/Read (the modal remains only as a legacy consumer).
     cmds.push({
       id: "view-markdown",
-      label: "View task as markdown",
-      hint: `[${at.id}]`,
+      label: "Read document",
+      hint: modeShortcutHint("read"),
       icon: "book-open",
-      action: () => (modal.value = { kind: "render-markdown", taskId: at.id }),
+      action: () => requestMode("read"),
+    });
+    cmds.push({
+      id: "edit-body",
+      label: "Edit description",
+      hint: modeShortcutHint("edit"),
+      icon: "edit",
+      action: () => requestMode("edit", "body"),
+    });
+    cmds.push({
+      id: "split-view",
+      label: "Split editor and preview",
+      hint: modeShortcutHint("split"),
+      icon: "fileText",
+      action: () => requestMode("split"),
+    });
+    cmds.push({
+      id: "edit-title",
+      label: "Edit title",
+      hint: `[${at.id}]`,
+      icon: "edit",
+      action: () => {
+        // Editing a title does not choose a different body-mode preference.
+        tab.value = "document";
+        pendingTitleFocus.value = at.id;
+      },
     });
     cmds.push({
       id: "delete-task",
@@ -259,18 +292,16 @@ export function buildCommands(): Command[] {
   });
 
   // ----- tag scoped (filter + edit) -----
-  // Single top-level "Filter by tags…" entry opens TagFilterModal — that's
-  // the canonical entry for ALL tag filtering, including search and multi-
-  // select. We deliberately do NOT flatten per-tag toggle commands into the
-  // root list: it bloats the palette and the modal's own search already
-  // covers "type a tag name to find it" use case.
+  // The palette reveals the canonical attached sidebar filter, including
+  // search and multi-select. Keep the historical command id for matching;
+  // no per-tag flat commands or detached filtering modal.
   // Standalone tag CREATION lives in TagPicker on the active task.
   cmds.push({
     id: "filter-tags-modal",
     label: "Filter by tags\u2026",
-    hint: "opens modal",
+    hint: "sidebar filter",
     icon: "hash",
-    action: () => (modal.value = { kind: "filter-tags" }),
+    action: () => revealSidebarFilter("tags"),
   });
   if (tags.value.length > 0) {
     cmds.push({
@@ -290,6 +321,26 @@ export function buildCommands(): Command[] {
           })),
     });
   }
+
+  // ----- management (explicit sidebar modes — never filter changes) -----
+  cmds.push({
+    id: "manage-lanes",
+    label: "Manage lanes",
+    hint: "",
+    icon: "layers",
+    action: () => {
+      sidebarMode.value = "lanes";
+    },
+  });
+  cmds.push({
+    id: "manage-tags",
+    label: "Manage tags",
+    hint: "",
+    icon: "hash",
+    action: () => {
+      sidebarMode.value = "tags";
+    },
+  });
 
   // ----- system -----
   cmds.push({

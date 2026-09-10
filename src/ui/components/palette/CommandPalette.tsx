@@ -9,11 +9,12 @@ import type { JSX, VNode } from "preact";
 import { useEffect, useRef } from "preact/hooks";
 import { useSignal } from "@preact/signals";
 
-import { paletteOpen, paletteQuery, tasks, selectedId } from "../../state/signals.ts";
+import { paletteOpen, paletteQuery, tasks, selectedId, tab } from "../../state/signals.ts";
 import { showError } from "../../api/errors.ts";
 import { Icon } from "../Icon.tsx";
 import { PriorityChip } from "../chips/PriorityChip.tsx";
 import { buildCommands, type Command } from "./buildCommands.ts";
+import { DialogFrame } from "../modals/DialogFrame.tsx";
 import { searchTasks } from "../../lib/fuzzy.ts";
 import type { Task } from "../../api/types.ts";
 
@@ -86,7 +87,13 @@ export function CommandPalette(): VNode {
   const inSubmenu = stack.value.length > 0;
 
   const selectTask = (task: Task) => {
+    // Global search stays global and selection PRESERVES workspace filters
+    // (W4) — the outside-filter notice explains any mismatch. Reveal the
+    // Document tab explicitly: the per-task default effect only fires on
+    // task CHANGES, and re-selecting the current task should also land on
+    // the document.
     selectedId.value = task.id;
+    tab.value = "document";
     paletteOpen.value = false;
   };
 
@@ -125,15 +132,19 @@ export function CommandPalette(): VNode {
     }
   };
 
+  // Same DialogFrame as every modal (V3): named, native-modal, Escape via
+  // cancel and backdrop click both route to the owner's close; the root-
+  // level Escape still ALSO reaches the global handler (keydown bubbles
+  // before the dialog's close request fires) which clears the query.
   return (
-    <div
-      class="overlay overlay-top"
-      onClick={(e: MouseEvent) => {
-        const t = e.target as HTMLElement;
-        if (t.classList.contains("overlay") || t.classList.contains("overlay-top")) paletteOpen.value = false;
+    <DialogFrame
+      label="Command palette"
+      className="dialog-frame--top"
+      onClose={() => {
+        paletteOpen.value = false;
       }}
     >
-      <div class="modal palette">
+      <div class="modal palette" data-pop>
         {inSubmenu ? (
           <div class="palette-breadcrumb">
             <button class="btn-icon" onClick={popScope} title="Back" aria-label="Back to previous menu">
@@ -249,6 +260,6 @@ export function CommandPalette(): VNode {
           </span>
         </div>
       </div>
-    </div>
+    </DialogFrame>
   );
 }

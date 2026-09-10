@@ -61,15 +61,19 @@ describe("ExternalChangeBanner", () => {
     expect(onDismiss).not.toHaveBeenCalled();
   });
 
-  test("Dismiss button invokes onDismiss once", () => {
+  test("the keep action is labeled 'Keep my changes' and invokes onDismiss once (task 330 H-series)", () => {
     const onApply = mock(() => {});
     const onDismiss = mock(() => {});
     const { container } = render(
       <ExternalChangeBanner label="Title" incoming="x" onApply={onApply} onDismiss={onDismiss} />,
     );
-    const dismissBtn = findButton(container, "Dismiss");
-    if (!dismissBtn) throw new Error("expected Dismiss button to render");
-    fireEvent.click(dismissBtn);
+    // The old ambiguous 'Dismiss' label is gone — the action states its
+    // domain meaning: keep MY text (and overwrite the external write on
+    // the next explicit save).
+    expect(findButton(container, "Dismiss")).toBeNull();
+    const keepBtn = findButton(container, "Keep my changes");
+    if (!keepBtn) throw new Error("expected 'Keep my changes' button to render");
+    fireEvent.click(keepBtn);
     expect(onDismiss).toHaveBeenCalledTimes(1);
     expect(onApply).not.toHaveBeenCalled();
   });
