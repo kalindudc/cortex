@@ -40,6 +40,24 @@ describe("TagPill", () => {
     expect((pending.getByRole("button") as HTMLButtonElement).disabled).toBe(true);
   });
 
+  test("onActivate renders a labeled filter button that fires without bubbling into the surrounding control", () => {
+    const activate = mock(() => {});
+    const parent = mock(() => {});
+    const view = render(
+      <div onClick={parent}>
+        <TagPill name="bug" color={null} onActivate={activate} onRemove={() => {}} />
+      </div>,
+    );
+    const filterButton = view.getByRole("button", { name: "Filter tasks by #bug", exact: true });
+    // The visible text stays the bare tag name for parity with plain pills.
+    expect(filterButton.textContent).toBe("bug");
+    fireEvent.click(filterButton);
+    expect(activate).toHaveBeenCalledTimes(1);
+    expect(parent).not.toHaveBeenCalled();
+    // Filter and remove are distinct sibling controls, never nested.
+    expect(view.getByRole("button", { name: "Remove tag bug", exact: true })).toBeTruthy();
+  });
+
   test("adds tag-pill-interactive when interactive=true", () => {
     render(<TagPill name="x" color={null} interactive />);
     const el = document.querySelector(".tag-pill") as HTMLElement;

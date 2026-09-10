@@ -17,7 +17,7 @@ import { api } from "../../api/client.ts";
 import { tryApi } from "../../api/errors.ts";
 
 import type { Task } from "../../api/types.ts";
-import { tagsPopover } from "../../state/signals.ts";
+import { tagsPopover, addTagFilter } from "../../state/signals.ts";
 import { closeAllPopovers, togglePopover } from "../../state/popovers.ts";
 import { tip } from "../../state/tooltip.ts";
 import { TagPill } from "./TagPill.tsx";
@@ -69,6 +69,7 @@ export function TagsHeaderChip({ task }: { task: Task }): VNode {
         <TagPill
           key={name}
           name={name}
+          onActivate={() => addTagFilter(name)}
           onRemove={() => {
             void removeTag(name);
           }}

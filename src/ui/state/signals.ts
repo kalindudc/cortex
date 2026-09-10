@@ -46,6 +46,14 @@ export function toggleTagFilter(name: string): void {
   const next = cur.includes(name) ? cur.filter(n => n !== name) : [...cur, name];
   setFilter("tag", next);
 }
+// Append-only variant used by clickable task tag pills: widen the active
+// filter with `name` but never toggle it off. Idempotent so clicking a tag
+// already in the filter is a no-op (no duplicate entry, no re-render churn).
+export function addTagFilter(name: string): void {
+  const cur = filters.value.tag;
+  if (cur.includes(name)) return;
+  setFilter("tag", [...cur, name]);
+}
 // Workspace search query (W3). A SEPARATE signal from `filters` so the
 // legacy cortex-filters storage payload keeps its shape; persisted under
 // its own versioned key by state/workspace.ts. Empty/whitespace-only means

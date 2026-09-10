@@ -221,6 +221,16 @@ test("header tags are compact and rounded; X expands on hover/focus and collapse
   await expect(page.getByRole("button", { name: "Edit tags", exact: true })).toHaveCount(0);
   const pill = page.locator(".tags-header > .tag-pill").filter({ hasText: /^bug$/ });
   const remove = pill.getByRole("button", { name: "Remove tag bug", exact: true });
+  // The clickable label must never clip its own glyphs: a pill border-radius
+  // combined with an inherited overflow:hidden previously cropped the text on
+  // every side. overflow:visible is the fix, so paint is never masked.
+  const filterLabel = pill.getByRole("button", { name: "Filter tasks by #bug", exact: true });
+  expect(
+    await filterLabel.evaluate(element => {
+      const style = getComputedStyle(element);
+      return { x: style.overflowX, y: style.overflowY };
+    }),
+  ).toEqual({ x: "visible", y: "visible" });
   await page.mouse.move(1, 1);
   expect(await remove.evaluate(element => getComputedStyle(element).opacity)).toBe("0");
   const before = await pill.boundingBox();
@@ -242,7 +252,13 @@ test("header tags are compact and rounded; X expands on hover/focus and collapse
   await expect.poll(() => remove.evaluate(element => element.getBoundingClientRect().width)).toBe(0);
   expect((await pill.boundingBox())?.width).toBe(before.width);
   // A zero-width idle control remains reachable through normal Tab order.
+  // The tag label is itself a filter button, so it takes focus first; its
+  // focus-within still reveals the paired remove X, and a second Tab lands on
+  // the remove control.
   await page.locator(".task-header button.priority-chip").focus();
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("button", { name: "Filter tasks by #bug", exact: true })).toBeFocused();
+  await expect.poll(() => remove.evaluate(element => element.getBoundingClientRect().width)).toBe(24);
   await page.keyboard.press("Tab");
   await expect(remove).toBeFocused();
   await expect.poll(() => remove.evaluate(element => element.getBoundingClientRect().width)).toBe(24);

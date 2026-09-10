@@ -175,8 +175,10 @@ SSE clients receive a `heartbeat` event every 15 s.
   clear), removable tag pills, and a single `+` button to add tags. Each
   rounded pill is compact at rest and smoothly expands its `×` control on
   hover or keyboard focus—no reserved empty remove-button space. Touch
-  devices keep the remove target visible. It detaches the tag from this
-  task, not the tag definition. Tag additions
+  devices keep the remove target visible. Clicking (or keyboard-activating) a
+  tag pill's label appends that tag to the sidebar tag filter (idempotent,
+  never toggles it off); the `×` instead detaches the tag from this task, not
+  the tag definition. Tag additions
   and removals use the API's delta modes rather than replacing a stale tag list. The workspace toolbar keeps the smart next-status action
   (`Move to review` / `Mark done` / `Unblock` / `Reopen`), status popup,
   `Focus reading` / `Show navigation`, and a `⋯` task-actions menu holding

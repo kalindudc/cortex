@@ -378,6 +378,55 @@ test("palette 'Filter by tags…' opens the attached sidebar panel", async ({ ur
   await expect(page.getByRole("searchbox", { name: "Search tags" })).toBeFocused();
 });
 
+test("clicking a task's header tag pill appends it to the sidebar filter and narrows the list", async ({
+  url,
+  page,
+}) => {
+  await seedLane(url, "inbox");
+  const tagged = await seedTask(url, "inbox", "tagged task", { tags: ["bug"] });
+  await seedTask(url, "inbox", "plain task");
+  await page.goto(`${url}/task/${tagged.id}`);
+
+  // The header tag renders as a clickable filter button; both tasks show first.
+  const pill = page.getByRole("button", { name: "Filter tasks by #bug", exact: true });
+  await expect(pill).toBeVisible();
+  await expect(page.locator(".task-row", { hasText: "tagged task" })).toBeVisible();
+  await expect(page.locator(".task-row", { hasText: "plain task" })).toBeVisible();
+  await expect(page.locator(".filter-chip")).toHaveCount(0);
+
+  await pill.click();
+
+  // The tag is appended to the sidebar filter: a removable chip appears and
+  // the untagged task drops out of the list.
+  await expect(page.locator(".filter-chip", { hasText: "#bug" })).toBeVisible();
+  await expect(page.locator(".task-row", { hasText: "tagged task" })).toBeVisible();
+  await expect(page.locator(".task-row", { hasText: "plain task" })).toHaveCount(0);
+
+  // Idempotent: clicking again keeps exactly one chip (append, never toggle).
+  await pill.click();
+  await expect(page.locator(".filter-chip")).toHaveCount(1);
+});
+
+test("a header tag click widens an existing filter without dropping earlier tags", async ({ url, page }) => {
+  await seedLane(url, "inbox");
+  const api = await seedTask(url, "inbox", "api task", { tags: ["api"] });
+  await seedTask(url, "inbox", "ui task", { tags: ["ui"] });
+  // Pre-existing tag filter set from the sidebar.
+  await page.goto(url);
+  await page.getByRole("button", { name: "Filter by tags", exact: true }).click();
+  await page.getByRole("button", { name: "Include #ui", exact: true }).click();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".filter-chip", { hasText: "#ui" })).toBeVisible();
+
+  // Opening the api task and clicking its tag appends #api alongside #ui (OR).
+  await page.goto(`${url}/task/${api.id}`);
+  await page.getByRole("button", { name: "Filter tasks by #api", exact: true }).click();
+  await expect(page.locator(".filter-chip", { hasText: "#ui" })).toBeVisible();
+  await expect(page.locator(".filter-chip", { hasText: "#api" })).toBeVisible();
+  await expect(page.locator(".task-row", { hasText: "api task" })).toBeVisible();
+  await expect(page.locator(".task-row", { hasText: "ui task" })).toBeVisible();
+});
+
 test("mobile live tag filtering preserves its drawer through fallback changes; outside clicks keep target focus", async ({
   url,
   page,

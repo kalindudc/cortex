@@ -141,6 +141,26 @@ describe("TagsHeaderChip", () => {
     expect(view.getByRole("button", { name: "Remove tag ui", exact: true })).toBeTruthy();
   });
 
+  test("clicking a tag pill appends it to the sidebar tag filter (idempotent) without mutating the task or opening the picker", () => {
+    filters.value = { status: "open", lane: "todo", tag: ["existing"] };
+    const view = render(<TagsHeaderChip task={fx} />);
+    const filterBug = () => fireEvent.click(view.getByRole("button", { name: "Filter tasks by #bug", exact: true }));
+    filterBug();
+    expect(filters.value.tag).toEqual(["existing", "bug"]);
+    // Idempotent: a second click never duplicates the entry.
+    filterBug();
+    expect(filters.value.tag).toEqual(["existing", "bug"]);
+    // A different pill appends alongside the first.
+    fireEvent.click(view.getByRole("button", { name: "Filter tasks by #ui", exact: true }));
+    expect(filters.value.tag).toEqual(["existing", "bug", "ui"]);
+    // status/lane preserved; no task-tag mutation; picker stays closed.
+    expect(filters.value.status).toBe("open");
+    expect(filters.value.lane).toBe("todo");
+    expect(removeTaskTag).not.toHaveBeenCalled();
+    expect(setTags).not.toHaveBeenCalled();
+    expect(tagsPopover.value).toBe(false);
+  });
+
   test("repeated removal of a pending tag is guarded; different removals send independent deltas", () => {
     const view = render(<TagsHeaderChip task={fx} />);
     const bug = view.getByRole("button", { name: "Remove tag bug", exact: true });
