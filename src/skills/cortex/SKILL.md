@@ -24,11 +24,24 @@ Cortex is a single-binary, single-user task tracker designed for one human super
 | `cortex add <title>` | Create a new task. | [add.md](cli/add.md) |
 | `cortex edit <id>` | Edit a task's title, body, or priority. Body edits prefer anchor-based partial replace. | [edit.md](cli/edit.md) |
 | `cortex update <id> -m <msg> --as <id>` | Post an update on a task; optionally flip status. | [cli/update.md](cli/update.md) |
+| `cortex schema` | Print the data model + command grammar (agent orientation, DB-free). | [schema.md](cli/schema.md) |
+| `cortex doctor` | Report version, db path, daemon state, pending migrations, counts. | [doctor.md](cli/doctor.md) |
 | `cortex serve` | Run the localhost API + dashboard daemon. | [serve.md](cli/serve.md) |
 | `cortex open` | Open the cortex dashboard in your default browser. | [open.md](cli/open.md) |
 | `cortex reset` | Wipe the DB and regenerate the skill (destructive, requires typing `RESET`). | [reset.md](cli/reset.md) |
 
-Other commands (`ls`, `show`, `mv`, `rm`, `lane`, `stop`) follow the same shape — run `cortex <cmd> --help` for argument reference.
+Other commands (`ls`, `show`, `search`, `mv`, `rm`, `lane`, `stop`) follow the same shape — run `cortex <cmd> --help` for argument reference.
+
+## Agent I/O contract (`--json`)
+
+Every mutating command (`add`, `edit`, `update`, `mv`, `rm`, `tag add|edit|rm`, `lane add|edit|rm`) — plus the read commands `ls`, `show`, `search`, `schema`, `doctor` — accepts `--json`. Prefer it whenever you will parse output.
+
+- **Success** prints the resulting object to **stdout** (e.g. `add`/`edit`/`mv` → the task; `update` → `{ update, status? }`; `rm` → `{ ok, id }`). `cortex ls --json` omits task bodies for scannability — pass `--full` to include them, or read one body with `cortex show <id> --json`.
+- **Errors** print `{ "error": { "code", "message", "matches"? } }` to **stdout** under `--json` (and `error: <message>` to **stderr** otherwise). Exit is `0` on success, `1` on error; branch on `code`, not the exit code.
+- **Codes:** `not_found`, `bad_request`, `validation`, `conflict`, `body_search_not_found`, `body_search_ambiguous` (with `matches`), `error`. See `cortex schema --json` for the authoritative list.
+- **stdin body:** `cortex add --body-file -` (or `--body-file=-`) reads the body from stdin; `cortex edit` supports the same.
+- **One-shot attribution:** `cortex add --as <id>` records the first `created` update so the task is not anonymous (otherwise `add` is anonymous and attribution starts at the first `cortex update`).
+- **Non-interactive `rm`:** `cortex rm --json` refuses to prompt (agents can't answer y/N) — pass `--force`. The human, non-`--json` prompt still works via piped stdin and aborts safely on EOF.
 
 ## Recipes
 

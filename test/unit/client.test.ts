@@ -1,5 +1,5 @@
 import { test, expect, describe, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
-import { daemonUrl, Client } from "../../src/client.ts";
+import { daemonUrl, Client, HttpError } from "../../src/client.ts";
 import { pidPath, urlPath } from "../../src/paths.ts";
 import fs from "node:fs";
 import path from "node:path";
@@ -272,33 +272,57 @@ describe("Client", () => {
     expect(r.search).toBe("?force=1");
   });
 
-  test("request helper throws Error with documented format on non-2xx (parses {error})", async () => {
+  test("request helper throws HttpError with clean server message + status on non-2xx", async () => {
     nextResponse = new Response(JSON.stringify({ error: "nope" }), {
       status: 400,
       headers: { "content-type": "application/json" },
     });
-    let caught: Error | null = null;
+    let caught: unknown = null;
     try {
       await Client.getTask(baseUrl, 1);
     } catch (e) {
-      caught = e as Error;
+      caught = e;
     }
-    expect(caught).not.toBeNull();
-    // Source uses Unicode arrow "→" in the error message, not "->"
-    if (!caught) throw new Error("expected caught error");
-    expect(caught.message).toBe("GET /api/tasks/1 → 400: nope");
+    expect(caught).toBeInstanceOf(HttpError);
+    const err = caught as HttpError;
+    expect(err.message).toBe("nope");
+    expect(err.status).toBe(400);
+    expect(err.code).toBeUndefined();
+  });
+
+  test("request helper preserves the server's machine-readable code + matches (409)", async () => {
+    nextResponse = new Response(
+      JSON.stringify({
+        error: "body-search anchor matched 3 times; refine for uniqueness",
+        code: "body_search_ambiguous",
+        matches: 3,
+      }),
+      { status: 409, headers: { "content-type": "application/json" } },
+    );
+    let caught: unknown = null;
+    try {
+      await Client.editTask(baseUrl, 5, { bodySearch: "x", bodyReplace: "y" });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(HttpError);
+    const err = caught as HttpError;
+    expect(err.status).toBe(409);
+    expect(err.code).toBe("body_search_ambiguous");
+    expect(err.matches).toBe(3);
   });
 
   test("request helper falls back to raw text when body is not JSON", async () => {
     nextResponse = new Response("plain failure text", { status: 500 });
-    let caught: Error | null = null;
+    let caught: unknown = null;
     try {
       await Client.listTags(baseUrl);
     } catch (e) {
-      caught = e as Error;
+      caught = e;
     }
-    expect(caught).not.toBeNull();
-    if (!caught) throw new Error("expected caught error");
-    expect(caught.message).toBe("GET /api/tags → 500: plain failure text");
+    expect(caught).toBeInstanceOf(HttpError);
+    const err = caught as HttpError;
+    expect(err.message).toBe("plain failure text");
+    expect(err.status).toBe(500);
   });
 });

@@ -1,6 +1,19 @@
 import { defineCommand } from "citty";
 import { Store, type Lane } from "../store.ts";
 import { Client, daemonUrl } from "../client.ts";
+import { emitError, emitOk } from "../output.ts";
+
+/**
+ * Every mutating subcommand accepts `--json`: success emits the resulting
+ * Lane (or `{ ok, name }` for rm) on stdout; failures route through
+ * emitError for the shared machine-readable error envelope.
+ */
+
+const jsonArg = {
+  type: "boolean" as const,
+  default: false,
+  description: "emit the result as JSON instead of the human line",
+};
 
 const add = defineCommand({
   meta: { name: "add", description: "create a lane" },
@@ -16,8 +29,10 @@ const add = defineCommand({
       valueHint: "#hex",
       description: "display color hex (e.g. #fe8019); used by the dashboard",
     },
+    json: jsonArg,
   },
   async run({ args }) {
+    const json = args.json;
     const payload = {
       name: args.name,
       color: args.color || null,
@@ -26,20 +41,18 @@ const add = defineCommand({
     if (url) {
       try {
         const lane = (await Client.addLane(url, payload)) as Lane;
-        console.log(`✓ lane ${lane.name} created`);
+        emitOk(json, lane, `✓ lane ${lane.name} created`);
         return;
       } catch (err) {
-        console.error(`error: ${(err as Error).message}`);
-        process.exit(1);
+        emitError(json, err);
       }
     }
     const store = Store.open();
     try {
       const lane = store.addLane(payload);
-      console.log(`✓ lane ${lane.name} created`);
+      emitOk(json, lane, `✓ lane ${lane.name} created`);
     } catch (err) {
-      console.error(`error: ${(err as Error).message}`);
-      process.exit(1);
+      emitError(json, err);
     } finally {
       store.close();
     }
@@ -94,8 +107,10 @@ const edit = defineCommand({
       valueHint: "new-name",
       description: "rename the lane (cascades to all tasks via FK)",
     },
+    json: jsonArg,
   },
   async run({ args }) {
+    const json = args.json;
     const fields: {
       color?: string | null;
       rename?: string;
@@ -103,27 +118,24 @@ const edit = defineCommand({
     if (args.color) fields.color = args.color;
     if (args.rename) fields.rename = args.rename;
     if (Object.keys(fields).length === 0) {
-      console.error("error: provide at least one of --color, --rename");
-      process.exit(1);
+      emitError(json, new Error("provide at least one of --color, --rename"));
     }
     const url = daemonUrl();
     if (url) {
       try {
         const lane = (await Client.editLane(url, args.name, fields)) as Lane;
-        console.log(`✓ lane ${lane.name} updated`);
+        emitOk(json, lane, `✓ lane ${lane.name} updated`);
         return;
       } catch (err) {
-        console.error(`error: ${(err as Error).message}`);
-        process.exit(1);
+        emitError(json, err);
       }
     }
     const store = Store.open();
     try {
       const lane = store.editLane(args.name, fields);
-      console.log(`✓ lane ${lane.name} updated`);
+      emitOk(json, lane, `✓ lane ${lane.name} updated`);
     } catch (err) {
-      console.error(`error: ${(err as Error).message}`);
-      process.exit(1);
+      emitError(json, err);
     } finally {
       store.close();
     }
@@ -138,26 +150,26 @@ const rm = defineCommand({
       required: true,
       description: "lane name",
     },
+    json: jsonArg,
   },
   async run({ args }) {
+    const json = args.json;
     const url = daemonUrl();
     if (url) {
       try {
         await Client.removeLane(url, args.name);
-        console.log(`✓ lane ${args.name} removed`);
+        emitOk(json, { ok: true, name: args.name }, `✓ lane ${args.name} removed`);
         return;
       } catch (err) {
-        console.error(`error: ${(err as Error).message}`);
-        process.exit(1);
+        emitError(json, err);
       }
     }
     const store = Store.open();
     try {
       store.removeLane(args.name);
-      console.log(`✓ lane ${args.name} removed`);
+      emitOk(json, { ok: true, name: args.name }, `✓ lane ${args.name} removed`);
     } catch (err) {
-      console.error(`error: ${(err as Error).message}`);
-      process.exit(1);
+      emitError(json, err);
     } finally {
       store.close();
     }

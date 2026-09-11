@@ -73,6 +73,11 @@ export default defineCommand({
       valueHint: "text",
       description: "search task titles and bodies. @text searches titles only, #text searches tags",
     },
+    full: {
+      type: "boolean",
+      default: false,
+      description: "with --json, include task bodies (default omits them for scannable, token-efficient output)",
+    },
   },
   run({ args }) {
     if (args.status && !STATUSES.includes(args.status as TaskStatus)) {
@@ -118,7 +123,23 @@ export default defineCommand({
       // server/UI keep their priority-first ordering; only the CLI re-sorts.
       rows.sort((a, b) => a.id - b.id);
       if (args.json) {
-        console.log(JSON.stringify(rows));
+        // List views are for scanning: omit the (potentially large) body by
+        // default so an agent can enumerate tasks without spending its context
+        // budget on full prose. `--full` includes bodies; read one body with
+        // `cortex show <id> --json`.
+        const out = args.full
+          ? rows
+          : rows.map(t => ({
+              id: t.id,
+              lane: t.lane,
+              title: t.title,
+              status: t.status,
+              priority: t.priority,
+              created: t.created,
+              updated: t.updated,
+              tags: t.tags,
+            }));
+        console.log(JSON.stringify(out));
         return;
       }
       const byLane = new Map<string, Task[]>();

@@ -1,7 +1,7 @@
-import fs from "node:fs";
 import { defineCommand } from "citty";
-import { Store, validateTagName, type Task, type TaskStatus } from "../store.ts";
+import { Store, validateAuthorTag, validateTagName, type Task, type TaskStatus } from "../store.ts";
 import { Client, daemonUrl } from "../client.ts";
+import { emitError, emitOk, resolveBody } from "../output.ts";
 
 /** Parse a comma-separated tag list and validate each name. Empty/blank entries
  *  are silently dropped (e.g. `-t a,,b` becomes `["a","b"]`). */
@@ -67,21 +67,23 @@ export default defineCommand({
       valueHint: "a,b,c",
       description: "comma-separated tag names; auto-creates missing tags",
     },
+    json: {
+      type: "boolean",
+      default: false,
+      description: "emit the created task as JSON instead of the human line",
+    },
+    as: {
+      type: "string",
+      alias: "author",
+      valueHint: "id",
+      description:
+        "optional attribution tag; when set, records the first 'created' update so the task is not anonymous (create + attribute in one call)",
+    },
   },
   async run({ args }) {
-    if (args.bodyFile && args.body) {
-      console.error("error: use --body-file OR -b, not both");
-      process.exit(1);
-    }
-    let body: string | null = args.body || null;
-    if (args.bodyFile) {
-      try {
-        body = fs.readFileSync(args.bodyFile, "utf8");
-      } catch (e) {
-        console.error(`error: --body-file: ${(e as Error).message}`);
-        process.exit(1);
-      }
-    }
+    const json = args.json;
+    const raw = await resolveBody(json, args.body, args.bodyFile);
+    const body: string | null = raw || null;
     // Parse + validate tags BEFORE opening the daemon connection or store
     // so a bad tag name fails fast without persisting a half-tagged task.
     let tagNames: string[] = [];
@@ -89,8 +91,17 @@ export default defineCommand({
       try {
         tagNames = parseTags(args.tags);
       } catch (e) {
-        console.error(`error: ${(e as Error).message}`);
-        process.exit(1);
+        emitError(json, e);
+      }
+    }
+    // Validate the optional --as attribution up front (Store + server also
+    // validate) so a bad tag fails before we persist a task.
+    let author: string | undefined;
+    if (args.as !== undefined) {
+      try {
+        author = validateAuthorTag(args.as);
+      } catch (e) {
+        emitError(json, e);
       }
     }
     const payload = {
@@ -107,11 +118,13 @@ export default defineCommand({
         if (tagNames.length > 0) {
           task = (await Client.setTaskTags(url, task.id, tagNames)) as Task;
         }
-        console.log(`[${task.id}] ${task.title}`);
+        if (author !== undefined) {
+          await Client.addUpdate(url, task.id, { author, summary: "created" });
+        }
+        emitOk(json, task, `[${task.id}] ${task.title}`);
         return;
       } catch (err) {
-        console.error(`error: ${(err as Error).message}`);
-        process.exit(1);
+        emitError(json, err);
       }
     }
     const store = Store.open();
@@ -120,10 +133,12 @@ export default defineCommand({
       if (tagNames.length > 0) {
         task = store.setTaskTags(task.id, tagNames);
       }
-      console.log(`[${task.id}] ${task.title}`);
+      if (author !== undefined) {
+        store.addUpdate({ task_id: task.id, author, summary: "created" });
+      }
+      emitOk(json, task, `[${task.id}] ${task.title}`);
     } catch (err) {
-      console.error(`error: ${(err as Error).message}`);
-      process.exit(1);
+      emitError(json, err);
     } finally {
       store.close();
     }

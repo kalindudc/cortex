@@ -13,6 +13,8 @@ const EXPECTED_SUBCOMMANDS = [
   "ls",
   "show",
   "search",
+  "schema",
+  "doctor",
   "update",
   "edit",
   "mv",

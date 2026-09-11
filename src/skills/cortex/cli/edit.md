@@ -16,6 +16,10 @@ cortex edit <id> --body-search "<exact unique anchor>" --body-replace "<replacem
 # Body — full overwrite:
 cortex edit <id> -b "<full body>"
 cortex edit <id> --body-file <path>
+cortex edit <id> --body-file -      # read the new body from stdin
+
+# Structured output for agents:
+cortex edit <id> -t "<new title>" --json   # prints the edited task as JSON
 
 # Combined: title + partial body edit in one atomic call
 cortex edit <id> -t "<new title>" --body-search "..." --body-replace "..."
@@ -48,6 +52,8 @@ On 409, the server response body includes a machine-readable `code`:
 
 - `body_search_not_found`
 - `body_search_ambiguous` (with `matches: N`)
+
+The CLI surfaces the SAME codes with `--json`, on both the daemon and direct-store paths: a failed edit prints `{ "error": { "code": "body_search_ambiguous", "message": "...", "matches": 2 } }` to stdout and exits 1. Branch on `code` (not the exit code) to decide whether to re-read + refine the anchor (`body_search_not_found`) or broaden it (`body_search_ambiguous`).
 
 ## Recipe: race-safe in-place amendment
 

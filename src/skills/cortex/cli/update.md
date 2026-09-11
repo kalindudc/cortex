@@ -18,7 +18,7 @@ Post an update on a task. Optionally flip the task's status in the same call.
 ## Usage
 
 ```bash
-cortex update <id> -m "<message>" --as <session-id> [-s <status>] [-b <body>]
+cortex update <id> -m "<message>" --as <session-id> [-s <status>] [-b <body>] [--json]
 ```
 
 ## Args
@@ -30,6 +30,7 @@ cortex update <id> -m "<message>" --as <session-id> [-s <status>] [-b <body>]
 | `--as` | `--author` | **REQUIRED** | Session-id author tag. Format: `<role>-<8 hex>`, max 80 chars, no newlines. See [recipes/session-id.md](../recipes/session-id.md). |
 | `--status` | `-s` | no | One of `draft`, `open`, `review`, `blocked`, `done`. Flips the task and writes an audit-trail row. |
 | `--body` | `-b` | no | Longer detail shown by `cortex show <id>`. |
+| `--json` | — | no | Emit `{ "update": {...}, "status"? }` as JSON on stdout instead of the `✓ ...` lines. On failure emits `{ "error": { "code", "message" } }` and exits 1. |
 
 ## Examples
 

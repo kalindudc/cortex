@@ -32,6 +32,26 @@ export function daemonUrl(): string | null {
 
 type Method = "GET" | "POST" | "PATCH" | "DELETE";
 
+/**
+ * Error thrown by `request()` on any non-2xx response. Carries the HTTP
+ * `status` plus the server's machine-readable `code` / `matches` (parsed from
+ * the JSON error body when present) so the CLI can re-emit them in its
+ * structured `--json` error envelope. `message` is the server's clean error
+ * text (or the raw body) — no HTTP method/path/status noise leaks to agents.
+ */
+export class HttpError extends Error {
+  readonly status: number;
+  readonly code?: string;
+  readonly matches?: number;
+  constructor(status: number, message: string, code?: string, matches?: number) {
+    super(message);
+    this.name = "HttpError";
+    this.status = status;
+    if (code !== undefined) this.code = code;
+    if (matches !== undefined) this.matches = matches;
+  }
+}
+
 async function request<T>(url: string, method: Method, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${url}${path}`, {
     method,
@@ -41,13 +61,17 @@ async function request<T>(url: string, method: Method, path: string, body?: unkn
   const text = await res.text();
   if (!res.ok) {
     let msg = text;
+    let code: string | undefined;
+    let matches: number | undefined;
     try {
-      const parsed = JSON.parse(text) as { error?: string };
+      const parsed = JSON.parse(text) as { error?: string; code?: string; matches?: number };
       if (parsed.error) msg = parsed.error;
+      if (typeof parsed.code === "string") code = parsed.code;
+      if (typeof parsed.matches === "number") matches = parsed.matches;
     } catch {
       /* keep raw text */
     }
-    throw new Error(`${method} ${path} → ${res.status}: ${msg}`);
+    throw new HttpError(res.status, msg, code, matches);
   }
   return text ? (JSON.parse(text) as T) : (undefined as T);
 }

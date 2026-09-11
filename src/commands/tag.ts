@@ -1,6 +1,7 @@
 import { defineCommand } from "citty";
 import { Store, validateTagName, type Tag } from "../store.ts";
 import { Client, daemonUrl } from "../client.ts";
+import { emitError, emitOk } from "../output.ts";
 
 /**
  * `cortex tag` mirrors `cortex lane`: a flat add | ls | edit | rm subcommand
@@ -9,7 +10,17 @@ import { Client, daemonUrl } from "../client.ts";
  * reference via `cortex add -t a,b` / `cortex edit --add-tag x`; this
  * subcommand exists primarily so the user can pre-create a tag with a
  * custom color and rename/remove tags without touching tasks.
+ *
+ * Every mutating subcommand accepts `--json`: success emits the resulting
+ * Tag (or `{ ok, name }` for rm) on stdout; failures route through
+ * emitError for the shared machine-readable error envelope.
  */
+
+const jsonArg = {
+  type: "boolean" as const,
+  default: false,
+  description: "emit the result as JSON instead of the human line",
+};
 
 const add = defineCommand({
   meta: { name: "add", description: "create a tag" },
@@ -25,34 +36,33 @@ const add = defineCommand({
       valueHint: "#hex",
       description: "display color hex (e.g. #fe8019); used by the dashboard",
     },
+    json: jsonArg,
   },
   async run({ args }) {
+    const json = args.json;
     let name: string;
     try {
       name = validateTagName(args.name);
     } catch (e) {
-      console.error(`error: ${(e as Error).message}`);
-      process.exit(1);
+      emitError(json, e);
     }
     const payload = { name, color: args.color || null };
     const url = daemonUrl();
     if (url) {
       try {
         const tag = (await Client.addTag(url, payload)) as Tag;
-        console.log(`✓ tag ${tag.name} created`);
+        emitOk(json, tag, `✓ tag ${tag.name} created`);
         return;
       } catch (err) {
-        console.error(`error: ${(err as Error).message}`);
-        process.exit(1);
+        emitError(json, err);
       }
     }
     const store = Store.open();
     try {
       const tag = store.addTag(payload);
-      console.log(`✓ tag ${tag.name} created`);
+      emitOk(json, tag, `✓ tag ${tag.name} created`);
     } catch (err) {
-      console.error(`error: ${(err as Error).message}`);
-      process.exit(1);
+      emitError(json, err);
     } finally {
       store.close();
     }
@@ -123,40 +133,38 @@ const edit = defineCommand({
       valueHint: "new-name",
       description: "rename the tag (cascades to all tasks via FK)",
     },
+    json: jsonArg,
   },
   async run({ args }) {
+    const json = args.json;
     const fields: { color?: string | null; rename?: string } = {};
     if (args.color) fields.color = args.color;
     if (args.rename) {
       try {
         fields.rename = validateTagName(args.rename);
       } catch (e) {
-        console.error(`error: ${(e as Error).message}`);
-        process.exit(1);
+        emitError(json, e);
       }
     }
     if (Object.keys(fields).length === 0) {
-      console.error("error: provide at least one of --color, --rename");
-      process.exit(1);
+      emitError(json, new Error("provide at least one of --color, --rename"));
     }
     const url = daemonUrl();
     if (url) {
       try {
         const tag = (await Client.editTag(url, args.name, fields)) as Tag;
-        console.log(`✓ tag ${tag.name} updated`);
+        emitOk(json, tag, `✓ tag ${tag.name} updated`);
         return;
       } catch (err) {
-        console.error(`error: ${(err as Error).message}`);
-        process.exit(1);
+        emitError(json, err);
       }
     }
     const store = Store.open();
     try {
       const tag = store.editTag(args.name, fields);
-      console.log(`✓ tag ${tag.name} updated`);
+      emitOk(json, tag, `✓ tag ${tag.name} updated`);
     } catch (err) {
-      console.error(`error: ${(err as Error).message}`);
-      process.exit(1);
+      emitError(json, err);
     } finally {
       store.close();
     }
@@ -180,26 +188,26 @@ const rm = defineCommand({
       default: false,
       description: "drop the tag even if tasks reference it (cascades join rows)",
     },
+    json: jsonArg,
   },
   async run({ args }) {
+    const json = args.json;
     const url = daemonUrl();
     if (url) {
       try {
         await Client.removeTag(url, args.name, args.force);
-        console.log(`✓ tag ${args.name} removed`);
+        emitOk(json, { ok: true, name: args.name }, `✓ tag ${args.name} removed`);
         return;
       } catch (err) {
-        console.error(`error: ${(err as Error).message}`);
-        process.exit(1);
+        emitError(json, err);
       }
     }
     const store = Store.open();
     try {
       store.removeTag(args.name, { force: args.force });
-      console.log(`✓ tag ${args.name} removed`);
+      emitOk(json, { ok: true, name: args.name }, `✓ tag ${args.name} removed`);
     } catch (err) {
-      console.error(`error: ${(err as Error).message}`);
-      process.exit(1);
+      emitError(json, err);
     } finally {
       store.close();
     }

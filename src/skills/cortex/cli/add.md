@@ -5,7 +5,7 @@ Create a new task. Returns `[<id>] <title>` on success — capture the id for la
 ## Usage
 
 ```bash
-cortex add "<title>" [-l <lane>] [-p <priority>] [-b <body> | --body-file <path>] [-s <status>] [-t <tags>]
+cortex add "<title>" [-l <lane>] [-p <priority>] [-b <body> | --body-file <path>|-] [-s <status>] [-t <tags>] [--as <id>] [--json]
 ```
 
 ## Args
@@ -16,9 +16,11 @@ cortex add "<title>" [-l <lane>] [-p <priority>] [-b <body> | --body-file <path>
 | `--lane` | `-l` | `now` | Lane name. Auto-created if it doesn't exist. |
 | `--priority` | `-p` | (none) | Optional. Non-negative integer. **0 = highest**, larger numbers = lower priority. Leave unset for archive/document tasks (plans, research notes, anything you organise by lane or tag rather than urgency). |
 | `--body` | `-b` | — | Longer description shown by `cortex show <id>`. |
-| `--body-file` | — | — | Read the body from a file. Mutually exclusive with `-b`. ALWAYS prefer this over `-b` for KB-scale markdown (shell escaping is a footgun). |
+| `--body-file` | — | — | Read the body from a file. `--body-file -` (or `--body-file=-`) reads stdin. Mutually exclusive with `-b`. ALWAYS prefer this over `-b` for KB-scale markdown (shell escaping is a footgun). |
 | `--status` | `-s` | `open` | One of `draft`, `open`, `review`, `blocked`, `done`. Set the initial status of the task. |
 | `--tags` | `-t` | — | Comma-separated tag names (e.g. `-t "plan,my-feature"`). Auto-creates missing tags. Tag names match `[a-z0-9_@-]{1,32}`. |
+| `--as` | `--author` | — | Optional attribution tag. When set, records the first `created` update so the task isn't anonymous (create + attribute in ONE call). |
+| `--json` | — | `false` | Emit the created task as JSON on stdout instead of `[<id>] <title>`. On failure emits `{ "error": { "code", "message" } }` and exits 1. |
 
 ## Examples
 
@@ -37,6 +39,19 @@ $ cortex add "Plan: nullable priority" -l cortex -t plan
 ```
 
 The new task starts in status `open` with no updates yet.
+
+JSON + one-shot attribution (create, attribute, and capture the id in one call):
+
+```bash
+$ cortex add "Plan: nullable priority" -l cortex -t plan --as planner-7f3a9201 --json | jq .id
+132
+```
+
+Body from stdin (no tmpfile needed):
+
+```bash
+$ generate_plan | cortex add "Plan: X" --body-file - --json
+```
 
 ## Pitfalls
 

@@ -1,7 +1,7 @@
-import fs from "node:fs";
 import { defineCommand } from "citty";
 import { Store, validateTagName, type Task } from "../store.ts";
 import { Client, daemonUrl } from "../client.ts";
+import { emitError, printJson, resolveBody } from "../output.ts";
 
 function parsePriority(raw: string): number {
   const n = Number.parseInt(raw, 10);
@@ -74,16 +74,17 @@ export default defineCommand({
       valueHint: "name",
       description: "remove a single tag",
     },
+    json: {
+      type: "boolean",
+      default: false,
+      description: "emit the edited task as JSON instead of the human line",
+    },
   },
   async run({ args }) {
+    const json = args.json;
     const id = Number.parseInt(args.id, 10);
     if (!Number.isFinite(id)) {
-      console.error("error: id must be a number");
-      process.exit(1);
-    }
-    if (args.bodyFile && args.body !== undefined) {
-      console.error("error: use --body-file OR -b, not both");
-      process.exit(1);
+      emitError(json, new Error("id must be a number"));
     }
     // bodySearch + bodyReplace must be present together AND mutually
     // exclusive with -b / --body-file. Both rules are also enforced server-
@@ -91,16 +92,13 @@ export default defineCommand({
     const hasSearch = args.bodySearch !== undefined;
     const hasReplace = args.bodyReplace !== undefined;
     if (hasSearch !== hasReplace) {
-      console.error("error: --body-search and --body-replace must be used together");
-      process.exit(1);
+      emitError(json, new Error("--body-search and --body-replace must be used together"));
     }
     if (hasSearch && (args.body !== undefined || args.bodyFile !== undefined)) {
-      console.error("error: --body-search/--body-replace cannot be combined with -b or --body-file");
-      process.exit(1);
+      emitError(json, new Error("--body-search/--body-replace cannot be combined with -b or --body-file"));
     }
     if (hasSearch && args.bodySearch === "") {
-      console.error("error: --body-search cannot be empty");
-      process.exit(1);
+      emitError(json, new Error("--body-search cannot be empty"));
     }
     const patch: {
       title?: string;
@@ -110,24 +108,22 @@ export default defineCommand({
       priority?: number | null;
     } = {};
     if (args.title) patch.title = args.title;
-    if (args.bodyFile) {
-      try {
-        patch.body = fs.readFileSync(args.bodyFile, "utf8");
-      } catch (e) {
-        console.error(`error: --body-file: ${(e as Error).message}`);
-        process.exit(1);
+    if (!hasSearch) {
+      // --body-file (incl. "-" stdin) always sets the body, even empty (a
+      // clear); an empty -b stays a no-op (cf. add.ts). resolveBody enforces
+      // the -b/--body-file mutex and routes read errors through emitError.
+      const raw = await resolveBody(json, args.body, args.bodyFile);
+      if (args.bodyFile !== undefined) {
+        patch.body = raw ?? "";
+      } else if (raw !== undefined && raw !== "") {
+        patch.body = raw;
       }
-    } else if (args.body !== undefined && args.body !== "") {
-      // Preserve existing semantic: empty -b is a no-op (cf. Plan-1 add.ts).
-      patch.body = args.body;
-    }
-    if (hasSearch) {
+    } else {
       patch.bodySearch = args.bodySearch;
       patch.bodyReplace = args.bodyReplace;
     }
     if (args.priority !== undefined && args.clearPriority) {
-      console.error("error: --priority and --clear-priority are mutually exclusive");
-      process.exit(1);
+      emitError(json, new Error("--priority and --clear-priority are mutually exclusive"));
     }
     if (args.priority) patch.priority = parsePriority(args.priority);
     if (args.clearPriority) patch.priority = null;
@@ -136,8 +132,7 @@ export default defineCommand({
     // exclusivity check; any combination yields a hard exit.
     const tagModes = [args.setTags, args.addTag, args.rmTag].filter(v => v !== undefined).length;
     if (tagModes > 1) {
-      console.error("error: --set-tags, --add-tag, and --rm-tag are mutually exclusive");
-      process.exit(1);
+      emitError(json, new Error("--set-tags, --add-tag, and --rm-tag are mutually exclusive"));
     }
     let tagOp: { mode: "set" | "add" | "rm"; names: string[] } | null = null;
     try {
@@ -154,14 +149,15 @@ export default defineCommand({
         tagOp = { mode: "rm", names: [validateTagName(args.rmTag)] };
       }
     } catch (e) {
-      console.error(`error: ${(e as Error).message}`);
-      process.exit(1);
+      emitError(json, e);
     }
     if (Object.keys(patch).length === 0 && tagOp === null) {
-      console.error(
-        "error: provide at least one of --title, --body, --priority, --clear-priority, --set-tags, --add-tag, --rm-tag",
+      emitError(
+        json,
+        new Error(
+          "provide at least one of --title, --body, --priority, --clear-priority, --set-tags, --add-tag, --rm-tag",
+        ),
       );
-      process.exit(1);
     }
     const url = daemonUrl();
     if (url) {
@@ -175,12 +171,10 @@ export default defineCommand({
           task = (await Client.setTaskTags(url, id, newSet)) as Task;
         }
         if (!task) throw new Error("no fields changed");
-        console.log(`✓ edited [${task.id}] ${task.title}`);
-        if (tagOp) console.log(`✓ tags: ${task.tags.join(",")}`);
+        emitEdited(json, task, tagOp !== null);
         return;
       } catch (err) {
-        console.error(`error: ${(err as Error).message}`);
-        process.exit(1);
+        emitError(json, err);
       }
     }
     const store = Store.open();
@@ -198,16 +192,24 @@ export default defineCommand({
         task = store.setTaskTags(id, newSet);
       }
       if (!task) throw new Error("no fields changed");
-      console.log(`✓ edited [${task.id}] ${task.title}`);
-      if (tagOp) console.log(`✓ tags: ${task.tags.join(",")}`);
+      emitEdited(json, task, tagOp !== null);
     } catch (err) {
-      console.error(`error: ${(err as Error).message}`);
-      process.exit(1);
+      emitError(json, err);
     } finally {
       store.close();
     }
   },
 });
+
+/** Emit an edited task: JSON object, or the human ✓ line(s). */
+function emitEdited(json: boolean, task: Task, showTags: boolean): void {
+  if (json) {
+    printJson(task);
+    return;
+  }
+  console.log(`✓ edited [${task.id}] ${task.title}`);
+  if (showTags) console.log(`✓ tags: ${task.tags.join(",")}`);
+}
 
 /** Compute the new tag set for a single edit invocation.
  *  - set: caller-supplied list IS the new set.
