@@ -53,9 +53,21 @@ export function CommandPalette(): VNode {
   // pickers on demand.
   const stack = useSignal<Scope[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Focus AND select the remembered query on open so typing replaces it. The
+  // leading "/" is the command-mode sigil, not the user's text: it stays
+  // outside the selection so replacing a command filter never silently drops
+  // the palette into search mode (mod+k is the explicit way to get there).
+  // Runs twice like the focus it extends: once now, once after DialogFrame's
+  // showModal() has performed its own initial-focus pass on the next tick.
   useEffect(() => {
-    inputRef.current?.focus();
-    const t = setTimeout(() => inputRef.current?.focus(), 0);
+    const focusAndSelect = (): void => {
+      const input = inputRef.current;
+      if (!input) return;
+      input.focus();
+      input.setSelectionRange(input.value.startsWith("/") ? 1 : 0, input.value.length);
+    };
+    focusAndSelect();
+    const t = setTimeout(focusAndSelect, 0);
     return () => clearTimeout(t);
   }, []);
   useEffect(() => {

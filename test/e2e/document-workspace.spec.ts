@@ -207,6 +207,142 @@ test("title edit: wrapping textarea, Enter commits, autosave persists, blank/Esc
   await expect(page.locator(".doc-mode-switch button", { hasText: "Read" })).toHaveAttribute("aria-pressed", "true");
 });
 
+test("pinned title clamps to two lines; a rested hover reveals it IN FLOW and pushes the document down; editing shows every line", async ({
+  url,
+  page,
+}) => {
+  await seedLane(url, "inbox");
+  const long =
+    "Coordinate the multi-agent rollout of the sanitized Markdown boundary across every dashboard surface " +
+    "while keeping the audit trail attributable, the reviewers unblocked and the release checklist honest";
+  const t = await seedTask(url, "inbox", long);
+  await seedTask(url, "inbox", "short title");
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto(`${url}/task/${t.id}`);
+
+  const header = page.locator(".task-header");
+  const heading = page.locator(".task-header .task-title-display");
+  const trigger = page.locator(".task-header .task-title-trigger");
+  const text = page.locator(".task-header .task-title-text");
+  const chips = page.locator(".task-header-trailing");
+  const reader = page.locator(".doc-reader");
+  await expect(heading).toHaveClass(/is-clamped/);
+  // CSS-only truncation: the DOM (and the accessible name) keep the whole title.
+  await expect(trigger).toHaveText(long);
+  await expect(trigger).toHaveAccessibleName(long);
+
+  const lineHeight = await text.evaluate(el => Number.parseFloat(getComputedStyle(el).lineHeight));
+  const fullHeight = await text.evaluate(el => el.scrollHeight);
+  expect(fullHeight).toBeGreaterThan(lineHeight * 3);
+  const clampedHeight = lineHeight * 2;
+  const box = async (locator: typeof text): Promise<{ y: number; height: number }> => {
+    const b = await locator.boundingBox();
+    if (!b) throw new Error("expected a laid out element");
+    return { y: b.y, height: b.height };
+  };
+  const textBefore = await box(text);
+  expect(textBefore.height).toBeLessThanOrEqual(clampedHeight + 1);
+  expect((await box(heading)).height).toBeLessThanOrEqual(clampedHeight + 1);
+  const chipsBefore = await box(chips);
+  const readerBefore = await box(reader);
+  const near = (a: number, b: number): void => expect(Math.abs(a - b)).toBeLessThanOrEqual(1);
+
+  // Passing THROUGH the title on the way to the document never reveals it:
+  // the pointer has to rest on the title first. The kicker tooltip (200ms)
+  // is the auto-waited proof that the intent window has elapsed unarmed.
+  const titleRect = await trigger.boundingBox();
+  if (!titleRect) throw new Error("expected title");
+  await page.mouse.move(titleRect.x + 40, titleRect.y + 10);
+  await page.mouse.move(titleRect.x + 40, readerBefore.y + 40);
+  await page.locator(".task-header .task-id").hover();
+  await expect(page.locator(".tooltip-visible")).toContainText(`Task ${t.id}`);
+  await expect(header).not.toHaveClass(/is-title-revealed/);
+  expect(await box(text)).toEqual(textBefore);
+
+  // Resting on the title reveals it IN FLOW: the text grows to its full
+  // height and the heading, the metadata row and the reader all move by
+  // exactly that delta — nothing floats above anything.
+  await trigger.hover();
+  await expect(header).toHaveClass(/is-title-revealed/);
+  await expect.poll(async () => (await box(text)).height).toBeGreaterThanOrEqual(fullHeight - 1);
+  const delta = (await box(text)).height - textBefore.height;
+  expect(delta).toBeGreaterThan(lineHeight);
+  expect((await box(heading)).height).toBeGreaterThanOrEqual(fullHeight - 1);
+  const chipsAfter = await box(chips);
+  const readerAfter = await box(reader);
+  near(chipsAfter.y - chipsBefore.y, delta);
+  near(readerAfter.y - readerBefore.y, delta);
+  near(readerBefore.height - readerAfter.height, delta);
+  const chipsRect = await chips.boundingBox();
+  if (!chipsRect) throw new Error("expected metadata row");
+  expect(
+    await page.evaluate(
+      ([x, y]) => document.elementFromPoint(x, y)?.closest(".task-header-trailing") != null,
+      [chipsRect.x + 12, chipsRect.y + 6],
+    ),
+  ).toBe(true);
+
+  // The reveal follows the pointer across the header: moving down onto the
+  // metadata row keeps everything exactly where it is, so nothing runs away.
+  await page.mouse.move(chipsRect.x + 12, chipsRect.y + 6);
+  await expect(header).toHaveClass(/is-title-revealed/);
+  const textSticky = await box(text);
+  expect(textSticky.y).toBe(textBefore.y);
+  expect(textSticky.height).toBeGreaterThanOrEqual(fullHeight - 1);
+  expect(await box(chips)).toEqual(chipsAfter);
+
+  // Leaving the header collapses it and everything returns to its place.
+  await page.mouse.move(1, 1);
+  await expect(header).not.toHaveClass(/is-title-revealed/);
+  await expect.poll(async () => (await box(text)).height).toBeLessThanOrEqual(clampedHeight + 1);
+  await expect.poll(async () => Math.abs((await box(chips)).y - chipsBefore.y)).toBeLessThanOrEqual(1);
+  near((await box(reader)).y, readerBefore.y);
+  near((await box(reader)).height, readerBefore.height);
+
+  // Editing is never clamped: the textarea holds and shows every line in flow.
+  await trigger.click();
+  const input = page.locator(".task-header .title-input");
+  await expect(input).toBeFocused();
+  await expect(input).toHaveValue(long);
+  expect((await box(input)).height).toBeGreaterThanOrEqual(fullHeight - 1);
+  await expect(page.locator(".task-title-text")).toHaveCount(0);
+
+  // Keyboard parity: Escape returns keyboard focus to the trigger, which
+  // reveals the full title without the mouse; Tab away collapses it.
+  await page.mouse.move(1, 1);
+  await input.press("Escape");
+  await expect(trigger).toBeFocused();
+  await expect(heading).toHaveClass(/is-clamped/);
+  await expect.poll(async () => (await box(text)).height).toBeGreaterThanOrEqual(fullHeight - 1);
+  await page.keyboard.press("Tab");
+  await expect(trigger).not.toBeFocused();
+  await expect.poll(async () => (await box(text)).height).toBeLessThanOrEqual(clampedHeight + 1);
+
+  // Narrower header => more lines. The measurement follows the resize, so the
+  // reveal still shows the WHOLE title (never a stale, shorter height).
+  await page.setViewportSize({ width: 390, height: 844 });
+  const narrowLineHeight = await text.evaluate(el => Number.parseFloat(getComputedStyle(el).lineHeight));
+  const narrowFull = await text.evaluate(el => el.scrollHeight);
+  expect(narrowFull).toBeGreaterThan(fullHeight);
+  await expect.poll(async () => (await box(text)).height).toBeLessThanOrEqual(narrowLineHeight * 2 + 1);
+  await trigger.hover();
+  await expect.poll(async () => (await box(text)).height).toBeGreaterThanOrEqual(narrowFull - 1);
+  await page.mouse.move(1, 1);
+  await expect.poll(async () => (await box(text)).height).toBeLessThanOrEqual(narrowLineHeight * 2 + 1);
+  await page.setViewportSize({ width: 1280, height: 900 });
+
+  // A title that fits is never armed: hovering it changes nothing.
+  await page.locator(".task-row", { hasText: "short title" }).click();
+  await expect(heading).toHaveText("short title");
+  await expect(heading).not.toHaveClass(/is-clamped/);
+  const shortBefore = await box(text);
+  expect(shortBefore.height).toBeLessThanOrEqual(lineHeight + 1);
+  await trigger.hover();
+  await expect(header).toHaveClass(/is-title-revealed/);
+  expect(await box(text)).toEqual(shortBefore);
+  await expect(heading).not.toHaveClass(/is-clamped/);
+});
+
 test("header tags are compact and rounded; X expands on hover/focus and collapses without an idle gap", async ({
   url,
   page,

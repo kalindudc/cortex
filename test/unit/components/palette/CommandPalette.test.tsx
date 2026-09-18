@@ -48,6 +48,33 @@ describe("CommandPalette", () => {
     expect(rows[2].textContent).toContain("Gamma");
   });
 
+  test("opening in search mode focuses the input and selects the whole remembered query", async () => {
+    paletteQuery.value = "beta ui";
+    const { container } = render(<CommandPalette />);
+    const input = container.querySelector(".palette-input") as HTMLInputElement;
+    // The mount effect re-runs on the next tick, after DialogFrame's showModal.
+    await new Promise(r => setTimeout(r, 5));
+    expect(document.activeElement).toBe(input);
+    expect(input.value).toBe("beta ui");
+    expect([input.selectionStart, input.selectionEnd]).toEqual([0, "beta ui".length]);
+  });
+
+  test("opening in command mode selects the filter but keeps the leading / out of the selection", async () => {
+    paletteQuery.value = "/move lane";
+    const { container } = render(<CommandPalette />);
+    const input = container.querySelector(".palette-input") as HTMLInputElement;
+    await new Promise(r => setTimeout(r, 5));
+    expect(document.activeElement).toBe(input);
+    expect([input.selectionStart, input.selectionEnd]).toEqual([1, "/move lane".length]);
+    // Replacing the selection keeps the palette in command mode.
+    const replaced = `${input.value.slice(0, input.selectionStart ?? 0)}gam${input.value.slice(input.selectionEnd ?? 0)}`;
+    fireEvent.input(input, { target: { value: replaced } });
+    expect(paletteQuery.value).toBe("/gam");
+    const rows = container.querySelectorAll(".palette-row");
+    expect(rows.length).toBe(1);
+    expect(rows[0].textContent).toContain("Gamma");
+  });
+
   test("ArrowDown moves the highlight to the next row", () => {
     const { container } = render(<CommandPalette />);
     const input = container.querySelector(".palette-input") as HTMLInputElement;

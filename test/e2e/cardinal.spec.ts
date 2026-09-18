@@ -174,6 +174,49 @@ test("open command palette with Cmd+P / Ctrl+P", async ({ url, page }) => {
   await expect(page.locator(".palette-input")).toHaveCount(0);
 });
 
+test("reopening the palette selects the remembered query so typing replaces it; command mode keeps its /", async ({
+  url,
+  page,
+}) => {
+  await seedLane(url, "inbox");
+  await seedTask(url, "inbox", "alpha task");
+  await seedTask(url, "inbox", "beta task");
+  await page.goto(url);
+  const mod = process.platform === "darwin" ? "Meta" : "Control";
+  const input = page.locator(".palette-input");
+  const selection = () => input.evaluate((el: HTMLInputElement) => [el.selectionStart, el.selectionEnd]);
+
+  // Search, pick a result: the palette closes but remembers the query.
+  await page.keyboard.press(`${mod}+KeyK`);
+  await input.pressSequentially("alpha");
+  await input.press("Enter");
+  await expect(input).toHaveCount(0);
+  await expect(page.locator(".task-header .task-title-display")).toHaveText("alpha task");
+
+  // Reopen search: the whole remembered query is selected, so typing replaces it.
+  await page.keyboard.press(`${mod}+KeyK`);
+  await expect(input).toBeFocused();
+  await expect(input).toHaveValue("alpha");
+  await expect.poll(selection).toEqual([0, 5]);
+  await input.pressSequentially("beta");
+  await expect(input).toHaveValue("beta");
+  await expect(page.locator(".palette-row", { hasText: "beta task" })).toBeVisible();
+  await input.press("Enter");
+  await expect(page.locator(".task-header .task-title-display")).toHaveText("beta task");
+
+  // Command mode: the remembered filter is selected, the / sigil is not, so
+  // replacing the filter stays in command mode.
+  await page.keyboard.press(`${mod}+KeyP`);
+  await expect(input).toBeFocused();
+  await expect(input).toHaveValue("/beta");
+  await expect.poll(selection).toEqual([1, 5]);
+  await input.pressSequentially("new lane");
+  await expect(input).toHaveValue("/new lane");
+  await expect(page.locator(".palette-row", { hasText: "New lane" }).first()).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(input).toHaveCount(0);
+});
+
 test("task search palette searches body text and highlights matched context", async ({ url, page }) => {
   await seedLane(url, "inbox");
   await seedTask(url, "inbox", "alpha-title task");

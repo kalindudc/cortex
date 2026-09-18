@@ -79,7 +79,7 @@ Note: If a `repo-map` does not exist, run `pnpm run agents:map` to generate one.
 - Lane/tag dropdown search is OPTIONAL: `src/ui/lib/catalogSearch.ts` returns every entry for an empty query and every literal, case-insensitive AND-keyword match otherwise. NEVER impose a result cap or forced-refinement policy.
 - Mode shortcut matching/hints live in `src/ui/lib/keys.ts`; route actions through `requestMode`, preserve common browser shortcuts and AltGr text input, and suspend mode changes behind overlays. Browser coverage lives in `test/e2e/workspace-shortcuts.spec.ts`.
 - `preferredReaderMode` is the browser-persisted Read/Edit/Split choice; `readerMode` is the effective view (heading links may temporarily show Read). NEVER reset the preference on task navigation or title editing; only explicit mode choices update it.
-- `src/ui/styles/motion.css` owns shared motion (90/140/180ms; opacity/transform keyframes; localized tag-remove width transitions). NEVER defer state/focus or remount editors just to animate. Respect live reduced-motion changes and keep sidebar filter sessions alive during fallback-task changes; explicit task navigation still dismisses them.
+- `src/ui/styles/motion.css` owns shared motion (90/140/180ms; opacity/transform keyframes; localized tag-remove width transitions; the clamped title's in-flow `max-height` reveal is the ONLY sanctioned animation that moves document panels). NEVER defer state/focus or remount editors just to animate. Respect live reduced-motion changes and keep sidebar filter sessions alive during fallback-task changes; explicit task navigation still dismisses them.
 
 ## 6. Testing
 
@@ -107,7 +107,7 @@ different I/O assumptions:
 - `src/ui/components/App.tsx` — UI entry; routes signals into views.
 - `src/ui/state/signals.ts` — global signal store + derived computed.
 - `src/ui/state/workspace.ts` — document-workspace controller (query/body-mode preference persistence, Document entry, `requestMode` / `requestPostUpdate` / `revealSidebarFilter`, transient-state reset, narrow-viewport tracking).
-- `src/ui/components/active/TaskToolbar.tsx` — workspace actions and Read/Edit/Split; `TaskHeader` owns only the document identity/metadata and shared title draft.
+- `src/ui/components/active/TaskToolbar.tsx` — workspace actions and Read/Edit/Split; `TaskHeader` owns only the document identity/metadata and shared title draft. Its pinned display title clamps to `TITLE_CLAMP_LINES`; a reveal (pointer rests on the title for `TITLE_REVEAL_INTENT_MS`, stays until it leaves the header; or keyboard focus-visible) grows the title IN FLOW so the metadata row and reader/editor move down with it — never as an overlay. `TaskHeader` owns the reveal state and measurement; `document.css` + `motion.css` own the look. The title textarea is never clamped.
 - `src/ui/lib/markdown.ts` — the sanitized Markdown/Mermaid rendering boundary (see §5).
 - `src/skills/` — markdown skill bodies embedded by `cortex init`.
 - `src/extensions/pi.ts` — pi extension surface (custom tools).

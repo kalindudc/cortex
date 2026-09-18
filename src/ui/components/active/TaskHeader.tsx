@@ -1,6 +1,21 @@
-// Document identity: task id, wrapping title, and one quiet metadata row.
+// Document identity: task id, clamped title, and one quiet metadata row.
 // TaskToolbar owns status/actions; this header shares the SAME TaskDraft as
 // the editor/preview. Title focus, autosave and conflict resolution stay here.
+//
+// The header stays pinned above the scrolling reader/editor, so the DISPLAY
+// title clamps to TITLE_CLAMP_LINES (CSS line clamp; the full text stays in
+// the DOM as the button's accessible name). When the text really overflows,
+// the heading is marked `.is-clamped` and the title can reveal itself IN
+// FLOW: it grows and the metadata row, reader and editor move down with it,
+// so the reveal reads as the same document growing rather than a layer.
+// Reveal state (`.is-title-revealed` on the header) is owned here, not by
+// :hover, for two reasons: (1) it arms only after the pointer has RESTED on
+// the title for TITLE_REVEAL_INTENT_MS, so passing through the header on the
+// way to the document never bounces the layout; (2) once revealed it stays
+// until the pointer leaves the whole header, so the metadata row cannot jump
+// away from a pointer travelling down to it. Keyboard focus-visible reveals
+// through CSS alone. The title textarea (editing) is exempt: it always shows
+// every line in flow.
 import type { JSX, VNode } from "preact";
 import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
 import { useSignal } from "@preact/signals";
@@ -14,6 +29,14 @@ import { PriorityChipButton } from "../chips/PriorityChip.tsx";
 import { TagsHeaderChip } from "../chips/TagsHeaderChip.tsx";
 import { ExternalChangeBanner } from "./ExternalChangeBanner.tsx";
 
+/** Lines the pinned display title shows before it clamps. Published to CSS as
+ *  `--title-clamp-lines` so document.css / motion.css never repeat the number. */
+export const TITLE_CLAMP_LINES = 2;
+/** How long the pointer must rest on a clamped title before it reveals. A
+ *  hover-intent threshold (interaction), not a motion delay: nothing is
+ *  animating while it runs, and keyboard focus reveals at once. */
+export const TITLE_REVEAL_INTENT_MS = 150;
+
 const SAVE_LABEL: Record<TaskDraft["saveState"], string | null> = {
   saved: null,
   pending: "Unsaved changes…",
@@ -23,8 +46,13 @@ const SAVE_LABEL: Record<TaskDraft["saveState"], string | null> = {
 
 export function TaskHeader({ task, draft }: { task: Task; draft: TaskDraft }): VNode {
   const editingTitle = useSignal(false);
+  const titleClamped = useSignal(false);
+  const titleRevealed = useSignal(false);
+  const revealTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const titleInputRef = useRef<HTMLTextAreaElement>(null);
   const titleTriggerRef = useRef<HTMLButtonElement>(null);
+  const titleDisplayRef = useRef<HTMLHeadingElement>(null);
+  const titleTextRef = useRef<HTMLSpanElement>(null);
   const returnTitleFocus = useRef(false);
   useLayoutEffect(() => {
     if (!editingTitle.value && returnTitleFocus.current) {
@@ -48,6 +76,53 @@ export function TaskHeader({ task, draft }: { task: Task; draft: TaskDraft }): V
     return () => clearTimeout(timer);
   }, [editingTitle.value]);
 
+  // Does the display title overflow its clamp? scrollHeight is the full text
+  // height even while the line clamp hides the tail, and it is compared with
+  // the CONSTANT clamp height rather than clientHeight, so a revealed (grown)
+  // title still reads as clamped. The heading is observed for width/wrap
+  // changes; a reveal resizes it too, which merely re-measures to the same
+  // answer and never restarts the transition (same custom-property value).
+  useLayoutEffect(() => {
+    if (editingTitle.value) return;
+    const heading = titleDisplayRef.current;
+    const text = titleTextRef.current;
+    if (!heading || !text) return;
+    const measure = (): void => {
+      const lineHeight = Number.parseFloat(getComputedStyle(text).lineHeight);
+      const full = text.scrollHeight;
+      text.style.setProperty("--title-full-height", `${full}px`);
+      titleClamped.value = Number.isFinite(lineHeight) && full > lineHeight * TITLE_CLAMP_LINES + 1;
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(heading);
+    return () => observer.disconnect();
+  }, [editingTitle.value, draft.title]);
+
+  const cancelReveal = (): void => {
+    if (revealTimer.current == null) return;
+    clearTimeout(revealTimer.current);
+    revealTimer.current = null;
+  };
+  const armReveal = (): void => {
+    if (titleRevealed.peek()) return;
+    cancelReveal();
+    revealTimer.current = setTimeout(() => {
+      revealTimer.current = null;
+      titleRevealed.value = true;
+    }, TITLE_REVEAL_INTENT_MS);
+  };
+  const dismissReveal = (): void => {
+    cancelReveal();
+    titleRevealed.value = false;
+  };
+  // Task navigation and unmount both drop a reveal that belonged to the
+  // previous title; a pointer parked on the header must not carry it over.
+  useEffect(() => {
+    dismissReveal();
+    return cancelReveal;
+  }, [task.id]);
+
   const stopEditing = (restoreFocus = false): void => {
     if (!editingTitle.peek()) return;
     if (restoreFocus) returnTitleFocus.current = true;
@@ -57,7 +132,7 @@ export function TaskHeader({ task, draft }: { task: Task; draft: TaskDraft }): V
   const saveLabel = SAVE_LABEL[draft.saveState];
 
   return (
-    <header class="task-header">
+    <header class={`task-header${titleRevealed.value ? " is-title-revealed" : ""}`} onMouseLeave={dismissReveal}>
       <div class="document-kicker">
         <span>Task</span>
         <span class="task-id num" {...tip(`Task ${task.id}`)}>
@@ -103,18 +178,27 @@ export function TaskHeader({ task, draft }: { task: Task; draft: TaskDraft }): V
             />
           </div>
         ) : (
-          <h1 class="task-title-display grow">
+          <h1
+            class={`task-title-display grow${titleClamped.value ? " is-clamped" : ""}`}
+            style={{ "--title-clamp-lines": String(TITLE_CLAMP_LINES) }}
+            ref={titleDisplayRef}
+            onMouseEnter={armReveal}
+            onMouseLeave={cancelReveal}
+          >
             <button
               type="button"
               class={`task-title-trigger${draft.title.trim() === "" ? " is-empty" : ""}`}
               ref={titleTriggerRef}
               aria-describedby={`title-edit-hint-${task.id}`}
               onClick={() => {
+                dismissReveal();
                 editingTitle.value = true;
               }}
               {...tip("Click to edit title")}
             >
-              {draft.title.trim() === "" ? "Untitled task" : draft.title}
+              <span class="task-title-text" ref={titleTextRef}>
+                {draft.title.trim() === "" ? "Untitled task" : draft.title}
+              </span>
             </button>
           </h1>
         )}

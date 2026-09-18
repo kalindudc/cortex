@@ -30,7 +30,11 @@ mock.module("../../../../src/ui/api/client.ts", () => ({
 }));
 
 import { render, fireEvent } from "@testing-library/preact";
-import { TaskHeader } from "../../../../src/ui/components/active/TaskHeader.tsx";
+import {
+  TaskHeader,
+  TITLE_CLAMP_LINES,
+  TITLE_REVEAL_INTENT_MS,
+} from "../../../../src/ui/components/active/TaskHeader.tsx";
 import { TaskToolbar } from "../../../../src/ui/components/active/TaskToolbar.tsx";
 import type { TaskDraft, DraftField } from "../../../../src/ui/lib/useTaskDraft.ts";
 import { filters, modal, pendingTitleFocus, workspaceQuery, lanes, tags } from "../../../../src/ui/state/signals.ts";
@@ -96,6 +100,23 @@ function fakeDraft(opts: FakeDraftOpts = {}): TaskDraft & {
 }
 
 const tick = (): Promise<void> => new Promise(r => setTimeout(r, 5));
+const pastIntent = (): Promise<void> => new Promise(r => setTimeout(r, TITLE_REVEAL_INTENT_MS + 40));
+
+// happy-dom has no layout: scrollHeight is 0 and line-height is "normal", so
+// the clamp measurement in TaskHeader always reads "fits". These stubs give
+// the title text a fixed line-height and a chosen full text height; the
+// real geometry is certified in test/e2e/document-workspace.spec.ts.
+const TITLE_LINE_HEIGHT = 37.5;
+function stubTitleMetrics(scrollHeight: number): () => void {
+  Object.defineProperty(HTMLElement.prototype, "scrollHeight", { configurable: true, get: () => scrollHeight });
+  const originalGetComputedStyle = globalThis.getComputedStyle;
+  globalThis.getComputedStyle = (() =>
+    ({ lineHeight: `${TITLE_LINE_HEIGHT}px` }) as CSSStyleDeclaration) as typeof getComputedStyle;
+  return () => {
+    Reflect.deleteProperty(HTMLElement.prototype, "scrollHeight");
+    globalThis.getComputedStyle = originalGetComputedStyle;
+  };
+}
 
 describe("TaskHeader", () => {
   beforeEach(() => {
@@ -271,9 +292,120 @@ describe("TaskHeader", () => {
     expect(draft.calls.set).toEqual([]);
   });
 
-  test("long titles render fully (wrapping display, no truncation attribute)", () => {
+  test("long titles keep the full text in the DOM; the clamp is CSS-only and its line count is published", () => {
     const long = "word ".repeat(60).trim();
     const { container } = render(<TaskHeader task={task()} draft={fakeDraft({ title: long })} />);
-    expect(container.querySelector(".task-title-display")?.textContent).toBe(long);
+    const heading = container.querySelector<HTMLElement>(".task-title-display");
+    if (!heading) throw new Error("expected title heading");
+    // The accessible name of the edit trigger is the COMPLETE title.
+    expect(heading.textContent).toBe(long);
+    expect(container.querySelector("button.task-title-trigger > .task-title-text")?.textContent).toBe(long);
+    expect(heading.style.getPropertyValue("--title-clamp-lines")).toBe(String(TITLE_CLAMP_LINES));
+    // Without layout nothing overflows, so no overlay behavior is armed.
+    expect(heading.classList.contains("is-clamped")).toBe(false);
+  });
+
+  test("a title that overflows the clamp marks the heading .is-clamped and records its full height", async () => {
+    const restore = stubTitleMetrics(TITLE_LINE_HEIGHT * 4);
+    try {
+      const { container } = render(<TaskHeader task={task()} draft={fakeDraft({ title: "four lines of title" })} />);
+      await tick();
+      const heading = container.querySelector<HTMLElement>(".task-title-display");
+      const text = container.querySelector<HTMLElement>(".task-title-text");
+      if (!heading || !text) throw new Error("expected clamped title");
+      expect(heading.classList.contains("is-clamped")).toBe(true);
+      expect(text.style.getPropertyValue("--title-full-height")).toBe(`${TITLE_LINE_HEIGHT * 4}px`);
+      // Still the full text: the clamp never rewrites the title.
+      expect(text.textContent).toBe("four lines of title");
+    } finally {
+      restore();
+    }
+  });
+
+  test("a title that fits within the clamp lines is never marked .is-clamped", async () => {
+    const restore = stubTitleMetrics(TITLE_LINE_HEIGHT * TITLE_CLAMP_LINES);
+    try {
+      const { container } = render(<TaskHeader task={task()} draft={fakeDraft({ title: "exactly two lines" })} />);
+      await tick();
+      expect(container.querySelector(".task-title-display")?.classList.contains("is-clamped")).toBe(false);
+    } finally {
+      restore();
+    }
+  });
+
+  test("reveal arms only after the pointer RESTS on the title; passing through never reveals", async () => {
+    const { container } = render(<TaskHeader task={task()} draft={fakeDraft()} />);
+    const header = container.querySelector(".task-header") as HTMLElement;
+    const heading = container.querySelector(".task-title-display") as HTMLElement;
+    fireEvent.mouseEnter(heading);
+    await tick();
+    expect(header.classList.contains("is-title-revealed")).toBe(false);
+    // Leaving the title before the intent window cancels the pending reveal.
+    fireEvent.mouseLeave(heading);
+    await pastIntent();
+    expect(header.classList.contains("is-title-revealed")).toBe(false);
+    // Resting on it reveals.
+    fireEvent.mouseEnter(heading);
+    await pastIntent();
+    expect(header.classList.contains("is-title-revealed")).toBe(true);
+  });
+
+  test("a reveal follows the pointer across the header and ends only when it leaves the header", async () => {
+    const { container } = render(<TaskHeader task={task()} draft={fakeDraft()} />);
+    const header = container.querySelector(".task-header") as HTMLElement;
+    const heading = container.querySelector(".task-title-display") as HTMLElement;
+    fireEvent.mouseEnter(heading);
+    await pastIntent();
+    expect(header.classList.contains("is-title-revealed")).toBe(true);
+    // Down onto the metadata row: still inside the header, still revealed.
+    fireEvent.mouseLeave(heading);
+    await tick();
+    expect(header.classList.contains("is-title-revealed")).toBe(true);
+    fireEvent.mouseLeave(header);
+    await tick();
+    expect(header.classList.contains("is-title-revealed")).toBe(false);
+  });
+
+  test("starting to edit or navigating to another task drops the reveal", async () => {
+    const draft = fakeDraft();
+    const view = render(<TaskHeader task={task()} draft={draft} />);
+    const header = view.container.querySelector(".task-header") as HTMLElement;
+    const reveal = async (): Promise<void> => {
+      fireEvent.mouseEnter(view.container.querySelector(".task-title-display") as HTMLElement);
+      await pastIntent();
+      expect(header.classList.contains("is-title-revealed")).toBe(true);
+    };
+    await reveal();
+    fireEvent.click(view.container.querySelector("button.task-title-trigger") as HTMLButtonElement);
+    await tick();
+    expect(header.classList.contains("is-title-revealed")).toBe(false);
+    fireEvent.keyDown(view.container.querySelector("textarea.title-input") as HTMLTextAreaElement, { key: "Enter" });
+    await tick();
+    expect(header.classList.contains("is-title-revealed")).toBe(false);
+    await reveal();
+    view.rerender(<TaskHeader task={task({ id: 8 })} draft={draft} />);
+    await tick();
+    expect(header.classList.contains("is-title-revealed")).toBe(false);
+  });
+
+  test("editing a clamped title shows the whole title in the textarea with no clamp in the DOM", async () => {
+    const restore = stubTitleMetrics(TITLE_LINE_HEIGHT * 5);
+    try {
+      const long = "a very long title ".repeat(12).trim();
+      const { container } = render(<TaskHeader task={task()} draft={fakeDraft({ title: long })} />);
+      await tick();
+      expect(container.querySelector(".task-title-display.is-clamped")).not.toBeNull();
+      fireEvent.click(container.querySelector("button.task-title-trigger") as HTMLButtonElement);
+      await tick();
+      const input = container.querySelector<HTMLTextAreaElement>("textarea.title-input");
+      if (!input) throw new Error("expected title textarea");
+      expect(input.value).toBe(long);
+      // The autosizing mirror receives the complete value, so the field grows to every line.
+      expect(container.querySelector(".title-input-wrap")?.getAttribute("data-replicated-value")).toBe(`${long} `);
+      expect(container.querySelector(".is-clamped")).toBeNull();
+      expect(container.querySelector(".task-title-text")).toBeNull();
+    } finally {
+      restore();
+    }
   });
 });

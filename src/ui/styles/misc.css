@@ -236,7 +236,9 @@ input:disabled { opacity: 0.5; cursor: not-allowed; }
   /* Same grid cell + identical box-model so they wrap to the same
      line count. Anything that affects width or text metrics MUST be
      mirrored on both selectors. Metrics match .task-title-display
-     (document.css) so entering/leaving title editing never reflows. */
+     (document.css) so entering/leaving title editing never reflows a
+     title of up to --title-clamp-lines lines. Longer titles are clamped
+     in display mode only; the textarea always grows to the full text. */
   grid-area: 1 / 1 / 2 / 2;
   padding: 0;
   margin: 0;

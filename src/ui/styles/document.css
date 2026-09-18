@@ -174,6 +174,27 @@ button.prop-trigger.priority-chip-unset:focus-visible { border-color: var(--text
 .task-title-trigger { display: block; width: 100%; min-height: 1.25em; padding: 0; border: 0; border-radius: var(--r-1); background: transparent; color: inherit; font: inherit; letter-spacing: inherit; text-align: left; overflow-wrap: anywhere; cursor: text; }
 .task-title-trigger:hover { background: color-mix(in srgb, var(--panel) 65%, transparent); }
 .task-title-trigger.is-empty { color: var(--text-2); }
+/* The header is pinned above the scrolling reader/editor, so the display
+   title clamps to --title-clamp-lines (TaskHeader publishes the count and
+   measures overflow). `lh` keeps the clamp height tied to the real
+   line-height at every font size. Once a title really overflows, the
+   heading is `.is-clamped`; a reveal (TaskHeader's `.is-title-revealed` on
+   the header, or keyboard focus-visible on the trigger) lifts the clamp and
+   lets the text grow IN FLOW to its measured full height, so the metadata
+   row, reader and editor move down with it exactly as they do for the
+   title textarea, which is exempt: editing always shows every line. */
+.task-title-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--title-clamp-lines, 2);
+  max-height: calc(var(--title-clamp-lines, 2) * 1lh);
+  overflow: hidden;
+}
+.task-header.is-title-revealed .is-clamped .task-title-text,
+.is-clamped .task-title-trigger:focus-visible .task-title-text {
+  -webkit-line-clamp: none;
+  max-height: var(--title-full-height, none);
+}
 .task-header .tag-pill-removable { height: 28px; max-width: 28ch; }
 .tags-add { padding: 0; width: var(--control-height); }
 .tags-add:disabled, .tags-overflow:disabled { opacity: .5; cursor: progress; }
