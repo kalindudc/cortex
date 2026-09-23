@@ -275,17 +275,28 @@ describe("Store: tasks", () => {
 describe("Store: updates", () => {
   // Plan 3 raised the CHECK cap from 200 → 1024: cortex summaries are
   // notifications, not diffs (the original SmartBear LOC argument doesn't
-  // transfer). 1024 lets agents write a useful one-paragraph status.
-  test("addUpdate accepts 1024-char summary, throws on 1025", () => {
+  // transfer). Raised again 1024 → 4096 so an agent can post a multi-
+  // paragraph status in `-m` without spilling into `-b`; the UI renders
+  // summaries with `white-space: pre-wrap`, so length is the only bound.
+  test("addUpdate accepts 4096-char summary, throws on 4097", () => {
     const s = open();
     const t = s.addTask({ title: "x" });
-    expect(() => s.addUpdate({ task_id: t.id, author: "me", summary: "x".repeat(1024) })).not.toThrow();
-    expect(() => s.addUpdate({ task_id: t.id, author: "me", summary: "x".repeat(1025) })).toThrow("summary too long");
+    expect(() => s.addUpdate({ task_id: t.id, author: "me", summary: "x".repeat(4096) })).not.toThrow();
+    expect(() => s.addUpdate({ task_id: t.id, author: "me", summary: "x".repeat(4097) })).toThrow("summary too long");
     s.close();
   });
 });
 
 describe("Store: migrate", () => {
+  // Guards _seedMigrations(): a DB created with the CURRENT schema must
+  // seed every known migration as applied, otherwise every open warns
+  // "migrations pending" and `cortex init` rebuilds tables for nothing.
+  test("fresh DB reports no pending migrations", () => {
+    const s = open();
+    expect(s.pendingMigrations()).toEqual([]);
+    s.close();
+  });
+
   test("migrate is idempotent — reopening preserves data and schema", () => {
     // Re-open the same on-disk DB twice; second open's migrate() must be a no-op.
     const tmp = `${process.env.TMPDIR ?? "/tmp"}/cortex-migrate-${Date.now()}.db`;

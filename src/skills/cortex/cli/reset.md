@@ -34,6 +34,6 @@ Type RESET to confirm: RESET
 ## Pitfalls
 
 - **The skill directory at `~/.agents/skills/cortex/` is wiped and regenerated** from the binary's embedded copy. Any hand-edits to `SKILL.md`, `cli/*.md`, or `recipes/*.md` are **LOST**. Edit the cortex source repo and rebuild if you need permanent changes.
-- **Legacy DBs need `cortex reset` to take new schema constraints.** Older cortex DBs were created with a 200-char summary `CHECK`; the current schema allows 1024. Existing DBs do NOT auto-migrate. Running `cortex reset` is the supported way to pick up the new limit — but **all existing tasks and updates are lost**. Export anything you care about first.
+- **`reset` is NOT how you pick up schema changes.** Older cortex DBs were created with a 200- or 1024-char summary `CHECK`; the current schema allows 4096. Schema changes ship as migrations: `cortex doctor` lists them as pending and [`cortex init`](init.md) applies them safely (backup, rebuild, validate) with all data kept. Reaching for `reset` instead throws away **every task and update** for nothing.
 - The `RESET` confirmation is **case-sensitive and must match exactly**. `reset`, `Reset`, or whitespace around it all abort.
 - `reset` stops the daemon via `SIGTERM` and waits up to ~1s. If the daemon ignores `SIGTERM`, the pid/url state files are still removed — start a new `cortex serve` afterwards.

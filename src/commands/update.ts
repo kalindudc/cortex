@@ -21,7 +21,7 @@ export default defineCommand({
       alias: "m",
       required: true,
       valueHint: "text",
-      description: `short summary, max 1024 chars`,
+      description: `short summary, max 4096 chars`,
     },
     status: {
       type: "string",

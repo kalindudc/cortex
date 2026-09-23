@@ -308,7 +308,7 @@ export class Store {
           id       INTEGER PRIMARY KEY AUTOINCREMENT,
           task_id  INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
           author   TEXT    NOT NULL,
-          summary  TEXT    NOT NULL CHECK(length(summary) <= 1024),
+          summary  TEXT    NOT NULL CHECK(length(summary) <= 4096),
           body     TEXT,
           severity TEXT    NOT NULL
                    CHECK(severity IN ('progress','review','blocked')),
@@ -404,6 +404,15 @@ export class Store {
         now(),
       ]);
     }
+    // updates-summary-4096: seed only when the live DDL already carries the
+    // 4096 cap (fresh DB). A 1024-era DB must NOT be seeded here — it is
+    // picked up as pending below.
+    if (updatesDdl?.sql?.includes("length(summary) <= 4096")) {
+      this.db.run(`INSERT OR IGNORE INTO _migrations (name, applied_at) VALUES (?, ?);`, [
+        "updates-summary-4096",
+        now(),
+      ]);
+    }
   }
 
   /** Return a list of pending migration names.
@@ -442,6 +451,20 @@ export class Store {
         .get();
       if (updatesDdl?.sql?.includes("length(summary) <= 200")) {
         pending.push("updates-summary-1024");
+      }
+    }
+
+    if (!applied.has("updates-summary-4096")) {
+      const updatesDdl = this.db
+        .query<{ sql: string | null }, []>("SELECT sql FROM sqlite_master WHERE name='updates';")
+        .get();
+      // Pending for EVERY older cap, not just 1024: a 200-era DB gets both
+      // rebuilds queued in one applyMigrations() pass (1024 runs first —
+      // list order — then 4096 rebuilds again) instead of needing a second
+      // `cortex init` to reach the current cap.
+      const sql = updatesDdl?.sql ?? "";
+      if (sql.includes("length(summary) <= 200") || sql.includes("length(summary) <= 1024")) {
+        pending.push("updates-summary-4096");
       }
     }
 
@@ -520,7 +543,7 @@ export class Store {
     const counts: { tasks?: number; updates?: number } = {};
     if (name === "tasks-status-draft" || name === "tasks-priority-nullable") {
       counts.tasks = this.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM tasks;").get()?.n ?? 0;
-    } else if (name === "updates-summary-1024") {
+    } else if (name === "updates-summary-1024" || name === "updates-summary-4096") {
       counts.updates = this.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM updates;").get()?.n ?? 0;
     }
     return counts;
@@ -605,6 +628,30 @@ export class Store {
         return "updates_new";
       }
 
+      if (name === "updates-summary-4096") {
+        // Schema-only: widen the summary CHECK 1024 -> 4096 (or 200 -> 4096
+        // when chained after updates-summary-1024). Rows copy untouched.
+        this.db.run(`
+          CREATE TABLE updates_new (
+            id       INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id  INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            author   TEXT    NOT NULL,
+            summary  TEXT    NOT NULL CHECK(length(summary) <= 4096),
+            body     TEXT,
+            severity TEXT    NOT NULL
+                     CHECK(severity IN ('progress','review','blocked')),
+            created  INTEGER NOT NULL
+          );
+        `);
+        this.db.run(`INSERT INTO updates_new SELECT * FROM updates;`);
+        this.db.run(`DROP TABLE updates;`);
+        this.db.run(`ALTER TABLE updates_new RENAME TO updates;`);
+        this.db.run(
+          `INSERT OR REPLACE INTO sqlite_sequence (name, seq) VALUES ('updates', (SELECT MAX(id) FROM updates));`,
+        );
+        return "updates_new";
+      }
+
       throw new Error(`unknown migration: ${name}`);
     } finally {
       this.db.run("PRAGMA foreign_keys = ON;");
@@ -632,7 +679,7 @@ export class Store {
       if (newCount !== oldCounts.tasks) {
         return { ok: false, error: `tasks row count mismatch (expected ${oldCounts.tasks}, got ${newCount})` };
       }
-    } else if (name === "updates-summary-1024") {
+    } else if (name === "updates-summary-1024" || name === "updates-summary-4096") {
       const newCount = this.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM updates;").get()?.n ?? 0;
       if (newCount !== oldCounts.updates) {
         return { ok: false, error: `updates row count mismatch (expected ${oldCounts.updates}, got ${newCount})` };
@@ -1170,7 +1217,7 @@ export class Store {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes("CHECK constraint failed")) {
-        throw new Error("summary too long");
+        throw new Error("summary too long (max 4096 chars)");
       }
       throw err;
     }

@@ -1,6 +1,6 @@
 // PostUpdateForm — inline Activity composer (task 330, A2/A3).
 //
-// Labeled author + summary (1024-char limit, Mod-Enter/Mod-S posting via
+// Labeled author + summary (4096-char limit, Mod-Enter/Mod-S posting via
 // the shared onSubmitKeys matcher — IME-safe). Summary/author DRAFTS are
 // kept per task in module memory so hiding the panel or switching tasks
 // cannot discard or misattribute text; the task id and payload are captured
@@ -168,7 +168,7 @@ export function PostUpdateForm({ task }: { task: Task }): VNode {
         }}
         placeholder="Post an update…"
         rows={2}
-        maxlength={1024}
+        maxlength={4096}
         value={summary.value}
         onInput={(e: JSX.TargetedInputEvent<HTMLTextAreaElement>) => setSummary(e.currentTarget.value)}
         onKeyDown={onKeys}
@@ -185,7 +185,7 @@ export function PostUpdateForm({ task }: { task: Task }): VNode {
           />
         </div>
         <div class="compose-submit-row">
-          <span class={`char-counter num${len > 1000 ? " warn" : ""}`}>{len}/1024</span>
+          <span class={`char-counter num${len > 4000 ? " warn" : ""}`}>{len}/4096</span>
           <button
             type="submit"
             class="btn btn-primary compose-submit"

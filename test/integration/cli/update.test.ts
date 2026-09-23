@@ -63,11 +63,11 @@ describe("audit-trail status rows", () => {
     expect(last2Summaries).toEqual(["status \u2192 blocked", "stuck"].sort());
   });
 
-  test("Store.addUpdate accepts 1024-char summary directly; rejects 1025", () => {
+  test("Store.addUpdate accepts 4096-char summary directly; rejects 4097", () => {
     const s = Store.open(":memory:");
     const t = s.addTask({ title: "x" });
-    expect(() => s.addUpdate({ task_id: t.id, author: "a", summary: "x".repeat(1024) })).not.toThrow();
-    expect(() => s.addUpdate({ task_id: t.id, author: "a", summary: "x".repeat(1025) })).toThrow(/summary too long/);
+    expect(() => s.addUpdate({ task_id: t.id, author: "a", summary: "x".repeat(4096) })).not.toThrow();
+    expect(() => s.addUpdate({ task_id: t.id, author: "a", summary: "x".repeat(4097) })).toThrow(/summary too long/);
     s.close();
   });
 });

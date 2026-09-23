@@ -1,5 +1,5 @@
 // PostUpdateForm — inline Activity composer (task 330, A2/A3): labeled
-// author + 1024-char summary, per-task in-memory drafts, a submission guard
+// author + 4096-char summary, per-task in-memory drafts, a submission guard
 // (one request per submit, IME-safe), dispatch-time payload capture so
 // deferred results can never post/clear another task's draft, SSE/API
 // dedupe, and focus routing through requestPostUpdate.
@@ -85,11 +85,12 @@ describe("PostUpdateForm", () => {
     clearPostDrafts();
   });
 
-  test("labeled author + summary with the 1024 limit", () => {
+  test("labeled author + summary with the 4096 limit", () => {
     const { container } = render(<PostUpdateForm task={task()} />);
     expect(container.querySelector("label[for='post-update-input']")).not.toBeNull();
     expect(container.querySelector("label[for='post-update-author']")).not.toBeNull();
-    expect(textarea(container).getAttribute("maxlength")).toBe("1024");
+    expect(textarea(container).getAttribute("maxlength")).toBe("4096");
+    expect(container.querySelector(".char-counter")?.textContent).toBe("0/4096");
   });
 
   test("submit posts once with the captured payload and clears the draft on ack", async () => {
