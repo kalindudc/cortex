@@ -64,5 +64,25 @@ describe("cortex add/edit accept --body-file", () => {
     r = await cli("add", "x", "-l", "now", "-b", "inline", "--body-file", tmp);
     expect(r.code).not.toBe(0);
     expect(r.stderr).toContain("use --body-file OR -b");
+
+    // Stdin: `--body-file -` reads the body from stdin. A bare "-" token
+    // starts with charCode 45, which citty 0.1.x's parser treats as a flag
+    // (bodyFile became boolean true); cli.ts normalizes it to
+    // `--body-file=-` and stdinRequested() accepts both spellings.
+    const stdinBody = "stdin body line\n- with dash item";
+    r = await runCli({ args: ["add", "stdin", "-l", "now", "--body-file", "-"], env: testEnv, stdin: stdinBody });
+    expect(r.code).toBe(0);
+    const sm = r.stdout.match(/^\[(\d+)\]/);
+    expect(sm).not.toBeNull();
+    const sid = sm?.[1];
+    if (!sid) throw new Error(`could not parse task id from cli output: ${r.stdout}`);
+    r = await cli("show", sid, "--json");
+    expect(r.code).toBe(0);
+    const showOut3 = JSON.parse(r.stdout);
+    const task3 = showOut3.task ?? showOut3;
+    expect(task3.body).toBe(stdinBody);
+    // cleanup
+    r = await cli("rm", sid, "-f");
+    expect(r.code).toBe(0);
   });
 });

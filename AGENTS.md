@@ -57,6 +57,7 @@ Top-level subdirectories of `src/` (auto-rewritten by `pnpm run agents:map` betw
 Other notable single-file modules (curated; not auto-rewritten):
 
 - `src/client.ts` — typed REST client used by the CLI to talk to the daemon.
+- `src/args.ts` — argv pre-normalizer run before citty parses: rewrites `--flag -value` into `--flag=-value` for known string flags of the detected subcommand, because citty 0.1.x never consumes a dash-leading token as a flag value (it leaves the flag boolean-true and can hijack aliases like `-b`).
 - `src/events.ts` — SSE event types + helpers shared by server and UI.
 - `src/skills.ts` — resolves embedded skill files for `cortex init`.
 - `src/extensions.ts` — registers the pi extension surface.

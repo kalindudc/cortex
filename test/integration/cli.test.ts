@@ -275,6 +275,30 @@ test("cortex edit --body-search/--body-replace: success, no-match, ambiguous, mu
   expect(r.stdout).toContain("- step 2");
   expect(r.stdout).toContain("- step 3");
 
+  // Dash-leading anchors: citty 0.1.x never consumes a "-"-prefixed token
+  // as a flag value (it left bodySearch boolean-true → "anchor not found",
+  // and a value like "-beta" hijacked the -b alias, faking the mutex
+  // error). cli.ts pre-normalizes argv (src/args.ts) so these parse as
+  // values; markdown list/separator anchors are the routine agent case.
+  r = await run("edit", String(id), "--body-search", "- step 1", "--body-replace", "- step ONE");
+  expect(r.code).toBe(0);
+  r = await run("show", String(id));
+  expect(r.stdout).toContain("- step ONE");
+
+  r = await run("edit", String(id), "--body-search", "- step 2", "--body-replace", "- step TWO");
+  expect(r.code).toBe(0);
+  r = await run("show", String(id));
+  expect(r.stdout).toContain("- step TWO");
+
+  // Same-shape values for -b on add/update: dash-leading bodies must not
+  // be re-parsed as flags.
+  r = await run("add", "dashy", "-b", "- [ ] todo");
+  expect(r.code).toBe(0);
+  const did = Number(r.stdout.match(/^\[(\d+)\]/)?.[1]);
+  expect(did).toBeGreaterThan(0);
+  r = await run("show", String(did));
+  expect(r.stdout).toContain("- [ ] todo");
+
   // Anchor not found — non-zero exit + helpful error so an agent can
   // re-read and refine.
   r = await run("edit", String(id), "--body-search", "this anchor does not exist", "--body-replace", "x");
@@ -299,5 +323,7 @@ test("cortex edit --body-search/--body-replace: success, no-match, ambiguous, mu
 
   // cleanup
   r = await run("rm", String(id), "-f");
+  expect(r.code).toBe(0);
+  r = await run("rm", String(did), "-f");
   expect(r.code).toBe(0);
 });
