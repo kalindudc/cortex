@@ -1,5 +1,8 @@
 import { defineCommand } from "citty";
-import { Store, type Task, type Update } from "../store.ts";
+import { HttpError } from "../api.ts";
+import type { CortexClient } from "../contracts.ts";
+import { withClient } from "../daemon.ts";
+import type { Task, Update } from "../store.ts";
 
 /**
  * Render the formatted `cortex show` text view for one task and its
@@ -53,27 +56,49 @@ export default defineCommand({
       description: "emit raw JSON instead of the formatted view",
     },
   },
-  run({ args }) {
+  async run({ args }) {
     const id = Number.parseInt(args.id, 10);
     if (!Number.isFinite(id)) {
       console.error("error: id must be a number");
       process.exit(1);
     }
-    const store = Store.open();
-    try {
-      const task = store.getTask(id);
-      if (!task) {
-        console.error(`task ${id} not found`);
-        process.exit(1);
-      }
-      const updates = store.listUpdates(id);
-      if (args.json) {
-        console.log(JSON.stringify({ task, updates }));
-        return;
-      }
-      console.log(renderTaskView(task, updates));
-    } finally {
-      store.close();
+    const found = await readTaskOrExit(id);
+    if (args.json) {
+      console.log(JSON.stringify(found));
+      return;
     }
+    console.log(renderTaskView(found.task, found.updates));
   },
 });
+
+/** One task and its updates, from ONE read (GET /api/tasks/:id/state), or null when it does not exist. */
+export async function readTask(client: CortexClient, id: number): Promise<{ task: Task; updates: Update[] } | null> {
+  try {
+    const { task, updates } = await client.taskState(id);
+    return { task, updates };
+  } catch (err) {
+    if (err instanceof HttpError && err.status === 404) return null;
+    throw err;
+  }
+}
+
+/**
+ * readTask through withClient (the verified daemon, or offline under the
+ * ownership lease), printing `task <id> not found` (no `error:` prefix, the
+ * historical show/search/resume wording) or `error: <message>` and exiting 1
+ * when there is nothing to show.
+ */
+export async function readTaskOrExit(id: number): Promise<{ task: Task; updates: Update[] }> {
+  let found: { task: Task; updates: Update[] } | null;
+  try {
+    found = await withClient(client => readTask(client, id));
+  } catch (err) {
+    console.error(`error: ${(err as Error).message}`);
+    process.exit(1);
+  }
+  if (found === null) {
+    console.error(`task ${id} not found`);
+    process.exit(1);
+  }
+  return found;
+}

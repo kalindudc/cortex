@@ -2,8 +2,13 @@ import { test, expect, describe, beforeEach, afterEach } from "bun:test";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
-import { resolveOpenUrl } from "../../src/commands/open.ts";
-import { browserUrlPath, urlPath, ensureConfigDir } from "../../src/paths.ts";
+import { resolveDashboardUrl, resolveOpenUrl } from "../../src/commands/open.ts";
+import type { DaemonIdentity } from "../../src/contracts.ts";
+import { publishDaemonMetadata, removeDaemonMetadata } from "../../src/daemon.ts";
+import { canonicalDatabasePath, tryAcquireOwnership } from "../../src/ownership.ts";
+import { browserUrlPath, urlPath, ensureConfigDir, dbPath, daemonSocketPath } from "../../src/paths.ts";
+import { buildApp, createRuntime, type DaemonControl } from "../../src/server.ts";
+import { Store } from "../../src/store.ts";
 
 // Snapshot env keys we mutate so we can restore after each test — same
 // pattern as paths.test.ts.
@@ -65,5 +70,87 @@ describe("resolveOpenUrl (cortex open URL resolution)", () => {
     fs.writeFileSync(browserUrlPath(), "   \n");
     fs.writeFileSync(urlPath(), "http://127.0.0.1:7777");
     expect(resolveOpenUrl()).toBe("http://cortex.localhost:7777");
+  });
+});
+
+describe("resolveDashboardUrl (cortex open on the verified daemon for this database)", () => {
+  const KEYS = ["XDG_CONFIG_HOME", "XDG_RUNTIME_DIR", "CORTEX_DB"] as const;
+  let saved: Record<string, string | undefined> = {};
+  let tmpDir: string;
+  let runtimeDir: string;
+  const cleanups: (() => unknown)[] = [];
+
+  beforeEach(() => {
+    saved = Object.fromEntries(KEYS.map(k => [k, process.env[k]]));
+    tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "cortex-open-daemon-")));
+    runtimeDir = fs.mkdtempSync(path.join(os.tmpdir(), "cxo-"));
+    fs.chmodSync(runtimeDir, 0o700);
+    process.env.XDG_CONFIG_HOME = tmpDir;
+    process.env.XDG_RUNTIME_DIR = runtimeDir;
+    process.env.CORTEX_DB = path.join(tmpDir, "cortex.db");
+    ensureConfigDir();
+  });
+
+  afterEach(async () => {
+    for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+    for (const key of KEYS) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
+    }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(runtimeDir, { recursive: true, force: true });
+  });
+
+  /** A published daemon for CORTEX_DB in this process, headless until enable-web is called. */
+  function startDaemon(): { identity: DaemonIdentity; calls: string[] } {
+    const lease = tryAcquireOwnership(dbPath());
+    if (lease === null) throw new Error("expected to own the database");
+    const store = Store.open(dbPath(), { owner: lease, warnMigrations: false });
+    const canonical = canonicalDatabasePath(dbPath());
+    const socketPath = daemonSocketPath(canonical);
+    const identity: DaemonIdentity = {
+      protocol: 1,
+      instanceId: crypto.randomUUID(),
+      databaseId: store.databaseId(),
+      databasePath: canonical,
+      endpoint: { kind: "unix", socketPath },
+      pid: 999_999_999,
+      capabilities: ["control.shutdown", "control.web"],
+    };
+    const calls: string[] = [];
+    const control: DaemonControl = {
+      shutdown: () => {},
+      enableWeb: async request => {
+        calls.push(`web ${JSON.stringify(request)}`);
+        identity.webUrl = "http://cortex.localhost:4321";
+        publishDaemonMetadata(identity);
+        return identity;
+      },
+    };
+    const app = buildApp(store, createRuntime({ identity, listener: "ipc", control }));
+    const server = Bun.serve({ unix: socketPath, fetch: app.fetch });
+    publishDaemonMetadata(identity);
+    cleanups.push(async () => {
+      await server.stop(true);
+      removeDaemonMetadata(identity);
+      store.close();
+      lease.release();
+    });
+    return { identity, calls };
+  }
+
+  test("without a verified daemon it keeps the legacy resolution", async () => {
+    expect(await resolveDashboardUrl()).toBe("http://cortex.localhost:7777");
+    fs.writeFileSync(browserUrlPath(), "http://cortex.localhost:7778");
+    expect(await resolveDashboardUrl()).toBe("http://cortex.localhost:7778");
+  });
+
+  test("the verified daemon's dashboard wins over legacy files, enabled on that same daemon when missing", async () => {
+    const { calls } = startDaemon();
+    fs.writeFileSync(browserUrlPath(), "http://cortex.localhost:7778");
+    expect(await resolveDashboardUrl()).toBe("http://cortex.localhost:4321");
+    expect(calls).toEqual(["web {}"]);
+    expect(await resolveDashboardUrl()).toBe("http://cortex.localhost:4321");
+    expect(calls.length).toBe(1);
   });
 });

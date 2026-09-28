@@ -1,9 +1,20 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { Store } from "../../src/store.ts";
-import { createBackup, dryRunRestore, exportData, restoreBackup, TABLES, type BackupDoc } from "../../src/backup.ts";
+import { Store, mutationDigest, type Task } from "../../src/store.ts";
+import type { ResourceScope, Versions } from "../../src/contracts.ts";
+import {
+  createBackup,
+  dryRunRestore,
+  exportData,
+  projectRestore,
+  readBackup,
+  restoreBackup,
+  TABLES,
+  type BackupDoc,
+} from "../../src/backup.ts";
 
 const tmpRoots: string[] = [];
 
@@ -237,6 +248,225 @@ describe("backwards-compatible data-only restore", () => {
 
       await expect(restoreBackup({ backupPath, liveStore: dest.store })).rejects.toThrow(/format_version/);
     } finally {
+      dest.store.close();
+    }
+  });
+});
+
+// ---------- private concurrency metadata vs the v1 data-only format (plan @400 N10) ----------
+
+const V1_KEYS = [
+  "cortex_version",
+  "created_at",
+  "format",
+  "format_version",
+  "lanes",
+  "notifications",
+  "source_host",
+  "source_user",
+  "stats",
+  "tables",
+  "tags",
+  "task_tags",
+  "tasks",
+  "updates",
+];
+const TASK_SCOPES: ResourceScope[] = ["body", "entity", "lane", "priority", "status", "title"];
+
+function versionsOf(store: Store, id: number): Versions {
+  const state = store.taskState(id);
+  if (!state) throw new Error(`task ${id} has no state`);
+  return state.versions;
+}
+
+function tokenValues(versions: Versions | null): string[] {
+  return Object.values(versions ?? {}).filter((value): value is string => typeof value === "string");
+}
+
+describe("backup excludes private metadata", () => {
+  test("TABLES and the v1 payload are unchanged: no identity, revision or receipt data is exported", async () => {
+    const { dbPath, dir, store } = openTmpStore("export-private");
+    try {
+      const task = store.addTask({ title: "t", tags: ["x"], author: "agent-1" });
+      store.editTask(task.id, { body: "b" });
+      const post = {
+        task_id: task.id,
+        author: "agent-1",
+        summary: "blocked",
+        status: "blocked" as const,
+        notify: true,
+      };
+      store.runIdempotent("m-export-receipt", mutationDigest("update.post", post), () => store.postUpdate(post));
+
+      expect(TABLES.map(t => [t.name, [...t.columns], t.idColumn])).toEqual([
+        ["lanes", ["name", "color", "sort"], null],
+        ["tags", ["name", "color", "created"], null],
+        ["tasks", ["id", "lane", "title", "body", "status", "priority", "created", "updated"], "id"],
+        ["updates", ["id", "task_id", "author", "summary", "body", "severity", "created"], "id"],
+        ["task_tags", ["task_id", "tag_name"], null],
+        ["notifications", ["id", "task_id", "author", "status", "title", "message", "read", "created"], "id"],
+      ]);
+
+      const outPath = path.join(dir, "private.zip");
+      await createBackup({ liveDbPath: dbPath, outPath });
+      for (const doc of [await exportData(dbPath), unzipJson(outPath)]) {
+        expect(Object.keys(doc).sort()).toEqual(V1_KEYS);
+        expect(Object.keys(doc.tables).sort()).toEqual(TABLES.map(t => t.name).sort());
+        const text = JSON.stringify(doc);
+        expect(text).not.toContain(store.databaseId());
+        for (const value of tokenValues(versionsOf(store, task.id))) expect(text).not.toContain(value);
+        expect(text).not.toContain("m-export-receipt");
+        expect(text).not.toMatch(/_database_identity|_resource_revisions|_mutation_receipts|database_id|mutation_id/);
+      }
+    } finally {
+      store.close();
+    }
+  });
+});
+
+describe("restore stamps destination revisions", () => {
+  test("imported ids and affected catalogs get fresh tokens; identity, receipts and untouched catalogs are kept", async () => {
+    const source = openTmpStore("source-stamp");
+    const dest = openTmpStore("dest-stamp");
+    try {
+      source.store.addLane({ name: "later" });
+      source.store.addTask({ title: "s1", lane: "later", tags: ["restored"] }); // id 1
+      source.store.addTask({ title: "s2" }); // id 2
+      source.store.runIdempotent("m-source", "digest-source", () =>
+        source.store.addUpdate({ task_id: 1, author: "agent-1", summary: "from the source" }),
+      );
+      const outPath = path.join(source.dir, "stamp.zip");
+      await createBackup({ liveDbPath: source.dbPath, outPath });
+
+      dest.store.addLane({ name: "later" });
+      dest.store.addLane({ name: "idle" });
+      const doomed = dest.store.addTask({ title: "deleted before the restore" }); // id 1
+      const doomedTokens = tokenValues(versionsOf(dest.store, doomed.id));
+      dest.store.removeTask(doomed.id);
+      const kept = dest.store.runIdempotent("m-dest", "digest-dest", () => dest.store.addTask({ title: "kept" })); // id 2
+      const databaseId = dest.store.databaseId();
+      const laterBefore = dest.store.versions("lane", "later");
+      const idleBefore = dest.store.versions("lane", "idle");
+
+      const dry = await dryRunRestore(outPath, dest.store);
+      expect(dry.would.tasks).toEqual({ preserved: 1, bumped: 1 });
+      expect(dest.store.versions("lane", "later")).toEqual(laterBefore);
+
+      const result = await restoreBackup({ backupPath: outPath, liveStore: dest.store });
+      expect(result.counts.tasks).toEqual({ preserved: 1, bumped: 1 });
+      expect(result.idMap.get(1)).toBe(doomed.id); // a destination-deleted id comes back
+      const restoredTokens = tokenValues(versionsOf(dest.store, doomed.id));
+      expect(restoredTokens.length).toBe(TASK_SCOPES.length);
+      for (const value of restoredTokens) expect(doomedTokens).not.toContain(value);
+      const bumped = result.idMap.get(2) as number;
+      expect(Object.keys(versionsOf(dest.store, bumped)).sort()).toEqual(TASK_SCOPES);
+
+      // Catalogs: "later" gained a member (entity) but kept the destination definition;
+      // "restored" is new; "idle" was not involved.
+      const laterAfter = dest.store.versions("lane", "later");
+      expect(laterAfter?.entity).not.toBe(laterBefore?.entity);
+      expect(laterAfter?.definition).toBe(laterBefore?.definition);
+      expect(dest.store.versions("lane", "idle")).toEqual(idleBefore);
+      expect(dest.store.versions("tag", "restored")).not.toBeNull();
+
+      // Destination identity and receipts survive; source receipts never travel.
+      expect(dest.store.databaseId()).toBe(databaseId);
+      const refuse = (): Task => {
+        throw new Error("a replay must not run the write");
+      };
+      expect(dest.store.runIdempotent("m-dest", "digest-dest", refuse)).toEqual({ value: kept.value, replayed: true });
+      expect(dest.store.runIdempotent("m-source", "digest-source", () => "fresh")).toEqual({
+        value: "fresh",
+        replayed: false,
+      });
+
+      // Sequence high-water: new ids continue above every restored or bumped id.
+      const next = dest.store.addTask({ title: "after the restore" });
+      expect(next.id).toBeGreaterThan(Math.max(...result.idMap.values()));
+    } finally {
+      source.store.close();
+      dest.store.close();
+    }
+  });
+});
+
+// ---------- dry-run projections (plan @400 N6) ----------
+//
+// A dry-run never writes: it projects the archive onto what the destination
+// holds, read through Store.readSnapshot (no migrate, no lease), onto legacy
+// schemas as they are, and onto a MISSING destination as the fresh database a
+// real restore would create (only the default `now` lane), never creating it.
+
+const sha256 = (file: string): string => crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+
+describe("restore projections never write", () => {
+  test("a missing destination projects onto a fresh database: exactly what a real restore into one reports", async () => {
+    const source = openTmpStore("proj-source");
+    const fresh = openTmpStore("proj-fresh");
+    try {
+      source.store.addLane({ name: "later" });
+      source.store.addTask({ title: "a", tags: ["x"] });
+      source.store.addTask({ title: "b", lane: "later" });
+      const outPath = path.join(source.dir, "backup.zip");
+      await createBackup({ liveDbPath: source.dbPath, outPath });
+
+      const dry = await dryRunRestore(outPath, null);
+      expect(dry.would.lanes).toEqual({ new: 1, existing: 1 });
+      expect(dry.would.tags).toEqual({ new: 1, existing: 0 });
+      expect(dry.would.tasks).toEqual({ preserved: 2, bumped: 0 });
+      const real = await restoreBackup({ backupPath: outPath, liveStore: fresh.store });
+      expect(dry.would).toEqual(real.counts);
+    } finally {
+      source.store.close();
+      fresh.store.close();
+    }
+  });
+
+  test("inside Store.readSnapshot it projects onto a legacy schema without tag tables; the file stays byte-identical", async () => {
+    const source = openTmpStore("proj-legacy-source");
+    const dest = openTmpStore("proj-legacy-dest");
+    let destOpen = true;
+    try {
+      source.store.addTask({ title: "a", tags: ["x"] });
+      const outPath = path.join(source.dir, "backup.zip");
+      await createBackup({ liveDbPath: source.dbPath, outPath });
+      dest.store.addTask({ title: "legacy" });
+      dest.store.runInTransaction(raw => {
+        for (const table of ["task_tags", "tags", "notifications", "_resource_revisions", "_mutation_receipts"]) {
+          raw.run(`DROP TABLE ${table};`);
+        }
+      });
+      dest.store.close();
+      destOpen = false;
+      const before = sha256(dest.dbPath);
+
+      const doc = readBackup(outPath);
+      expect(doc.stats.tasks).toBe(1);
+      const dry = Store.readSnapshot(dest.dbPath, s => projectRestore(doc, s));
+      expect(dry.would.tags).toEqual({ new: 1, existing: 0 });
+      expect(dry.would.tasks).toEqual({ preserved: 0, bumped: 1 });
+      expect(dry.would.taskTags).toBe(1);
+      expect(sha256(dest.dbPath)).toBe(before);
+    } finally {
+      source.store.close();
+      if (destOpen) dest.store.close();
+    }
+  });
+
+  test("a destination without the core cortex tables is unsupported: the projection errors", async () => {
+    const source = openTmpStore("proj-unsupported-source");
+    const dest = openTmpStore("proj-unsupported-dest");
+    try {
+      source.store.addTask({ title: "a" });
+      const outPath = path.join(source.dir, "backup.zip");
+      await createBackup({ liveDbPath: source.dbPath, outPath });
+      dest.store.runInTransaction(raw => {
+        for (const table of ["task_tags", "notifications", "updates", "tasks"]) raw.run(`DROP TABLE ${table};`);
+      });
+      const doc = readBackup(outPath);
+      expect(() => projectRestore(doc, dest.store)).toThrow(/missing required cortex tables/);
+    } finally {
+      source.store.close();
       dest.store.close();
     }
   });

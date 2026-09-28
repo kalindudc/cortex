@@ -29,6 +29,7 @@
 
 import { expect, type Locator } from "@playwright/test";
 import { test as base } from "./fixtures/cortex-server.ts";
+import { buildBody, CASES } from "./fixtures/markdown-probes.ts";
 
 const extendedTest = base.extend({});
 
@@ -54,62 +55,6 @@ async function seedTask(
   });
   if (!r.ok) throw new Error(`failed to seed task: ${r.status} ${await r.text()}`);
   return r.json();
-}
-
-// Diagram-type matrix. Each entry seeds a fence in the rendered body and
-// asserts a unique-to-this-diagram label round-trips into the SVG textContent.
-//
-// The labels (FlowProbeNode, StateProbeAlpha, etc.) are arbitrary but
-// MUST be unique across the matrix so a regression that wires Block N's
-// renderer to Block M's source still fails.
-interface DiagramCase {
-  type: string; // human label only
-  fence: string; // body between the ```mermaid fences
-  probe: string; // label that must appear in the rendered SVG textContent
-}
-
-const CASES: DiagramCase[] = [
-  {
-    type: "flowchart",
-    fence: ["flowchart LR", '  A["FlowProbeNode"] --> B["FlowProbeEdge"]'].join("\n"),
-    probe: "FlowProbeNode",
-  },
-  {
-    type: "stateDiagram-v2",
-    fence: ["stateDiagram-v2", "    [*] --> StateProbeAlpha", "    StateProbeAlpha --> [*]"].join("\n"),
-    probe: "StateProbeAlpha",
-  },
-  {
-    type: "sequenceDiagram",
-    fence: ["sequenceDiagram", "    SeqProbeActor->>SeqProbeTarget: hi"].join("\n"),
-    probe: "SeqProbeActor",
-  },
-  {
-    type: "classDiagram",
-    fence: ["classDiagram", "    class ClassProbeFoo { +bar() }"].join("\n"),
-    probe: "ClassProbeFoo",
-  },
-  {
-    type: "pie",
-    fence: ["pie title PieProbeTitle", '  "PieProbeSlice" : 1'].join("\n"),
-    probe: "PieProbeSlice",
-  },
-];
-
-function buildBody(): string {
-  // Number the fences in the source so a failure message points to the
-  // right block even if the markdown renderer reorders them (it doesn't,
-  // but the comments serve as a sanity anchor in test output).
-  const sections: string[] = ["# Mermaid diagram type matrix", ""];
-  CASES.forEach((c, i) => {
-    sections.push(`## Block ${i + 1} — ${c.type}`);
-    sections.push("");
-    sections.push("```mermaid");
-    sections.push(c.fence);
-    sections.push("```");
-    sections.push("");
-  });
-  return sections.join("\n");
 }
 
 extendedTest("every mermaid diagram type renders to a real SVG (not the error bomb)", async ({ url, page }) => {

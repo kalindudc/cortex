@@ -7,17 +7,25 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # The same gates on Linux (glibc) and macOS, under the pinned Bun.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.1.12"
+          bun-version: "1.4.2"
       - uses: pnpm/action-setup@v4
       - name: install dependencies
         run: pnpm install --frozen-lockfile
       - name: agents.md drift check
         run: pnpm run agents:check
+      # tsc needs the gitignored src/ui/mermaid-manifest.generated.ts, which only a build writes.
+      - name: style
+        run: pnpm run gen:mermaid-manifest && pnpm run style:check
       - name: bun:test (build + backend + UI unit)
         run: pnpm test
       - name: playwright (e2e cardinal flows)
@@ -26,5 +34,5 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.os }}
           path: tmp/playwright-report

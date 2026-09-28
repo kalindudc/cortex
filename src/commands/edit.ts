@@ -1,6 +1,7 @@
 import { defineCommand } from "citty";
-import { Store, validateTagName, type Task } from "../store.ts";
-import { Client, daemonUrl } from "../client.ts";
+import type { CortexClient } from "../contracts.ts";
+import { withClient } from "../daemon.ts";
+import { validateTagName, type Task } from "../store.ts";
 import { emitError, printJson, resolveBody } from "../output.ts";
 
 function parsePriority(raw: string): number {
@@ -159,45 +160,23 @@ export default defineCommand({
         ),
       );
     }
-    const url = daemonUrl();
-    if (url) {
-      try {
-        let task: Task | null = null;
-        if (Object.keys(patch).length > 0) {
-          task = (await Client.editTask(url, id, patch)) as Task;
-        }
-        if (tagOp) {
-          const newSet = await resolveTagSet(tagOp, async () => (await Client.getTask(url, id)) as Task);
-          task = (await Client.setTaskTags(url, id, newSet)) as Task;
-        }
-        if (!task) throw new Error("no fields changed");
-        emitEdited(json, task, tagOp !== null);
-        return;
-      } catch (err) {
-        emitError(json, err);
-      }
-    }
-    const store = Store.open();
+    // Field edits, then the tag change as an atomic membership delta (or a
+    // whole-set replace for --set-tags), through the verified daemon or,
+    // without one, the same handlers in-process under one ownership lease.
+    const tagChange = tagOp;
+    let task: Task;
     try {
-      let task: Task | null = null;
-      if (Object.keys(patch).length > 0) {
-        task = store.editTask(id, patch);
-      }
-      if (tagOp) {
-        const newSet = await resolveTagSet(tagOp, async () => {
-          const t = store.getTask(id);
-          if (!t) throw new Error(`task ${id} not found`);
-          return t;
-        });
-        task = store.setTaskTags(id, newSet);
-      }
-      if (!task) throw new Error("no fields changed");
-      emitEdited(json, task, tagOp !== null);
+      task = await withClient(async client => {
+        let edited: Task | null = null;
+        if (Object.keys(patch).length > 0) edited = await client.editTask(id, patch);
+        if (tagChange) edited = await applyTagOp(client, id, tagChange);
+        if (!edited) throw new Error("no fields changed");
+        return edited;
+      });
     } catch (err) {
       emitError(json, err);
-    } finally {
-      store.close();
     }
+    emitEdited(json, task, tagOp !== null);
   },
 });
 
@@ -211,20 +190,20 @@ function emitEdited(json: boolean, task: Task, showTags: boolean): void {
   if (showTags) console.log(`✓ tags: ${task.tags.join(",")}`);
 }
 
-/** Compute the new tag set for a single edit invocation.
- *  - set: caller-supplied list IS the new set.
- *  - add: existing ∪ {name} (deduped via Set).
- *  - rm:  existing ∖ {name}.
- *  Reads existing tags only when needed (add/rm), never in set mode. */
-async function resolveTagSet(
+/**
+ * Apply one edit invocation's tag change.
+ *  - set: the caller-supplied list IS the new set (whole-set replace).
+ *  - add: existing ∪ {name}, as an atomic membership delta on the server;
+ *  - rm:  existing ∖ {name}, likewise; so a concurrent unrelated tag change
+ *    survives (no read-then-replace).
+ */
+function applyTagOp(
+  client: CortexClient,
+  id: number,
   op: { mode: "set" | "add" | "rm"; names: string[] },
-  fetchExisting: () => Promise<Task>,
-): Promise<string[]> {
-  if (op.mode === "set") return op.names;
-  const existing = await fetchExisting();
-  if (op.mode === "add") {
-    return Array.from(new Set([...existing.tags, ...op.names]));
-  }
-  const drop = new Set(op.names);
-  return existing.tags.filter(n => !drop.has(n));
+): Promise<Task> {
+  if (op.mode === "set") return client.setTags(id, op.names);
+  const [name] = op.names;
+  if (name === undefined) throw new Error("no tag given");
+  return op.mode === "add" ? client.addTaskTag(id, name) : client.removeTaskTag(id, name);
 }

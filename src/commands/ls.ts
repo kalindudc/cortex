@@ -1,5 +1,6 @@
 import { defineCommand } from "citty";
-import { Store, validateTagName, type TaskStatus, type Task } from "../store.ts";
+import { withClient } from "../daemon.ts";
+import { validateTagName, type TaskStatus, type Task } from "../store.ts";
 
 const STATUSES: TaskStatus[] = ["draft", "open", "review", "blocked", "done"];
 
@@ -79,7 +80,7 @@ export default defineCommand({
       description: "with --json, include task bodies (default omits them for scannable, token-efficient output)",
     },
   },
-  run({ args }) {
+  async run({ args }) {
     if (args.status && !STATUSES.includes(args.status as TaskStatus)) {
       console.error(`error: status must be one of ${STATUSES.join(",")}`);
       process.exit(1);
@@ -102,74 +103,80 @@ export default defineCommand({
       const raw = renderTagsTruncated(tags);
       return raw ? c("90", raw) : "";
     };
-    const searchOpts: { search?: string; title?: string; tagQuery?: string } = {};
-    if (args.search) {
-      const s = args.search.trim();
-      if (s.startsWith("@")) searchOpts.title = s.slice(1).trim();
-      else if (s.startsWith("#")) searchOpts.tagQuery = s.slice(1).trim();
-      else searchOpts.search = s;
-    }
-    const store = Store.open();
+    // The filters travel as GET /api/tasks query parameters (the server
+    // applies the same @title / #tag / substring search grammar and the AND
+    // tag filter through Store.listTasks), to the verified daemon or, without
+    // one, the same handler in-process. The human view also needs per-task
+    // update counts, read in the same call.
+    let rows: Task[];
+    const updateCounts = new Map<number, number>();
     try {
-      const rows = store.listTasks({
-        lane: args.lane || undefined,
-        status: (args.status as TaskStatus) || undefined,
-        tags: tagFilter,
-        ...searchOpts,
-      });
-      // `cortex ls` sorts by task id (ascending) by default — stable and
-      // scannable when ids are the primary handle for agent handoffs. The
-      // priority ORDER BY inside Store.listTasks is untouched so the
-      // server/UI keep their priority-first ordering; only the CLI re-sorts.
-      rows.sort((a, b) => a.id - b.id);
-      if (args.json) {
-        // List views are for scanning: omit the (potentially large) body by
-        // default so an agent can enumerate tasks without spending its context
-        // budget on full prose. `--full` includes bodies; read one body with
-        // `cortex show <id> --json`.
-        const out = args.full
-          ? rows
-          : rows.map(t => ({
-              id: t.id,
-              lane: t.lane,
-              title: t.title,
-              status: t.status,
-              priority: t.priority,
-              created: t.created,
-              updated: t.updated,
-              tags: t.tags,
-            }));
-        console.log(JSON.stringify(out));
-        return;
-      }
-      const byLane = new Map<string, Task[]>();
-      for (const t of rows) {
-        const list = byLane.get(t.lane) ?? [];
-        list.push(t);
-        byLane.set(t.lane, list);
-      }
-      if (byLane.size === 0) {
-        console.log("(no tasks)");
-        return;
-      }
-      for (const [lane, tasks] of byLane) {
-        console.log(c("1", `\n${lane}`));
-        for (const t of tasks) {
-          const updates = store.listUpdates(t.id).length;
-          const badge = c(STATUS_COLOR[t.status], STATUS_BADGE[t.status]);
-          const idStr = c("90", `[${t.id}]`);
-          const updStr = updates > 0 ? c("90", ` (${updates} updates)`) : "";
-          // Tag chips appear after the title in gray, truncated to keep the
-          // line scannable. With many-tag tasks, showing every tag dominated
-          // the row and pushed the updates count off-screen. Show first
-          // LS_TAG_LIMIT tags then '+N' for the rest. Use `cortex show <id>`
-          // for the full list.
-          const tagStr = formatTagsForLs(t.tags);
-          console.log(`  ${idStr} ${badge} ${t.title}${tagStr}${updStr}`);
+      rows = await withClient(async client => {
+        const listed = await client.tasks({
+          lane: args.lane || undefined,
+          status: (args.status as TaskStatus) || undefined,
+          search: args.search || undefined,
+          tags: tagFilter,
+        });
+        if (!args.json) {
+          for (const t of listed) updateCounts.set(t.id, (await client.updates(t.id)).length);
         }
+        return listed;
+      });
+    } catch (err) {
+      console.error(`error: ${(err as Error).message}`);
+      process.exit(1);
+    }
+    // `cortex ls` sorts by task id (ascending) by default — stable and
+    // scannable when ids are the primary handle for agent handoffs. The
+    // priority ORDER BY inside Store.listTasks is untouched so the
+    // server/UI keep their priority-first ordering; only the CLI re-sorts.
+    rows.sort((a, b) => a.id - b.id);
+    if (args.json) {
+      // List views are for scanning: omit the (potentially large) body by
+      // default so an agent can enumerate tasks without spending its context
+      // budget on full prose. `--full` includes bodies; read one body with
+      // `cortex show <id> --json`.
+      const out = args.full
+        ? rows
+        : rows.map(t => ({
+            id: t.id,
+            lane: t.lane,
+            title: t.title,
+            status: t.status,
+            priority: t.priority,
+            created: t.created,
+            updated: t.updated,
+            tags: t.tags,
+          }));
+      console.log(JSON.stringify(out));
+      return;
+    }
+    const byLane = new Map<string, Task[]>();
+    for (const t of rows) {
+      const list = byLane.get(t.lane) ?? [];
+      list.push(t);
+      byLane.set(t.lane, list);
+    }
+    if (byLane.size === 0) {
+      console.log("(no tasks)");
+      return;
+    }
+    for (const [lane, tasks] of byLane) {
+      console.log(c("1", `\n${lane}`));
+      for (const t of tasks) {
+        const updates = updateCounts.get(t.id) ?? 0;
+        const badge = c(STATUS_COLOR[t.status], STATUS_BADGE[t.status]);
+        const idStr = c("90", `[${t.id}]`);
+        const updStr = updates > 0 ? c("90", ` (${updates} updates)`) : "";
+        // Tag chips appear after the title in gray, truncated to keep the
+        // line scannable. With many-tag tasks, showing every tag dominated
+        // the row and pushed the updates count off-screen. Show first
+        // LS_TAG_LIMIT tags then '+N' for the rest. Use `cortex show <id>`
+        // for the full list.
+        const tagStr = formatTagsForLs(t.tags);
+        console.log(`  ${idStr} ${badge} ${t.title}${tagStr}${updStr}`);
       }
-    } finally {
-      store.close();
     }
   },
 });

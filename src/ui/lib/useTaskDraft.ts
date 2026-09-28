@@ -1,34 +1,66 @@
-// lib/useTaskDraft.ts — THE task draft owner (task 330, D1–D3).
+// lib/useTaskDraft.ts — THE browser task draft owner (task 330, D1–D3;
+// plan @400 N8/N16, Task 9).
 //
 // One hook instance per mounted task (TaskDocument keys by task id).
 // Header (title), CodeMirror editor and rendered preview all consume the
-// SAME draft: local text, per-field external-conflict values, an explicit
-// body replacement epoch (the only thing besides task id that may remount
-// the editor — D4), and a saveState derived from ACTUAL request
-// acknowledgements.
+// SAME draft: local text, per-field incoming (conflict) versions, an
+// explicit body replacement epoch (the only thing besides task id that may
+// remount the editor — D4), and a saveState derived from ACTUAL request
+// acknowledgements. src/tui/drafts.ts implements the same semantics for the
+// terminal.
 //
-// Reconciliation per field (local / server-baseline / incoming):
-//   incoming === baseline            → echo/no-op
-//   incoming === local               → converge (our own write came back)
-//   local === baseline               → clean live update (adopt; body bumps epoch)
-//   else                             → conflict: keep BOTH, pause unsent
-//                                      autosaves until Apply / Keep (D3)
+// BASELINE (N8). Editing starts only once an ATOMIC TaskState is known: the
+// text AND its version tokens from one GET /api/tasks/:id/state. Until then
+// `ready` is false, set() is ignored and the UI shows an honest loading (or
+// failure + Retry) state instead of an editor; reading shows the task copy
+// meanwhile.
+//
+// GUARDED WRITES. Every title/body save is a versioned write
+// (`Prefer: cortex-versioned`) whose guard names that field's expected
+// token, never another field's; the acknowledged versions become the new
+// baseline, and "Saved" means the CURRENT text was acknowledged. A 412 is
+// not an error: the draft reads the incoming version atomically and keeps
+// BOTH as a conflict, pausing that field's autosave. Apply adopts the
+// incoming version; Keep rebases on the DISPLAYED incoming token and writes
+// conditionally again, so it can conflict again. Every other failure
+// (including the anchor 409s) is an error with Retry. Unguarded legacy
+// writers (CLI/API) stay last-writer-wins on the server by design; they
+// advance tokens, so a dirty draft still conflicts instead of overwriting.
+//
+// RECONCILIATION. A new task copy (live snapshot → `task` prop) is only a
+// HINT: when its title or body leaves the draft's baseline, the draft reads
+// the atomic TaskState and reconciles each field by ITS token, so status,
+// tags, priority and activity never create title/body conflicts:
+//   same token                    → nothing new
+//   our in-flight text read back  → rebase on it
+//   our base text (changed back)  → rebase the token only (our edit applies)
+//   our local text                → converge
+//   clean field                   → adopt (live update; body bumps epoch)
+//   else                          → conflict: keep BOTH, pause autosave
+// One read is in flight at a time; a read overtaken by one of our writes,
+// or by a newer copy arriving meanwhile, is discarded and read again, so a
+// stale answer never reverts acknowledged text or overwrites typing.
 //
 // Persistence of unsaved work is IN-MEMORY per task id (never browser
-// storage): snapshots record the local text and the server baseline it was
-// edited against, survive navigation, are released once clean, and are
-// pruned when a task is confirmed deleted (pruneTaskDrafts). While any
-// unsaved work exists, a beforeunload warning is armed (D2).
+// storage): snapshots record the local text, the server baseline it was
+// edited against and that baseline's token, survive navigation, are
+// released once clean, and are pruned when a task is confirmed deleted
+// (pruneTaskDrafts). While any unsaved work exists, a beforeunload warning
+// is armed (D2).
 
 import { useEffect, useMemo, useRef } from "preact/hooks";
-import { useSignal } from "@preact/signals";
+import { batch, useSignal } from "@preact/signals";
+import { HttpError } from "../../api.ts";
+import type { EditTaskRequest, TaskStateSnapshot, Versions } from "../../contracts.ts";
 import type { Task } from "../api/types.ts";
 import { api } from "../api/client.ts";
-import { tryApi } from "../api/errors.ts";
+import { showError } from "../api/errors.ts";
 import { useAutosave, type AutosaveApi, type Scheduler } from "./autosave.ts";
 
 export type DraftField = "title" | "body";
 export type SaveState = "saved" | "pending" | "saving" | "error";
+
+const FIELDS: readonly DraftField[] = ["title", "body"];
 
 export interface TaskDraft {
   title: string;
@@ -36,11 +68,17 @@ export interface TaskDraft {
   bodyEpoch: number;
   saveState: SaveState;
   external: Record<DraftField, string | null>;
+  /** True once the atomic baseline (text + version tokens) is known; editing is disabled before. */
+  ready: boolean;
+  /** Why reading the baseline failed (editing stays disabled until reload()), else null. */
+  loadError: string | null;
   set(field: DraftField, value: string): void;
   flush(): void;
   retry(): void;
   apply(field: DraftField): void;
   keep(field: DraftField): void;
+  /** Read the baseline again after it failed. */
+  reload(): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -50,11 +88,14 @@ export interface TaskDraft {
 interface FieldSnapshot {
   local: string;
   base: string; // server baseline the local text was edited against
+  token: string; // that baseline's version token
 }
 type DraftSnapshot = Partial<Record<DraftField, FieldSnapshot>>;
 
 const draftMemory = new Map<number, DraftSnapshot>();
 const unsavedTasks = new Set<number>();
+/** The mounted draft instance per task; a dead instance's late answers never touch a live one's memory. */
+const liveDrafts = new Map<number, object>();
 
 function beforeUnloadHandler(e: BeforeUnloadEvent): void {
   e.preventDefault();
@@ -101,6 +142,60 @@ export function pruneTaskDrafts(liveIds: Iterable<number>): void {
 }
 
 // ---------------------------------------------------------------------------
+// Per-mount draft state
+// ---------------------------------------------------------------------------
+
+interface Incoming {
+  readonly text: string;
+  readonly token: string;
+}
+
+interface FieldCore {
+  /** What the user sees and edits. */
+  local: string;
+  /** The server text `local` is edited against. */
+  base: string;
+  /** `base`'s version token; null until the baseline is known. */
+  token: string | null;
+  /** The other version of a conflicted field, else null. */
+  incoming: Incoming | null;
+  inFlight: boolean;
+  /** The text of the write in flight. */
+  sent: string | null;
+  trailing: boolean;
+  errored: boolean;
+  revision: number;
+  /** The revision whose 412 already re-sent once automatically (changed and changed back). */
+  resent: number;
+  /** Keep was chosen (over the version with this token) while a write was in flight: decided once it settles. */
+  keepWanted: string | null;
+}
+
+interface Core {
+  ready: boolean;
+  loadError: string | null;
+  bodyEpoch: number;
+  /** Bumped whenever one of our writes starts or finishes (a read spanning it may predate it). */
+  writeEpoch: number;
+  /** The TaskState read in flight, if any. */
+  reading: Promise<void> | null;
+  /** A newer copy arrived while `reading` was in flight: its answer must be read again. */
+  again: boolean;
+  /** Fields that showed a recovered snapshot before the baseline was known. */
+  recovered: Record<DraftField, boolean>;
+  fields: Record<DraftField, FieldCore>;
+}
+
+const fieldText = (task: Task, field: DraftField): string => (field === "title" ? task.title : (task.body ?? ""));
+
+const isConflict = (err: unknown): boolean => err instanceof HttpError && err.status === 412;
+
+function describe(err: unknown): string {
+  if (err instanceof HttpError && err.status === 404) return "the task no longer exists";
+  return err instanceof Error ? err.message : String(err);
+}
+
+// ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
 
@@ -109,204 +204,385 @@ export function useTaskDraft(task: Task, scheduler?: Scheduler): TaskDraft {
   const serverTitle = task.title;
   const serverBody = task.body || "";
 
-  // Seed from recovered snapshots (computed once per mount; the hook lives
-  // and dies with its task's mounted lifetime).
-  const seed = useMemo(() => {
+  // Created once per mount (the hook lives and dies with its task's mounted
+  // lifetime). Until the baseline arrives, the text shown is the recovered
+  // snapshot (unsaved work from an earlier mount) or the task copy.
+  const core = useMemo<Core>(() => {
     const snap = draftMemory.get(taskId);
-    const restore = (field: DraftField, server: string): { local: string; conflict: string | null } => {
-      const s = snap?.[field];
-      if (s == null || s.local === server) return { local: server, conflict: null };
-      // Server unchanged since the interrupted edit → clean recovery
-      // (re-queued below). Server moved → surface the conflict instead of
-      // silently overwriting either side.
-      if (s.base === server) return { local: s.local, conflict: null };
-      return { local: s.local, conflict: server };
-    };
+    const initial = (field: DraftField, server: string): FieldCore => ({
+      local: snap?.[field]?.local ?? server,
+      base: server,
+      token: null,
+      incoming: null,
+      inFlight: false,
+      sent: null,
+      trailing: false,
+      errored: false,
+      revision: 0,
+      resent: -1,
+      keepWanted: null,
+    });
     return {
-      title: restore("title", serverTitle),
-      body: restore("body", serverBody),
+      ready: false,
+      loadError: null,
+      bodyEpoch: 0,
+      writeEpoch: 0,
+      reading: null,
+      again: false,
+      recovered: { title: snap?.title != null, body: snap?.body != null },
+      fields: { title: initial("title", serverTitle), body: initial("body", serverBody) },
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId]);
 
-  const titleLocal = useSignal(seed.title.local);
-  const bodyLocal = useSignal(seed.body.local);
-  const titleServer = useSignal(serverTitle);
-  const bodyServer = useSignal(serverBody);
-  const titleExternal = useSignal<string | null>(seed.title.conflict);
-  const bodyExternal = useSignal<string | null>(seed.body.conflict);
+  const titleLocal = useSignal(core.fields.title.local);
+  const bodyLocal = useSignal(core.fields.body.local);
+  const titleExternal = useSignal<string | null>(null);
+  const bodyExternal = useSignal<string | null>(null);
   const bodyEpoch = useSignal(0);
-  const saveState = useSignal<SaveState>("saved");
+  const ready = useSignal(false);
+  const loadError = useSignal<string | null>(null);
+
+  const computeSaveState = (): SaveState => {
+    const fs = FIELDS.map(field => core.fields[field]);
+    if (fs.some(f => f.errored)) return "error";
+    if (fs.some(f => f.inFlight)) return "saving";
+    if (fs.some(f => f.local !== f.base || f.incoming !== null)) return "pending";
+    return "saved";
+  };
+  const saveState = useSignal<SaveState>(computeSaveState());
 
   // Liveness guard. Writing component-subscribed signals during the
   // unmount flush enqueues a re-render of the DYING component and crashes
   // preact's render queue (vnode parent already nulled). This cleanup is
   // registered BEFORE the useAutosave hooks so it flips first on unmount;
-  // the flush that follows still PATCHes and maintains the module-level
+  // the flush that follows still writes and maintains the module-level
   // draft memory, but skips all signal writes.
   const alive = useRef(true);
-  useEffect(
-    () => () => {
+  const owner = useRef<object>({});
+  useEffect(() => {
+    liveDrafts.set(taskId, owner.current);
+    return () => {
       alive.current = false;
-    },
-    [],
-  );
+      if (liveDrafts.get(taskId) === owner.current) liveDrafts.delete(taskId);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // Imperative per-field bookkeeping (not render state).
-  const flight = useRef<
-    Record<DraftField, { inFlight: boolean; trailing: boolean; errored: boolean; revision: number }>
-  >({
-    title: { inFlight: false, trailing: false, errored: false, revision: 0 },
-    body: { inFlight: false, trailing: false, errored: false, revision: 0 },
-  });
-
-  const sig = (field: DraftField) =>
-    field === "title"
-      ? { local: titleLocal, server: titleServer, external: titleExternal }
-      : { local: bodyLocal, server: bodyServer, external: bodyExternal };
-
-  // Imperative reads use peek() throughout — these code paths run from
-  // timers, promise continuations and unmount cleanups where a tracked
-  // read could accidentally subscribe whatever rendering context happens
-  // to be open. Subscription is the getters' job (bottom of the hook).
-  const recomputeState = (): void => {
-    const f = flight.current;
-    const dirty = (field: DraftField): boolean => sig(field).local.peek() !== sig(field).server.peek();
-    const unsaved =
-      f.title.inFlight || f.body.inFlight || f.title.errored || f.body.errored || dirty("title") || dirty("body");
-    markUnsaved(taskId, unsaved);
-    if (!alive.current) return; // never re-render a dying component
-    let next: SaveState = "saved";
-    if (f.title.errored || f.body.errored) next = "error";
-    else if (f.title.inFlight || f.body.inFlight) next = "saving";
-    else if (dirty("title") || dirty("body") || titleExternal.peek() != null || bodyExternal.peek() != null)
-      next = "pending";
-    saveState.value = next;
-  };
+  const unsaved = (): boolean =>
+    FIELDS.some(field => {
+      const f = core.fields[field];
+      return f.local !== f.base || f.inFlight || f.errored || f.incoming !== null;
+    });
 
   const updateSnapshot = (field: DraftField): void => {
-    const s = sig(field);
-    if (s.local.peek() === s.server.peek()) writeSnapshot(taskId, field, null);
-    else writeSnapshot(taskId, field, { local: s.local.peek(), base: s.server.peek() });
+    const f = core.fields[field];
+    if (f.token === null) return; // no baseline yet: a recovered snapshot stays as it was
+    if (f.local === f.base && f.incoming === null) writeSnapshot(taskId, field, null);
+    else writeSnapshot(taskId, field, { local: f.local, base: f.base, token: f.token });
   };
 
-  // One serialized save runner per field: at most one PATCH in flight,
+  // Imperative reads/writes go through `core`; this mirrors it into the
+  // render signals (and the module-level memory + unload marker).
+  const changed = (): void => {
+    // After unmount the memory is still maintained, unless the task was
+    // mounted again: the live instance owns it then.
+    if (alive.current || !liveDrafts.has(taskId)) {
+      for (const field of FIELDS) updateSnapshot(field);
+      markUnsaved(taskId, unsaved());
+    }
+    if (!alive.current) return; // never re-render a dying component
+    batch(() => {
+      titleLocal.value = core.fields.title.local;
+      bodyLocal.value = core.fields.body.local;
+      titleExternal.value = core.fields.title.incoming?.text ?? null;
+      bodyExternal.value = core.fields.body.incoming?.text ?? null;
+      bodyEpoch.value = core.bodyEpoch;
+      saveState.value = computeSaveState();
+      ready.value = core.ready;
+      loadError.value = core.loadError;
+    });
+  };
+
+  // ---------- reads ----------
+
+  /** Adopt `version` as the field's text and baseline (a clean live update or Apply). */
+  const adopt = (field: DraftField, version: Incoming): void => {
+    const f = core.fields[field];
+    autosaveOf(field).cancel(); // superseded pending work dies here
+    f.local = version.text;
+    f.base = version.text;
+    f.token = version.token;
+    f.incoming = null;
+    f.errored = false;
+    if (field === "body") core.bodyEpoch++;
+  };
+
+  /** Initialize text + tokens from the first atomic read, recovering unsaved work from an earlier mount. */
+  const seed = (state: TaskStateSnapshot): void => {
+    for (const field of FIELDS) {
+      if (state.versions[field] === undefined) {
+        throw new Error(`the daemon did not report the ${field} version of task ${taskId}; restart it (cortex stop)`);
+      }
+    }
+    const snap = draftMemory.get(taskId);
+    for (const field of FIELDS) {
+      const f = core.fields[field];
+      const text = fieldText(state.task, field);
+      const token = state.versions[field] as string;
+      const saved = snap?.[field];
+      f.base = text;
+      f.token = token;
+      f.incoming = null;
+      if (saved == null || saved.local === text) {
+        f.local = text;
+        continue;
+      }
+      f.local = saved.local;
+      if (saved.token === token || saved.base === text) {
+        // Unchanged since the interrupted edit (or changed and changed
+        // back): the edit still applies. Re-queue it (debounced).
+        f.revision++;
+        autosaveOf(field).schedule();
+      } else {
+        // Moved meanwhile: surface a conflict, never a silent overwrite.
+        f.incoming = { text, token };
+      }
+    }
+    core.ready = true;
+    core.loadError = null;
+  };
+
+  /** Reconcile one field with an incoming version; true when anything changed. */
+  const reconcile = (field: DraftField, text: string, token: string): boolean => {
+    const f = core.fields[field];
+    if (token === f.token) return false; // nothing new for this field
+    if (f.inFlight && text === f.sent) {
+      // Our in-flight write, read back before its answer.
+      f.base = text;
+      f.token = token;
+      return true;
+    }
+    if (text === f.base) {
+      f.token = token; // changed and changed back: our edit still applies
+      return true;
+    }
+    if (text === f.local) {
+      f.base = text; // converge — our text, their ack
+      f.token = token;
+      f.incoming = null;
+      f.errored = false;
+      return true;
+    }
+    if (f.local === f.base && !f.inFlight && f.incoming === null) {
+      adopt(field, { text, token }); // clean live update
+      return true;
+    }
+    // Both changed: keep BOTH and pause this field's unsent autosave until Apply / Keep.
+    f.incoming = { text, token };
+    autosaveOf(field).cancel();
+    return true;
+  };
+
+  const receive = (state: TaskStateSnapshot): void => {
+    for (const field of FIELDS) {
+      const token = state.versions[field];
+      if (token !== undefined) reconcile(field, fieldText(state.task, field), token);
+    }
+  };
+
+  /**
+   * Read the atomic TaskState and seed or reconcile from it. One read at a
+   * time: callers during a read share it, and it is read again when one of
+   * our writes (or a newer copy) overtook it. Rejects when the read fails.
+   */
+  const refresh = (): Promise<void> => {
+    if (core.reading !== null) {
+      core.again = true;
+      return core.reading;
+    }
+    const reading: Promise<void> = Promise.resolve()
+      .then(async () => {
+        for (;;) {
+          core.again = false;
+          const epoch = core.writeEpoch;
+          const state = await api.taskState(taskId);
+          if (!alive.current) return;
+          if (core.again || epoch !== core.writeEpoch) continue; // overtaken: read again
+          if (core.ready) receive(state);
+          else seed(state);
+          changed();
+          return;
+        }
+      })
+      .finally(() => {
+        if (core.reading === reading) core.reading = null;
+      });
+    core.reading = reading;
+    return reading;
+  };
+
+  const loadBaseline = (): void => {
+    refresh().catch((err: unknown) => {
+      if (!alive.current || core.ready) return;
+      core.loadError = describe(err);
+      changed();
+    });
+  };
+
+  // ---------- writes ----------
+
+  /** After our ack: an incoming version recorded meanwhile is ours, or (nothing unsaved) adopted. */
+  const afterAck = (field: DraftField): void => {
+    const f = core.fields[field];
+    const incoming = f.incoming;
+    if (incoming === null) return;
+    if (incoming.token === f.token || incoming.text === f.base) f.incoming = null;
+    else if (f.local === f.base && f.keepWanted === null) adopt(field, incoming);
+  };
+
+  // Read fresh after an await (a read may have recorded a conflict meanwhile);
+  // TypeScript would otherwise keep the pre-await narrowing of `f.incoming`.
+  const incomingOf = (field: DraftField): Incoming | null => core.fields[field].incoming;
+
+  // One serialized save runner per field: at most one write in flight,
   // exactly one trailing save carrying the LATEST text (D2).
   const runSave = async (field: DraftField): Promise<void> => {
-    const s = sig(field);
-    const m = flight.current[field];
-    if (s.external.peek() != null) return; // paused by an unresolved conflict
-    if (m.inFlight) {
-      m.trailing = true;
+    const f = core.fields[field];
+    const token = f.token;
+    if (!core.ready || token === null || f.incoming !== null) return; // no baseline, or paused by a conflict
+    if (f.inFlight) {
+      f.trailing = true;
       return;
     }
-    const value = s.local.peek();
-    if (value === s.server.peek() && !m.errored) {
-      recomputeState();
+    if (f.local === f.base) {
+      f.errored = false;
+      changed();
       return;
     }
-    m.inFlight = true;
-    m.errored = false;
-    const revisionAtStart = m.revision;
-    const prevServer = s.server.peek();
-    // Optimistic baseline: our own SSE echo then classifies as a no-op
-    // instead of an external change (D3). Skipped once unmounted — the
-    // baseline signal dies with the instance; draft memory is the record.
-    if (alive.current) s.server.value = value;
-    recomputeState(); // → saving
+    const sent = f.local;
+    const revision = f.revision;
+    const request: EditTaskRequest = field === "title" ? { title: sent } : { body: sent === "" ? null : sent };
+    // The guard names ONLY this field's token: other fields never conflict with it.
+    const expected: Versions = field === "title" ? { title: token } : { body: token };
+    f.inFlight = true;
+    f.errored = false;
+    f.sent = sent;
+    core.writeEpoch++;
+    changed(); // → saving
     try {
-      await tryApi(() => api.editTask(taskId, field === "title" ? { title: value } : { body: value || null }));
-      m.inFlight = false;
-      if (m.revision !== revisionAtStart) m.trailing = true; // newer text exists — never label it Saved
-      if (!alive.current) {
-        // Ack after unmount: the local text reached the server — release
-        // the recovery snapshot (unless newer text was typed, which cannot
-        // happen post-unmount).
-        writeSnapshot(taskId, field, null);
-        markUnsaved(taskId, false);
-      }
-    } catch {
-      // tryApi already reported the error; restore the baseline so the
-      // dirty check stays truthful. The recovery snapshot keeps the local
-      // text (with its pre-save baseline) either way.
-      m.inFlight = false;
-      m.trailing = false;
-      m.errored = true;
-      if (alive.current) s.server.value = prevServer;
-      else {
-        writeSnapshot(taskId, field, { local: value, base: prevServer });
-        markUnsaved(taskId, true);
-        return;
+      const result = await api.versioned.editTask(taskId, request, { expected });
+      core.writeEpoch++;
+      f.inFlight = false;
+      f.sent = null;
+      f.base = sent;
+      f.token = result.versions[field] ?? f.token;
+      afterAck(field);
+      if (f.revision !== revision) f.trailing = true; // newer text exists — never label it Saved
+    } catch (err) {
+      core.writeEpoch++;
+      f.inFlight = false;
+      f.sent = null;
+      f.trailing = false;
+      if (!isConflict(err)) {
+        f.errored = true;
+        showError(err); // global drawer, never this component's signals: safe after unmount too
+      } else if (alive.current) {
+        // Stale token: read the incoming version and keep both (or converge).
+        // After unmount the recorded snapshot keeps the edit and its old
+        // token instead: the next mount's baseline read surfaces it.
+        try {
+          await refresh();
+          if (incomingOf(field) === null && f.local !== f.base) {
+            // The daemon's text is still what we edited against: re-send once per revision.
+            if (f.resent !== f.revision) {
+              f.resent = f.revision;
+              f.trailing = true;
+            } else {
+              f.errored = true;
+              showError(new Error(`The ${field} save keeps being rejected as stale; Retry reads it again`));
+            }
+          }
+        } catch (readErr) {
+          f.errored = true;
+          showError(new Error(`A newer version of the ${field} exists, and reading it failed: ${describe(readErr)}`));
+        }
       }
     }
-    const wantTrailing = m.trailing;
-    m.trailing = false;
-    updateSnapshot(field);
-    recomputeState();
-    if (wantTrailing && !m.errored) void runSave(field);
+    if (f.keepWanted !== null) {
+      // Keep, chosen while this write was in flight: only if the version the
+      // user chose to override is still the one shown (a newer one needs a
+      // new decision), rebase on it and write ours over it, conditionally.
+      const chosen = f.keepWanted;
+      f.keepWanted = null;
+      const incoming = incomingOf(field);
+      if (incoming !== null && incoming.token === chosen && !f.errored) {
+        f.base = incoming.text;
+        f.token = incoming.token;
+        f.incoming = null;
+        f.trailing = true;
+      }
+    }
+    const wantTrailing = f.trailing && !f.errored && incomingOf(field) === null && alive.current;
+    f.trailing = false;
+    changed();
+    if (wantTrailing) void runSave(field);
   };
 
   const titleSave = useAutosave(() => void runSave("title"), undefined, undefined, scheduler);
   const bodySave = useAutosave(() => void runSave("body"), undefined, undefined, scheduler);
-  const autosaveOf = (field: DraftField): AutosaveApi => (field === "title" ? titleSave : bodySave);
+  function autosaveOf(field: DraftField): AutosaveApi {
+    return field === "title" ? titleSave : bodySave;
+  }
 
-  // Recovered-but-clean-base snapshots are unsaved work: re-queue the
-  // interrupted save on mount (debounced; a failure lands in error state).
+  // The atomic baseline, read once per mount (reload() retries a failure).
   useEffect(() => {
-    if (seed.title.conflict == null && seed.title.local !== serverTitle) {
-      flight.current.title.revision++;
-      titleSave.schedule();
-    }
-    if (seed.body.conflict == null && seed.body.local !== serverBody) {
-      flight.current.body.revision++;
-      bodySave.schedule();
-    }
-    recomputeState();
+    changed(); // publish the initial (possibly recovered) state + unload marker
+    loadBaseline();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId]);
 
-  // SSE reconciliation (see header). Runs whenever the server-sourced prop
-  // changes under this mounted task.
-  const reconcile = (field: DraftField, incoming: string): void => {
-    const s = sig(field);
-    if (incoming === s.server.peek()) return; // echo / steady state
-    if (incoming === s.local.peek()) {
-      s.server.value = incoming; // converge — our text, their ack
-      s.external.value = null;
-      updateSnapshot(field);
-      recomputeState();
+  // A new copy of the task (live snapshot) is a hint: re-read when its title
+  // or body left the baseline. Metadata-only copies never get here.
+  const seen = useRef({ title: serverTitle, body: serverBody });
+  useEffect(() => {
+    if (seen.current.title === serverTitle && seen.current.body === serverBody) return;
+    seen.current = { title: serverTitle, body: serverBody };
+    if (!core.ready) {
+      // Still loading (or failed): show the newer copy meanwhile, and make
+      // sure the baseline comes from a read at least as new as it.
+      for (const field of FIELDS) {
+        const f = core.fields[field];
+        f.base = field === "title" ? serverTitle : serverBody;
+        if (!core.recovered[field]) f.local = f.base;
+      }
+      core.loadError = null;
+      changed();
+      loadBaseline();
       return;
     }
-    if (s.local.peek() === s.server.peek()) {
-      s.local.value = incoming; // clean live update
-      s.server.value = incoming;
-      s.external.value = null;
-      if (field === "body") bodyEpoch.value++;
-      updateSnapshot(field);
-      recomputeState();
+    const { title, body } = core.fields;
+    if (serverTitle === title.base && serverBody === body.base && title.incoming === null && body.incoming === null) {
       return;
     }
-    // Conflict: retain both; pause unsent autosaves until Apply/Keep (D3).
-    s.external.value = incoming;
-    autosaveOf(field).cancel();
-    updateSnapshot(field);
-    recomputeState();
-  };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => reconcile("title", serverTitle), [serverTitle]);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => reconcile("body", serverBody), [serverBody]);
+    refresh().catch((err: unknown) => {
+      // Deleted meanwhile: the snapshot's removal decides what happens next.
+      if (!alive.current || (err instanceof HttpError && err.status === 404)) return;
+      showError(err);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverTitle, serverBody]);
 
   const set = (field: DraftField, value: string): void => {
-    const s = sig(field);
+    if (!core.ready) return; // editing is disabled until the baseline is known
+    const f = core.fields[field];
     // Title is a single-line semantic field even on a wrapping textarea.
     const v = field === "title" ? value.replace(/\n+/g, " ") : value;
-    if (v === s.local.peek()) return;
-    s.local.value = v;
-    flight.current[field].revision++;
-    updateSnapshot(field);
-    if (s.external.peek() == null) autosaveOf(field).schedule();
-    recomputeState();
+    if (v === f.local) return;
+    f.local = v;
+    f.revision++;
+    if (f.incoming === null) autosaveOf(field).schedule();
+    changed();
   };
 
   const flush = (): void => {
@@ -315,35 +591,46 @@ export function useTaskDraft(task: Task, scheduler?: Scheduler): TaskDraft {
   };
 
   const retry = (): void => {
-    for (const field of ["title", "body"] as DraftField[]) {
-      if (flight.current[field].errored) void runSave(field);
+    for (const field of FIELDS) {
+      if (core.fields[field].errored) void runSave(field);
     }
   };
 
   const apply = (field: DraftField): void => {
-    const s = sig(field);
-    const incoming = s.external.peek();
-    if (incoming == null) return;
-    autosaveOf(field).cancel(); // superseded pending work dies here
-    flight.current[field].revision++;
-    flight.current[field].errored = false;
-    s.local.value = incoming;
-    s.server.value = incoming;
-    s.external.value = null;
-    if (field === "body") bodyEpoch.value++;
-    updateSnapshot(field);
-    recomputeState();
+    const f = core.fields[field];
+    const incoming = f.incoming;
+    if (incoming === null) return;
+    f.keepWanted = null;
+    f.revision++;
+    adopt(field, incoming);
+    changed();
   };
 
   const keep = (field: DraftField): void => {
-    const s = sig(field);
-    if (s.external.peek() == null) return;
-    s.external.value = null;
-    // The external text is what the server currently has — reflect that
-    // baseline, then explicitly queue OUR text over it (D3: an explicit
-    // decision, not a silent overwrite).
-    recomputeState();
+    const f = core.fields[field];
+    const incoming = f.incoming;
+    if (incoming === null) return;
+    if (f.inFlight) {
+      // Its answer decides which version the daemon holds: keep after it.
+      f.keepWanted = incoming.token;
+      return;
+    }
+    // The incoming version is what the daemon has: rebase on its token, then
+    // explicitly write ours over it (D3: an explicit decision, not a silent
+    // overwrite) — still conditionally, so a newer write conflicts again.
+    f.base = incoming.text;
+    f.token = incoming.token;
+    f.incoming = null;
+    f.errored = false;
+    changed();
     void runSave(field);
+  };
+
+  const reload = (): void => {
+    if (core.ready || core.reading !== null) return;
+    core.loadError = null;
+    changed();
+    loadBaseline();
   };
 
   // Release clean entries after unmount; keep dirty/failed snapshots for
@@ -353,7 +640,7 @@ export function useTaskDraft(task: Task, scheduler?: Scheduler): TaskDraft {
     () => () => {
       const entry = draftMemory.get(taskId);
       const clean = entry == null || (entry.title == null && entry.body == null);
-      if (clean) markUnsaved(taskId, false);
+      if (clean && !liveDrafts.has(taskId)) markUnsaved(taskId, false);
     },
     [taskId],
   );
@@ -379,10 +666,17 @@ export function useTaskDraft(task: Task, scheduler?: Scheduler): TaskDraft {
     get external() {
       return { title: titleExternal.value, body: bodyExternal.value };
     },
+    get ready() {
+      return ready.value;
+    },
+    get loadError() {
+      return loadError.value;
+    },
     set,
     flush,
     retry,
     apply,
     keep,
+    reload,
   };
 }

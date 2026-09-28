@@ -121,6 +121,24 @@ describe("MarkdownView", () => {
     expect(filters.value.lane).toBe("now"); // untouched
   });
 
+  test("an injected onRef follows refs instead of navigateRef: no selection/filter singleton changes", async () => {
+    tasks.value = [mkTask(42)];
+    filters.value = { status: "open", lane: "now", tag: [] };
+    const followed: string[] = [];
+    const { container } = render(
+      <MarkdownView
+        source={"see @42 and #bugs"}
+        idPrefix="t"
+        onRef={(kind, value) => followed.push(`${kind}:${value}`)}
+      />,
+    );
+    await tick();
+    for (const ref of Array.from(container.querySelectorAll<HTMLButtonElement>("button.md-ref"))) fireEvent.click(ref);
+    expect(followed).toEqual(["task:42", "tag:bugs"]);
+    expect(selectedId.value).toBeNull();
+    expect(filters.value).toEqual({ status: "open", lane: "now", tag: [] });
+  });
+
   test("code blocks gain a copy control; clipboard success shows feedback", async () => {
     const writes: string[] = [];
     Object.defineProperty(navigator, "clipboard", {

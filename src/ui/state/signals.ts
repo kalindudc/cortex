@@ -7,6 +7,7 @@
 
 import { batch, signal } from "@preact/signals";
 import type { Task, Lane, Update, Author, TaskStatus, RelatedTasks } from "../api/types.ts";
+import type { ConnectionState } from "../../contracts.ts";
 
 // ---------- task data ----------
 export const tasks = signal<Task[]>([]);
@@ -129,7 +130,8 @@ export const postUpdateFocusRequest = signal<number>(0);
 // Task id whose title-input should grab focus on next mount. Set by the
 // "+ New task" affordance in SidebarPane (createUntitledTask) so the user
 // can immediately rename the auto-generated `untitled-<id>` placeholder.
-// EditableTaskBody picks this up via useEffect and clears it after focus
+// TaskHeader consumes it once that task's draft has its atomic baseline
+// (editing is disabled before, plan @400 N8) and clears it after focus
 // (one-shot semantics).
 export const pendingTitleFocus = signal<number | null>(null);
 export const selectedId = signal<number | null>(null);
@@ -212,3 +214,11 @@ export const pendingHeadingFragment = signal<PendingHeadingFragment | null>(null
 // pending schema migrations; the UI shows a banner directing the user to
 // run `cortex init`.
 export const migrationsPending = signal<string[]>([]);
+
+// ---------- live synchronization (plan @400 N12) ----------
+// Health of the /events subscription, written only by state/refresh.ts
+// connectLive(): "connecting" until the first `ready`, "live" after each
+// `ready`, and "stale" while the stream is down after having been live
+// (shown data may lag until the next `ready` resnapshots). The native
+// clients' ConnectionState vocabulary; no UI renders it yet.
+export const liveState = signal<ConnectionState>("connecting");

@@ -12,8 +12,42 @@ import { useEffect as stubUseEffect } from "preact/hooks";
 
 const editTaskMock = mock(() => Promise.resolve({}));
 const postUpdMock = mock(() => Promise.resolve({}));
+
+// The daemon's copy of each task, with per-field version tokens: the draft
+// reads its atomic baseline (and every incoming change) from here, and every
+// task() this file builds is written to it first, like a live snapshot that
+// follows a real write (plan @400 N8).
+const SCOPES = ["entity", "title", "body", "priority", "lane", "status"] as const;
+const serverTasks = new Map<number, { task: Task; versions: Versions }>();
+let tokenSeq = 0;
+function serverWrite(t: Task): void {
+  const prev = serverTasks.get(t.id);
+  const versions: Versions = { ...prev?.versions };
+  for (const scope of SCOPES) {
+    const moved = scope === "entity" || JSON.stringify(prev?.task[scope]) !== JSON.stringify(t[scope]);
+    if (prev === undefined || moved) versions[scope] = `${scope}-${++tokenSeq}`;
+  }
+  serverTasks.set(t.id, { task: structuredClone(t), versions });
+}
+const taskStateMock = mock((id: number): Promise<TaskStateSnapshot> => {
+  const s = serverTasks.get(id);
+  if (!s) return Promise.reject(new Error(`no task ${id}`));
+  return Promise.resolve({ task: structuredClone(s.task), updates: [], versions: { ...s.versions }, cursor: "e1:1" });
+});
+const versionedEditMock = mock((id: number, patch: EditTaskRequest): Promise<TaskWriteResult> => {
+  const s = serverTasks.get(id);
+  if (!s) return Promise.reject(new Error(`no task ${id}`));
+  const next: Task = { ...s.task };
+  if (patch.title !== undefined) next.title = patch.title;
+  if (patch.body !== undefined) next.body = patch.body;
+  serverWrite(next);
+  const written = serverTasks.get(id) as { task: Task; versions: Versions };
+  return Promise.resolve({ task: structuredClone(written.task), versions: { ...written.versions }, replayed: false });
+});
 mock.module("../../../../src/ui/api/client.ts", () => ({
   api: {
+    taskState: taskStateMock,
+    versioned: { editTask: versionedEditMock },
     tasks: mock(() => Promise.resolve([])),
     lanes: mock(() => Promise.resolve([])),
     tags: mock(() => Promise.resolve([])),
@@ -102,9 +136,11 @@ import {
   narrowViewport,
 } from "../../../../src/ui/state/signals.ts";
 import type { Task } from "../../../../src/ui/api/types.ts";
+import type { EditTaskRequest, TaskStateSnapshot, TaskWriteResult, Versions } from "../../../../src/contracts.ts";
 
+/** A task copy, as the daemon now holds it (see serverWrite above). */
 function task(over: Partial<Task> = {}): Task {
-  return {
+  const t: Task = {
     id: 5,
     lane: "now",
     title: "Document me",
@@ -116,6 +152,8 @@ function task(over: Partial<Task> = {}): Task {
     tags: [],
     ...over,
   };
+  serverWrite(t);
+  return t;
 }
 
 const tick = (ms = 0): Promise<void> => new Promise(r => setTimeout(r, ms));
@@ -139,6 +177,7 @@ describe("TaskDocument", () => {
     // would leak the previous test's body into the next draft seed.
     await new Promise(r => setTimeout(r, 0));
     pruneTaskDrafts([]);
+    serverTasks.clear();
     tasks.value = [task()];
     selectedId.value = 5;
     filters.value = { status: null, lane: null, tag: [] };
@@ -152,6 +191,8 @@ describe("TaskDocument", () => {
     pendingHeadingFragment.value = null;
     narrowViewport.value = false;
     editTaskMock.mockClear();
+    versionedEditMock.mockClear();
+    taskStateMock.mockClear();
     postUpdMock.mockClear();
   });
 
@@ -161,6 +202,7 @@ describe("TaskDocument", () => {
     expect(container.querySelector(".doc-reader .markdown-view h1")?.textContent).toBe("Alpha");
     expect(container.querySelector(".md-editor")).toBeNull(); // lazy: no CodeMirror cost for reading
     expect(editTaskMock).toHaveBeenCalledTimes(0);
+    expect(versionedEditMock).toHaveBeenCalledTimes(0);
     expect(postUpdMock).toHaveBeenCalledTimes(0);
   });
 
@@ -236,6 +278,7 @@ describe("TaskDocument", () => {
     await tick();
     expect(container.querySelector(".doc-reader")?.textContent ?? "").toContain("fresh local edit");
     expect(editTaskMock).toHaveBeenCalledTimes(0); // mode switching never writes
+    expect(versionedEditMock).toHaveBeenCalledTimes(0);
   });
 
   test("empty body shows the add-description affordance instead of an empty reader", async () => {
@@ -308,6 +351,29 @@ describe("TaskDocument", () => {
     } finally {
       Element.prototype.scrollIntoView = orig;
     }
+  });
+
+  test("Edit before the atomic baseline arrives: an honest loading state, then ONE editor seeded from it (N8)", async () => {
+    let answer: (snap: TaskStateSnapshot) => void = () => {};
+    taskStateMock.mockImplementationOnce(
+      () =>
+        new Promise<TaskStateSnapshot>(resolve => {
+          answer = resolve;
+        }),
+    );
+    const t = task({ body: "copy from the list" });
+    const { container } = render(<TaskDocument task={t} />);
+    fireEvent.click(modeButton(container, "Edit"));
+    await tick();
+    expect(container.querySelector(".md-editor")).toBeNull(); // nothing to type into yet
+    expect(container.querySelector(".editor-baseline")?.textContent ?? "").toContain("Loading");
+    task({ body: "newer on the daemon" });
+    const s = serverTasks.get(5) as { task: Task; versions: Versions };
+    answer({ task: structuredClone(s.task), updates: [], versions: { ...s.versions }, cursor: "e1:2" });
+    await tick();
+    expect(container.querySelector(".editor-baseline")).toBeNull();
+    expect(container.querySelector(".md-editor")?.getAttribute("data-value")).toBe("newer on the daemon");
+    expect(versionedEditMock).toHaveBeenCalledTimes(0);
   });
 
   test("body conflict banner stays visible in Read mode (outside the hidden editor)", async () => {

@@ -58,9 +58,9 @@ test("create a task via the Tasks-section '+' button — untitled-<id> appears i
 }) => {
   await seedLane(url, "inbox");
   await page.goto(url);
-  // Click the Tasks-section '+' button. Server assigns an id; the title is
-  // auto-set to `untitled-<id>` via the two-request POST + PATCH flow in
-  // SidebarPane.createUntitledTask.
+  // Click the Tasks-section '+' button. Server assigns an id and names the
+  // task `untitled-<id>` inside the same create (`untitled: true`, see
+  // lib/createTask.ts createUntitledTask).
   await page.locator('button[aria-label="New task"]').click();
   // Auto-wait for the SSE round-trip; assert SOME .task-row with the
   // untitled-<n> shape appears (we don't know the exact id ahead of time).

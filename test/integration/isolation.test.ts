@@ -3,6 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
 import { runCli, mkTmpEnv } from "./helpers.ts";
+import { daemonSocketPath, runtimeDir } from "../../src/paths.ts";
 
 // Plan 15 isolation guard.
 //
@@ -19,14 +20,28 @@ import { runCli, mkTmpEnv } from "./helpers.ts";
 const REAL_CONFIG_DIR = path.join(os.homedir(), ".config", "cortex");
 const REAL_DB = path.join(REAL_CONFIG_DIR, "cortex.db");
 
+// The five paths every spawned cortex MUST see pinned (plan @400 N24).
+// Hardcoded, NOT imported from helpers.ts: dropping a key from the helper
+// must fail this guard rather than silently shrink it.
+const PINNED_KEYS = [
+  "XDG_CONFIG_HOME",
+  "XDG_RUNTIME_DIR",
+  "CORTEX_DB",
+  "CORTEX_SKILL_DIR",
+  "CORTEX_PI_EXTENSION_DIR",
+] as const;
+const POISON: Record<(typeof PINNED_KEYS)[number], string> = {
+  XDG_CONFIG_HOME: "/tmp/poison-xdg",
+  XDG_RUNTIME_DIR: "/tmp/poison-runtime",
+  CORTEX_DB: "/tmp/poison-db",
+  CORTEX_SKILL_DIR: "/tmp/poison-skill",
+  CORTEX_PI_EXTENSION_DIR: "/tmp/poison-ext",
+};
+
 describe("CLI isolation guard", () => {
   // Snapshot the parent env values up-front so we can restore after the
   // env-scrubbing test pokes them.
-  const originalParentEnv = {
-    XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
-    CORTEX_DB: process.env.CORTEX_DB,
-    CORTEX_SKILL_DIR: process.env.CORTEX_SKILL_DIR,
-  };
+  const originalParentEnv = Object.fromEntries(PINNED_KEYS.map(k => [k, process.env[k]]));
 
   afterAll(() => {
     for (const [k, v] of Object.entries(originalParentEnv)) {
@@ -71,37 +86,61 @@ describe("CLI isolation guard", () => {
       expect(tmpDb.startsWith(tmpDir)).toBe(true);
       expect(fs.existsSync(tmpDb)).toBe(true);
       expect(fs.statSync(tmpDb).size).toBeGreaterThan(0);
+
+      // init's other installs landed in the pinned dirs too: the pi
+      // extension (unpinned before Task 3 of plan @400) and the skills.
+      const extRoot = env.CORTEX_PI_EXTENSION_DIR ?? "";
+      const skillRoot = env.CORTEX_SKILL_DIR ?? "";
+      expect(extRoot.startsWith(tmpDir)).toBe(true);
+      expect(skillRoot.startsWith(tmpDir)).toBe(true);
+      expect(fs.existsSync(path.join(extRoot, "cortex", "index.ts"))).toBe(true);
+      expect(fs.existsSync(path.join(skillRoot, "cortex", "SKILL.md"))).toBe(true);
     } finally {
       cleanup();
     }
   });
 
-  test("helper env scrubs inherited XDG_CONFIG_HOME / CORTEX_DB / CORTEX_SKILL_DIR", () => {
+  test("helper env scrubs and re-pins all five isolation paths", () => {
     // Poison the parent env BEFORE calling mkTmpEnv. If the helper merely
-    // spread + overwrote, an inherited XDG_CONFIG_HOME might persist into
-    // the child env (or `??` semantics would let "" win and route to
-    // ~/.config/cortex). We assert defense-in-depth.
-    process.env.XDG_CONFIG_HOME = "/tmp/poison-xdg";
-    process.env.CORTEX_DB = "/tmp/poison-db";
-    process.env.CORTEX_SKILL_DIR = "/tmp/poison-skill";
+    // spread + overwrote, an inherited value might persist into the child
+    // env (or `??` semantics would let "" win and route to the real
+    // config/runtime/skill/extension dirs). We assert defense-in-depth.
+    for (const key of PINNED_KEYS) process.env[key] = POISON[key];
 
-    const { tmpDir, env, cleanup } = mkTmpEnv("scrub");
+    const { tmpDir, runtimeDir: runtime, env, cleanup } = mkTmpEnv("scrub");
     try {
-      // Each pinned key starts with the freshly-created tmpDir, NOT the
-      // poisoned parent values.
-      expect(env.XDG_CONFIG_HOME?.startsWith(tmpDir)).toBe(true);
-      expect(env.CORTEX_DB?.startsWith(tmpDir)).toBe(true);
-      expect(env.CORTEX_SKILL_DIR?.startsWith(tmpDir)).toBe(true);
+      for (const key of PINNED_KEYS) {
+        expect(env[key], `${key} must be pinned`).toBeTruthy();
+        expect(env[key], `${key} leaked the inherited value`).not.toBe(POISON[key]);
+      }
+      // Config/DB/skill/extension paths live under the fresh tmpDir ...
+      for (const key of ["XDG_CONFIG_HOME", "CORTEX_DB", "CORTEX_SKILL_DIR", "CORTEX_PI_EXTENSION_DIR"] as const) {
+        expect(env[key]?.startsWith(tmpDir), `${key} is not under ${tmpDir}`).toBe(true);
+      }
+      // ... and the runtime dir is its own fresh, private, SHORT directory.
+      expect(env.XDG_RUNTIME_DIR).toBe(runtime);
+      const st = fs.lstatSync(runtime);
+      expect(st.isDirectory()).toBe(true);
+      expect(st.uid).toBe(process.getuid?.() ?? -1);
+      expect(st.mode & 0o777).toBe(0o700);
 
-      // None of the pinned values leak the poisoned values.
-      expect(env.XDG_CONFIG_HOME).not.toBe("/tmp/poison-xdg");
-      expect(env.CORTEX_DB).not.toBe("/tmp/poison-db");
-      expect(env.CORTEX_SKILL_DIR).not.toBe("/tmp/poison-skill");
+      // src/paths.ts accepts it as XDG_RUNTIME_DIR (no fallback) and a
+      // daemon socket inside it fits the AF_UNIX limit.
+      const previous = process.env.XDG_RUNTIME_DIR;
+      process.env.XDG_RUNTIME_DIR = runtime;
+      try {
+        expect(runtimeDir()).toBe(runtime);
+        expect(path.dirname(daemonSocketPath(path.join(tmpDir, "cortex.db")))).toBe(runtime);
+      } finally {
+        process.env.XDG_RUNTIME_DIR = previous;
+      }
 
       // NO_COLOR pinned (matches every other test's expectation).
       expect(env.NO_COLOR).toBe("1");
     } finally {
       cleanup();
     }
+    expect(fs.existsSync(tmpDir)).toBe(false);
+    expect(fs.existsSync(runtime)).toBe(false);
   });
 });

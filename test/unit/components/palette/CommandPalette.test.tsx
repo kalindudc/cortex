@@ -75,6 +75,32 @@ describe("CommandPalette", () => {
     expect(rows[0].textContent).toContain("Gamma");
   });
 
+  test("a selection made after open survives the deferred selection pass", async () => {
+    paletteQuery.value = "/move lane";
+    const { container } = render(<CommandPalette />);
+    const input = container.querySelector(".palette-input") as HTMLInputElement;
+    // A select-all-and-replace (paste, automation) can land between the first
+    // selection pass and the deferred one; the deferred pass must not undo it.
+    input.focus();
+    input.setSelectionRange(0, input.value.length);
+    await new Promise(r => setTimeout(r, 5));
+    expect(document.activeElement).toBe(input);
+    expect([input.selectionStart, input.selectionEnd]).toEqual([0, "/move lane".length]);
+  });
+
+  test("the deferred pass still repairs focus that moved off the input", async () => {
+    paletteQuery.value = "/a";
+    const { container } = render(<CommandPalette />);
+    const input = container.querySelector(".palette-input") as HTMLInputElement;
+    // Focus moves to another element INSIDE the dialog, so DialogFrame's settle
+    // pass does nothing and only the palette's deferred pass can repair it.
+    (container.querySelector(".palette-row") as HTMLButtonElement).focus();
+    input.setSelectionRange(0, 0);
+    await new Promise(r => setTimeout(r, 5));
+    expect(document.activeElement).toBe(input);
+    expect([input.selectionStart, input.selectionEnd]).toEqual([1, "/a".length]);
+  });
+
   test("ArrowDown moves the highlight to the next row", () => {
     const { container } = render(<CommandPalette />);
     const input = container.querySelector(".palette-input") as HTMLInputElement;

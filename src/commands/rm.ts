@@ -1,7 +1,6 @@
 import { defineCommand } from "citty";
 import readline from "node:readline";
-import { Store } from "../store.ts";
-import { Client, daemonUrl } from "../client.ts";
+import { withClient } from "../daemon.ts";
 import { emitError, emitOk } from "../output.ts";
 
 function prompt(question: string): Promise<string> {
@@ -56,24 +55,13 @@ export default defineCommand({
         return;
       }
     }
-    const url = daemonUrl();
-    if (url) {
-      try {
-        await Client.removeTask(url, id);
-        emitOk(json, { ok: true, id }, `✓ removed task ${id}`);
-        return;
-      } catch (err) {
-        emitError(json, err);
-      }
-    }
-    const store = Store.open();
+    // The confirmation above ran with nothing held; only the delete itself
+    // goes through the daemon (or owns the database, offline).
     try {
-      store.removeTask(id);
-      emitOk(json, { ok: true, id }, `✓ removed task ${id}`);
+      await withClient(client => client.delTask(id));
     } catch (err) {
       emitError(json, err);
-    } finally {
-      store.close();
     }
+    emitOk(json, { ok: true, id }, `✓ removed task ${id}`);
   },
 });

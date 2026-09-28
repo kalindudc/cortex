@@ -96,7 +96,7 @@ describe("TagPicker", () => {
   });
 
   test("a failed add keeps the new-tag search text for retry", async () => {
-    // Bun 1.1.12 can eagerly create mockRejectedValueOnce's promise;
+    // Bun 1.1.12 (the pin when this was written) could eagerly create mockRejectedValueOnce's promise;
     // reject only at dispatch, after the SUT has installed its catch.
     addTaskTagMock.mockImplementationOnce(() => Promise.reject(new Error("offline")));
     render(<TagPicker task={fx} />);

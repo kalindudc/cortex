@@ -14,8 +14,8 @@
  */
 
 import fs from "node:fs";
-import { BodySearchError } from "./store.ts";
-import { HttpError } from "./client.ts";
+import { BodySearchError, ConflictError, MutationReuseError, WriteGuardError } from "./store.ts";
+import { HttpError } from "./api.ts";
 
 /** Stable machine-readable error codes surfaced in the `--json` error envelope. */
 export const ErrCode = {
@@ -25,6 +25,14 @@ export const ErrCode = {
   CONFLICT: "conflict",
   BODY_SEARCH_NOT_FOUND: "body_search_not_found",
   BODY_SEARCH_AMBIGUOUS: "body_search_ambiguous",
+  /** A guarded write's expected versions are stale (HTTP 412); nothing was written. */
+  VERSION_CONFLICT: "version_conflict",
+  /** A malformed or partial WriteGuard (HTTP 400). */
+  INVALID_GUARD: "invalid_guard",
+  /** A mutation id already committed a different request (HTTP 409). */
+  MUTATION_REUSED: "mutation_reused",
+  /** The request reached a different daemon instance than the one verified (HTTP 421). */
+  INSTANCE_MISMATCH: "instance_mismatch",
   GENERIC: "error",
 } as const;
 
@@ -53,6 +61,8 @@ export function emitOk(json: boolean, jsonValue: unknown, humanLine: string): vo
 function codeFromStatus(status: number): ErrCodeValue {
   if (status === 404) return ErrCode.NOT_FOUND;
   if (status === 409) return ErrCode.CONFLICT;
+  if (status === 412) return ErrCode.VERSION_CONFLICT;
+  if (status === 421) return ErrCode.INSTANCE_MISMATCH;
   if (status === 400) return ErrCode.BAD_REQUEST;
   return ErrCode.GENERIC;
 }
@@ -66,8 +76,16 @@ function classify(err: unknown): { code: ErrCodeValue; message: string; matches?
       matches: err.matches,
     };
   }
+  if (err instanceof ConflictError) return { code: ErrCode.VERSION_CONFLICT, message: err.message };
+  if (err instanceof WriteGuardError) return { code: ErrCode.INVALID_GUARD, message: err.message };
+  if (err instanceof MutationReuseError) return { code: ErrCode.MUTATION_REUSED, message: err.message };
   if (err instanceof HttpError) {
-    const code = (err.code as ErrCodeValue | undefined) ?? codeFromStatus(err.status);
+    // A server-sent code wins. Without one, a message naming a miss is
+    // not_found whatever the route's status (some answer a missing task with
+    // 400), matching the direct-Store classification below.
+    const code =
+      (err.code as ErrCodeValue | undefined) ??
+      (/not found/i.test(err.message) ? ErrCode.NOT_FOUND : codeFromStatus(err.status));
     return { code, message: err.message, matches: err.matches };
   }
   const message = err instanceof Error ? err.message : String(err);

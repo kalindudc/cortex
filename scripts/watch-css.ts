@@ -9,7 +9,7 @@
 // until someone re-runs `pnpm run ui:build` by hand.
 //
 // node:fs.watch on macOS uses FSEvents under the hood; non-recursive watch
-// of a small directory of ~14 files is reliable on bun 1.1.12. We debounce
+// of a small directory of ~14 files was verified reliable on bun 1.1.12. We debounce
 // because most editors (VS Code, vim) write a file as rename-temp + atomic
 // move, which fires multiple events for one logical save.
 //

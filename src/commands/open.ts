@@ -1,33 +1,42 @@
 import { defineCommand } from "citty";
 import fs from "node:fs";
-import { urlPath, browserUrlPath } from "../paths.ts";
+import { discoverDaemon, enableWeb } from "../daemon.ts";
+import { urlPath, browserUrlPath, dbPath } from "../paths.ts";
 import { openInBrowser } from "../open-browser.ts";
 
 /**
- * `cortex open` — re-open the dashboard in the user's default browser.
+ * `cortex open` — open the dashboard of this database's daemon in the
+ * user's default browser.
  *
  * Resolution order (first hit wins):
- *   1. `~/.config/cortex/cortex.browser-url` — written by a running
- *      `cortex serve`; contains the friendly URL exactly as printed.
- *   2. `~/.config/cortex/cortex.url` — legacy file from older binaries
+ *   1. The verified daemon serving this database (plan @400 N5): its
+ *      dashboard URL, after enabling the loopback dashboard on that SAME
+ *      instance through its IPC-only control route when it runs headless
+ *      (`serve --no-web`, TUI autostart).
+ *   2. `~/.config/cortex/cortex.browser-url` — written by a running
+ *      `cortex serve` of an older binary; contains the friendly URL exactly
+ *      as printed.
+ *   3. `~/.config/cortex/cortex.url` — legacy file from even older binaries
  *      that only wrote the loopback URL. We upgrade `127.0.0.1` to
  *      `cortex.localhost` on the fly so the user gets the friendly host
  *      even before they restart the daemon.
- *   3. `http://cortex.localhost:7777` — the documented default. Lets the
+ *   4. `http://cortex.localhost:7777` — the documented default. Lets the
  *      command work even when the daemon has never been started; the
  *      browser surfaces its own connection-refused page if the URL is
  *      unreachable, which is the right UX for a "did I leave it
  *      running?" probe.
  *
- * The chosen URL is always echoed to stdout BEFORE the platform open call
- * fires, so users on stripped containers (where `xdg-open` may print a
- * warning instead of opening anything) can copy/paste it manually.
+ * `cortex open` never starts a daemon. The chosen URL is always echoed to
+ * stdout BEFORE the platform open call fires, so users on stripped
+ * containers (where `xdg-open` may print a warning instead of opening
+ * anything) can copy/paste it manually.
  */
 /**
- * Pure URL-resolution function extracted from `run()` so it can be unit
- * tested without spawning a browser. Reads the daemon state files via the
- * same `paths.ts` helpers the rest of the CLI uses, so test fixtures that
- * pin `XDG_CONFIG_HOME` exercise the real resolution logic.
+ * Pure URL-resolution function for the legacy files (steps 2-4), extracted
+ * from `run()` so it can be unit tested without spawning a browser. Reads
+ * the daemon state files via the same `paths.ts` helpers the rest of the
+ * CLI uses, so test fixtures that pin `XDG_CONFIG_HOME` exercise the real
+ * resolution logic.
  */
 export function resolveOpenUrl(): string {
   if (fs.existsSync(browserUrlPath())) {
@@ -46,14 +55,31 @@ export function resolveOpenUrl(): string {
   return "http://cortex.localhost:7777";
 }
 
+/** The full resolution (steps 1-4) for `databasePath`; step 1 may enable the daemon's dashboard. */
+export async function resolveDashboardUrl(databasePath: string = dbPath()): Promise<string> {
+  const identity = await discoverDaemon(databasePath);
+  if (identity === null) return resolveOpenUrl();
+  if (identity.webUrl !== undefined) return identity.webUrl;
+  const enabled = await enableWeb(identity);
+  if (enabled.webUrl === undefined)
+    throw new Error(`the cortex daemon (pid ${identity.pid}) did not start its dashboard`);
+  return enabled.webUrl;
+}
+
 export default defineCommand({
   meta: {
     name: "open",
     description: "open the cortex dashboard in your default browser",
   },
   args: {},
-  run() {
-    const url = resolveOpenUrl();
+  async run() {
+    let url: string;
+    try {
+      url = await resolveDashboardUrl();
+    } catch (err) {
+      console.error(`error: ${(err as Error).message}`);
+      process.exit(1);
+    }
     console.log(`opening ${url}`);
     openInBrowser(url);
   },

@@ -29,7 +29,7 @@ mock.module("../../../../src/ui/api/client.ts", () => ({
   },
 }));
 
-import { render, fireEvent } from "@testing-library/preact";
+import { cleanup, render, fireEvent } from "@testing-library/preact";
 import {
   TaskHeader,
   TITLE_CLAMP_LINES,
@@ -37,6 +37,7 @@ import {
 } from "../../../../src/ui/components/active/TaskHeader.tsx";
 import { TaskToolbar } from "../../../../src/ui/components/active/TaskToolbar.tsx";
 import type { TaskDraft, DraftField } from "../../../../src/ui/lib/useTaskDraft.ts";
+import { closeAllPopovers } from "../../../../src/ui/state/popovers.ts";
 import { filters, modal, pendingTitleFocus, workspaceQuery, lanes, tags } from "../../../../src/ui/state/signals.ts";
 import type { Task } from "../../../../src/ui/api/types.ts";
 
@@ -59,9 +60,20 @@ interface FakeDraftOpts {
   title?: string;
   saveState?: TaskDraft["saveState"];
   externalTitle?: string | null;
+  ready?: boolean;
+  loadError?: string | null;
 }
 function fakeDraft(opts: FakeDraftOpts = {}): TaskDraft & {
-  calls: { set: Array<[DraftField, string]>; flush: number; retry: number; apply: DraftField[]; keep: DraftField[] };
+  calls: {
+    set: Array<[DraftField, string]>;
+    flush: number;
+    retry: number;
+    apply: DraftField[];
+    keep: DraftField[];
+    reload: number;
+  };
+  /** Settle the atomic baseline (the test re-renders afterwards). */
+  becomeReady(): void;
 } {
   const calls = {
     set: [] as Array<[DraftField, string]>,
@@ -69,10 +81,17 @@ function fakeDraft(opts: FakeDraftOpts = {}): TaskDraft & {
     retry: 0,
     apply: [] as DraftField[],
     keep: [] as DraftField[],
+    reload: 0,
   };
   let title = opts.title ?? "Ship the document workspace";
+  let ready = opts.ready ?? true;
+  let loadError = opts.loadError ?? null;
   return {
     calls,
+    becomeReady() {
+      ready = true;
+      loadError = null;
+    },
     get title() {
       return title;
     },
@@ -80,6 +99,15 @@ function fakeDraft(opts: FakeDraftOpts = {}): TaskDraft & {
     bodyEpoch: 0,
     saveState: opts.saveState ?? "saved",
     external: { title: opts.externalTitle ?? null, body: null },
+    get ready() {
+      return ready;
+    },
+    get loadError() {
+      return loadError;
+    },
+    reload() {
+      calls.reload++;
+    },
     set(field: DraftField, value: string) {
       calls.set.push([field, value]);
       if (field === "title") title = value;
@@ -386,6 +414,100 @@ describe("TaskHeader", () => {
     view.rerender(<TaskHeader task={task({ id: 8 })} draft={draft} />);
     await tick();
     expect(header.classList.contains("is-title-revealed")).toBe(false);
+  });
+
+  test("title editing waits for the atomic baseline: a click while loading says so, then edits once ready", async () => {
+    // Earlier tests leave mounted headers and open metadata popovers whose
+    // pickers take focus on mount; these tests are about focus.
+    cleanup();
+    closeAllPopovers();
+    const draft = fakeDraft({ ready: false });
+    const view = render(<TaskHeader task={task()} draft={draft} />);
+    const trigger = view.container.querySelector("button.task-title-trigger") as HTMLButtonElement;
+    trigger.focus();
+    fireEvent.click(trigger);
+    await tick();
+    expect(view.container.querySelector("textarea.title-input")).toBeNull(); // editing disabled
+    const state = view.container.querySelector(".draft-state");
+    expect(state?.getAttribute("role")).toBe("status");
+    expect(state?.textContent ?? "").toContain("Loading");
+    draft.becomeReady();
+    view.rerender(<TaskHeader task={task()} draft={draft} />);
+    await tick();
+    expect(view.container.querySelector("textarea.title-input")).not.toBeNull();
+    expect(view.container.querySelector(".draft-state")).toBeNull();
+  });
+
+  test("a baseline that arrives after focus moved elsewhere never steals it: the queued edit is dropped", async () => {
+    // Earlier tests leave mounted headers and open metadata popovers whose
+    // pickers take focus on mount; these tests are about focus.
+    cleanup();
+    closeAllPopovers();
+    const draft = fakeDraft({ ready: false });
+    const view = render(
+      <>
+        <TaskHeader task={task()} draft={draft} />
+        <button type="button" class="outside">
+          Other control
+        </button>
+      </>,
+    );
+    const trigger = view.container.querySelector("button.task-title-trigger") as HTMLButtonElement;
+    trigger.focus();
+    fireEvent.click(trigger);
+    const outside = view.container.querySelector(".outside") as HTMLButtonElement;
+    outside.focus();
+    draft.becomeReady();
+    view.rerender(
+      <>
+        <TaskHeader task={task()} draft={draft} />
+        <button type="button" class="outside">
+          Other control
+        </button>
+      </>,
+    );
+    await tick();
+    expect(view.container.querySelector("textarea.title-input")).toBeNull();
+    expect(document.activeElement).toBe(outside);
+  });
+
+  test("pendingTitleFocus waits for the baseline before entering editing", async () => {
+    // Earlier tests leave mounted headers and open metadata popovers whose
+    // pickers take focus on mount; these tests are about focus.
+    cleanup();
+    closeAllPopovers();
+    pendingTitleFocus.value = 7;
+    const draft = fakeDraft({ ready: false });
+    const view = render(<TaskHeader task={task()} draft={draft} />);
+    await tick();
+    expect(view.container.querySelector("textarea.title-input")).toBeNull();
+    expect(pendingTitleFocus.value).toBe(7);
+    draft.becomeReady();
+    view.rerender(<TaskHeader task={task()} draft={draft} />);
+    await tick();
+    expect(view.container.querySelector("textarea.title-input")).not.toBeNull();
+    expect(pendingTitleFocus.value).toBeNull();
+  });
+
+  test("a failed baseline is explained once editing is requested; the request and Retry both reload", async () => {
+    // Earlier tests leave mounted headers and open metadata popovers whose
+    // pickers take focus on mount; these tests are about focus.
+    cleanup();
+    closeAllPopovers();
+    const draft = fakeDraft({ ready: false, loadError: "daemon unreachable" });
+    const { container } = render(<TaskHeader task={task()} draft={draft} />);
+    expect(container.querySelector(".draft-state")).toBeNull(); // reading needs no baseline: no noise
+    fireEvent.click(container.querySelector("button.task-title-trigger") as HTMLButtonElement);
+    await tick();
+    expect(draft.calls.reload).toBe(1);
+    const state = container.querySelector(".draft-state");
+    expect(state?.getAttribute("role")).toBe("alert");
+    expect(state?.textContent ?? "").toContain("daemon unreachable");
+    const retry = container.querySelector<HTMLButtonElement>("button.draft-retry");
+    if (!retry) throw new Error("expected Retry");
+    fireEvent.click(retry);
+    expect(draft.calls.reload).toBe(2);
+    expect(container.querySelector("textarea.title-input")).toBeNull();
   });
 
   test("editing a clamped title shows the whole title in the textarea with no clamp in the DOM", async () => {

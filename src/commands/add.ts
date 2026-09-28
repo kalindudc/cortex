@@ -1,6 +1,7 @@
 import { defineCommand } from "citty";
-import { Store, validateAuthorTag, validateTagName, type Task, type TaskStatus } from "../store.ts";
-import { Client, daemonUrl } from "../client.ts";
+import type { CreateTaskRequest } from "../contracts.ts";
+import { withClient } from "../daemon.ts";
+import { validateAuthorTag, validateTagName, type Task, type TaskStatus } from "../store.ts";
 import { emitError, emitOk, resolveBody } from "../output.ts";
 
 /** Parse a comma-separated tag list and validate each name. Empty/blank entries
@@ -104,43 +105,24 @@ export default defineCommand({
         emitError(json, e);
       }
     }
-    const payload = {
+    // ONE create request: tags and the optional `created` attribution row
+    // commit in the task's own transaction (plan @400 N9), through the
+    // verified daemon or, without one, the same handler in-process.
+    const payload: CreateTaskRequest = {
       title: args.title,
       lane: args.lane,
       body,
       ...(args.priority !== undefined ? { priority: parsePriority(args.priority) } : {}),
       ...(args.status ? { status: args.status as TaskStatus } : {}),
+      ...(tagNames.length > 0 ? { tags: tagNames } : {}),
+      ...(author !== undefined ? { author } : {}),
     };
-    const url = daemonUrl();
-    if (url) {
-      try {
-        let task = (await Client.addTask(url, payload)) as Task;
-        if (tagNames.length > 0) {
-          task = (await Client.setTaskTags(url, task.id, tagNames)) as Task;
-        }
-        if (author !== undefined) {
-          await Client.addUpdate(url, task.id, { author, summary: "created" });
-        }
-        emitOk(json, task, `[${task.id}] ${task.title}`);
-        return;
-      } catch (err) {
-        emitError(json, err);
-      }
-    }
-    const store = Store.open();
+    let task: Task;
     try {
-      let task = store.addTask(payload);
-      if (tagNames.length > 0) {
-        task = store.setTaskTags(task.id, tagNames);
-      }
-      if (author !== undefined) {
-        store.addUpdate({ task_id: task.id, author, summary: "created" });
-      }
-      emitOk(json, task, `[${task.id}] ${task.title}`);
+      task = await withClient(client => client.addTask(payload));
     } catch (err) {
       emitError(json, err);
-    } finally {
-      store.close();
     }
+    emitOk(json, task, `[${task.id}] ${task.title}`);
   },
 });

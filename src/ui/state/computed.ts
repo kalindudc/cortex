@@ -1,16 +1,25 @@
 // state/computed.ts — Derived values over signals.ts.
 //
-// Pure read-from-signals computations. No side effects.
+// Pure read-from-signals computations. No side effects. The derivations
+// themselves live in lib/taskView.ts (pure functions, shared with the
+// terminal workspace); this module only wires them to the signals.
 
 import { computed, type ReadonlySignal } from "@preact/signals";
 import type { Task, Update } from "../api/types.ts";
 import { tasks, filters, selectedId, showAllTasks, updates, workspaceQuery } from "./signals.ts";
-import { searchTasks, type TaskSearchResult } from "../lib/fuzzy.ts";
+import type { TaskSearchResult } from "../lib/fuzzy.ts";
+import {
+  UNTAGGED,
+  filterTasks,
+  gateDone,
+  includesDone,
+  orderTasks,
+  pickActiveTask,
+  searchPool,
+} from "../lib/taskView.ts";
 
-// Sentinel value for "filter to untagged tasks". Picked to be collision-free
-// against TAG_NAME_RE (/^[a-z0-9_@-]{1,32}$/, src/store.ts:55) — the null
-// byte cannot appear in a real tag name, so equality checks are safe.
-export const UNTAGGED = "\u0000untagged";
+// The "filter to untagged tasks" sentinel (defined in lib/taskView.ts).
+export { UNTAGGED };
 
 // Full-pool search results for the workspace query (W3). Memoized by the
 // computed: recomputes ONLY when tasks or the query change — structured
@@ -19,11 +28,9 @@ export const UNTAGGED = "\u0000untagged";
 // resolution (fuzzy.ts falls back to substring when no exact tag exists in
 // the searched pool) behaves identically whatever lane/status is selected.
 // null = empty query = no search restriction (distinct from "no matches").
-const searchResults: ReadonlySignal<TaskSearchResult[] | null> = computed(() => {
-  const q = workspaceQuery.value.trim();
-  if (!q) return null;
-  return searchTasks(tasks.value, q);
-});
+const searchResults: ReadonlySignal<TaskSearchResult[] | null> = computed(() =>
+  searchPool(tasks.value, workspaceQuery.value),
+);
 
 // Composed task filter over the workspace query + unified `filters` signal:
 //   query  — membership in the full-pool search results (AND)
@@ -33,42 +40,22 @@ const searchResults: ReadonlySignal<TaskSearchResult[] | null> = computed(() => 
 //            that tag, OR the entry is the UNTAGGED sentinel and the task
 //            has zero tags. Empty array = no tag filter.
 // Any null/empty slot is a no-op. Output preserves server (priority) order.
-export const filteredTasks: ReadonlySignal<Task[]> = computed(() => {
-  const { status, lane, tag } = filters.value;
-  let out = tasks.value;
-  const results = searchResults.value;
-  if (results != null) {
-    const matched = new Set(results.map(r => r.task.id));
-    out = out.filter(t => matched.has(t.id));
-  }
-  if (status) out = out.filter(t => t.status === status);
-  if (lane) out = out.filter(t => t.lane === lane);
-  if (tag.length > 0) {
-    out = out.filter(t => {
-      const taskTags = Array.isArray(t.tags) ? t.tags : [];
-      // Match if any selected tag is present on the task, OR if UNTAGGED is
-      // selected and the task has no tags at all.
-      return tag.some(sel => (sel === UNTAGGED ? taskTags.length === 0 : taskTags.includes(sel)));
-    });
-  }
-  return out;
-});
+export const filteredTasks: ReadonlySignal<Task[]> = computed(() =>
+  filterTasks(tasks.value, searchResults.value, filters.value),
+);
 
 // Done-view exception (W4): the include-done gate is bypassed while the
 // status filter IS "done" — selecting the Done view must show done tasks
 // regardless of the eye toggle. Everywhere else showAllTasks keeps its
 // meaning. Shared by visibleTasks and the activeTask fallback so the
 // sidebar list and the default selection can never disagree.
-const includeDone: ReadonlySignal<boolean> = computed(() => showAllTasks.value || filters.value.status === "done");
+const includeDone: ReadonlySignal<boolean> = computed(() => includesDone(showAllTasks.value, filters.value));
 
 // Composed with the include-done gate above: when hidden, done tasks are
 // filtered out. Single source of truth for "what the user actually sees" —
 // consumed by the task list, the StatusBar shown count and the display
 // ordering below, so all stay in lockstep.
-export const visibleTasks: ReadonlySignal<Task[]> = computed(() => {
-  const list = filteredTasks.value;
-  return includeDone.value ? list : list.filter(t => t.status !== "done");
-});
+export const visibleTasks: ReadonlySignal<Task[]> = computed(() => gateDone(filteredTasks.value, includeDone.value));
 
 // Display order for the task list and Next/Previous cycling (W4):
 //   empty query    → natural title order (numeric-aware, so task-2 sorts
@@ -78,15 +65,9 @@ export const visibleTasks: ReadonlySignal<Task[]> = computed(() => {
 //                    (score descending).
 // activeTask's priority FALLBACK intentionally does NOT consume this — it
 // keeps the server's priority order via filteredTasks.
-export const orderedVisibleTasks: ReadonlySignal<Task[]> = computed(() => {
-  const list = visibleTasks.value;
-  const results = searchResults.value;
-  if (results == null) {
-    return [...list].sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: "base" }));
-  }
-  const visibleIds = new Set(list.map(t => t.id));
-  return results.filter(r => visibleIds.has(r.task.id)).map(r => r.task);
-});
+export const orderedVisibleTasks: ReadonlySignal<Task[]> = computed(() =>
+  orderTasks(visibleTasks.value, searchResults.value),
+);
 
 // Legacy alias retained while call sites migrate. Delete once nothing
 // imports tasksInLane (search src/ for remaining references after the
@@ -103,20 +84,11 @@ export const activeTask: ReadonlySignal<Task | null> = computed(() => {
   //   2. The priority fallback applies the showAllTasks gate so a lane of
   //      only-done tasks (with no selection) doesn't surface one through
   //      the back door even though the sidebar hides it.
-  const base = filteredTasks.value;
-  if (selectedId.value != null) {
-    // Filter governs the sidebar LIST only — the right-pane active task
-    // is invariant under filter changes. Look up against the UNFILTERED
-    // pool so a lane/status/tag filter that excludes the active task does
-    // NOT yank the user onto a different one. The priority-fallback branch
-    // below (selectedId == null) still operates over the filtered+gated
-    // view to honor "no selection → top of current view".
-    const t = tasks.value.find(x => x.id === selectedId.value);
-    if (t) return t;
-  }
-  const list = includeDone.value ? base : base.filter(t => t.status !== "done");
-  // Fall back to the highest-priority open task in the current view.
-  return list.find(t => t.status !== "done") ?? list[0] ?? null;
+  // Filter governs the sidebar LIST only — the right-pane active task is
+  // invariant under filter changes (pickActiveTask looks the selection up
+  // in the UNFILTERED pool); the fallback falls to the highest-priority
+  // open task of the filtered+gated view ("no selection → top of view").
+  return pickActiveTask(tasks.value, filteredTasks.value, selectedId.value, includeDone.value);
 });
 
 export const inboxList: ReadonlySignal<Update[]> = computed(() => {

@@ -165,8 +165,9 @@ describe("SidebarPane", () => {
     await new Promise(r => setTimeout(r, 0));
     await new Promise(r => setTimeout(r, 0));
     expect(addTaskMock).toHaveBeenCalledTimes(1);
-    expect(editTaskMock).toHaveBeenCalledTimes(1);
-    expect(editTaskMock).toHaveBeenCalledWith(42, { title: "untitled-42" });
+    // One atomic create names it untitled-<id> (plan @400 Task 9): no follow-up PATCH.
+    expect(addTaskMock).toHaveBeenCalledWith({ untitled: true, lane: "now" });
+    expect(editTaskMock).not.toHaveBeenCalled();
     expect(selectedId.value).toBe(42);
   });
 

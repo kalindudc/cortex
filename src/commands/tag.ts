@@ -1,11 +1,13 @@
 import { defineCommand } from "citty";
-import { Store, validateTagName, type Tag } from "../store.ts";
-import { Client, daemonUrl } from "../client.ts";
+import type { TagWithCount } from "../contracts.ts";
+import { withClient } from "../daemon.ts";
+import { validateTagName, type Tag } from "../store.ts";
 import { emitError, emitOk } from "../output.ts";
 
 /**
  * `cortex tag` mirrors `cortex lane`: a flat add | ls | edit | rm subcommand
- * surface, dual-path daemon-or-Store routing, and a single chokepoint
+ * surface, withClient routing (the verified daemon, or the same handlers
+ * in-process while owning the database), and a single chokepoint
  * (validateTagName) for input validation. Tags are auto-created on first
  * reference via `cortex add -t a,b` / `cortex edit --add-tag x`; this
  * subcommand exists primarily so the user can pre-create a tag with a
@@ -47,25 +49,13 @@ const add = defineCommand({
       emitError(json, e);
     }
     const payload = { name, color: args.color || null };
-    const url = daemonUrl();
-    if (url) {
-      try {
-        const tag = (await Client.addTag(url, payload)) as Tag;
-        emitOk(json, tag, `✓ tag ${tag.name} created`);
-        return;
-      } catch (err) {
-        emitError(json, err);
-      }
-    }
-    const store = Store.open();
+    let tag: Tag;
     try {
-      const tag = store.addTag(payload);
-      emitOk(json, tag, `✓ tag ${tag.name} created`);
+      tag = await withClient(client => client.addTag(payload));
     } catch (err) {
       emitError(json, err);
-    } finally {
-      store.close();
     }
+    emitOk(json, tag, `✓ tag ${tag.name} created`);
   },
 });
 
@@ -79,22 +69,12 @@ const ls = defineCommand({
     },
   },
   async run({ args }) {
-    const url = daemonUrl();
-    let tags: (Tag & { task_count: number })[];
-    if (url) {
-      try {
-        tags = (await Client.listTags(url)) as (Tag & { task_count: number })[];
-      } catch (err) {
-        console.error(`error: ${(err as Error).message}`);
-        process.exit(1);
-      }
-    } else {
-      const store = Store.open();
-      try {
-        tags = store.listTags();
-      } finally {
-        store.close();
-      }
+    let tags: TagWithCount[];
+    try {
+      tags = await withClient(client => client.tags());
+    } catch (err) {
+      console.error(`error: ${(err as Error).message}`);
+      process.exit(1);
     }
     if (args.json) {
       console.log(JSON.stringify(tags));
@@ -149,25 +129,13 @@ const edit = defineCommand({
     if (Object.keys(fields).length === 0) {
       emitError(json, new Error("provide at least one of --color, --rename"));
     }
-    const url = daemonUrl();
-    if (url) {
-      try {
-        const tag = (await Client.editTag(url, args.name, fields)) as Tag;
-        emitOk(json, tag, `✓ tag ${tag.name} updated`);
-        return;
-      } catch (err) {
-        emitError(json, err);
-      }
-    }
-    const store = Store.open();
+    let tag: Tag;
     try {
-      const tag = store.editTag(args.name, fields);
-      emitOk(json, tag, `✓ tag ${tag.name} updated`);
+      tag = await withClient(client => client.editTag(args.name, fields));
     } catch (err) {
       emitError(json, err);
-    } finally {
-      store.close();
     }
+    emitOk(json, tag, `✓ tag ${tag.name} updated`);
   },
 });
 
@@ -192,25 +160,12 @@ const rm = defineCommand({
   },
   async run({ args }) {
     const json = args.json;
-    const url = daemonUrl();
-    if (url) {
-      try {
-        await Client.removeTag(url, args.name, args.force);
-        emitOk(json, { ok: true, name: args.name }, `✓ tag ${args.name} removed`);
-        return;
-      } catch (err) {
-        emitError(json, err);
-      }
-    }
-    const store = Store.open();
     try {
-      store.removeTag(args.name, { force: args.force });
-      emitOk(json, { ok: true, name: args.name }, `✓ tag ${args.name} removed`);
+      await withClient(client => client.delTag(args.name, args.force));
     } catch (err) {
       emitError(json, err);
-    } finally {
-      store.close();
     }
+    emitOk(json, { ok: true, name: args.name }, `✓ tag ${args.name} removed`);
   },
 });
 

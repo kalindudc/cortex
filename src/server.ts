@@ -1,11 +1,44 @@
-import { Hono, type Context } from "hono";
+import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { streamSSE } from "hono/streaming";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { type Store, validateAuthorTag, validateTagName, BodySearchError, type TaskStatus } from "./store.ts";
+import {
+  type AddTaskInput,
+  BodySearchError,
+  ConflictError,
+  MutationReuseError,
+  mutationDigest,
+  type ResourceKind,
+  type StatusChange,
+  type Store,
+  type Task,
+  type TaskStatus,
+  validateAuthorTag,
+  validateTagName,
+  WriteGuardError,
+} from "./store.ts";
 import { backupNotificationInput, createBackup, defaultBackupPath } from "./backup.ts";
-import { emit, subscribe, type CortexEvent } from "./events.ts";
+import { createEventPublisher, type EventKind, type EventPublisher } from "./events.ts";
+import { CONTROL_PATHS, INSTANCE_HEADER, PREFER_VERSIONED } from "./api.ts";
+import { createPreviewStore, type PreviewStore, registerPreviewRoutes } from "./preview.ts";
+import type {
+  BlockedTransition,
+  DaemonIdentity,
+  EnableWebRequest,
+  HealthResponse,
+  LaneStateSnapshot,
+  NotificationChange,
+  PostUpdateResult,
+  ReadyPayload,
+  ResyncPayload,
+  TagStateSnapshot,
+  TaskStateSnapshot,
+  TaskWriteResult,
+  Versions,
+  WorkspaceSnapshot,
+  WriteGuard,
+} from "./contracts.ts";
 import pkg from "../package.json" with { type: "json" };
 // `with { type: "file" }` returns a string PATH (not file contents) that
 // `bun build --compile` rewrites to point at the embedded blob. Read the
@@ -87,7 +120,110 @@ const VERSION = pkg.version;
 const isStatus = (v: string): v is TaskStatus =>
   v === "draft" || v === "open" || v === "review" || v === "blocked" || v === "done";
 
-export function buildApp(store: Store): Hono {
+// ---------- daemon runtime (plan @400 N11/N12) ----------
+
+/**
+ * Which trusted listener serves an app: the private Unix socket ("ipc") or
+ * the loopback TCP listener the browser uses. Set by the code that bound the
+ * listener, never derived from a request (no header can change it). Only IPC
+ * apps get the control routes; an app built without a runtime is
+ * "loopback", the least-trusted kind.
+ */
+export type ListenerKind = "ipc" | "loopback";
+
+/**
+ * What the IPC control routes may do to the daemon hosting this app
+ * (`cortex serve` supplies it; in-process apps have none).
+ */
+export interface DaemonControl {
+  /** Begin the daemon's graceful shutdown (called after the 202 has been sent). */
+  shutdown(): void;
+  /** Start the loopback dashboard listener, or report the running one; resolves with the updated identity. */
+  enableWeb(request: EnableWebRequest): Promise<DaemonIdentity>;
+}
+
+/** Delay between answering a shutdown request and starting it, so the 202 leaves before listeners close. */
+const SHUTDOWN_DELAY_MS = 25;
+
+/**
+ * RFC 1123 label-or-FQDN shape for a printed dashboard hostname: ASCII
+ * letters, digits, dots and hyphens, starting and ending alphanumeric, at
+ * most 253 characters. No scheme, port, path or whitespace.
+ */
+export function isValidHostname(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= 253 &&
+    /^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/.test(value)
+  );
+}
+
+/** Per-connection SSE bounds: past either queue bound a client gets one `resync` instead of more frames. */
+export type StreamLimits = { maxQueuedFrames: number; maxQueuedChars: number; heartbeatMs: number };
+
+/**
+ * Everything a daemon's apps share beyond the Store: its published identity
+ * (null until published, or for in-process use; it may gain webUrl later, so
+ * it is read per request), the ONE event publisher every listener's app
+ * publishes to and streams from, the ONE rich-preview store (created over
+ * IPC, read on loopback: src/preview.ts), and this app's listener kind.
+ */
+export interface DaemonRuntime {
+  identity: DaemonIdentity | null;
+  readonly events: EventPublisher;
+  readonly previews: PreviewStore;
+  readonly listener: ListenerKind;
+  readonly stream: StreamLimits;
+  /** Control over the hosting daemon; only an "ipc" app exposes it (as the control routes). */
+  readonly control: DaemonControl | null;
+}
+
+export const DEFAULT_STREAM_LIMITS: StreamLimits = {
+  maxQueuedFrames: 1024,
+  maxQueuedChars: 8 * 1024 * 1024,
+  // Below Bun.serve's default idleTimeout (10 s), which the listeners keep for ordinary
+  // requests: a longer gap let Bun close every idle stream (clients saw a spurious reconnect).
+  heartbeatMs: 5_000,
+};
+
+export function createRuntime(
+  options: {
+    identity?: DaemonIdentity | null;
+    events?: EventPublisher;
+    previews?: PreviewStore;
+    listener?: ListenerKind;
+    stream?: Partial<StreamLimits>;
+    control?: DaemonControl | null;
+  } = {},
+): DaemonRuntime {
+  return {
+    identity: options.identity ?? null,
+    events: options.events ?? createEventPublisher(),
+    previews: options.previews ?? createPreviewStore(),
+    listener: options.listener ?? "loopback",
+    stream: { ...DEFAULT_STREAM_LIMITS, ...options.stream },
+    control: options.control ?? null,
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** True when a `Prefer` header lists the cortex-versioned preference (RFC 7240 token, any parameters). */
+function prefersVersioned(header: string | undefined): boolean {
+  if (!header) return false;
+  return header.split(",").some(token => (token.split(/[;=]/)[0] ?? "").trim().toLowerCase() === PREFER_VERSIONED);
+}
+
+/** Remove the transport-level `guard` member, leaving the request's own fields. */
+function splitGuard<T extends Record<string, unknown>>(body: T): { guard: unknown; fields: Omit<T, "guard"> } {
+  const { guard, ...fields } = body;
+  return { guard, fields };
+}
+
+export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime()): Hono {
   const app = new Hono();
 
   // Shared by GET / and GET /task/:id — the SPA owns its own routing in the
@@ -107,6 +243,9 @@ export function buildApp(store: Store): Hono {
   };
   app.get("/", serveShell);
   app.get("/task/:id", serveShell);
+  // The rich draft preview page (src/ui/components/Preview.tsx) boots from the
+  // same shell; the page reads /api/preview/:token itself (src/preview.ts).
+  app.get("/preview/:token", serveShell);
 
   // Static UI modules — CSS + ESM JS modules. Same no-store policy so the
   // browser always picks up the latest module graph after a reload. We use
@@ -119,13 +258,218 @@ export function buildApp(store: Store): Hono {
     });
   }
 
-  app.get("/api/health", c => c.json({ ok: true, version: VERSION }));
+  const events = runtime.events;
+  const publish = (kind: EventKind, payload: unknown): void => {
+    events.publish(kind, payload);
+  };
+
+  /** Current versions of a live resource, read inside the write's transaction. */
+  const versionsOf = (kind: ResourceKind, key: number | string): Versions => {
+    const v = store.versions(kind, key);
+    if (!v) throw new Error(`${kind} ${key} vanished inside its own write`);
+    return v;
+  };
+
+  /**
+   * Run one write so its result can be answered consistently: with a guard
+   * mutationId through the receipt table (looked up BEFORE any guard or
+   * existence check; a replay writes nothing and returns the stored result),
+   * otherwise in one transaction. `write` returns everything the response
+   * and the post-commit publish need, as JSON-serializable data.
+   */
+  const mutate = <R>(
+    guard: unknown,
+    operation: string,
+    request: unknown,
+    write: () => R,
+  ): { result: R; replayed: boolean } => {
+    const mutationId = isRecord(guard) ? guard.mutationId : undefined;
+    if (mutationId === undefined) return { result: store.atomically(write), replayed: false };
+    const expected = isRecord(guard) ? guard.expected : undefined;
+    // runIdempotent validates the id at runtime (a non-string is a WriteGuardError, i.e. 400).
+    const { value, replayed } = store.runIdempotent(
+      mutationId as string,
+      mutationDigest(operation, { request, expected }),
+      write,
+    );
+    return { result: value, replayed };
+  };
+
+  /** Legacy JSON by default; the versioned DTO when the request carried `Prefer: cortex-versioned`. */
+  const answer = (c: Context, legacy: unknown, versioned: unknown, status: 200 | 201 = 200): Response => {
+    if (prefersVersioned(c.req.header("prefer"))) {
+      c.header("Preference-Applied", PREFER_VERSIONED);
+      return c.json(versioned, status);
+    }
+    return c.json(legacy, status);
+  };
+
+  /** Structured answers for the guard/receipt errors; null for anything else (legacy mapping applies). */
+  const guardFailure = (c: Context, err: unknown): Response | null => {
+    if (err instanceof ConflictError) {
+      return c.json(
+        {
+          error: err.message,
+          code: err.code,
+          kind: err.kind,
+          key: err.key,
+          mismatches: err.mismatches,
+          current: err.current,
+        },
+        412,
+      );
+    }
+    if (err instanceof WriteGuardError) return c.json({ error: err.message, code: "invalid_guard" }, 400);
+    if (err instanceof MutationReuseError) {
+      return c.json({ error: err.message, code: "mutation_reused", mutationId: err.mutationId }, 409);
+    }
+    return null;
+  };
+
+  /** Legacy routes treat an unparseable body as `{}`; kept for their unchanged error paths. */
+  const lenientBody = async (c: Context): Promise<Record<string, unknown>> => {
+    const body: unknown = await c.req.json().catch(() => ({}));
+    return isRecord(body) ? body : {};
+  };
+
+  /**
+   * DELETE bodies are optional (`{ guard }`), but a body that is present and
+   * malformed must not silently turn a guarded delete into an unguarded one.
+   */
+  const deleteBody = async (c: Context): Promise<Record<string, unknown> | Response> => {
+    const text = await c.req.text();
+    if (text.trim() === "") return {};
+    try {
+      const body: unknown = JSON.parse(text);
+      if (isRecord(body)) return body;
+    } catch {
+      /* answered below */
+    }
+    return c.json({ error: "DELETE body must be a JSON object such as { guard }", code: "invalid_guard" }, 400);
+  };
+
+  /**
+   * Publish a committed status change: its `status → x` audit row (as
+   * `update.posted`, like any post, so loaded activity threads show it), its
+   * notification, the task, and an actual transition into blocked. Callers
+   * skip it on a deduplicated replay.
+   */
+  const publishStatus = (change: StatusChange, author: string): void => {
+    publish("update.posted", change.audit);
+    if (change.notification) publish("notification.added", change.notification);
+    publish("task.updated", change.task);
+    if (change.task.status === "blocked" && change.previous !== "blocked") {
+      const transition: BlockedTransition = { task: change.task, previous: change.previous, author };
+      publish("task.blocked", transition);
+    }
+  };
+
+  // Bind requests to the instance a native client verified (N11). A request
+  // without the header is unbound (browser, legacy CLI).
+  const checkInstance: MiddlewareHandler = async (c, next) => {
+    const expected = c.req.header(INSTANCE_HEADER);
+    if (expected !== undefined && expected !== runtime.identity?.instanceId) {
+      return c.json(
+        {
+          error: `this daemon is not instance ${expected}; rediscover the daemon and retry`,
+          code: "instance_mismatch",
+        },
+        421,
+      );
+    }
+    await next();
+  };
+  app.use("/api/*", checkInstance);
+  app.use("/events", checkInstance);
+
+  // A published daemon names itself, which is how clients tell it from a
+  // legacy (pre-identity) daemon and verify the instance behind a socket.
+  app.get("/api/health", c => {
+    const health: HealthResponse = { ok: true, version: VERSION };
+    if (runtime.identity !== null) health.identity = runtime.identity;
+    return c.json(health);
+  });
+
+  // ---------- control (plan @400 N5/N11): IPC listener only ----------
+  // Registered only when the code that bound this app's listener said it is
+  // the private socket AND supplied control; a loopback app never has these
+  // routes, whatever a request's headers claim. checkInstance (above) already
+  // rejects a different instance; control additionally requires the header,
+  // so a request can never stop or reconfigure an instance it did not verify.
+  if (runtime.listener === "ipc" && runtime.control !== null) {
+    const control = runtime.control;
+    const requireInstance: MiddlewareHandler = async (c, next) => {
+      if (c.req.header(INSTANCE_HEADER) === undefined) {
+        return c.json(
+          { error: `control requests must name the daemon instance (${INSTANCE_HEADER})`, code: "instance_required" },
+          400,
+        );
+      }
+      await next();
+    };
+
+    app.post(CONTROL_PATHS.shutdown, requireInstance, c => {
+      setTimeout(() => control.shutdown(), SHUTDOWN_DELAY_MS);
+      return c.json({ ok: true, instanceId: runtime.identity?.instanceId ?? null }, 202);
+    });
+
+    app.post(CONTROL_PATHS.web, requireInstance, async c => {
+      const text = await c.req.text();
+      let body: unknown = {};
+      if (text.trim() !== "") {
+        try {
+          body = JSON.parse(text);
+        } catch {
+          return c.json({ error: "enable-web body must be JSON such as { port, host }" }, 400);
+        }
+      }
+      if (!isRecord(body)) return c.json({ error: "enable-web body must be a JSON object" }, 400);
+      const request: EnableWebRequest = {};
+      if (body.port !== undefined) {
+        if (typeof body.port !== "number" || !Number.isInteger(body.port) || body.port < 0 || body.port > 65535) {
+          return c.json({ error: "port must be an integer 0-65535" }, 400);
+        }
+        request.port = body.port;
+      }
+      if (body.host !== undefined) {
+        if (!isValidHostname(body.host)) {
+          return c.json({ error: "host must be a valid hostname (RFC 1123 form, no port, no scheme)" }, 400);
+        }
+        request.host = body.host;
+      }
+      try {
+        return c.json({ identity: await control.enableWeb(request) });
+      } catch (err) {
+        return c.json({ error: (err as Error).message, code: "web_unavailable" }, 409);
+      }
+    });
+  }
+
+  // ---------- rich draft previews (plan @400 N21): create over IPC only, read by exact token ----------
+  registerPreviewRoutes(app, runtime);
 
   // UI bootstraps the default author for the post-update form from this.
   app.get("/api/me", c => c.json({ author: resolveAuthor() }));
 
   // UI checks for pending migrations on boot so it can show a banner.
   app.get("/api/migrations", c => c.json({ pending: store.pendingMigrations() }));
+
+  // ---------- snapshots (N11/N12) ----------
+  // Store reads are synchronous and every write publishes in the same turn
+  // it commits, so the cursor read here covers exactly the writes this
+  // snapshot can see: apply only stream events after it.
+  app.get("/api/workspace", c => {
+    const snapshot = store.workspace();
+    const body: WorkspaceSnapshot = { identity: runtime.identity, cursor: events.cursor(), ...snapshot };
+    return c.json(body);
+  });
+
+  app.get("/api/tasks/:id/state", c => {
+    const state = store.taskState(Number(c.req.param("id")));
+    if (!state) return c.json({ error: "not found" }, 404);
+    const body: TaskStateSnapshot = { ...state, cursor: events.cursor() };
+    return c.json(body);
+  });
 
   // ---------- tasks ----------
   app.get("/api/tasks", c => {
@@ -139,24 +483,55 @@ export function buildApp(store: Store): Hono {
       else if (searchArg.startsWith("#")) searchOpts.tagQuery = searchArg.slice(1).trim();
       else searchOpts.search = searchArg;
     }
-    return c.json(store.listTasks({ lane, status, ...searchOpts }));
+    // `tags=a,b`: tasks carrying EVERY listed tag (the CLI's `ls -t`), validated names.
+    let tags: string[] | undefined;
+    const tagsArg = c.req.query("tags");
+    if (tagsArg) {
+      try {
+        tags = tagsArg
+          .split(",")
+          .map(s => s.trim())
+          .filter(Boolean)
+          .map(n => validateTagName(n));
+      } catch (e) {
+        return c.json({ error: (e as Error).message }, 400);
+      }
+    }
+    return c.json(store.listTasks({ lane, status, tags, ...searchOpts }));
   });
 
   app.post("/api/tasks", async c => {
-    const body = (await c.req.json().catch(() => ({}))) as {
-      title?: string;
-      lane?: string;
-      body?: string | null;
-      priority?: number | null;
-      status?: TaskStatus;
-      tags?: string[];
-    };
-    if (!body.title || typeof body.title !== "string") {
+    const { guard, fields: body } = splitGuard(
+      (await lenientBody(c)) as {
+        title?: string;
+        untitled?: unknown;
+        lane?: string;
+        body?: string | null;
+        priority?: number | null;
+        status?: TaskStatus;
+        tags?: string[];
+        author?: unknown;
+        guard?: unknown;
+      },
+    );
+    if (body.untitled !== undefined && typeof body.untitled !== "boolean") {
+      return c.json({ error: "untitled must be a boolean" }, 400);
+    }
+    const untitled = body.untitled === true;
+    if (untitled && body.title !== undefined) {
+      return c.json({ error: "an untitled create takes its title from the new id; omit title" }, 400);
+    }
+    const title = body.title;
+    if (!untitled && (!title || typeof title !== "string")) {
       return c.json({ error: "title is required" }, 400);
     }
-    // Validate tag names BEFORE addTask so a malformed tag short-circuits
-    // with a 400 (not a 500) and never persists a task we'd then have to
-    // roll back.
+    // A bad status would otherwise reach the CHECK constraint as a 500; null keeps meaning "default".
+    const statusArg: unknown = body.status;
+    if (statusArg !== undefined && statusArg !== null && !(typeof statusArg === "string" && isStatus(statusArg))) {
+      return c.json({ error: "invalid status" }, 400);
+    }
+    // Validate tag names BEFORE the write so a malformed tag short-circuits
+    // with a 400 (not a 500) and never persists a task.
     if (Array.isArray(body.tags)) {
       try {
         body.tags.forEach(n => {
@@ -166,24 +541,41 @@ export function buildApp(store: Store): Hono {
         return c.json({ error: (e as Error).message }, 400);
       }
     }
-    let task = store.addTask(body as { title: string });
-    if (Array.isArray(body.tags) && body.tags.length > 0) {
-      task = store.setTaskTags(task.id, body.tags);
+    let author: string | undefined;
+    if (body.author !== undefined) {
+      try {
+        if (typeof body.author !== "string") throw new Error("author must be a string");
+        author = validateAuthorTag(body.author);
+        if (!author) throw new Error("author cannot be empty");
+      } catch (e) {
+        return c.json({ error: (e as Error).message }, 400);
+      }
     }
-    emit({ kind: "task.added", payload: task, ts: Date.now() });
-    // Persist a bell-drawer notification so the row survives a dashboard
-    // reload (the previous in-memory ring lost everything on refresh).
-    // `status` snapshots the value the task was created with; the SSE
-    // payload IS the row so the drawer can prepend it without a refetch.
-    const notif = store.addNotification({
-      task_id: task.id,
-      author: resolveAuthor(),
-      status: task.status,
-      title: `[${task.id}] ${task.title}`,
-      message: "created",
-    });
-    emit({ kind: "notification.added", payload: notif, ts: Date.now() });
-    return c.json(task, 201);
+    const fields = { lane: body.lane, body: body.body, priority: body.priority, status: body.status, tags: body.tags };
+    const input: AddTaskInput = untitled
+      ? { ...fields, untitled: true, author }
+      : { ...fields, title: title as string, author };
+    try {
+      // The bell-drawer `created` row commits with the task (N9); its author
+      // stays the server-side default, as before. Resolved outside the
+      // transaction: the first call may spawn `git config`.
+      const notification = { author: resolveAuthor() };
+      const { result, replayed } = mutate(guard, "task.create", { body }, () => {
+        const created = store.createTask({ ...input, notification }, guard as WriteGuard);
+        return { ...created, versions: versionsOf("task", created.task.id) };
+      });
+      if (!replayed) {
+        publish("task.added", result.task);
+        if (result.created) publish("update.posted", result.created);
+        if (result.notification) publish("notification.added", result.notification);
+      }
+      const dto: TaskWriteResult = { task: result.task, versions: result.versions, replayed };
+      return answer(c, result.task, dto, 201);
+    } catch (err) {
+      const failure = guardFailure(c, err);
+      if (failure) return failure;
+      throw err;
+    }
   });
 
   app.get("/api/tasks/:id", c => {
@@ -205,13 +597,16 @@ export function buildApp(store: Store): Hono {
 
   app.patch("/api/tasks/:id", async c => {
     const id = Number(c.req.param("id"));
-    const fields = (await c.req.json().catch(() => ({}))) as {
-      title?: string;
-      body?: string | null;
-      bodySearch?: string;
-      bodyReplace?: string;
-      priority?: number | null;
-    };
+    const { guard, fields } = splitGuard(
+      (await lenientBody(c)) as {
+        title?: string;
+        body?: string | null;
+        bodySearch?: string;
+        bodyReplace?: string;
+        priority?: number | null;
+        guard?: unknown;
+      },
+    );
     // Validate the bodySearch / bodyReplace combo at the API boundary so
     // agents get a clean 400 (not a generic 500) when they misuse the
     // partial-edit shape. The store ALSO defends against these but
@@ -230,10 +625,15 @@ export function buildApp(store: Store): Hono {
       return c.json({ error: "bodySearch cannot be empty" }, 400);
     }
     try {
-      const task = store.editTask(id, fields);
-      emit({ kind: "task.updated", payload: task, ts: Date.now() });
-      return c.json(task);
+      const { result, replayed } = mutate(guard, "task.edit", { id, body: fields }, () => {
+        const task = store.editTask(id, fields, guard as WriteGuard);
+        return { task, versions: versionsOf("task", id) };
+      });
+      if (!replayed) publish("task.updated", result.task);
+      return answer(c, result.task, { ...result, replayed });
     } catch (err) {
+      const failure = guardFailure(c, err);
+      if (failure) return failure;
       // Anchor-based partial edits surface as 409 Conflict so agents can
       // distinguish "my anchor is stale, re-read and retry" from "the task
       // doesn't exist" (404) or "my request is malformed" (400).
@@ -251,20 +651,19 @@ export function buildApp(store: Store): Hono {
 
   app.patch("/api/tasks/:id/status", async c => {
     const id = Number(c.req.param("id"));
-    const body = (await c.req.json().catch(() => ({}))) as {
-      status?: string;
-      author?: string;
-    };
-    if (!body.status || !isStatus(body.status)) {
+    const { guard, fields: body } = splitGuard(
+      (await lenientBody(c)) as { status?: string; author?: string; guard?: unknown },
+    );
+    const status = body.status;
+    if (!status || !isStatus(status)) {
       return c.json({ error: "invalid status" }, 400);
     }
-    // Author attribution for the audit-trail row written inside setStatus.
-    // HTTP path is OPTIONAL: the dashboard never sends an author (the human
-    // is the supervisor, the click IS the attribution), only attributed
-    // CLI calls do (every `cortex update` requires --as <session-id>).
-    // We use that same flag below as the discriminator for whether to
-    // emit a bell-drawer notification — no point pinging the supervisor
-    // about a status change they just clicked themselves.
+    // Author attribution for the audit-trail row. HTTP path is OPTIONAL: the
+    // dashboard never sends an author (the human is the supervisor, the
+    // click IS the attribution), only attributed CLI calls do (every
+    // `cortex update` requires --as <session-id>). That same flag decides
+    // whether the transition persists a bell-drawer notification: no point
+    // pinging the supervisor about a change they just clicked themselves.
     const isAttributed = body.author !== undefined;
     let author: string;
     if (isAttributed) {
@@ -277,61 +676,49 @@ export function buildApp(store: Store): Hono {
       author = resolveAuthor();
     }
     try {
-      // Capture prev BEFORE setStatus mutates the row — we only fire a
-      // notification on an actual status change, mirroring the
-      // dashboard's old client-side `lastStatus` Map at
-      // src/ui/index.tsx:103. The store does its own getTask lookup
-      // inside setStatus; this extra read is the cheapest way to make
-      // the transition decision server-side.
-      const prev = store.getTask(id);
-      const task = store.setStatus(id, body.status, { author });
-      // Only emit a bell-drawer notification when the status change came
-      // from an attributed source (an agent via the CLI). Dashboard
-      // clicks are intentionally silent — the supervisor knows what
-      // they just did, and the in-app row already reflects the change
-      // via the `task.updated` SSE event below. The browser-native
-      // "task blocked" Notification (src/ui/index.tsx) is orthogonal
-      // and continues to fire for every blocked transition regardless
-      // of source.
-      if (isAttributed && prev && prev.status !== task.status) {
-        const notif = store.addNotification({
-          task_id: task.id,
-          author,
-          status: task.status,
-          title: `[${task.id}] ${task.title}`,
-          message: `${prev.status} \u2192 ${task.status}`,
-        });
-        emit({ kind: "notification.added", payload: notif, ts: Date.now() });
-      }
-      emit({ kind: "task.updated", payload: task, ts: Date.now() });
-      return c.json(task);
+      // The notification (attributed, actual change only) commits inside the
+      // status transaction; everything publishes after commit, and nothing on
+      // a deduplicated replay (N9).
+      const { result, replayed } = mutate(guard, "task.status", { id, body }, () => {
+        const change = store.transitionStatus(id, status, { author, notify: isAttributed }, guard as WriteGuard);
+        return { change, versions: versionsOf("task", id) };
+      });
+      if (!replayed) publishStatus(result.change, author);
+      const dto: TaskWriteResult = { task: result.change.task, versions: result.versions, replayed };
+      return answer(c, result.change.task, dto);
     } catch (err) {
+      const failure = guardFailure(c, err);
+      if (failure) return failure;
       return c.json({ error: (err as Error).message }, 404);
     }
   });
 
   app.patch("/api/tasks/:id/lane", async c => {
     const id = Number(c.req.param("id"));
-    const body = (await c.req.json().catch(() => ({}))) as { lane?: string };
-    if (!body.lane || typeof body.lane !== "string") {
+    const { guard, fields: body } = splitGuard((await lenientBody(c)) as { lane?: string; guard?: unknown });
+    const lane = body.lane;
+    if (!lane || typeof lane !== "string") {
       return c.json({ error: "lane is required" }, 400);
     }
     try {
-      const task = store.moveTask(id, body.lane);
-      emit({ kind: "task.updated", payload: task, ts: Date.now() });
-      return c.json(task);
+      const { result, replayed } = mutate(guard, "task.lane", { id, body }, () => {
+        const task = store.moveTask(id, lane, guard as WriteGuard);
+        return { task, versions: versionsOf("task", id) };
+      });
+      if (!replayed) publish("task.updated", result.task);
+      return answer(c, result.task, { ...result, replayed });
     } catch (err) {
+      const failure = guardFailure(c, err);
+      if (failure) return failure;
       return c.json({ error: (err as Error).message }, 400);
     }
   });
 
   app.patch("/api/tasks/:id/tags", async c => {
     const id = Number(c.req.param("id"));
-    const body = (await c.req.json().catch(() => ({}))) as {
-      set?: string[];
-      add?: string[];
-      remove?: string[];
-    };
+    const { guard, fields: body } = splitGuard(
+      (await lenientBody(c)) as { set?: string[]; add?: string[]; remove?: string[]; guard?: unknown },
+    );
     // Exactly one mode per request: keeps the resolution rule trivial and
     // matches the CLI's mutually-exclusive `--set-tags` / `--add-tag` /
     // `--rm-tag` flags.
@@ -340,37 +727,56 @@ export function buildApp(store: Store): Hono {
       return c.json({ error: "exactly one of 'set', 'add', or 'remove' must be provided" }, 400);
     }
     try {
-      let next: string[];
+      let write: () => Task;
       if (Array.isArray(body.set)) {
-        next = body.set.map(n => validateTagName(n));
+        const names = body.set.map(n => validateTagName(n));
+        write = () => store.setTaskTags(id, names, guard as WriteGuard);
       } else {
-        const existing = store.getTask(id);
-        if (!existing) return c.json({ error: `task ${id} not found` }, 404);
-        if (Array.isArray(body.add)) {
-          const adds = body.add.map(n => validateTagName(n));
-          next = Array.from(new Set([...existing.tags, ...adds]));
-        } else {
-          const rms = new Set((body.remove ?? []).map(n => validateTagName(n)));
-          next = existing.tags.filter(n => !rms.has(n));
-        }
+        // add/remove are atomic membership deltas in the Store (no
+        // read-then-replace), so concurrent unrelated tag changes survive.
+        // The task is checked first to keep the legacy 404-before-400 order.
+        const delta = Array.isArray(body.add) ? { add: body.add } : { remove: body.remove };
+        write = () => {
+          if (!store.getTask(id)) throw new Error(`task ${id} not found`);
+          return store.changeTaskTags(id, delta, guard as WriteGuard);
+        };
       }
-      const task = store.setTaskTags(id, next);
-      emit({ kind: "task.updated", payload: task, ts: Date.now() });
-      return c.json(task);
+      const { result, replayed } = mutate(guard, "task.tags", { id, body }, () => {
+        const task = write();
+        return { task, versions: versionsOf("task", id) };
+      });
+      if (!replayed) publish("task.updated", result.task);
+      return answer(c, result.task, { ...result, replayed });
     } catch (err) {
+      const failure = guardFailure(c, err);
+      if (failure) return failure;
       const msg = (err as Error).message;
       const code = msg.includes("not found") ? 404 : 400;
       return c.json({ error: msg }, code);
     }
   });
 
-  app.delete("/api/tasks/:id", c => {
+  app.delete("/api/tasks/:id", async c => {
     const id = Number(c.req.param("id"));
+    const parsed = await deleteBody(c);
+    if (parsed instanceof Response) return parsed;
+    const { guard } = splitGuard(parsed);
     try {
-      store.removeTask(id);
-      emit({ kind: "task.removed", payload: { id }, ts: Date.now() });
-      return c.json({ ok: true });
+      const { result, replayed } = mutate(guard, "task.remove", { id }, () =>
+        store.removeTask(id, guard as WriteGuard),
+      );
+      if (!replayed) {
+        publish("task.removed", { id });
+        // The delete cascaded the task's notifications away.
+        if (result.notifications > 0) {
+          const change: NotificationChange = { action: "task_removed", id: null, task_id: id };
+          publish("notification.changed", change);
+        }
+      }
+      return answer(c, { ok: true }, { ok: true, replayed });
     } catch (err) {
+      const failure = guardFailure(c, err);
+      if (failure) return failure;
       return c.json({ error: (err as Error).message }, 404);
     }
   });
@@ -383,32 +789,64 @@ export function buildApp(store: Store): Hono {
 
   app.post("/api/tasks/:id/updates", async c => {
     const id = Number(c.req.param("id"));
-    const body = (await c.req.json().catch(() => ({}))) as {
-      author?: string;
-      summary?: string;
-      body?: string | null;
-    };
+    const { guard, fields: body } = splitGuard(
+      (await lenientBody(c)) as {
+        author?: string;
+        summary?: string;
+        body?: string | null;
+        status?: unknown;
+        notify?: unknown;
+        guard?: unknown;
+      },
+    );
     if (!body.summary || !body.author) {
       return c.json({ error: "author and summary are required" }, 400);
     }
     // Early HTTP rejection: validate the author tag here so a malformed
-    // dashboard payload never reaches Store.addUpdate (which would also
-    // throw, but a 400 from the route is the user-facing contract).
+    // dashboard payload never reaches the Store (which would also throw, but
+    // a 400 from the route is the user-facing contract).
+    let author: string;
     try {
-      body.author = validateAuthorTag(body.author);
+      author = validateAuthorTag(body.author);
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
     }
+    // Optional status in the SAME transaction as the message (N9). `notify`
+    // marks an attributed agent change: a human's own post never notifies.
+    const status = body.status;
+    if (status !== undefined && (typeof status !== "string" || !isStatus(status))) {
+      return c.json({ error: "invalid status" }, 400);
+    }
+    if (body.notify !== undefined && typeof body.notify !== "boolean") {
+      return c.json({ error: "notify must be a boolean" }, 400);
+    }
+    const summary = body.summary;
+    const notify = body.notify === true;
     try {
-      const update = store.addUpdate({
-        task_id: id,
-        author: body.author,
-        summary: body.summary,
-        body: body.body,
+      const { result, replayed } = mutate(guard, "update.post", { id, body }, () => {
+        const posted = store.postUpdate(
+          { task_id: id, author, summary, body: body.body, status, notify },
+          guard as WriteGuard,
+        );
+        const task = store.getTask(id);
+        if (!task) throw new Error(`task ${id} not found`);
+        return { update: posted.update, change: posted.status, task, versions: versionsOf("task", id) };
       });
-      emit({ kind: "update.posted", payload: update, ts: Date.now() });
-      return c.json(update, 201);
+      if (!replayed) {
+        publish("update.posted", result.update);
+        if (result.change) publishStatus(result.change, author);
+      }
+      const dto: PostUpdateResult = {
+        update: result.update,
+        audit: result.change?.audit ?? null,
+        task: result.task,
+        versions: result.versions,
+        replayed,
+      };
+      return answer(c, result.update, dto, 201);
     } catch (err) {
+      const failure = guardFailure(c, err);
+      if (failure) return failure;
       return c.json({ error: (err as Error).message }, 400);
     }
   });
@@ -428,7 +866,7 @@ export function buildApp(store: Store): Hono {
       const notification = store.addNotification(
         backupNotificationInput({ outPath, bytes, stats: doc.stats, author: resolveAuthor() }),
       );
-      emit({ kind: "notification.added", payload: notification, ts: Date.now() });
+      publish("notification.added", notification);
       return c.json({ outPath, bytes, stats: doc.stats, notification });
     } catch (err) {
       return c.json({ error: (err as Error).message }, 500);
@@ -443,138 +881,191 @@ export function buildApp(store: Store): Hono {
   // ---------- notifications ----------
   // Persisted bell-drawer feed. Read endpoint returns rows newest-first.
   // Mutation endpoints validate :id as a number and return 400 on NaN;
-  // none of these accept a request body. No SSE emit on read/dismiss/
-  // clear — the drawer mutates its local signal optimistically and the
-  // canonical state is re-fetched on the next refresh().
+  // none of these accept a request body. An acknowledgement that changed a
+  // row publishes a `notification.changed` invalidation (N12) so every
+  // other connected client converges; a no-op publishes nothing.
+  const notificationChanged = (action: NotificationChange["action"], id: number | null): void => {
+    const change: NotificationChange = { action, id, task_id: null };
+    publish("notification.changed", change);
+  };
+
   app.get("/api/notifications", c => c.json(store.listNotifications()));
 
   app.patch("/api/notifications/:id/read", c => {
     const id = Number(c.req.param("id"));
     if (!Number.isInteger(id)) return c.json({ error: "invalid id" }, 400);
-    store.markNotificationRead(id);
+    if (store.markNotificationRead(id)) notificationChanged("read", id);
     return c.json({ ok: true });
   });
 
   app.patch("/api/notifications/:id/unread", c => {
     const id = Number(c.req.param("id"));
     if (!Number.isInteger(id)) return c.json({ error: "invalid id" }, 400);
-    store.markNotificationUnread(id);
+    if (store.markNotificationUnread(id)) notificationChanged("unread", id);
     return c.json({ ok: true });
   });
 
   app.post("/api/notifications/read-all", c => {
-    store.markAllNotificationsRead();
+    if (store.markAllNotificationsRead() > 0) notificationChanged("read_all", null);
     return c.json({ ok: true });
   });
 
   app.delete("/api/notifications/:id", c => {
     const id = Number(c.req.param("id"));
     if (!Number.isInteger(id)) return c.json({ error: "invalid id" }, 400);
-    store.dismissNotification(id);
+    if (store.dismissNotification(id)) notificationChanged("dismiss", id);
     return c.json({ ok: true });
   });
 
   app.delete("/api/notifications", c => {
-    store.clearNotifications();
+    if (store.clearNotifications() > 0) notificationChanged("clear", null);
     return c.json({ ok: true });
   });
 
   // ---------- lanes ----------
   app.get("/api/lanes", c => c.json(store.listLanes()));
 
+  // A lane, its member count and versions from one read, for guarded edits/deletes (TUI :lanes).
+  app.get("/api/lanes/:name/state", c => {
+    const state = store.laneState(c.req.param("name"));
+    if (!state) return c.json({ error: "not found" }, 404);
+    const body: LaneStateSnapshot = { ...state, cursor: events.cursor() };
+    return c.json(body);
+  });
+
   app.post("/api/lanes", async c => {
-    const body = (await c.req.json().catch(() => ({}))) as {
-      name?: string;
-      color?: string | null;
-      sort?: number;
-    };
-    if (!body.name || typeof body.name !== "string") {
+    const { guard, fields: body } = splitGuard(
+      (await lenientBody(c)) as { name?: string; color?: string | null; sort?: number; guard?: unknown },
+    );
+    const name = body.name;
+    if (!name || typeof name !== "string") {
       return c.json({ error: "name is required" }, 400);
     }
     try {
-      const lane = store.addLane(body as { name: string });
-      emit({ kind: "lane.changed", payload: lane, ts: Date.now() });
-      return c.json(lane, 201);
+      const { result, replayed } = mutate(guard, "lane.add", { body }, () => {
+        const lane = store.addLane({ name, color: body.color, sort: body.sort }, guard as WriteGuard);
+        return { lane, versions: versionsOf("lane", lane.name) };
+      });
+      if (!replayed) publish("lane.changed", result.lane);
+      return answer(c, result.lane, { ...result, replayed }, 201);
     } catch (err) {
+      const failure = guardFailure(c, err);
+      if (failure) return failure;
       return c.json({ error: (err as Error).message }, 400);
     }
   });
 
   app.patch("/api/lanes/:name", async c => {
     const name = c.req.param("name");
-    const fields = (await c.req.json().catch(() => ({}))) as {
-      color?: string | null;
-      sort?: number;
-      rename?: string;
-    };
+    const { guard, fields } = splitGuard(
+      (await lenientBody(c)) as { color?: string | null; sort?: number; rename?: string; guard?: unknown },
+    );
     try {
-      const lane = store.editLane(name, fields);
-      emit({ kind: "lane.changed", payload: lane, ts: Date.now() });
-      return c.json(lane);
+      const { result, replayed } = mutate(guard, "lane.edit", { name, body: fields }, () => {
+        const lane = store.editLane(name, fields, guard as WriteGuard);
+        return { lane, versions: versionsOf("lane", lane.name) };
+      });
+      if (!replayed) publish("lane.changed", result.lane);
+      return answer(c, result.lane, { ...result, replayed });
     } catch (err) {
+      const failure = guardFailure(c, err);
+      if (failure) return failure;
       return c.json({ error: (err as Error).message }, 404);
     }
   });
 
-  app.delete("/api/lanes/:name", c => {
+  app.delete("/api/lanes/:name", async c => {
     const name = c.req.param("name");
+    const parsed = await deleteBody(c);
+    if (parsed instanceof Response) return parsed;
+    const { guard } = splitGuard(parsed);
     try {
-      store.removeLane(name);
-      emit({ kind: "lane.changed", payload: { removed: name }, ts: Date.now() });
-      return c.json({ ok: true });
+      const { replayed } = mutate(guard, "lane.remove", { name }, () => {
+        store.removeLane(name, guard as WriteGuard);
+        return null;
+      });
+      if (!replayed) publish("lane.changed", { removed: name });
+      return answer(c, { ok: true }, { ok: true, replayed });
     } catch (err) {
+      const failure = guardFailure(c, err);
+      if (failure) return failure;
       return c.json({ error: (err as Error).message }, 400);
     }
   });
 
   // ---------- tags ----------
   // Mirrors /api/lanes: GET list, POST add, PATCH edit, DELETE remove.
-  // Every write emits `tag.changed`; the dashboard's refresh() re-fetches
-  // /api/tags on every event, so no per-event handler is needed in v1.
+  // Every write publishes `tag.changed`; the dashboard's refresh() re-fetches
+  // /api/tags on every event. Renames/forced removals cascade into tasks.
   app.get("/api/tags", c => c.json(store.listTags()));
 
+  // A tag, its member count (a delete's impact) and versions from one read (TUI :tags).
+  app.get("/api/tags/:name/state", c => {
+    const state = store.tagState(c.req.param("name"));
+    if (!state) return c.json({ error: "not found" }, 404);
+    const body: TagStateSnapshot = { ...state, cursor: events.cursor() };
+    return c.json(body);
+  });
+
   app.post("/api/tags", async c => {
-    const body = (await c.req.json().catch(() => ({}))) as {
-      name?: string;
-      color?: string | null;
-    };
-    if (!body.name || typeof body.name !== "string") {
+    const { guard, fields: body } = splitGuard(
+      (await lenientBody(c)) as { name?: string; color?: string | null; guard?: unknown },
+    );
+    const name = body.name;
+    if (!name || typeof name !== "string") {
       return c.json({ error: "name is required" }, 400);
     }
     try {
-      const tag = store.addTag(body as { name: string });
-      emit({ kind: "tag.changed", payload: tag, ts: Date.now() });
-      return c.json(tag, 201);
+      const { result, replayed } = mutate(guard, "tag.add", { body }, () => {
+        const tag = store.addTag({ name, color: body.color }, guard as WriteGuard);
+        return { tag, versions: versionsOf("tag", tag.name) };
+      });
+      if (!replayed) publish("tag.changed", result.tag);
+      return answer(c, result.tag, { ...result, replayed }, 201);
     } catch (err) {
+      const failure = guardFailure(c, err);
+      if (failure) return failure;
       return c.json({ error: (err as Error).message }, 400);
     }
   });
 
   app.patch("/api/tags/:name", async c => {
     const name = c.req.param("name");
-    const fields = (await c.req.json().catch(() => ({}))) as {
-      color?: string | null;
-      rename?: string;
-    };
+    const { guard, fields } = splitGuard(
+      (await lenientBody(c)) as { color?: string | null; rename?: string; guard?: unknown },
+    );
     try {
-      const tag = store.editTag(name, fields);
-      emit({ kind: "tag.changed", payload: tag, ts: Date.now() });
-      return c.json(tag);
+      const { result, replayed } = mutate(guard, "tag.edit", { name, body: fields }, () => {
+        const tag = store.editTag(name, fields, guard as WriteGuard);
+        return { tag, versions: versionsOf("tag", tag.name) };
+      });
+      if (!replayed) publish("tag.changed", result.tag);
+      return answer(c, result.tag, { ...result, replayed });
     } catch (err) {
+      const failure = guardFailure(c, err);
+      if (failure) return failure;
       const msg = (err as Error).message;
       const code = msg.includes("not found") ? 404 : 400;
       return c.json({ error: msg }, code);
     }
   });
 
-  app.delete("/api/tags/:name", c => {
+  app.delete("/api/tags/:name", async c => {
     const name = c.req.param("name");
     const force = c.req.query("force") === "1";
+    const parsed = await deleteBody(c);
+    if (parsed instanceof Response) return parsed;
+    const { guard } = splitGuard(parsed);
     try {
-      store.removeTag(name, { force });
-      emit({ kind: "tag.changed", payload: { removed: name }, ts: Date.now() });
-      return c.json({ ok: true });
+      const { replayed } = mutate(guard, "tag.remove", { name, force }, () => {
+        store.removeTag(name, { force }, guard as WriteGuard);
+        return null;
+      });
+      if (!replayed) publish("tag.changed", { removed: name });
+      return answer(c, { ok: true }, { ok: true, replayed });
     } catch (err) {
+      const failure = guardFailure(c, err);
+      if (failure) return failure;
       return c.json({ error: (err as Error).message }, 400);
     }
   });
@@ -648,20 +1139,89 @@ export function buildApp(store: Store): Hono {
   }
 
   // ---------- SSE ----------
+  // Subscribe FIRST, then send `ready` carrying the cursor at subscription:
+  // a client snapshots after `ready` and applies only events after the
+  // snapshot's cursor, so nothing published in between is lost (N12). Each
+  // event's id is its `<epoch>:<seq>` cursor; names and data are the legacy
+  // ones. A slow reader's queue is bounded: past either bound (one frame
+  // larger than the character bound included, even into an empty queue) the
+  // queue is dropped for ONE `resync` frame whose cursor then tracks every
+  // further event until it is written, so memory never grows with the backlog.
   app.get("/events", c =>
     streamSSE(c, async stream => {
-      const unsub = subscribe((ev: CortexEvent) => {
-        void stream.writeSSE({
-          event: ev.kind,
-          data: JSON.stringify(ev.payload),
-          id: String(ev.ts),
-        });
+      const limits = runtime.stream;
+      type Frame = { event: string; data: string; id?: string };
+      const queue: Frame[] = [];
+      let queuedChars = 0;
+      let resyncAt: string | null = null;
+      let wake: (() => void) | null = null;
+      const nudge = (): void => {
+        const resume = wake;
+        wake = null;
+        resume?.();
+      };
+      const enqueue = (frame: Frame): void => {
+        queue.push(frame);
+        queuedChars += frame.data.length;
+        nudge();
+      };
+      const unsubscribe = events.subscribe(ev => {
+        if (resyncAt !== null) {
+          resyncAt = ev.cursor;
+          return;
+        }
+        const data = JSON.stringify(ev.payload);
+        const full = queue.length >= limits.maxQueuedFrames || queuedChars + data.length > limits.maxQueuedChars;
+        // Even with an empty queue (the writer may still be blocked on an earlier
+        // frame): a single frame past the bound is never retained.
+        if (full) {
+          queue.length = 0;
+          queuedChars = 0;
+          resyncAt = ev.cursor;
+          nudge();
+          return;
+        }
+        enqueue({ event: ev.kind, data, id: ev.cursor });
       });
-      stream.onAbort(() => unsub());
-      while (!stream.aborted) {
-        await stream.sleep(15000);
-        if (stream.aborted) break;
-        await stream.writeSSE({ event: "heartbeat", data: String(Date.now()) });
+      const cursor = events.cursor();
+      const ready: ReadyPayload = {
+        cursor,
+        epoch: events.epoch,
+        instanceId: runtime.identity?.instanceId ?? null,
+        databaseId: store.databaseId(),
+      };
+      enqueue({ event: "ready", data: JSON.stringify(ready), id: cursor });
+      // Legacy heartbeat framing (no id), only while idle so it never queues behind events.
+      const heartbeat = setInterval(() => {
+        if (queue.length === 0 && resyncAt === null) enqueue({ event: "heartbeat", data: String(Date.now()) });
+      }, limits.heartbeatMs);
+      stream.onAbort(() => {
+        unsubscribe();
+        clearInterval(heartbeat);
+        nudge();
+      });
+      try {
+        while (!stream.aborted) {
+          let frame: Frame | undefined;
+          if (resyncAt !== null) {
+            const resync: ResyncPayload = { reason: "overflow", cursor: resyncAt };
+            frame = { event: "resync", data: JSON.stringify(resync), id: resyncAt };
+            resyncAt = null;
+          } else {
+            frame = queue.shift();
+            if (frame) queuedChars -= frame.data.length;
+          }
+          if (!frame) {
+            await new Promise<void>(resolve => {
+              wake = resolve;
+            });
+            continue;
+          }
+          await stream.writeSSE(frame);
+        }
+      } finally {
+        unsubscribe();
+        clearInterval(heartbeat);
       }
     }),
   );
@@ -671,9 +1231,9 @@ export function buildApp(store: Store): Hono {
 
 export type ServerHandle = {
   port: number;
-  /** Loopback URL written to `cortex.url`; used by the CLI client. */
+  /** Loopback URL of the listener. */
   url: string;
-  /** User-facing URL written to `cortex.browser-url`; opened in a browser. */
+  /** User-facing URL (friendly host) for a browser. */
   browserUrl: string;
   stop(): Promise<void>;
 };
@@ -687,7 +1247,9 @@ export function startServer({
   host?: string;
   store: Store;
 }): ServerHandle {
-  const app = buildApp(store);
+  // A bare loopback listener with no published identity and no IPC control
+  // routes (in-process tests use it); `cortex serve` hosts the real daemon.
+  const app = buildApp(store, createRuntime({ listener: "loopback" }));
   const server = Bun.serve({
     port,
     hostname: "127.0.0.1",

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { emitError, emitOk, printJson, resolveBody, ErrCode } from "../../src/output.ts";
-import { BodySearchError } from "../../src/store.ts";
+import { BodySearchError, ConflictError, MutationReuseError, WriteGuardError } from "../../src/store.ts";
 import { HttpError } from "../../src/client.ts";
 
 /**
@@ -93,6 +93,19 @@ describe("emitError classification", () => {
     expect(JSON.parse(r.stdout[0] ?? "{}").error.code).toBe(ErrCode.BAD_REQUEST);
   });
 
+  // Every command now reaches the daemon's handlers (remote or in-process,
+  // plan @400 N6), and some routes answer a missing task with 400 (e.g. PATCH
+  // /lane). The message still names the miss, so it keeps the not_found code
+  // and hint that the direct-Store path always gave it.
+  test("HttpError without a code but a 'not found' message → not_found + hint, whatever the status", async () => {
+    const r = await capture(() => {
+      emitError(true, new HttpError(400, "task 99 not found"));
+    });
+    const env = JSON.parse(r.stdout[0] ?? "{}");
+    expect(env.error.code).toBe(ErrCode.NOT_FOUND);
+    expect(env.error.message).toBe("task 99 not found (run `cortex ls` to list tasks)");
+  });
+
   test("generic 'not found' Error → not_found code + actionable hint", async () => {
     const r = await capture(() => {
       emitError(true, new Error("task 99 not found"));
@@ -165,5 +178,38 @@ describe("printJson", () => {
       printJson({ a: 1, b: [2, 3] });
     });
     expect(r.stdout).toEqual(['{"a":1,"b":[2,3]}']);
+  });
+});
+
+// ---------- concurrency errors (plan @400 N8/N11) ----------
+
+describe("emitError: guarded-write codes", () => {
+  const code = async (err: unknown): Promise<string> => {
+    const r = await capture(() => {
+      emitError(true, err);
+    });
+    return JSON.parse(r.stdout[0] ?? "{}").error.code;
+  };
+
+  test("the new stable codes are exported", () => {
+    expect(ErrCode.VERSION_CONFLICT).toBe("version_conflict");
+    expect(ErrCode.INVALID_GUARD).toBe("invalid_guard");
+    expect(ErrCode.MUTATION_REUSED).toBe("mutation_reused");
+    expect(ErrCode.INSTANCE_MISMATCH).toBe("instance_mismatch");
+  });
+
+  test("server codes pass through; code-less 412/421 map by status", async () => {
+    expect(await code(new HttpError(412, "stale", "version_conflict"))).toBe(ErrCode.VERSION_CONFLICT);
+    expect(await code(new HttpError(409, "reused", "mutation_reused"))).toBe(ErrCode.MUTATION_REUSED);
+    expect(await code(new HttpError(412, "stale"))).toBe(ErrCode.VERSION_CONFLICT);
+    expect(await code(new HttpError(421, "other daemon"))).toBe(ErrCode.INSTANCE_MISMATCH);
+  });
+
+  test("Store guard errors classify without an HTTP hop (offline paths)", async () => {
+    expect(await code(new ConflictError("task", 1, [{ scope: "body", expected: "a", current: "b" }], {}))).toBe(
+      ErrCode.VERSION_CONFLICT,
+    );
+    expect(await code(new WriteGuardError("guard must be an object"))).toBe(ErrCode.INVALID_GUARD);
+    expect(await code(new MutationReuseError("m-1"))).toBe(ErrCode.MUTATION_REUSED);
   });
 });

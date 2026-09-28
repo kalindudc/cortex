@@ -1,8 +1,11 @@
-// createUntitledTask — two-phase task creation flow shared by the
-// SidebarPane "+" button and the command-palette "New task" entry.
-// Verifies the POST→PATCH chain plus the focus / selection signals it
-// flips. Errors are surfaced via tryApi (api/errors.ts), so we stub that
-// layer out to keep this unit purely about the orchestration.
+// createUntitledTask — the task creation flow shared by the SidebarPane
+// "+" button and the command-palette "New task" entry. ONE atomic create
+// (`untitled: true`, plan @400 N8/Task 9): the daemon names the task
+// `untitled-<id>` inside the create transaction, so there is no follow-up
+// PATCH and never an intermediate "untitled" row. Verifies the request plus
+// the focus / selection signals it flips. Errors are surfaced via tryApi
+// (api/errors.ts), so we stub that layer out to keep this unit purely about
+// the orchestration.
 
 import { describe, test, expect, mock, beforeEach } from "bun:test";
 
@@ -46,17 +49,16 @@ describe("createUntitledTask", () => {
     editTask.mockImplementation(() => Promise.resolve({}));
   });
 
-  test("calls api.addTask with the supplied lane and 'untitled' title", async () => {
+  test("creates atomically: api.addTask({ untitled: true, lane }) with no title of its own", async () => {
     await createUntitledTask("next");
     expect(addTask).toHaveBeenCalledTimes(1);
-    expect(addTask).toHaveBeenCalledWith({ title: "untitled", lane: "next" });
+    expect(addTask).toHaveBeenCalledWith({ untitled: true, lane: "next" });
   });
 
-  test("PATCHes editTask with title='untitled-<id>' after the POST", async () => {
+  test("sends no follow-up PATCH: the daemon names the task untitled-<id> in the create transaction", async () => {
     addTask.mockImplementationOnce(() => Promise.resolve({ id: 42 }));
     await createUntitledTask("now");
-    expect(editTask).toHaveBeenCalledTimes(1);
-    expect(editTask).toHaveBeenCalledWith(42, { title: "untitled-42" });
+    expect(editTask).not.toHaveBeenCalled();
   });
 
   test("sets pendingTitleFocus.value and selectedId.value to the new id", async () => {

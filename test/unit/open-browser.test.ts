@@ -1,5 +1,5 @@
 import { test, expect, describe, beforeEach, afterEach, spyOn } from "bun:test";
-import { openInBrowser } from "../../src/open-browser.ts";
+import { browserCommand, openInBrowser } from "../../src/open-browser.ts";
 
 // Snapshot the platform once so we can monkey-patch process.platform per
 // test and restore in afterEach. process.platform is a getter on the
@@ -82,5 +82,19 @@ describe("openInBrowser", () => {
     expect(warnSpy).toHaveBeenCalledTimes(1);
     expect(String(warnSpy.mock.calls[0]?.[0])).toContain("failed to open browser");
     expect(String(warnSpy.mock.calls[0]?.[0])).toContain("ENOENT");
+  });
+});
+
+describe("browserCommand (argv only, never a shell string)", () => {
+  const url = "http://cortex.localhost:7777/preview/0123456789abcdef0123456789abcdef";
+  test("each platform opener gets the URL as ONE argv element", () => {
+    expect(browserCommand(url, "darwin", () => null)).toEqual({ argv: ["open", url] });
+    expect(browserCommand(url, "linux", () => "/usr/bin/xdg-open")).toEqual({ argv: ["xdg-open", url] });
+    expect(browserCommand(url, "win32", () => null)).toEqual({ argv: ["cmd", "/c", "start", "", url] });
+  });
+
+  test("a missing opener or an unknown platform is a reason, not a launch", () => {
+    expect(browserCommand(url, "linux", () => null)).toEqual({ problem: "xdg-open not on PATH" });
+    expect(browserCommand(url, "aix", () => null)).toEqual({ problem: "don't know how to open a browser on aix" });
   });
 });

@@ -1,12 +1,14 @@
 import { defineCommand } from "citty";
-import { Store, type Lane } from "../store.ts";
-import { Client, daemonUrl } from "../client.ts";
+import { withClient } from "../daemon.ts";
+import type { Lane } from "../store.ts";
 import { emitError, emitOk } from "../output.ts";
 
 /**
  * Every mutating subcommand accepts `--json`: success emits the resulting
  * Lane (or `{ ok, name }` for rm) on stdout; failures route through
- * emitError for the shared machine-readable error envelope.
+ * emitError for the shared machine-readable error envelope. Every
+ * subcommand goes through withClient: the verified daemon, or the same
+ * handlers in-process while owning the database (plan @400 N6).
  */
 
 const jsonArg = {
@@ -37,25 +39,13 @@ const add = defineCommand({
       name: args.name,
       color: args.color || null,
     };
-    const url = daemonUrl();
-    if (url) {
-      try {
-        const lane = (await Client.addLane(url, payload)) as Lane;
-        emitOk(json, lane, `✓ lane ${lane.name} created`);
-        return;
-      } catch (err) {
-        emitError(json, err);
-      }
-    }
-    const store = Store.open();
+    let lane: Lane;
     try {
-      const lane = store.addLane(payload);
-      emitOk(json, lane, `✓ lane ${lane.name} created`);
+      lane = await withClient(client => client.addLane(payload));
     } catch (err) {
       emitError(json, err);
-    } finally {
-      store.close();
     }
+    emitOk(json, lane, `✓ lane ${lane.name} created`);
   },
 });
 
@@ -68,23 +58,24 @@ const ls = defineCommand({
       description: "emit raw JSON instead of a table",
     },
   },
-  run({ args }) {
-    const store = Store.open();
+  async run({ args }) {
+    let lanes: Lane[];
     try {
-      const lanes = store.listLanes();
-      if (args.json) {
-        console.log(JSON.stringify(lanes));
-        return;
-      }
-      console.table(
-        lanes.map(l => ({
-          name: l.name,
-          color: l.color ?? "",
-        })),
-      );
-    } finally {
-      store.close();
+      lanes = await withClient(client => client.lanes());
+    } catch (err) {
+      console.error(`error: ${(err as Error).message}`);
+      process.exit(1);
     }
+    if (args.json) {
+      console.log(JSON.stringify(lanes));
+      return;
+    }
+    console.table(
+      lanes.map(l => ({
+        name: l.name,
+        color: l.color ?? "",
+      })),
+    );
   },
 });
 
@@ -120,25 +111,13 @@ const edit = defineCommand({
     if (Object.keys(fields).length === 0) {
       emitError(json, new Error("provide at least one of --color, --rename"));
     }
-    const url = daemonUrl();
-    if (url) {
-      try {
-        const lane = (await Client.editLane(url, args.name, fields)) as Lane;
-        emitOk(json, lane, `✓ lane ${lane.name} updated`);
-        return;
-      } catch (err) {
-        emitError(json, err);
-      }
-    }
-    const store = Store.open();
+    let lane: Lane;
     try {
-      const lane = store.editLane(args.name, fields);
-      emitOk(json, lane, `✓ lane ${lane.name} updated`);
+      lane = await withClient(client => client.editLane(args.name, fields));
     } catch (err) {
       emitError(json, err);
-    } finally {
-      store.close();
     }
+    emitOk(json, lane, `✓ lane ${lane.name} updated`);
   },
 });
 
@@ -154,25 +133,12 @@ const rm = defineCommand({
   },
   async run({ args }) {
     const json = args.json;
-    const url = daemonUrl();
-    if (url) {
-      try {
-        await Client.removeLane(url, args.name);
-        emitOk(json, { ok: true, name: args.name }, `✓ lane ${args.name} removed`);
-        return;
-      } catch (err) {
-        emitError(json, err);
-      }
-    }
-    const store = Store.open();
     try {
-      store.removeLane(args.name);
-      emitOk(json, { ok: true, name: args.name }, `✓ lane ${args.name} removed`);
+      await withClient(client => client.delLane(args.name));
     } catch (err) {
       emitError(json, err);
-    } finally {
-      store.close();
     }
+    emitOk(json, { ok: true, name: args.name }, `✓ lane ${args.name} removed`);
   },
 });
 

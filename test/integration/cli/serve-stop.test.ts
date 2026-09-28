@@ -1,36 +1,43 @@
-import { test, expect, describe, beforeAll, afterAll } from "bun:test";
+import { test, expect, describe, beforeAll, afterAll, afterEach } from "bun:test";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
-import { BIN, mkTmpEnv, runCli } from "../helpers.ts";
+import { mkTmpEnv, ROOT } from "../helpers.ts";
+import {
+  isRunning,
+  leaseIsFree,
+  metadataFileFor,
+  readIdentity,
+  reap,
+  runBounded,
+  socketHealth,
+  spawnForeignCortexServe,
+  startForeground,
+  trackBackground,
+  waitFor,
+} from "../fixtures/daemon.ts";
+import { canonicalDatabasePath } from "../../../src/ownership.ts";
 
-// ---------- CLI integration: `cortex serve` shutdown ----------
+// ---------- CLI integration: database-scoped `cortex serve` / `cortex stop` ----------
 //
-// Scope: this file proves the daemon's OWN shutdown handler
-// (src/commands/serve.ts:73-86 -- the SIGTERM/SIGINT listener) does the
-// right thing: closes the store, removes pidPath()/urlPath(), exits cleanly.
+// Plan @400 Task 6 (N4/N5, gate G1). The daemon owns ONE canonical database:
+// it holds the ownership lease for its lifetime, listens on a private Unix
+// socket (plus the loopback dashboard), publishes `<db>.daemon.json` only
+// once it is ready, and removes its own metadata/socket before releasing the
+// lease. `cortex stop` is instance-bound: it discovers THIS database's daemon
+// through that metadata and asks it to shut down over its socket. There is no
+// process-table scan and no signal, so the old "skip if any `cortex serve`
+// runs on the host" guard is gone: a foreign `cortex serve` (for example a
+// developer's live `~/bin/cortex serve`) provably survives every stop here.
 //
-// Why we do NOT invoke `cortex stop` here as the primary path:
-//   `cortex stop` (src/commands/stop.ts) does host-wide discovery via
-//   `pgrep -f 'cortex serve'`, which on a developer machine running a real
-//   daemon (`~/bin/cortex serve --foreground`) would race and SIGTERM the
-//   developer's live daemon. The hermetic env (XDG_CONFIG_HOME=<tmp>)
-//   protects pidPath()/urlPath() but does NOT protect pgrep -- pgrep walks
-//   the host process table irrespective of env. So the primary test
-//   spawns the daemon directly (`cortex serve --port 0 --foreground
-//   --no-open`) and signals proc.pid by hand.
-//
-// A second test exercises `cortex stop` end-to-end, but ONLY if no
-// `cortex serve` is detected on the host (clean CI). On a dev box we
-// log + skip, preserving safety while still keeping CI coverage.
+// SAFETY: every signal in this file goes to a process the file spawned
+// (the fixture tracks them); background daemons are stopped through their
+// instance-bound route. Each test works in its own mkTmpEnv() sandbox.
 
-// Real user-home pid/url files we MUST NOT touch. The daemon under test
-// has XDG_CONFIG_HOME=<tmpDir> in its env so it writes into
-// <tmpDir>/cortex/cortex.{pid,url,browser-url} instead of ~/.config/cortex/,
-// but we snapshot the real files anyway to fail loud if that pin ever regresses.
 const REAL_PID = path.join(os.homedir(), ".config", "cortex", "cortex.pid");
 const REAL_URL = path.join(os.homedir(), ".config", "cortex", "cortex.url");
 const REAL_BROWSER_URL = path.join(os.homedir(), ".config", "cortex", "cortex.browser-url");
+const REAL_METADATA = path.join(os.homedir(), ".config", "cortex", "cortex.db.daemon.json");
 
 type Snap = { mtimeMs: number; size: number } | null;
 function snap(p: string): Snap {
@@ -47,197 +54,260 @@ function snapEq(a: Snap, b: Snap): boolean {
   return a.mtimeMs === b.mtimeMs && a.size === b.size;
 }
 
-let realPidBefore: Snap = null;
-let realUrlBefore: Snap = null;
-let realBrowserUrlBefore: Snap = null;
-
-// Track every PID we spawn so afterAll can SIGKILL them no matter what.
-const spawnedPids = new Set<number>();
+const realBefore = new Map<string, Snap>();
+const sandboxes: (() => void)[] = [];
 
 beforeAll(() => {
-  realPidBefore = snap(REAL_PID);
-  realUrlBefore = snap(REAL_URL);
-  realBrowserUrlBefore = snap(REAL_BROWSER_URL);
+  for (const p of [REAL_PID, REAL_URL, REAL_BROWSER_URL, REAL_METADATA]) realBefore.set(p, snap(p));
 });
 
-afterAll(() => {
-  // Belt-and-suspenders: even if a test threw mid-flight and the daemon
-  // we spawned is still alive, kill it so it can't outlive the test run
-  // and confuse the developer's next `cortex stop`. SIGKILL bypasses the
-  // shutdown handler -- that's fine here, this is purely a safety net.
-  for (const pid of spawnedPids) {
-    try {
-      process.kill(pid, "SIGKILL");
-    } catch {
-      /* already gone -- expected on the happy path */
-    }
-  }
+afterEach(async () => {
+  await reap();
 });
 
-/**
- * Spawn `cortex serve --port 0 --foreground --no-open` directly so proc.pid
- * IS the daemon (not a wrapper). Returns once the pid file exists, which
- * is our signal that startServer() bound and the SIGTERM handler is wired.
- *
- * `--port 0` lets the kernel pick a free port -- avoids flaky CI when
- * 7777 is in use. `--foreground` keeps the daemon attached to this
- * process so we can `await proc.exited`. `--no-open` suppresses the
- * macOS dashboard auto-open (it would still try in foreground mode if
- * we omit it; serve.ts only gates the open behind --no-open in the
- * non-foreground branch BUT belt-and-suspenders).
- */
-async function spawnDaemon(label: string): Promise<{
-  proc: ReturnType<typeof Bun.spawn>;
-  tmpDir: string;
-  pidFile: string;
-  urlFile: string;
-  browserUrlFile: string;
-  cleanup: () => void;
-}> {
-  const { tmpDir, env, cleanup } = mkTmpEnv(label);
-  const pidFile = path.join(tmpDir, "cortex", "cortex.pid");
-  const urlFile = path.join(tmpDir, "cortex", "cortex.url");
-  const browserUrlFile = path.join(tmpDir, "cortex", "cortex.browser-url");
+afterAll(async () => {
+  await reap();
+  for (const cleanup of sandboxes.splice(0)) cleanup();
+});
 
-  const proc = Bun.spawn([BIN, "serve", "--port", "0", "--foreground", "--no-open"], {
-    env,
-    cwd: process.cwd(),
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  spawnedPids.add(proc.pid);
-
-  // Wait up to 5s for the pid file to appear -- proxy for "server bound +
-  // shutdown handler installed". Polling is the right primitive here:
-  // serve.ts writes pidPath() synchronously after startServer() returns,
-  // so first-existence is a strict happens-after of the listener install.
-  const deadline = Date.now() + 5000;
-  while (Date.now() < deadline) {
-    if (fs.existsSync(pidFile) && fs.existsSync(urlFile) && fs.existsSync(browserUrlFile)) break;
-    await Bun.sleep(25);
-  }
-  if (!fs.existsSync(pidFile) || !fs.existsSync(urlFile) || !fs.existsSync(browserUrlFile)) {
-    // Daemon never came up. Capture stderr for a useful failure message
-    // and tear everything down before throwing.
-    let stderr = "";
-    try {
-      stderr = await new Response(proc.stderr).text();
-    } catch {
-      /* ignore */
-    }
-    try {
-      proc.kill("SIGKILL");
-    } catch {
-      /* ignore */
-    }
-    cleanup();
-    throw new Error(`daemon failed to write pid/url/browser-url within 5s. stderr=${stderr}`);
-  }
-
-  return { proc, tmpDir, pidFile, urlFile, browserUrlFile, cleanup };
+function sandbox(label: string): ReturnType<typeof mkTmpEnv> {
+  const env = mkTmpEnv(label);
+  sandboxes.push(env.cleanup);
+  return env;
 }
 
-describe("cortex serve shutdown integration", () => {
-  test("SIGTERM to the daemon removes pid/url/browser-url files and exits cleanly", async () => {
-    const { proc, pidFile, urlFile, browserUrlFile, cleanup } = await spawnDaemon("serve-sigterm");
+function legacyFiles(tmpDir: string): string[] {
+  return ["cortex.pid", "cortex.url", "cortex.browser-url"].filter(f => fs.existsSync(path.join(tmpDir, "cortex", f)));
+}
+
+describe("cortex serve / stop are scoped to one database", () => {
+  test("serve publishes complete metadata once ready; SIGTERM removes it and its socket, then releases the lease", async () => {
+    const { tmpDir, runtimeDir, env } = sandbox("serve-sigterm");
+    const db = canonicalDatabasePath(env.CORTEX_DB ?? "");
+    const daemon = await startForeground(env);
+    const { identity } = daemon;
+
+    expect(identity).toMatchObject({ protocol: 1, databasePath: db, pid: daemon.proc.pid });
+    expect(identity.instanceId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(identity.databaseId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(identity.capabilities).toEqual(["control.shutdown", "control.web", "control.preview"]);
+    expect(identity.endpoint.kind).toBe("unix");
+    const socketPath = identity.endpoint.kind === "unix" ? identity.endpoint.socketPath : "";
+    expect(path.dirname(socketPath)).toBe(runtimeDir);
+    expect(fs.lstatSync(socketPath).isSocket()).toBe(true);
+    expect(fs.statSync(daemon.metadataFile).mode & 0o777).toBe(0o600);
+    expect(daemon.metadataFile).toBe(`${db}.daemon.json`);
+
+    // Both listeners answer as this instance; the metadata's dashboard is the printed host.
+    const port = new URL(identity.webUrl ?? "http://x").port;
+    expect(identity.webUrl).toBe(`http://cortex.localhost:${port}`);
+    expect(daemon.stdout()).toContain(`cortex listening on http://cortex.localhost:${port}`);
+    expect((await socketHealth(identity)).identity).toEqual(identity);
+    const loopback = (await (await fetch(`http://127.0.0.1:${port}/api/health`)).json()) as { identity: unknown };
+    expect(loopback.identity).toEqual(identity);
+    expect(leaseIsFree(db)).toBe(false);
+    // Old-style daemon files are no longer written.
+    expect(legacyFiles(tmpDir)).toEqual([]);
+
+    daemon.proc.kill("SIGTERM");
+    expect([0, 143]).toContain(await daemon.proc.exited);
+    expect(fs.existsSync(daemon.metadataFile)).toBe(false);
+    expect(fs.existsSync(socketPath)).toBe(false);
+    expect(leaseIsFree(db)).toBe(true);
+  }, 30_000);
+
+  test("`cortex stop` stops only this database's daemon; a foreign `cortex serve` process survives", async () => {
+    const { env } = sandbox("serve-stop-foreign");
+    const db = canonicalDatabasePath(env.CORTEX_DB ?? "");
+    const foreign = spawnForeignCortexServe();
+    // The dummy is exactly what the old host-wide `pgrep -f 'cortex serve'` stop targeted
+    // (only read here; nothing is signalled). Skipped where pgrep is not installed.
+    if (Bun.which("pgrep") !== null) {
+      const pgrep = Bun.spawnSync(["pgrep", "-f", "cortex serve"]);
+      expect(pgrep.stdout.toString().split(/\s+/)).toContain(String(foreign.proc.pid));
+    }
+    const daemon = await startForeground(env);
+
+    const stopped = await runBounded(["stop"], env);
+    expect(stopped.code).toBe(0);
+    expect(stopped.stdout.trim()).toBe(`✓ stopped 1 process (pid: ${daemon.proc.pid})`);
+    expect([0, 143]).toContain(await daemon.proc.exited);
+    expect(fs.existsSync(daemon.metadataFile)).toBe(false);
+    expect(leaseIsFree(db)).toBe(true);
+    expect(isRunning(foreign)).toBe(true);
+
+    const again = await runBounded(["stop"], env);
+    expect(again.code).toBe(0);
+    expect(again.stdout.trim()).toBe("not running");
+    expect(isRunning(foreign)).toBe(true);
+  }, 30_000);
+
+  test("two databases under one config dir run independent daemons, and stop is scoped by CORTEX_DB", async () => {
+    const { tmpDir, env } = sandbox("serve-two-dbs");
+    const envB = { ...env, CORTEX_DB: path.join(tmpDir, "b.db") };
+    const a = await startForeground(env);
+    const b = await startForeground(envB);
+    expect(a.identity.instanceId).not.toBe(b.identity.instanceId);
+    expect(a.identity.databaseId).not.toBe(b.identity.databaseId);
+    expect(a.identity.endpoint).not.toEqual(b.identity.endpoint);
+    expect(a.metadataFile).not.toBe(b.metadataFile);
+
+    const stopB = await runBounded(["stop"], envB);
+    expect(stopB.stdout.trim()).toBe(`✓ stopped 1 process (pid: ${b.proc.pid})`);
+    await b.proc.exited;
+    expect(isRunning(a)).toBe(true);
+    expect((await socketHealth(a.identity)).identity?.instanceId).toBe(a.identity.instanceId);
+
+    const stopA = await runBounded(["stop"], env);
+    expect(stopA.stdout.trim()).toBe(`✓ stopped 1 process (pid: ${a.proc.pid})`);
+    await a.proc.exited;
+  }, 30_000);
+
+  test("the same database through a symlinked directory resolves to the one daemon", async () => {
+    const { tmpDir, env } = sandbox("serve-symlink");
+    const link = path.join(os.tmpdir(), `cortex-link-${path.basename(tmpDir)}`);
+    fs.symlinkSync(tmpDir, link);
+    sandboxes.push(() => fs.rmSync(link, { force: true }));
+    const viaLink = { ...env, CORTEX_DB: path.join(link, "cortex.db") };
+    const daemon = await startForeground(env);
+
+    const second = await runBounded(["serve", "--foreground", "--no-open", "--port", "0"], viaLink);
+    expect(second.code).toBe(1);
+    expect(second.stderr).toContain(`already serving ${canonicalDatabasePath(env.CORTEX_DB ?? "")}`);
+    expect(second.stderr).toContain(`pid ${daemon.proc.pid}`);
+
+    // Background serve attaches to it instead of starting another.
+    const attach = await runBounded(["serve", "--port", "0"], viaLink);
+    expect(attach.code).toBe(0);
+    expect(attach.stdout).toContain(`(pid ${daemon.proc.pid})`);
+
+    const stopped = await runBounded(["stop"], viaLink);
+    expect(stopped.stdout.trim()).toBe(`✓ stopped 1 process (pid: ${daemon.proc.pid})`);
+    expect([0, 143]).toContain(await daemon.proc.exited);
+  }, 30_000);
+
+  test("a crashed daemon's stale metadata and socket are recovered by the next owner; the pid they name is never signalled", async () => {
+    const { env } = sandbox("serve-stale");
+    const first = await startForeground(env);
+    const socketPath = first.identity.endpoint.kind === "unix" ? first.identity.endpoint.socketPath : "";
+    first.proc.kill("SIGKILL");
+    await first.proc.exited;
+    expect(fs.lstatSync(socketPath).isSocket()).toBe(true);
+    // The dead daemon's pid now "belongs" to an unrelated process.
+    const foreign = spawnForeignCortexServe();
+    const stale = { ...first.identity, pid: foreign.proc.pid };
+    fs.writeFileSync(first.metadataFile, JSON.stringify(stale));
+
+    const stop = await runBounded(["stop"], env);
+    expect(stop.code).toBe(0);
+    expect(stop.stdout.trim()).toBe("not running");
+    expect(isRunning(foreign)).toBe(true);
+
+    const next = await startForeground(env);
+    expect(next.identity.instanceId).not.toBe(first.identity.instanceId);
+    expect(next.identity.pid).toBe(next.proc.pid);
+    expect((await socketHealth(next.identity)).identity?.instanceId).toBe(next.identity.instanceId);
+    expect(isRunning(foreign)).toBe(true);
+
+    next.proc.kill("SIGTERM");
+    await next.proc.exited;
+    expect(isRunning(foreign)).toBe(true);
+  }, 30_000);
+
+  test("a healthy legacy daemon blocks serve even though the new lock is free, and stop only reports it", async () => {
+    const { tmpDir, env } = sandbox("serve-legacy");
+    const db = env.CORTEX_DB ?? "";
+    const foreign = spawnForeignCortexServe();
+    const legacy = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch: () => Response.json({ ok: true, version: "0.1.0" }),
+    });
     try {
-      // Sanity: the daemon wrote into our tmp dir, not ~/.config/cortex.
-      expect(fs.existsSync(pidFile)).toBe(true);
-      expect(fs.existsSync(urlFile)).toBe(true);
-      expect(fs.existsSync(browserUrlFile)).toBe(true);
-      const recordedPid = Number.parseInt(fs.readFileSync(pidFile, "utf8").trim(), 10);
-      expect(recordedPid).toBe(proc.pid);
+      fs.mkdirSync(path.join(tmpDir, "cortex"), { recursive: true });
+      fs.writeFileSync(path.join(tmpDir, "cortex", "cortex.pid"), String(foreign.proc.pid));
+      fs.writeFileSync(path.join(tmpDir, "cortex", "cortex.url"), `http://127.0.0.1:${legacy.port}`);
+      expect(leaseIsFree(db)).toBe(true);
 
-      // Send SIGTERM to the daemon directly. This exercises the listener
-      // installed at src/commands/serve.ts:84 (process.on("SIGTERM",
-      // shutdown)). shutdown() awaits handle.stop(), closes the store,
-      // rmSync's pidPath()/urlPath(), then process.exit(0).
-      process.kill(proc.pid, "SIGTERM");
+      for (const args of [
+        ["serve", "--foreground", "--no-open", "--port", "0"],
+        ["serve", "--port", "0"],
+      ]) {
+        const r = await runBounded(args, env);
+        expect(r.code).toBe(1);
+        expect(r.stderr).toContain("older cortex binary");
+        expect(r.stderr).toContain(`pid ${foreign.proc.pid}`);
+        expect(r.stderr).toMatch(/stop it first/);
+      }
+      expect(fs.existsSync(db)).toBe(false);
+      expect(fs.existsSync(metadataFileFor(db))).toBe(false);
+      expect(leaseIsFree(db)).toBe(true);
 
-      // Bun's spawn `exited` is the wait-status. The daemon calls
-      // process.exit(0) inside its handler, so on the happy path we
-      // see 0. If the runtime ever short-circuits and reports the
-      // signal-terminated status before process.exit lands, that's
-      // 128+15=143 on POSIX. Accept either; the FILE check below is
-      // the load-bearing assertion (a true uncaught SIGTERM would
-      // leave the files on disk, which is what we actually care about).
-      const code = await proc.exited;
-      expect([0, 143]).toContain(code);
-
-      // shutdown() should have removed all three files. This is the
-      // assertion that proves the handler ran to completion (vs. the
-      // kernel delivering SIGTERM and the runtime tearing down the process
-      // before the listener fired). Plan 35 added cortex.browser-url to the
-      // cleanup set; missing it from the rmSync would be silent leakage.
-      expect(fs.existsSync(pidFile)).toBe(false);
-      expect(fs.existsSync(urlFile)).toBe(false);
-      expect(fs.existsSync(browserUrlFile)).toBe(false);
+      const stop = await runBounded(["stop"], env);
+      expect(stop.code).toBe(0);
+      expect(stop.stdout.trim()).toBe("not running");
+      expect(stop.stderr).toContain("cortex stop cannot stop it");
+      expect(isRunning(foreign)).toBe(true);
     } finally {
-      // Always remove from the kill-set; the process is already gone.
-      spawnedPids.delete(proc.pid);
-      cleanup();
+      await legacy.stop(true);
     }
-  });
+  }, 30_000);
 
-  test("`cortex stop` end-to-end (skipped if any cortex serve is on the host)", async () => {
-    // Why the skip: stop.ts uses `pgrep -f 'cortex serve'` for orphan
-    // discovery (see commands/stop.ts:discoverDaemons). pgrep is
-    // host-wide -- it will see the developer's real daemon and stop.ts
-    // will SIGTERM it. Skip in that case.
-    const r = Bun.spawnSync(["pgrep", "-f", "cortex serve"]);
-    if (r.exitCode === 0) {
-      // eslint-disable-next-line no-console
-      console.log(
-        "[serve-stop] skipping `cortex stop` e2e: a `cortex serve` is running on the host (pgrep rc=0). " +
-          "Run this on a clean CI machine to exercise the full stop path.",
-      );
-      return;
-    }
+  test("background serve prints its success line only once the daemon is ready, and attaches on a second run", async () => {
+    const { env } = sandbox("serve-background");
+    const metadataFile = metadataFileFor(env.CORTEX_DB ?? "");
+    const started = await runBounded(["serve", "--port", "0"], env);
+    // The metadata already existed when the parent printed and exited.
+    const identity = readIdentity(metadataFile);
+    if (identity === null) throw new Error(`no daemon metadata after serve: ${started.stderr}`);
+    trackBackground(identity);
+    expect(started.code).toBe(0);
+    const m = started.stdout.match(/✓ cortex serving at http:\/\/cortex\.localhost:(\d+) \(pid (\d+)\)/);
+    expect(m).not.toBeNull();
+    expect(identity.pid).toBe(Number(m?.[2]));
+    expect(identity.webUrl).toBe(`http://cortex.localhost:${m?.[1]}`);
+    expect((await socketHealth(identity)).identity?.instanceId).toBe(identity.instanceId);
 
-    const { proc, pidFile, urlFile, browserUrlFile, tmpDir, cleanup } = await spawnDaemon("serve-stop-e2e");
+    const again = await runBounded(["serve", "--port", "0"], env);
+    expect(again.code).toBe(0);
+    expect(again.stdout).toContain(`(pid ${identity.pid})`);
+
+    const stop = await runBounded(["stop"], env);
+    expect(stop.stdout.trim()).toBe(`✓ stopped 1 process (pid: ${identity.pid})`);
+    await waitFor("the metadata to go away", () => (fs.existsSync(metadataFile) ? null : true));
+  }, 30_000);
+
+  test("serve retries the lease while a transient owner (an offline command) holds it", async () => {
+    const { env } = sandbox("serve-transient");
+    const db = env.CORTEX_DB ?? "";
+    const holder = Bun.spawn(
+      [process.execPath, path.join(ROOT, "test", "integration", "fixtures", "ownership-holder.ts"), "hold", db],
+      { env, cwd: ROOT, stdin: "pipe", stdout: "pipe", stderr: "pipe" },
+    );
     try {
-      // Build the stop env from the SAME tmpDir/XDG_CONFIG_HOME so
-      // stop.ts resolves the same pidPath()/urlPath() the daemon wrote.
-      const env: Record<string, string> = { ...(process.env as Record<string, string>) };
-      delete env.XDG_CONFIG_HOME;
-      env.XDG_CONFIG_HOME = tmpDir;
-      env.NO_COLOR = "1";
-
-      const stopRes = await runCli({ args: ["stop"], env });
-      expect(stopRes.code).toBe(0);
-      expect(stopRes.stdout).toMatch(/stopped \d+ process/);
-
-      // The daemon should have terminated and shutdown() should have
-      // wiped the pid/url files (stop.ts ALSO calls cleanupFiles, but
-      // either path satisfies this assertion).
-      const code = await proc.exited;
-      expect([0, 143]).toContain(code);
-      expect(fs.existsSync(pidFile)).toBe(false);
-      expect(fs.existsSync(urlFile)).toBe(false);
-      // Plan 35: stop.cleanupFiles() must remove cortex.browser-url too.
-      expect(fs.existsSync(browserUrlFile)).toBe(false);
+      const reader = holder.stdout.getReader();
+      const first = await reader.read();
+      reader.releaseLock();
+      expect(new TextDecoder().decode(first.value)).toContain("OWNED");
+      setTimeout(() => holder.stdin.end(), 600);
+      const startedAt = Date.now();
+      const daemon = await startForeground(env);
+      expect(Date.now() - startedAt).toBeGreaterThanOrEqual(500);
+      expect(await holder.exited).toBe(0);
+      daemon.proc.kill("SIGTERM");
+      await daemon.proc.exited;
     } finally {
-      spawnedPids.delete(proc.pid);
-      cleanup();
+      if (holder.exitCode === null) holder.kill("SIGKILL");
+      await holder.exited;
     }
-  });
+  }, 30_000);
 
-  // The hermetic-guard tests run last (Bun executes tests in file order
-  // within a describe block). They MUST execute even if earlier tests
-  // failed -- the snapshots are captured in beforeAll, so a missed
-  // assertion here is the single best signal that the test isolation
-  // broke and the developer's real daemon files were touched.
-  test("hermetic guard: ~/.config/cortex/cortex.pid mtime+size unchanged", () => {
-    const after = snap(REAL_PID);
-    expect(snapEq(after, realPidBefore)).toBe(true);
-  });
-
-  test("hermetic guard: ~/.config/cortex/cortex.url mtime+size unchanged", () => {
-    const after = snap(REAL_URL);
-    expect(snapEq(after, realUrlBefore)).toBe(true);
-  });
-
-  test("hermetic guard: ~/.config/cortex/cortex.browser-url mtime+size unchanged", () => {
-    const after = snap(REAL_BROWSER_URL);
-    expect(snapEq(after, realBrowserUrlBefore)).toBe(true);
+  // The hermetic-guard test runs last (Bun executes tests in file order
+  // within a describe block). It MUST execute even if earlier tests failed:
+  // the snapshots are captured in beforeAll, so a mismatch is the single
+  // best signal that isolation broke and the developer's real daemon files
+  // were touched.
+  test("hermetic guard: the real ~/.config/cortex daemon files are unchanged (mtime+size)", () => {
+    for (const [p, before] of realBefore) expect(snapEq(snap(p), before), p).toBe(true);
   });
 });

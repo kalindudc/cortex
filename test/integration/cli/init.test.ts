@@ -10,7 +10,7 @@ import { Store } from "../../../src/store.ts";
 // `init` is the operation under test, so each test creates its OWN env via
 // mkTmpEnv. Sharing a tmp dir across tests would defeat the idempotency
 // assertion (we need the second-init test to control whether state already
-// exists). See helpers.ts header for why the three env vars MUST be pinned.
+// exists). See helpers.ts header for why all five env vars MUST be pinned.
 //
 // Hermetic guards: this file ALSO writes to CORTEX_PI_EXTENSION_DIR (which
 // mkTmpEnv does NOT pin by default — see src/extensions.ts:extensionsRoot).
@@ -50,8 +50,8 @@ beforeAll(() => {
 afterAll(() => {});
 
 /**
- * Build a fresh hermetic env for one test, pinning CORTEX_PI_EXTENSION_DIR
- * in addition to the three vars mkTmpEnv handles. Returns the same shape
+ * Build a fresh hermetic env for one test, re-pinning CORTEX_PI_EXTENSION_DIR
+ * (mkTmpEnv already pins all five vars). Returns the same shape
  * as mkTmpEnv plus an `extRoot` for direct path assertions.
  */
 function mkInitEnv(label: string) {

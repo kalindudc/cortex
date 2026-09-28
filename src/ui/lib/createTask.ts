@@ -1,22 +1,21 @@
 // Create a new task with a placeholder title `untitled-<id>` and select it
-// so the user can immediately rename via the active-pane title input. The
-// two-request flow (POST then PATCH) is necessary because we don't know
-// the id until the server assigns it. The pendingTitleFocus signal is
-// picked up by EditableTaskBody's useEffect once the active pane re-
-// renders — a setTimeout-based document.querySelector race lost focus
-// every time Preact's reconciliation re-rendered the input.
+// so the user can immediately rename via the active-pane title input. ONE
+// atomic request (`untitled: true`, plan @400 N8/Task 9): the daemon names
+// the task from its new id inside the create transaction, so there is no
+// follow-up PATCH and never an intermediate "untitled" row. The
+// pendingTitleFocus signal is picked up by TaskHeader once the task's draft
+// has its baseline — a setTimeout-based document.querySelector race lost
+// focus every time Preact's reconciliation re-rendered the input.
 //
 // Extracted from SidebarPane so the command palette's "New task" entry
-// can share the exact same flow without duplicating the two-phase
-// request sequence.
+// can share the exact same flow.
 import { api } from "../api/client.ts";
 import { tryApi } from "../api/errors.ts";
 import { pendingTitleFocus, selectedId } from "../state/signals.ts";
 
 export async function createUntitledTask(lane: string): Promise<void> {
-  const created = await tryApi(() => api.addTask({ title: "untitled", lane }));
+  const created = await tryApi(() => api.addTask({ untitled: true, lane }));
   if (!created?.id) return;
-  await tryApi(() => api.editTask(created.id, { title: `untitled-${created.id}` }));
   pendingTitleFocus.value = created.id;
   selectedId.value = created.id;
 }

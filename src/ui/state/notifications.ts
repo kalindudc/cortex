@@ -5,11 +5,13 @@
 // Two parallel sources, merged for rendering:
 //
 //   1. notifications (server-driven, persisted) — populated by refresh()
-//      from GET /api/notifications and updated live by the SSE
-//      "notification.added" handler in src/ui/index.tsx. These survive a
-//      dashboard reload because the server writes a row on every
-//      task.added and on every PATCH /api/tasks/:id/status that actually
-//      changes the status. Each row carries a `status` (TaskStatus) that
+//      from the GET /api/workspace snapshot and kept live by connectLive
+//      in src/ui/state/refresh.ts (a "notification.added" frame prepends
+//      its row; "notification.changed" refetches GET /api/notifications,
+//      so read/unread/dismiss state converges across tabs and the TUI).
+//      These survive a dashboard reload because the server writes a row on
+//      every task.added and on every PATCH /api/tasks/:id/status that
+//      actually changes the status. Each row carries a `status` (TaskStatus) that
 //      drives the dot color via `dot-status-${status}` — the same CSS
 //      class family task rows use, so no bespoke notification colors are
 //      needed.

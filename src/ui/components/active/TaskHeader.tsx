@@ -16,6 +16,13 @@
 // away from a pointer travelling down to it. Keyboard focus-visible reveals
 // through CSS alone. The title textarea (editing) is exempt: it always shows
 // every line in flow.
+//
+// Title editing starts only once the draft's atomic baseline (text + version
+// tokens, plan @400 N8) is known. A request made earlier (click, Enter/Space
+// on the trigger, or pendingTitleFocus) waits for it with an honest status,
+// or the failure and a Retry; a queued click is dropped if focus moved away
+// meanwhile, so a late baseline never steals focus. Plain navigation shows
+// no loading chrome: reading needs no baseline.
 import type { JSX, VNode } from "preact";
 import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
 import { useSignal } from "@preact/signals";
@@ -46,6 +53,11 @@ const SAVE_LABEL: Record<TaskDraft["saveState"], string | null> = {
 
 export function TaskHeader({ task, draft }: { task: Task; draft: TaskDraft }): VNode {
   const editingTitle = useSignal(false);
+  // A title edit requested before the draft's atomic baseline was known,
+  // with the element that had focus then: the edit starts once the baseline
+  // arrives, but only if focus is still there (a late answer never steals
+  // focus from whatever the user moved on to).
+  const titleWanted = useSignal<{ focus: Element | null } | null>(null);
   const titleClamped = useSignal(false);
   const titleRevealed = useSignal(false);
   const revealTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -60,10 +72,26 @@ export function TaskHeader({ task, draft }: { task: Task; draft: TaskDraft }): V
       titleTriggerRef.current?.focus();
     }
   }, [editingTitle.value]);
+  // Editing waits for the atomic baseline (plan @400 N8): the one-shot
+  // pending request is consumed once the draft is ready.
   useEffect(() => {
-    if (pendingTitleFocus.value !== task.id) return;
+    if (pendingTitleFocus.value !== task.id || !draft.ready) return;
     editingTitle.value = true;
-  }, [task.id, pendingTitleFocus.value]);
+  }, [task.id, pendingTitleFocus.value, draft.ready]);
+  useEffect(() => {
+    const wanted = titleWanted.peek();
+    if (!draft.ready || wanted == null) return;
+    titleWanted.value = null;
+    if (document.activeElement === wanted.focus) editingTitle.value = true;
+  }, [draft.ready]);
+  const requestTitleEdit = (): void => {
+    if (draft.ready) {
+      editingTitle.value = true;
+      return;
+    }
+    titleWanted.value = { focus: document.activeElement };
+    if (draft.loadError != null) draft.reload();
+  };
   useEffect(() => {
     if (!editingTitle.value) return;
     const timer = setTimeout(() => {
@@ -130,6 +158,10 @@ export function TaskHeader({ task, draft }: { task: Task; draft: TaskDraft }): V
     editingTitle.value = false;
   };
   const saveLabel = SAVE_LABEL[draft.saveState];
+  // The baseline's state is shown only once a title edit is actually waiting
+  // for it: reading needs no baseline, so plain navigation shows no chrome.
+  const waitingForBaseline =
+    !draft.ready && (titleWanted.value != null || pendingTitleFocus.value === task.id) ? draft.loadError : undefined;
 
   return (
     <header class={`task-header${titleRevealed.value ? " is-title-revealed" : ""}`} onMouseLeave={dismissReveal}>
@@ -192,7 +224,7 @@ export function TaskHeader({ task, draft }: { task: Task; draft: TaskDraft }): V
               aria-describedby={`title-edit-hint-${task.id}`}
               onClick={() => {
                 dismissReveal();
-                editingTitle.value = true;
+                requestTitleEdit();
               }}
               {...tip("Click to edit title")}
             >
@@ -213,7 +245,18 @@ export function TaskHeader({ task, draft }: { task: Task; draft: TaskDraft }): V
           <TagsHeaderChip task={task} />
         </div>
       </div>
-      {saveLabel != null ? (
+      {waitingForBaseline === null ? (
+        <span class="draft-state draft-state-loading" role="status">
+          Loading the latest version for editing…
+        </span>
+      ) : waitingForBaseline !== undefined ? (
+        <span class="draft-state draft-state-error" role="alert">
+          Editing is unavailable: {waitingForBaseline}
+          <button type="button" class="draft-retry" onClick={() => draft.reload()}>
+            Retry
+          </button>
+        </span>
+      ) : saveLabel != null ? (
         <span
           class={`draft-state draft-state-${draft.saveState}`}
           role={draft.saveState === "error" ? "alert" : "status"}

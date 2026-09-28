@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # build-css.sh — Concatenate per-feature CSS slices into out/bundle.css.
 #
-# Why this script exists at all: Bun 1.1.12 (the pinned bundler) does NOT
-# inline CSS `@import` statements AND clobbers same-named bundle.css outputs
-# when multiple JS-side `import "./foo.css"` statements are reached, so we
-# cannot rely on the bundler to merge our 14 feature slices.
+# Why this script exists at all: Bun 1.1.12 (the bundler pinned when this was
+# written) did NOT inline CSS `@import` statements AND clobbered same-named
+# bundle.css outputs when multiple JS-side `import "./foo.css"` statements were
+# reached, so we could not rely on the bundler to merge our feature slices.
+# The script is kept deliberately after the 1.4.2 upgrade; retiring it is a
+# separate change.
 #
 # Why CSS is built outside `bun build`: src/server.ts imports out/bundle.css
 # via `with { type: "file" }`, which returns a path the server reads at

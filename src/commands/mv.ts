@@ -1,6 +1,6 @@
 import { defineCommand } from "citty";
-import { Store, type Task } from "../store.ts";
-import { Client, daemonUrl } from "../client.ts";
+import { withClient } from "../daemon.ts";
+import type { Task } from "../store.ts";
 import { emitError, emitOk } from "../output.ts";
 
 export default defineCommand({
@@ -28,24 +28,12 @@ export default defineCommand({
     if (!Number.isFinite(id)) {
       emitError(json, new Error("id must be a number"));
     }
-    const url = daemonUrl();
-    if (url) {
-      try {
-        const task = (await Client.moveTask(url, id, args.lane)) as Task;
-        emitOk(json, task, `✓ [${task.id}] → ${task.lane}`);
-        return;
-      } catch (err) {
-        emitError(json, err);
-      }
-    }
-    const store = Store.open();
+    let task: Task;
     try {
-      const task = store.moveTask(id, args.lane);
-      emitOk(json, task, `✓ [${task.id}] → ${task.lane}`);
+      task = await withClient(client => client.moveLane(id, args.lane));
     } catch (err) {
       emitError(json, err);
-    } finally {
-      store.close();
     }
+    emitOk(json, task, `✓ [${task.id}] → ${task.lane}`);
   },
 });

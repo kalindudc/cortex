@@ -114,7 +114,7 @@ function taskHighlight(
   return undefined;
 }
 
-export function searchTasks(tasks: Task[], query: string): TaskSearchResult[] {
+export function searchTasks(tasks: readonly Task[], query: string): TaskSearchResult[] {
   const raw = query.trim();
 
   // --- @<digits> shortcut: exact id lookup, bypass fuzzy entirely.

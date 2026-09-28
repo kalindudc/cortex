@@ -1,5 +1,22 @@
 import { test, expect, describe, beforeEach, afterEach } from "bun:test";
-import { configDir, dbPath, pidPath, urlPath, browserUrlPath, ensureConfigDir } from "../../src/paths.ts";
+import * as paths from "../../src/paths.ts";
+import {
+  configDir,
+  dbPath,
+  pidPath,
+  urlPath,
+  browserUrlPath,
+  ensureConfigDir,
+  runtimeDir,
+  ensureRuntimeDir,
+  daemonSocketPath,
+  daemonMetadataPath,
+  ownerLockPath,
+  MAX_SOCKET_PATH_BYTES,
+  tuiConfigPath,
+  themesDir,
+  tuiStatePath,
+} from "../../src/paths.ts";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
@@ -92,10 +109,15 @@ describe("paths", () => {
   test("browserUrlPath() resolves under configDir() and is distinct from urlPath()", () => {
     expect(browserUrlPath()).toBe(path.join(tmpDir, "cortex", "cortex.browser-url"));
     expect(browserUrlPath()).toBe(path.join(configDir(), "cortex.browser-url"));
-    // Distinct file: CLI uses urlPath() (loopback), browser/`cortex open` uses
-    // browserUrlPath() (friendly host). Conflating them would route mutations
-    // through DNS that Bun fetch / glibc getaddrinfo cannot resolve.
+    // Distinct files an OLDER binary's daemon wrote: its loopback API URL and
+    // the friendly dashboard URL. This cortex only reads them (plan @400 N4):
+    // the legacy-daemon fence probes cortex.url and `cortex open` falls back to
+    // them; it never writes them.
     expect(browserUrlPath()).not.toBe(urlPath());
+  });
+
+  test("the pid-file daemon helpers are gone: nothing reads a pid to signal or route (plan @400 N4-N6)", () => {
+    for (const name of ["readPid", "isAlive", "stopDaemonIfRunning"]) expect(name in paths).toBe(false);
   });
 
   test("ensureConfigDir() creates the directory (XDG pinned to tmp)", () => {
@@ -113,6 +135,25 @@ describe("paths", () => {
     expect(fs.existsSync(expected)).toBe(true);
   });
 
+  // Terminal UI configuration (plan @400 N15): user-authored, read-only
+  // tui.toml and themes/*.toml, plus app-written per-profile view state. All
+  // under configDir(), so the XDG_CONFIG_HOME pin above isolates them too.
+  test("tuiConfigPath() and themesDir() resolve under configDir()", () => {
+    expect(tuiConfigPath()).toBe(path.join(tmpDir, "cortex", "tui.toml"));
+    expect(themesDir()).toBe(path.join(tmpDir, "cortex", "themes"));
+  });
+
+  test("tuiStatePath(profile) is configDir()/tui/<profile>.state.json and creates nothing", () => {
+    expect(tuiStatePath("default")).toBe(path.join(tmpDir, "cortex", "tui", "default.state.json"));
+    expect(tuiStatePath("work-2_b")).toBe(path.join(tmpDir, "cortex", "tui", "work-2_b.state.json"));
+    expect(fs.existsSync(path.join(tmpDir, "cortex"))).toBe(false);
+  });
+
+  test("tuiStatePath() rejects profile names that could escape or alias the state directory", () => {
+    const bad = ["", ".", "..", "../x", "a/b", "a\\b", "-x", ".hidden", "a b", "a\u0000b", "x".repeat(65), "Émile"];
+    for (const name of bad) expect(() => tuiStatePath(name)).toThrow(/invalid profile name/);
+  });
+
   test("ensureConfigDir() creates nested XDG paths recursively", () => {
     const nested = path.join(tmpDir, "deeply", "nested", "xdg");
     process.env.XDG_CONFIG_HOME = nested;
@@ -121,5 +162,138 @@ describe("paths", () => {
     ensureConfigDir();
     expect(fs.existsSync(expected)).toBe(true);
     expect(fs.statSync(expected).isDirectory()).toBe(true);
+  });
+});
+
+// Owned runtime/socket/metadata/lock locations (plan @400 N4). The runtime dir
+// is XDG_RUNTIME_DIR only when it is a real 0700 directory owned by this user;
+// otherwise it is a private per-user directory under os.tmpdir(). TMPDIR is
+// pinned to a fresh tmp dir so the fallback never lands in the real tmpdir.
+describe("paths: runtime dir, daemon socket, metadata and owner lock", () => {
+  const saved = {
+    XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR,
+    TMPDIR: process.env.TMPDIR,
+    CORTEX_DB: process.env.CORTEX_DB,
+  };
+  const uid = process.getuid?.() ?? -1;
+  let root: string;
+  let fallback: string;
+
+  const privateDir = (name: string): string => {
+    const p = path.join(root, name);
+    fs.mkdirSync(p);
+    fs.chmodSync(p, 0o700);
+    return p;
+  };
+
+  beforeEach(() => {
+    root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "cxp-")));
+    const tmp = path.join(root, "tmp");
+    fs.mkdirSync(tmp);
+    process.env.TMPDIR = tmp;
+    delete process.env.XDG_RUNTIME_DIR;
+    fallback = path.join(tmp, `cortex-${uid}`);
+  });
+
+  afterEach(() => {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  test("runtimeDir() uses XDG_RUNTIME_DIR when it is a 0700 directory owned by the user", () => {
+    const xdg = privateDir("xdg");
+    process.env.XDG_RUNTIME_DIR = xdg;
+    expect(runtimeDir()).toBe(xdg);
+    expect(ensureRuntimeDir()).toBe(xdg);
+    expect(fs.existsSync(fallback)).toBe(false);
+  });
+
+  test("runtimeDir() falls back to <tmpdir>/cortex-<uid> for an unset, relative, missing, non-private, symlinked or non-directory XDG_RUNTIME_DIR", () => {
+    const open = path.join(root, "open");
+    fs.mkdirSync(open);
+    fs.chmodSync(open, 0o755);
+    const link = path.join(root, "link");
+    fs.symlinkSync(privateDir("target"), link);
+    const file = path.join(root, "file");
+    fs.writeFileSync(file, "");
+    fs.chmodSync(file, 0o700);
+    const candidates: (string | undefined)[] = [
+      undefined,
+      "",
+      "relative/run",
+      path.join(root, "missing"),
+      open,
+      link,
+      file,
+      path.join(file, "child"),
+    ];
+    for (const value of candidates) {
+      if (value === undefined) delete process.env.XDG_RUNTIME_DIR;
+      else process.env.XDG_RUNTIME_DIR = value;
+      expect(runtimeDir()).toBe(fallback);
+    }
+    // A pure lookup: nothing is created until ensureRuntimeDir().
+    expect(fs.existsSync(fallback)).toBe(false);
+  });
+
+  test("ensureRuntimeDir() creates the fallback as a private 0700 directory and is idempotent", () => {
+    expect(ensureRuntimeDir()).toBe(fallback);
+    const st = fs.lstatSync(fallback);
+    expect(st.isDirectory()).toBe(true);
+    expect(st.uid).toBe(uid);
+    expect(st.mode & 0o777).toBe(0o700);
+    expect(ensureRuntimeDir()).toBe(fallback);
+  });
+
+  test("ensureRuntimeDir() refuses a pre-existing fallback that is not private (mode, symlink)", () => {
+    fs.mkdirSync(fallback);
+    fs.chmodSync(fallback, 0o755);
+    expect(() => ensureRuntimeDir()).toThrow(/unsafe cortex runtime directory/);
+    expect(fs.statSync(fallback).mode & 0o777).toBe(0o755);
+    fs.rmdirSync(fallback);
+    fs.symlinkSync(privateDir("elsewhere"), fallback);
+    expect(() => ensureRuntimeDir()).toThrow(/unsafe cortex runtime directory/);
+  });
+
+  test("daemonSocketPath() is a short hashed name in the runtime dir, stable per database and distinct across databases", () => {
+    const xdg = privateDir("run");
+    process.env.XDG_RUNTIME_DIR = xdg;
+    const a = daemonSocketPath("/data/a/cortex.db");
+    const b = daemonSocketPath("/data/b/cortex.db");
+    expect(path.dirname(a)).toBe(xdg);
+    expect(path.basename(a)).toMatch(/^cortex-[0-9a-f]{16}\.sock$/);
+    expect(a).not.toBe(b);
+    expect(daemonSocketPath("/data/a/cortex.db")).toBe(a);
+    // Independent of the database path length.
+    const deep = daemonSocketPath(`/${"d".repeat(400)}/cortex.db`);
+    expect(Buffer.byteLength(deep)).toBeLessThanOrEqual(MAX_SOCKET_PATH_BYTES);
+    expect(path.basename(deep).length).toBe(path.basename(a).length);
+  });
+
+  test("daemonSocketPath() refuses a runtime dir that would overflow the AF_UNIX path limit", () => {
+    const xdg = privateDir("r".repeat(110));
+    process.env.XDG_RUNTIME_DIR = xdg;
+    expect(runtimeDir()).toBe(xdg);
+    expect(() => daemonSocketPath("/data/cortex.db")).toThrow(/AF_UNIX/);
+  });
+
+  test("owner lock and daemon metadata sit beside the canonical DB, distinct from SQLite and legacy daemon files", () => {
+    const db = "/data/cortex.db";
+    const lock = ownerLockPath(db);
+    const meta = daemonMetadataPath(db);
+    expect(path.dirname(lock)).toBe("/data");
+    expect(path.dirname(meta)).toBe("/data");
+    const others = [db, `${db}-wal`, `${db}-shm`, `${db}-journal`, pidPath(), urlPath(), browserUrlPath()];
+    for (const p of [lock, meta]) expect(others).not.toContain(p);
+    expect(lock).not.toBe(meta);
+  });
+
+  test("the runtime helpers do not move the existing database path", () => {
+    process.env.XDG_RUNTIME_DIR = privateDir("xdg");
+    delete process.env.CORTEX_DB;
+    expect(dbPath()).toBe(path.join(configDir(), "cortex.db"));
   });
 });

@@ -1,8 +1,9 @@
 import { defineCommand } from "citty";
-import { Store, type Task } from "../store.ts";
+import { withClient } from "../daemon.ts";
+import type { Task } from "../store.ts";
 import { searchTasks } from "../ui/lib/fuzzy.ts";
 import { renderTagsTruncated, STATUS_BADGE, STATUS_COLOR } from "./ls.ts";
-import { renderTaskView } from "./show.ts";
+import { readTaskOrExit, renderTaskView } from "./show.ts";
 
 // cortex search — interactive fuzzy task finder.
 //
@@ -101,14 +102,15 @@ export default defineCommand({
     },
   },
   async run({ args }) {
-    const store = Store.open();
+    // Read, then let go (offline: release the ownership lease) BEFORE the
+    // potentially long interactive fzf session; the selected task is re-read
+    // afterwards through a fresh withClient, which rediscovers the daemon.
     let tasks: Task[];
     try {
-      tasks = store.listTasks({});
-    } finally {
-      // Close before the (potentially long) interactive fzf session; the
-      // selected task is re-read afterwards with a fresh handle.
-      store.close();
+      tasks = await withClient(client => client.tasks());
+    } catch (err) {
+      console.error(`error: ${(err as Error).message}`);
+      process.exit(1);
     }
 
     const query = args.text ?? "";
@@ -166,17 +168,8 @@ export default defineCommand({
       process.exit(1);
     }
 
-    const reread = Store.open();
-    try {
-      const task = reread.getTask(id);
-      if (!task) {
-        console.error(`task ${id} not found`);
-        process.exit(1);
-      }
-      console.log(renderTaskView(task, reread.listUpdates(id)));
-    } finally {
-      reread.close();
-    }
+    const selected = await readTaskOrExit(id);
+    console.log(renderTaskView(selected.task, selected.updates));
 
     // Clipboard last, and its status goes to stderr — stdout stays
     // byte-identical to `cortex show <id>` for piping.

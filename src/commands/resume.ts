@@ -8,9 +8,10 @@
  *
  * Flow:
  *   1. Validate the id (positive integer; `Number.parseInt` + `>0`).
- *   2. `Store.open()` (mirrors `src/commands/show.ts` — direct read, no
- *      daemon round-trip).
- *   3. Fetch the task; 404 → exit 1.
+ *   2. Read the task and its updates through withClient (mirrors
+ *      `src/commands/show.ts`: the verified daemon, or offline under the
+ *      ownership lease), released BEFORE any picker prompt or pi runs.
+ *   3. Missing task → `task <id> not found`, exit 1.
  *   4. Aggregate updates by author (count, lastSeen, lastSummary).
  *   5. Filter to harness-attributable tags: first dash splits into
  *      `harness === "pi"` AND the suffix matches the strict uuidv7 regex.
@@ -27,16 +28,18 @@
  *   - chdir or scan `~/.pi/agent/sessions/`
  *   - accept author-tag input
  *   - add new Store methods
+ *   - hold the database (lease or daemon request) while picking or running pi
  */
 
 import { defineCommand } from "citty";
 import { spawn } from "node:child_process";
 import readline from "node:readline";
-import { Store } from "../store.ts";
+import type { Update } from "../store.ts";
+import { readTaskOrExit } from "./show.ts";
 
 const UUIDV7_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
-type Candidate = {
+export type Candidate = {
   author: string;
   sessionId: string;
   count: number;
@@ -124,6 +127,45 @@ async function pickWithReadline(cands: Candidate[]): Promise<Candidate | null> {
 }
 
 /**
+ * The task's resumable harness sessions, most recent first: updates
+ * aggregated by author (count, lastSeen, lastSummary), kept only when the
+ * first dash splits the tag into `harness === "pi"` AND a strict uuidv7
+ * suffix. Defense in depth: only well-formed uuids reach `spawn`. The
+ * terminal workspace's :resume checks this before handing over the terminal.
+ */
+export function resumeCandidates(updates: readonly Update[]): Candidate[] {
+  const byAuthor = new Map<string, { count: number; lastSeen: number; lastSummary: string }>();
+  for (const u of updates) {
+    const prev = byAuthor.get(u.author);
+    if (!prev || u.created > prev.lastSeen) {
+      byAuthor.set(u.author, {
+        count: (prev?.count ?? 0) + 1,
+        lastSeen: u.created,
+        lastSummary: u.summary,
+      });
+    } else {
+      byAuthor.set(u.author, {
+        count: prev.count + 1,
+        lastSeen: prev.lastSeen,
+        lastSummary: prev.lastSummary,
+      });
+    }
+  }
+  const cands: Candidate[] = [];
+  for (const [author, agg] of byAuthor) {
+    const dash = author.indexOf("-");
+    if (dash <= 0) continue;
+    const harness = author.slice(0, dash);
+    const sessionId = author.slice(dash + 1);
+    if (harness !== "pi") continue;
+    if (!UUIDV7_RE.test(sessionId)) continue;
+    cands.push({ author, sessionId, ...agg });
+  }
+  cands.sort((a, b) => b.lastSeen - a.lastSeen);
+  return cands;
+}
+
+/**
  * Spawn `pi --session <sessionId>` with stdio inherited. Never returns.
  *
  * Bun's `child_process.spawn` (under `bun build --compile`) raises ENOENT
@@ -178,51 +220,8 @@ export default defineCommand({
       process.exit(1);
     }
 
-    const store = Store.open();
-    let cands: Candidate[];
-    try {
-      const task = store.getTask(id);
-      if (!task) {
-        console.error(`task ${id} not found`);
-        process.exit(1);
-      }
-      const updates = store.listUpdates(id);
-
-      // Aggregate by author.
-      const byAuthor = new Map<string, { count: number; lastSeen: number; lastSummary: string }>();
-      for (const u of updates) {
-        const prev = byAuthor.get(u.author);
-        if (!prev || u.created > prev.lastSeen) {
-          byAuthor.set(u.author, {
-            count: (prev?.count ?? 0) + 1,
-            lastSeen: u.created,
-            lastSummary: u.summary,
-          });
-        } else {
-          byAuthor.set(u.author, {
-            count: prev.count + 1,
-            lastSeen: prev.lastSeen,
-            lastSummary: prev.lastSummary,
-          });
-        }
-      }
-
-      // Filter: first dash splits into harness==="pi" AND uuidv7-shaped
-      // suffix. Defense in depth — only well-formed uuids reach `spawn`.
-      cands = [];
-      for (const [author, agg] of byAuthor) {
-        const dash = author.indexOf("-");
-        if (dash <= 0) continue;
-        const harness = author.slice(0, dash);
-        const sessionId = author.slice(dash + 1);
-        if (harness !== "pi") continue;
-        if (!UUIDV7_RE.test(sessionId)) continue;
-        cands.push({ author, sessionId, ...agg });
-      }
-      cands.sort((a, b) => b.lastSeen - a.lastSeen);
-    } finally {
-      store.close();
-    }
+    const { updates } = await readTaskOrExit(id);
+    const cands = resumeCandidates(updates);
 
     if (cands.length === 0) {
       console.error(`cortex resume: no resumable harness sessions in updates for task ${id}`);

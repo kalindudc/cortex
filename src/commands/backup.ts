@@ -1,9 +1,10 @@
 import { defineCommand } from "citty";
 import fs from "node:fs";
-import { backupNotificationInput, createBackup, defaultBackupPath } from "../backup.ts";
-import { Client, daemonUrl } from "../client.ts";
-import { dbPath, ensureBackupsDir, isAlive, readPid } from "../paths.ts";
-import { Store } from "../store.ts";
+import path from "node:path";
+import { defaultBackupPath } from "../backup.ts";
+import type { BackupResult } from "../contracts.ts";
+import { withClient } from "../daemon.ts";
+import { dbPath, ensureBackupsDir } from "../paths.ts";
 
 function parseRotate(raw: unknown): number {
   const n = Number.parseInt(String(raw ?? "0"), 10);
@@ -14,7 +15,7 @@ function parseRotate(raw: unknown): number {
   return n;
 }
 
-type BackupResponse = { outPath: string; bytes: number; stats: { tasks: number; updates: number } };
+type BackupResponse = Pick<BackupResult, "outPath" | "bytes" | "stats">;
 
 function printBackup(result: BackupResponse): void {
   console.log(
@@ -40,32 +41,33 @@ export default defineCommand({
   },
   async run({ args }) {
     const rotate = parseRotate(args.rotate);
-    const outPath = args.out || defaultBackupPath();
-    ensureBackupsDir();
-    const pid = readPid();
-    if (pid !== null && isAlive(pid)) {
-      console.error("⚠ cortex daemon is running; backup is consistent (read-only deferred snapshot)");
+    // Refuse a missing source before anything else: offline, withClient would
+    // create and migrate an EMPTY database, whose archive --rotate would then
+    // keep over the last valid one.
+    const source = path.resolve(dbPath());
+    if (!fs.existsSync(source)) {
+      console.error(`error: no cortex database at ${source}: nothing to back up`);
+      process.exit(1);
     }
+    // Absolute, because a running daemon writes it from its own working directory.
+    const outPath = args.out ? path.resolve(args.out) : defaultBackupPath();
+    ensureBackupsDir();
+    let result: BackupResponse;
     try {
-      const url = daemonUrl();
-      if (url) {
-        const result = (await Client.backup(url, { outPath, rotate })) as BackupResponse;
-        printBackup(result);
-        return;
-      }
-
-      const { doc } = await createBackup({ liveDbPath: dbPath(), outPath, rotate });
-      const bytes = fs.statSync(outPath).size;
-      const store = Store.open();
-      try {
-        store.addNotification(backupNotificationInput({ outPath, bytes, stats: doc.stats }));
-      } finally {
-        store.close();
-      }
-      printBackup({ outPath, bytes, stats: doc.stats });
+      // The verified daemon writes the archive (its readonly snapshot beside
+      // the database it owns); without one, the same handler runs in-process
+      // while this command owns the database.
+      result = await withClient(async (client, target) => {
+        if (target.daemon !== null) {
+          console.error("⚠ cortex daemon is running; backup is consistent (read-only deferred snapshot)");
+        }
+        return client.backup({ outPath, rotate });
+      });
     } catch (err) {
       console.error(`error: ${(err as Error).message}`);
       process.exit(1);
     }
+    // Echo the path as given (relative stays relative), like before.
+    printBackup({ ...result, outPath: args.out || result.outPath });
   },
 });

@@ -245,12 +245,55 @@ function asInt(row: Record<string, unknown>, key: string): number | null {
   return typeof value === "number" && Number.isInteger(value) ? value : null;
 }
 
-function ensureLane(db: Database, name: string): void {
-  db.run(`INSERT OR IGNORE INTO lanes (name, color, sort) VALUES (?, NULL, 0);`, [name]);
+/** Returns whether the lane was created. */
+function ensureLane(db: Database, name: string): boolean {
+  return db.run(`INSERT OR IGNORE INTO lanes (name, color, sort) VALUES (?, NULL, 0);`, [name]).changes > 0;
 }
 
-function ensureTag(db: Database, name: string): void {
-  db.run(`INSERT OR IGNORE INTO tags (name, color, created) VALUES (?, NULL, ?);`, [name, Date.now()]);
+/** Returns whether the tag was created. */
+function ensureTag(db: Database, name: string): boolean {
+  return (
+    db.run(`INSERT OR IGNORE INTO tags (name, color, created) VALUES (?, NULL, ?);`, [name, Date.now()]).changes > 0
+  );
+}
+
+/**
+ * Catalog rows a merge created or changed the membership of, so their
+ * revision tokens can be stamped inside the merge's transaction.
+ */
+type Touched = {
+  newLanes: Set<string>;
+  memberLanes: Set<string>;
+  newTags: Set<string>;
+  memberTags: Set<string>;
+};
+
+function emptyTouched(): Touched {
+  return { newLanes: new Set(), memberLanes: new Set(), newTags: new Set(), memberTags: new Set() };
+}
+
+/**
+ * Plan @400 N10: imported task ids (preserved OR bumped) get fresh tokens for
+ * every scope, so an id the destination had deleted can never satisfy a guard
+ * read before that deletion; created lanes/tags start fresh, and existing ones
+ * that gained members advance `entity` only (their definition was kept).
+ * Destination identity and receipts are never touched, and the v1 archive
+ * carries no source receipts to import.
+ */
+function stampRestored(store: Store, idMap: Map<number, number>, touched: Touched): void {
+  store.stampRevisions("task", idMap.values());
+  store.stampRevisions("lane", touched.newLanes);
+  store.stampRevisions(
+    "lane",
+    [...touched.memberLanes].filter(name => !touched.newLanes.has(name)),
+    ["entity"],
+  );
+  store.stampRevisions("tag", touched.newTags);
+  store.stampRevisions(
+    "tag",
+    [...touched.memberTags].filter(name => !touched.newTags.has(name)),
+    ["entity"],
+  );
 }
 
 function isTaskIdCollision(err: unknown): boolean {
@@ -399,18 +442,27 @@ function extractBackup(backupPath: string): { doc: BackupDoc; cleanup: () => voi
   }
 }
 
-function insertLanes(db: Database, doc: BackupDoc, counts: RestoreCounts, columns: Set<string>): void {
+function insertLanes(
+  db: Database,
+  doc: BackupDoc,
+  counts: RestoreCounts,
+  columns: Set<string>,
+  touched: Touched,
+): void {
   for (const row of doc.lanes) {
     const name = asString(row, "name");
     if (!name) throw new Error("invalid backup: lane row missing name");
     const existed = existsByKey(db, "lanes", name);
     insertDynamic({ db, table: "lanes", data: row, columns, orIgnore: true });
     if (existed) counts.lanes.existing++;
-    else counts.lanes.new++;
+    else {
+      counts.lanes.new++;
+      touched.newLanes.add(name);
+    }
   }
 }
 
-function insertTags(db: Database, doc: BackupDoc, counts: RestoreCounts, columns: Set<string>): void {
+function insertTags(db: Database, doc: BackupDoc, counts: RestoreCounts, columns: Set<string>, touched: Touched): void {
   for (const row of doc.tags) {
     const name = asString(row, "name");
     if (!name) throw new Error("invalid backup: tag row missing name");
@@ -418,17 +470,27 @@ function insertTags(db: Database, doc: BackupDoc, counts: RestoreCounts, columns
     const data = { ...row, created: row.created ?? Date.now() };
     insertDynamic({ db, table: "tags", data, columns, orIgnore: true });
     if (existed) counts.tags.existing++;
-    else counts.tags.new++;
+    else {
+      counts.tags.new++;
+      touched.newTags.add(name);
+    }
   }
 }
 
-function insertTasks(db: Database, doc: BackupDoc, counts: RestoreCounts, columns: Set<string>): Map<number, number> {
+function insertTasks(
+  db: Database,
+  doc: BackupDoc,
+  counts: RestoreCounts,
+  columns: Set<string>,
+  touched: Touched,
+): Map<number, number> {
   const idMap = new Map<number, number>();
   for (const row of doc.tasks) {
     const oldId = asInt(row, "id");
     if (oldId === null) throw new Error("invalid backup: task row missing numeric id");
     const lane = asString(row, "lane");
-    if (lane) ensureLane(db, lane);
+    if (lane && ensureLane(db, lane)) touched.newLanes.add(lane);
+    touched.memberLanes.add(lane ?? "now");
     const data: Record<string, unknown> = {
       ...row,
       lane: row.lane ?? "now",
@@ -493,6 +555,7 @@ function insertTaskTags(
   counts: RestoreCounts,
   columns: Set<string>,
   idMap: Map<number, number>,
+  touched: Touched,
 ): void {
   for (const row of doc.task_tags) {
     const sourceTaskId = asInt(row, "task_id");
@@ -502,7 +565,8 @@ function insertTaskTags(
       counts.skipped.taskTags++;
       continue;
     }
-    ensureTag(db, tagName);
+    if (ensureTag(db, tagName)) touched.newTags.add(tagName);
+    touched.memberTags.add(tagName);
     insertDynamic({ db, table: "task_tags", data: { ...row, task_id: taskId }, columns, orIgnore: true });
     counts.taskTags++;
   }
@@ -552,12 +616,14 @@ export async function restoreBackup(opts: RestoreOpts): Promise<{ idMap: Map<num
       if (!tableHasRows(db, "lanes") || !tableHasRows(db, "tasks") || !tableHasRows(db, "updates")) {
         throw new Error("destination database is missing required cortex tables");
       }
-      insertLanes(db, extracted.doc, counts, laneColumns);
-      insertTags(db, extracted.doc, counts, tagColumns);
-      const idMap = insertTasks(db, extracted.doc, counts, taskColumns);
+      const touched = emptyTouched();
+      insertLanes(db, extracted.doc, counts, laneColumns, touched);
+      insertTags(db, extracted.doc, counts, tagColumns, touched);
+      const idMap = insertTasks(db, extracted.doc, counts, taskColumns, touched);
       insertUpdates(db, extracted.doc, counts, updateColumns, idMap);
-      insertTaskTags(db, extracted.doc, counts, taskTagColumns, idMap);
+      insertTaskTags(db, extracted.doc, counts, taskTagColumns, idMap, touched);
       insertNotifications(db, extracted.doc, counts, notificationColumns, idMap);
+      stampRestored(opts.liveStore, idMap, touched);
       return { idMap, counts };
     });
   } finally {
@@ -565,63 +631,117 @@ export async function restoreBackup(opts: RestoreOpts): Promise<{ idMap: Map<num
   }
 }
 
-export async function dryRunRestore(backupPath: string, liveStore: Store): Promise<DryRunResult> {
+/** Parse and validate a backup archive (extracted to a temp dir that is removed before returning). */
+export function readBackup(backupPath: string): BackupDoc {
   const extracted = extractBackup(backupPath);
   try {
-    const doc = extracted.doc;
-    const counts = emptyCounts();
-    const existingLanes = new Set(liveStore.listLanes().map(l => l.name));
-    const existingTags = new Set(liveStore.listTags().map(t => t.name));
-    for (const row of doc.lanes) {
-      const name = asString(row, "name");
-      if (!name) continue;
-      if (existingLanes.has(name)) counts.lanes.existing++;
-      else counts.lanes.new++;
-    }
-    for (const row of doc.tags) {
-      const name = asString(row, "name");
-      if (!name) continue;
-      if (existingTags.has(name)) counts.tags.existing++;
-      else counts.tags.new++;
-    }
-    const docTaskIds = new Set<number>();
-    for (const row of doc.tasks) {
-      const id = asInt(row, "id");
-      if (id === null) continue;
-      docTaskIds.add(id);
-      if (liveStore.getTask(id)) counts.tasks.bumped++;
-      else counts.tasks.preserved++;
-    }
-    for (const row of doc.updates) {
-      const taskId = asInt(row, "task_id");
-      if (taskId !== null && docTaskIds.has(taskId)) counts.updates++;
-      else counts.skipped.updates++;
-    }
-    for (const row of doc.task_tags) {
-      const taskId = asInt(row, "task_id");
-      if (taskId !== null && docTaskIds.has(taskId)) counts.taskTags++;
-      else counts.skipped.taskTags++;
-    }
-    for (const row of doc.notifications) {
-      if (row.task_id === null) {
-        counts.notifications++;
-        continue;
-      }
-      const taskId = asInt(row, "task_id");
-      if (taskId !== null && docTaskIds.has(taskId)) counts.notifications++;
-      else counts.skipped.notifications++;
-    }
-    return {
-      doc: {
-        format_version: doc.format_version,
-        cortex_version: doc.cortex_version,
-        created_at: doc.created_at,
-        source_host: doc.source_host,
-        stats: doc.stats,
-      },
-      would: counts,
-    };
+    return extracted.doc;
   } finally {
     extracted.cleanup();
   }
+}
+
+/** What a destination already holds, as far as a restore projection needs to know. */
+type RestoreDestination = { lanes: Set<string>; tags: Set<string>; taskIds: Set<number> };
+
+/**
+ * A missing destination: the fresh database a real restore would create
+ * first, i.e. `cortex init`'s empty database with only the default `now`
+ * lane. Projected, never created.
+ */
+function freshDestination(): RestoreDestination {
+  return { lanes: new Set(["now"]), tags: new Set(), taskIds: new Set() };
+}
+
+/**
+ * Read the destination with plain SELECTs, so it works on a readonly
+ * snapshot and on legacy schemas as they are (no migrate): a database from
+ * before tags simply has none. Without the core tables it is not a cortex
+ * database this cortex can restore into, which is an error.
+ */
+function readDestination(store: Store): RestoreDestination {
+  return store.runInTransaction(db => {
+    if (!tableHasRows(db, "lanes") || !tableHasRows(db, "tasks") || !tableHasRows(db, "updates")) {
+      throw new Error("destination database is missing required cortex tables");
+    }
+    const names = (table: "lanes" | "tags"): Set<string> =>
+      new Set(
+        db
+          .query<{ name: string }, []>(`SELECT name FROM ${qIdent(table)};`)
+          .all()
+          .map(r => r.name),
+      );
+    const taskIds = new Set(
+      db
+        .query<{ id: number }, []>("SELECT id FROM tasks;")
+        .all()
+        .map(r => r.id),
+    );
+    return { lanes: names("lanes"), tags: tableHasRows(db, "tags") ? names("tags") : new Set(), taskIds };
+  });
+}
+
+/**
+ * What restoring `doc` into `destination` would insert, without writing.
+ * `destination` null means the database does not exist yet (projected as a
+ * fresh one). Synchronous and read-only, so it runs inside Store.readSnapshot
+ * (no migration, no ownership lease), even beside a live daemon.
+ */
+export function projectRestore(doc: BackupDoc, destination: Store | null): DryRunResult {
+  const dest = destination === null ? freshDestination() : readDestination(destination);
+  const counts = emptyCounts();
+  for (const row of doc.lanes) {
+    const name = asString(row, "name");
+    if (!name) continue;
+    if (dest.lanes.has(name)) counts.lanes.existing++;
+    else counts.lanes.new++;
+  }
+  for (const row of doc.tags) {
+    const name = asString(row, "name");
+    if (!name) continue;
+    if (dest.tags.has(name)) counts.tags.existing++;
+    else counts.tags.new++;
+  }
+  const docTaskIds = new Set<number>();
+  for (const row of doc.tasks) {
+    const id = asInt(row, "id");
+    if (id === null) continue;
+    docTaskIds.add(id);
+    if (dest.taskIds.has(id)) counts.tasks.bumped++;
+    else counts.tasks.preserved++;
+  }
+  for (const row of doc.updates) {
+    const taskId = asInt(row, "task_id");
+    if (taskId !== null && docTaskIds.has(taskId)) counts.updates++;
+    else counts.skipped.updates++;
+  }
+  for (const row of doc.task_tags) {
+    const taskId = asInt(row, "task_id");
+    if (taskId !== null && docTaskIds.has(taskId)) counts.taskTags++;
+    else counts.skipped.taskTags++;
+  }
+  for (const row of doc.notifications) {
+    if (row.task_id === null) {
+      counts.notifications++;
+      continue;
+    }
+    const taskId = asInt(row, "task_id");
+    if (taskId !== null && docTaskIds.has(taskId)) counts.notifications++;
+    else counts.skipped.notifications++;
+  }
+  return {
+    doc: {
+      format_version: doc.format_version,
+      cortex_version: doc.cortex_version,
+      created_at: doc.created_at,
+      source_host: doc.source_host,
+      stats: doc.stats,
+    },
+    would: counts,
+  };
+}
+
+/** projectRestore for an archive on disk; `destination` null projects a missing database. */
+export async function dryRunRestore(backupPath: string, destination: Store | null): Promise<DryRunResult> {
+  return projectRestore(readBackup(backupPath), destination);
 }

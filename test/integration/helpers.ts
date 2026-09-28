@@ -5,25 +5,32 @@ import crypto from "node:crypto";
 
 // Shared CLI-spawn isolation for every test that spawns the cortex CLI.
 //
-// Why this exists (Plan 15 root cause):
-//   commands/{add,update,edit,mv,rm,lane}.ts call daemonUrl() (client.ts:21)
-//   BEFORE Store.open(). daemonUrl() reads ~/.config/cortex/cortex.{pid,url}
-//   via pidPath()/urlPath() (paths.ts:25-37); configDir() (paths.ts:9-12)
-//   only honors XDG_CONFIG_HOME. When tests set CORTEX_DB but not
-//   XDG_CONFIG_HOME, the live daemon is detected, the HTTP early-return
-//   fires, and CORTEX_DB is never consulted -- mutations land in the user's
-//   production DB.
+// Why this exists (Plan 15 root cause, still load-bearing):
+//   every normal command goes through daemon.ts withClient, which finds the
+//   daemon serving the CONFIGURED database (CORTEX_DB, else configDir()'s
+//   cortex.db; configDir() only honors XDG_CONFIG_HOME) and, before any
+//   writable fallback, probes an older binary's cortex.pid/cortex.url in the
+//   config dir. Before plan @400 Task 6 those two files alone routed every
+//   mutation to whatever daemon they named, so a test that pinned CORTEX_DB
+//   but not XDG_CONFIG_HOME wrote into the user's real DB. A test that pins
+//   only some of these paths can still reach, or be blocked by, the
+//   developer's real daemon or legacy files.
 //
-// Three env vars MUST always be pinned, in order of importance:
-//   1. XDG_CONFIG_HOME -- closes the daemon-routing escape hatch
-//   2. CORTEX_DB       -- pins SQLite file even on the no-daemon path
-//   3. CORTEX_SKILL_DIR -- keeps init/reset from clobbering ~/.agents/skills/
+// Five env vars MUST always be pinned (plan @400 N24), in order of importance:
+//   1. XDG_CONFIG_HOME         -- closes the daemon-routing escape hatch
+//   2. CORTEX_DB               -- pins SQLite file even on the no-daemon path
+//   3. XDG_RUNTIME_DIR         -- private 0700 dir for daemon sockets (src/paths.ts
+//                                 runtimeDir()); kept SHORT so socket paths stay
+//                                 under the ~104-byte AF_UNIX limit
+//   4. CORTEX_SKILL_DIR        -- keeps init/reset from clobbering ~/.agents/skills/
+//   5. CORTEX_PI_EXTENSION_DIR -- keeps init/reset from clobbering
+//                                 ~/.pi/agent/extensions/
 //
-// Defense in depth: this module DELETES inherited XDG_CONFIG_HOME /
-// CORTEX_DB / CORTEX_SKILL_DIR from the env it builds before assigning,
-// so a developer with these set in their shell can't make a test silently
-// re-target the wrong place. We never spread + overwrite (an empty-string
-// XDG_CONFIG_HOME from the parent shell still defeats the ?? in paths.ts:9).
+// Defense in depth: this module DELETES every inherited copy of the five
+// keys from the env it builds before assigning, so a developer with these
+// set in their shell can't make a test silently re-target the wrong place.
+// We never spread + overwrite (an empty-string XDG_CONFIG_HOME from the
+// parent shell still defeats the ?? in paths.ts:9).
 
 export const ROOT: string = path.resolve(import.meta.dir, "../..");
 export const BIN: string = path.join(ROOT, "bin/cortex");
@@ -44,42 +51,55 @@ export type RunOpts = {
   stdin?: string;
 };
 
+const ISOLATED_KEYS = [
+  "XDG_CONFIG_HOME",
+  "XDG_RUNTIME_DIR",
+  "CORTEX_DB",
+  "CORTEX_SKILL_DIR",
+  "CORTEX_PI_EXTENSION_DIR",
+] as const;
+
 /**
  * Build a hermetic env that points cortex at a fresh tmp dir for its
- * config, DB, and skill output. The caller is responsible for invoking
- * `cleanup()` (typically from afterAll).
+ * config, DB, skill and pi-extension output, plus a separate fresh 0700
+ * runtime dir. The caller is responsible for invoking `cleanup()`
+ * (typically from afterAll), which removes both directories.
  *
  * `label` is folded into the tmp-dir basename for easier debugging when
- * multiple test files leave artefacts around mid-run.
+ * multiple test files leave artefacts around mid-run. The runtime dir
+ * deliberately does NOT carry the label: daemon sockets live there and the
+ * AF_UNIX path limit (~104 bytes) leaves no room for long names.
  */
 export function mkTmpEnv(label: string): {
   tmpDir: string;
+  runtimeDir: string;
   env: Record<string, string>;
   cleanup: () => void;
 } {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `cortex-${label}-${crypto.randomBytes(4).toString("hex")}-`));
-  const dbPath = path.join(tmpDir, "cortex.db");
-  const skillDir = path.join(tmpDir, "skill");
+  const runtimeDir = fs.mkdtempSync(path.join(os.tmpdir(), "cxr-"));
+  fs.chmodSync(runtimeDir, 0o700);
 
-  // Build env explicitly: shallow-copy parent env, DELETE the three keys we
+  // Build env explicitly: shallow-copy parent env, DELETE the five keys we
   // care about (so an inherited "" or wrong path can't leak through), then
   // SET them to tmp paths. Spread + overwrite would not erase an inherited
   // empty string, which `?? path.join(homedir(), ".config")` treats as
   // truthy and silently routes to the user's real config dir.
   const env: Record<string, string> = { ...(process.env as Record<string, string>) };
-  delete env.XDG_CONFIG_HOME;
-  delete env.CORTEX_DB;
-  delete env.CORTEX_SKILL_DIR;
+  for (const key of ISOLATED_KEYS) delete env[key];
   env.XDG_CONFIG_HOME = tmpDir;
-  env.CORTEX_DB = dbPath;
-  env.CORTEX_SKILL_DIR = skillDir;
+  env.XDG_RUNTIME_DIR = runtimeDir;
+  env.CORTEX_DB = path.join(tmpDir, "cortex.db");
+  env.CORTEX_SKILL_DIR = path.join(tmpDir, "skill");
+  env.CORTEX_PI_EXTENSION_DIR = path.join(tmpDir, "ext");
   env.NO_COLOR = "1";
 
   const cleanup = () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(runtimeDir, { recursive: true, force: true });
   };
 
-  return { tmpDir, env, cleanup };
+  return { tmpDir, runtimeDir, env, cleanup };
 }
 
 /**

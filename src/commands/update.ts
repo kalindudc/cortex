@@ -1,6 +1,7 @@
 import { defineCommand } from "citty";
-import { Store, validateAuthorTag, type TaskStatus, type Update } from "../store.ts";
-import { Client, daemonUrl } from "../client.ts";
+import type { PostUpdateRequest } from "../contracts.ts";
+import { withClient } from "../daemon.ts";
+import { validateAuthorTag, type TaskStatus, type Update } from "../store.ts";
 import { emitError, printJson } from "../output.ts";
 
 const STATUSES: TaskStatus[] = ["draft", "open", "review", "blocked", "done"];
@@ -67,41 +68,28 @@ export default defineCommand({
     } catch (err) {
       emitError(json, err);
     }
-    const updatePayload = {
+    // ONE request (plan @400 N9): the message row, and with --status the
+    // status change plus its `status → x` audit row by the same author,
+    // commit together or not at all. `notify` marks it an attributed agent
+    // change, so a real transition persists its bell-drawer notification.
+    const status = args.status ? (args.status as TaskStatus) : undefined;
+    const request: PostUpdateRequest = {
       author,
       summary: args.message,
       body: args.body || null,
+      ...(status ? { status, notify: true } : {}),
     };
-    const url = daemonUrl();
-    if (url) {
-      try {
-        const u = (await Client.addUpdate(url, id, updatePayload)) as Update;
-        if (!json) console.log(`✓ update [${u.id}] posted on task ${id}`);
-        if (args.status) {
-          // Pass author through so the server's audit-trail row inside
-          // setStatus is attributed to the same session, not the cascade.
-          await Client.setStatus(url, id, args.status, author);
-          if (!json) console.log(`✓ status → ${args.status}`);
-        }
-        if (json) printJson({ update: u, ...(args.status ? { status: args.status } : {}) });
-        return;
-      } catch (err) {
-        emitError(json, err);
-      }
-    }
-    const store = Store.open();
+    let update: Update;
     try {
-      const update = store.addUpdate({ task_id: id, ...updatePayload });
-      if (!json) console.log(`✓ update [${update.id}] posted on task ${id}`);
-      if (args.status) {
-        store.setStatus(id, args.status as TaskStatus, { author });
-        if (!json) console.log(`✓ status → ${args.status}`);
-      }
-      if (json) printJson({ update, ...(args.status ? { status: args.status } : {}) });
+      update = await withClient(client => client.postUpd(id, request));
     } catch (err) {
       emitError(json, err);
-    } finally {
-      store.close();
     }
+    if (json) {
+      printJson({ update, ...(status ? { status } : {}) });
+      return;
+    }
+    console.log(`✓ update [${update.id}] posted on task ${id}`);
+    if (status) console.log(`✓ status → ${status}`);
   },
 });

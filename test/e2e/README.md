@@ -67,7 +67,9 @@ Every test owns a fresh, hermetic cortex daemon. The
 3. Picks a random free TCP port on `127.0.0.1` and spawns
    `bin/cortex serve --port <random> --foreground --no-open`.
 4. Polls `/api/health` until 200 (10s budget).
-5. Yields a `url` fixture to the test.
+5. Yields a `url` fixture to the test, plus `cli(args)`, which runs the
+   compiled binary once with the SAME hermetic env so it attaches to this
+   test's daemon (used by `guarded-drafts.spec.ts` for unguarded CLI writes).
 6. On teardown: SIGTERM the daemon, wait up to 2s for exit, SIGKILL if
    still alive, recursively remove the tmpdir.
 

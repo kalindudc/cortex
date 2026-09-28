@@ -16,7 +16,9 @@
 //        - table overflow wrappers (local scroll, not page scroll);
 //        - @id / #tag reference decoration through parseRefs/navigateRef,
 //          applied ONLY to prose text nodes (never inside code, links,
-//          pre, or SVG).
+//          pre, or SVG). A surface outside the workspace (the rich draft
+//          preview) injects `onRef` instead, so following a reference there
+//          never touches the workspace's selection/filter singletons.
 //   3. runMermaid(host, isCurrent) — sanitized SVG commits gated by the
 //      render generation; failures keep the source visible with an
 //      explicit error + retry affordance. Source-only documents never
@@ -43,6 +45,8 @@ export interface MarkdownViewProps {
   source: string;
   idPrefix: string;
   onHeadings?: (headings: MarkdownHeading[]) => void;
+  /** Follow an @id / #tag reference; default navigateRef (the workspace's selection and filters). */
+  onRef?: (kind: "task" | "tag", value: string) => void;
 }
 
 function slugify(text: string): string {
@@ -200,6 +204,8 @@ export function MarkdownView(props: MarkdownViewProps): VNode {
   // freely; the Markdown DOM must not rebuild unless source changes).
   const onHeadingsRef = useRef(props.onHeadings);
   onHeadingsRef.current = props.onHeadings;
+  const onRefRef = useRef(props.onRef);
+  onRefRef.current = props.onRef;
 
   // Sanitize on the RENDER path so the failure view and the host div swap
   // declaratively (fail closed on sanitizer errors). Memoized: unrelated
@@ -266,7 +272,7 @@ export function MarkdownView(props: MarkdownViewProps): VNode {
       if (target.classList.contains("md-ref")) {
         e.preventDefault();
         const kind = target.dataset.refKind === "task" ? "task" : "tag";
-        navigateRef(kind, target.dataset.refValue ?? "");
+        (onRefRef.current ?? navigateRef)(kind, target.dataset.refValue ?? "");
         return;
       }
       if (target.classList.contains("md-copy")) {

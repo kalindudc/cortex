@@ -1,23 +1,27 @@
-import { test, expect, describe, beforeAll, afterAll } from "bun:test";
+import { test, expect, describe, beforeAll, afterAll, afterEach } from "bun:test";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
-import { BIN, mkTmpEnv, runCli } from "../helpers.ts";
+import { mkTmpEnv } from "../helpers.ts";
+import { isRunning, readIdentity, reap, runBounded, socketHealth, startForeground } from "../fixtures/daemon.ts";
+import { CONTROL_PATHS, INSTANCE_HEADER } from "../../../src/api.ts";
+import type { DaemonIdentity } from "../../../src/contracts.ts";
 
-// ---------- CLI integration: `cortex serve --host` + cortex.browser-url ----------
+// ---------- CLI integration: `cortex serve --host`, the dashboard listener and --no-web ----------
 //
-// Scope: this file proves that
-//   1. `cortex serve --host <name>` writes the FRIENDLY URL to
-//      cortex.browser-url AND the LOOPBACK URL to cortex.url, and prints
-//      the friendly URL to stdout.
+// Scope (plan @400 Task 6, N4/N5/N11):
+//   1. `cortex serve --host <name>` publishes the FRIENDLY dashboard URL as
+//      the metadata's `webUrl` and prints it, while the listener itself
+//      binds the LOOPBACK address (127.0.0.1) — the printed-host versus
+//      loopback distinction the old cortex.browser-url/cortex.url pair held.
 //   2. validateHost in src/commands/serve.ts rejects empty / malformed
-//      values BEFORE binding (so a bad --host never starts a daemon).
-//   3. `cortex stop` removes cortex.browser-url alongside cortex.{pid,url}.
+//      values BEFORE anything starts.
+//   3. `--no-web` serves only the private socket; the IPC-only enable-web
+//      control route then starts the dashboard on the SAME instance, and the
+//      loopback app never exposes control routes, whatever headers say.
 //
-// Why we spawn the daemon directly (not via runCli):
-//   `cortex serve --foreground` does not exit on its own; runCli waits
-//   for exit. We need a long-running process whose stdout / pid we can
-//   inspect, then SIGTERM it. Same approach as serve-stop.test.ts.
+// The daemon is spawned directly (`serve --foreground`), so its pid is ours
+// to signal; see ../fixtures/daemon.ts.
 
 const REAL_PID = path.join(os.homedir(), ".config", "cortex", "cortex.pid");
 const REAL_URL = path.join(os.homedir(), ".config", "cortex", "cortex.url");
@@ -41,8 +45,7 @@ function snapEq(a: Snap, b: Snap): boolean {
 let realPidBefore: Snap = null;
 let realUrlBefore: Snap = null;
 let realBrowserUrlBefore: Snap = null;
-
-const spawnedPids = new Set<number>();
+const sandboxes: (() => void)[] = [];
 
 beforeAll(() => {
   realPidBefore = snap(REAL_PID);
@@ -50,201 +53,127 @@ beforeAll(() => {
   realBrowserUrlBefore = snap(REAL_BROWSER_URL);
 });
 
-afterAll(() => {
-  for (const pid of spawnedPids) {
-    try {
-      process.kill(pid, "SIGKILL");
-    } catch {
-      /* already gone — expected on the happy path */
-    }
-  }
+afterEach(async () => {
+  await reap();
 });
 
-/**
- * Spawn `cortex serve --port 0 --foreground --no-open --host <host>`
- * directly so proc.pid IS the daemon. Returns once both pid + url +
- * browser-url files exist (signal that startServer bound and the
- * shutdown handler is wired). Mirrors spawnDaemon() in serve-stop.test.ts
- * but with the extra browser-url file and a configurable host.
- */
-async function spawnDaemonWithHost(
-  label: string,
-  host: string,
-): Promise<{
-  proc: ReturnType<typeof Bun.spawn>;
-  tmpDir: string;
-  pidFile: string;
-  urlFile: string;
-  browserUrlFile: string;
-  stdout: string;
-  cleanup: () => void;
-}> {
-  const { tmpDir, env, cleanup } = mkTmpEnv(label);
-  const pidFile = path.join(tmpDir, "cortex", "cortex.pid");
-  const urlFile = path.join(tmpDir, "cortex", "cortex.url");
-  const browserUrlFile = path.join(tmpDir, "cortex", "cortex.browser-url");
+afterAll(async () => {
+  await reap();
+  for (const cleanup of sandboxes.splice(0)) cleanup();
+});
 
-  const proc = Bun.spawn([BIN, "serve", "--port", "0", "--foreground", "--no-open", "--host", host], {
-    env,
-    cwd: process.cwd(),
-    stdio: ["ignore", "pipe", "pipe"],
+function sandbox(label: string): ReturnType<typeof mkTmpEnv> {
+  const env = mkTmpEnv(label);
+  sandboxes.push(env.cleanup);
+  return env;
+}
+
+function portOf(url: string | undefined): string {
+  const port = new URL(url ?? "http://invalid").port;
+  expect(port).toMatch(/^\d+$/);
+  return port;
+}
+
+async function control(identity: DaemonIdentity, route: string, body?: unknown, bound = true): Promise<Response> {
+  if (identity.endpoint.kind !== "unix") throw new Error("expected a unix endpoint");
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (bound) headers[INSTANCE_HEADER] = identity.instanceId;
+  return fetch(`http://localhost${route}`, {
+    method: "POST",
+    unix: identity.endpoint.socketPath,
+    headers,
+    body: JSON.stringify(body ?? {}),
   });
-  spawnedPids.add(proc.pid);
-
-  // Wait up to 5s for all three files to appear. The daemon writes
-  // pidPath/urlPath/browserUrlPath synchronously after startServer()
-  // returns, so first-existence is a strict happens-after of bind.
-  const deadline = Date.now() + 5000;
-  while (Date.now() < deadline) {
-    if (fs.existsSync(pidFile) && fs.existsSync(urlFile) && fs.existsSync(browserUrlFile)) break;
-    await Bun.sleep(25);
-  }
-  if (!fs.existsSync(pidFile) || !fs.existsSync(urlFile) || !fs.existsSync(browserUrlFile)) {
-    let stderr = "";
-    try {
-      stderr = await new Response(proc.stderr).text();
-    } catch {
-      /* ignore */
-    }
-    try {
-      proc.kill("SIGKILL");
-    } catch {
-      /* ignore */
-    }
-    cleanup();
-    throw new Error(`daemon failed to write pid/url/browser-url within 5s. stderr=${stderr}`);
-  }
-
-  // Drain a single readable chunk of stdout so the test can assert the
-  // printed URL line. The daemon emits one line then sits idle until
-  // SIGTERM, so a 100 ms read window is enough.
-  let stdout = "";
-  try {
-    const reader = proc.stdout.getReader();
-    const start = Date.now();
-    while (Date.now() - start < 250) {
-      const r = await Promise.race([reader.read(), Bun.sleep(50).then(() => null)]);
-      if (!r) continue;
-      const v = r as { done: boolean; value?: Uint8Array };
-      if (v.done) break;
-      if (v.value) stdout += new TextDecoder().decode(v.value);
-      if (stdout.includes("cortex listening on")) break;
-    }
-    reader.releaseLock();
-  } catch {
-    /* stdout already consumed elsewhere -- non-fatal */
-  }
-
-  return { proc, tmpDir, pidFile, urlFile, browserUrlFile, stdout, cleanup };
 }
 
 describe("cortex serve --host", () => {
-  test("writes friendly URL to cortex.browser-url and loopback URL to cortex.url; stdout shows friendly URL", async () => {
-    const { proc, pidFile, urlFile, browserUrlFile, stdout, cleanup } = await spawnDaemonWithHost(
-      "host-flag-friendly",
-      "cortex.example",
-    );
-    try {
-      // Both files exist (spawnDaemonWithHost waited for them).
-      expect(fs.existsSync(pidFile)).toBe(true);
-      expect(fs.existsSync(urlFile)).toBe(true);
-      expect(fs.existsSync(browserUrlFile)).toBe(true);
-
-      const apiUrl = fs.readFileSync(urlFile, "utf8").trim();
-      const browserUrl = fs.readFileSync(browserUrlFile, "utf8").trim();
-
-      // CLI side: loopback IP, kernel-assigned port (--port 0).
-      expect(apiUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
-      // Browser side: friendly host, SAME kernel-assigned port.
-      const port = apiUrl.match(/:(\d+)$/)?.[1];
-      expect(port).toBeDefined();
-      expect(browserUrl).toBe(`http://cortex.example:${port}`);
-
-      // stdout shows the friendly URL — proves the daemon prints what the
-      // human will see, not the internal loopback. Drain may race; assert
-      // only when something captured.
-      if (stdout.length > 0) expect(stdout).toContain(`cortex listening on http://cortex.example:${port}`);
-
-      // Send SIGTERM and confirm shutdown handler removes ALL THREE files
-      // (the load-bearing assertion for task 3 in the plan).
-      process.kill(proc.pid, "SIGTERM");
-      const code = await proc.exited;
-      expect([0, 143]).toContain(code);
-      expect(fs.existsSync(pidFile)).toBe(false);
-      expect(fs.existsSync(urlFile)).toBe(false);
-      expect(fs.existsSync(browserUrlFile)).toBe(false);
-    } finally {
-      spawnedPids.delete(proc.pid);
-      cleanup();
+  test("publishes and prints the friendly URL while the listener binds 127.0.0.1", async () => {
+    const { tmpDir, env } = sandbox("host-flag-friendly");
+    const daemon = await startForeground(env, ["--port", "0", "--host", "cortex.example"]);
+    const port = portOf(daemon.identity.webUrl);
+    expect(daemon.identity.webUrl).toBe(`http://cortex.example:${port}`);
+    expect(daemon.stdout()).toContain(`cortex listening on http://cortex.example:${port}`);
+    // The CLI-facing side is the loopback address, on the same port.
+    const health = (await (await fetch(`http://127.0.0.1:${port}/api/health`)).json()) as { identity: unknown };
+    expect(health.identity).toEqual(daemon.identity);
+    // No old-style cortex.{pid,url,browser-url} files any more.
+    for (const f of ["cortex.pid", "cortex.url", "cortex.browser-url"]) {
+      expect(fs.existsSync(path.join(tmpDir, "cortex", f))).toBe(false);
     }
-  });
 
-  test("default --host is cortex.localhost (file contents and stdout)", async () => {
-    // Same fixture, default host (passed via --host because spawnDaemonWithHost
-    // requires it; passing the default explicitly proves the validator accepts it).
-    const { proc, browserUrlFile, urlFile, stdout, cleanup } = await spawnDaemonWithHost(
-      "host-flag-default",
-      "cortex.localhost",
-    );
-    try {
-      const apiUrl = fs.readFileSync(urlFile, "utf8").trim();
-      const port = apiUrl.match(/:(\d+)$/)?.[1];
-      expect(port).toBeDefined();
-      expect(fs.readFileSync(browserUrlFile, "utf8").trim()).toBe(`http://cortex.localhost:${port}`);
-      if (stdout.length > 0) expect(stdout).toContain(`http://cortex.localhost:${port}`);
-    } finally {
-      try {
-        process.kill(proc.pid, "SIGTERM");
-        await proc.exited;
-      } catch {
-        /* ignore */
-      }
-      spawnedPids.delete(proc.pid);
-      cleanup();
-    }
-  });
+    daemon.proc.kill("SIGTERM");
+    expect([0, 143]).toContain(await daemon.proc.exited);
+    expect(fs.existsSync(daemon.metadataFile)).toBe(false);
+  }, 30_000);
 
-  test("rejects empty --host with non-zero exit and the validateHost error", async () => {
-    const { env, cleanup } = mkTmpEnv("host-flag-empty");
-    try {
-      // Empty host: argv contains --host followed by an empty argument.
-      const r = await runCli({ args: ["serve", "--port", "0", "--no-open", "--host", ""], env });
+  test("default --host is cortex.localhost (metadata and stdout)", async () => {
+    const { env } = sandbox("host-flag-default");
+    const daemon = await startForeground(env, ["--port", "0", "--host", "cortex.localhost"]);
+    const port = portOf(daemon.identity.webUrl);
+    expect(daemon.identity.webUrl).toBe(`http://cortex.localhost:${port}`);
+    expect(daemon.stdout()).toContain(`http://cortex.localhost:${port}`);
+    daemon.proc.kill("SIGTERM");
+    await daemon.proc.exited;
+  }, 30_000);
+
+  for (const [name, host] of [
+    ["empty", ""],
+    ["malformed (contains a space)", "bad host"],
+    ["a scheme prefix", "http://cortex.localhost"],
+  ] as const) {
+    test(`rejects ${name} --host with a non-zero exit and the validateHost error`, async () => {
+      const { env } = sandbox("host-flag-bad");
+      const r = await runBounded(["serve", "--port", "0", "--no-open", "--host", host], env);
       expect(r.code).not.toBe(0);
       expect(r.stderr).toContain("error: --host must be a valid hostname");
-    } finally {
-      cleanup();
-    }
-  });
+      expect(readIdentity(`${env.CORTEX_DB}.daemon.json`)).toBeNull();
+    });
+  }
+});
 
-  test("rejects malformed --host (contains a space) with non-zero exit", async () => {
-    const { env, cleanup } = mkTmpEnv("host-flag-bad");
-    try {
-      const r = await runCli({ args: ["serve", "--port", "0", "--no-open", "--host", "bad host"], env });
-      expect(r.code).not.toBe(0);
-      expect(r.stderr).toContain("error: --host must be a valid hostname");
-    } finally {
-      cleanup();
-    }
-  });
+describe("cortex serve --no-web and the IPC-only control routes", () => {
+  test("enable-web starts the dashboard on the same instance; the loopback app has no control routes", async () => {
+    const { env } = sandbox("host-flag-noweb");
+    const daemon = await startForeground(env, ["--no-web"]);
+    const { identity } = daemon;
+    expect(identity.webUrl).toBeUndefined();
+    const socketPath = identity.endpoint.kind === "unix" ? identity.endpoint.socketPath : "";
+    expect(daemon.stdout()).toContain(`cortex listening on ${socketPath}`);
 
-  test("rejects --host containing a scheme prefix", async () => {
-    const { env, cleanup } = mkTmpEnv("host-flag-scheme");
-    try {
-      const r = await runCli({
-        args: ["serve", "--port", "0", "--no-open", "--host", "http://cortex.localhost"],
-        env,
-      });
-      expect(r.code).not.toBe(0);
-      expect(r.stderr).toContain("error: --host must be a valid hostname");
-    } finally {
-      cleanup();
-    }
-  });
+    expect((await control(identity, CONTROL_PATHS.web, { port: 0 }, false)).status).toBe(400);
+    const enabled = await control(identity, CONTROL_PATHS.web, { port: 0, host: "cortex.example" });
+    expect(enabled.status).toBe(200);
+    const updated = ((await enabled.json()) as { identity: DaemonIdentity }).identity;
+    expect(updated.instanceId).toBe(identity.instanceId);
+    const port = portOf(updated.webUrl);
+    expect(updated.webUrl).toBe(`http://cortex.example:${port}`);
+    // Republished atomically with the dashboard, and idempotent.
+    expect(readIdentity(daemon.metadataFile)?.webUrl).toBe(updated.webUrl);
+    const repeat = await control(identity, CONTROL_PATHS.web, { port: 0 });
+    expect(((await repeat.json()) as { identity: DaemonIdentity }).identity.webUrl).toBe(updated.webUrl);
 
-  // The hermetic-guard tests run last (Bun executes tests in file order
-  // within a describe block). Same belt-and-suspenders pattern as
-  // serve-stop.test.ts: capture snapshots in beforeAll, fail loud if
-  // any test path leaked into ~/.config/cortex/.
+    // The loopback listener serves the API but never control, whatever the headers claim.
+    expect((await fetch(`http://127.0.0.1:${port}/api/health`)).ok).toBe(true);
+    const spoofed = await fetch(`http://127.0.0.1:${port}${CONTROL_PATHS.shutdown}`, {
+      method: "POST",
+      headers: { [INSTANCE_HEADER]: identity.instanceId, "x-cortex-listener": "ipc", forwarded: "for=unix" },
+    });
+    expect(spoofed.status).toBe(404);
+    await Bun.sleep(100);
+    expect(isRunning(daemon)).toBe(true);
+    expect((await socketHealth(identity)).identity?.instanceId).toBe(identity.instanceId);
+
+    daemon.proc.kill("SIGTERM");
+    expect([0, 143]).toContain(await daemon.proc.exited);
+    expect(fs.existsSync(daemon.metadataFile)).toBe(false);
+  }, 30_000);
+});
+
+// The hermetic-guard tests run last (Bun executes tests in file order
+// within a describe block). Same belt-and-suspenders pattern as
+// serve-stop.test.ts: capture snapshots in beforeAll, fail loud if
+// any test path leaked into ~/.config/cortex/.
+describe("hermetic guards", () => {
   test("hermetic guard: ~/.config/cortex/cortex.pid mtime+size unchanged", () => {
     expect(snapEq(snap(REAL_PID), realPidBefore)).toBe(true);
   });

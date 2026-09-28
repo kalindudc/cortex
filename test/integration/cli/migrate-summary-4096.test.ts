@@ -1,5 +1,5 @@
 import { test, expect, describe, afterAll } from "bun:test";
-import { Store } from "../../../src/store.ts";
+import { ConflictError, Store, type Task } from "../../../src/store.ts";
 import { runCli, mkTmpEnv } from "../helpers.ts";
 
 // The `updates.summary` CHECK cap was raised 1024 -> 4096. A DB created by
@@ -97,6 +97,38 @@ CREATE TABLE updates (
 ${SEED_ROWS}
 `;
 
+const TASK_SCOPES = ["body", "entity", "lane", "priority", "status", "title"];
+
+/**
+ * Plan @400 N7/N10: an upgraded legacy DB gains the private identity/revision/
+ * receipt tables additively. Its legacy rows (never stamped) still get one
+ * token per scope, a guarded write works against them, and a stale guard is
+ * refused without writing.
+ */
+function expectRevisionsAfterUpgrade(dbPath: string, taskId: number): void {
+  const s = Store.open(dbPath, { warnMigrations: false });
+  try {
+    expect(s.databaseId()).toMatch(/^[0-9a-f-]{36}$/);
+    const legacy = s.taskState(taskId);
+    expect(Object.keys(legacy?.versions ?? {}).sort()).toEqual(TASK_SCOPES);
+    const seen = legacy?.versions.title;
+    s.editTask(taskId, { title: "renamed after upgrade" }, { expected: { title: seen } });
+    expect(() => s.editTask(taskId, { title: "stale" }, { expected: { title: seen } })).toThrow(ConflictError);
+    expect(s.getTask(taskId)?.title).toBe("renamed after upgrade");
+  } finally {
+    s.close();
+  }
+}
+
+function tokensOf(dbPath: string, id: number): string[] {
+  const s = Store.open(dbPath, { warnMigrations: false });
+  try {
+    return Object.values(s.taskState(id)?.versions ?? {}).filter((v): v is string => typeof v === "string");
+  } finally {
+    s.close();
+  }
+}
+
 function fabricateLegacyDb(dbPath: string, sql: string): void {
   if (!SQLITE3) throw new Error("sqlite3 CLI missing");
   const proc = Bun.spawnSync([SQLITE3, dbPath, sql], { stdout: "pipe", stderr: "pipe" });
@@ -170,6 +202,8 @@ describe.skipIf(!SQLITE3)("updates-summary-4096 migration", () => {
     r = await run("update", "1", "-m", "y".repeat(4097), "--as", "a-1");
     expect(r.code).not.toBe(0);
     expect(r.stderr).toMatch(/summary too long/);
+
+    expectRevisionsAfterUpgrade(e.env.CORTEX_DB as string, 1);
   });
 
   test("200-era DB: the whole chain applies in one init, ending at the 4096 cap", async () => {
@@ -202,5 +236,53 @@ describe.skipIf(!SQLITE3)("updates-summary-4096 migration", () => {
     const s = Store.open(e.env.CORTEX_DB, { warnMigrations: false });
     expect(s.listUpdates(1).map(u => u.summary)).toEqual(["kept across the rebuild", "y".repeat(4096)]);
     s.close();
+
+    expectRevisionsAfterUpgrade(e.env.CORTEX_DB as string, 1);
+  });
+
+  // The legacy tasks-table rebuilds reset sqlite_sequence to MAX(id), so a task
+  // id deleted before `cortex init` can be issued again afterwards (see the
+  // todo below). Whatever id the next task gets, its revision tokens must be
+  // fresh: tombstones and random tokens keep stale guards from matching (ABA).
+  test("200-era DB: a task created after the tasks rebuild never inherits a deleted task's tokens", async () => {
+    const e = legacyEnv("migrate-200-aba", LEGACY_200_DB);
+    const db = e.env.CORTEX_DB as string;
+    const run = (...args: string[]) => runCli({ args, env: e.env });
+
+    // Pre-init, the 200-era tasks table still has `priority NOT NULL`.
+    let r = await run("add", "doomed", "-p", "1", "--json");
+    expect(r.code).toBe(0);
+    const doomed = JSON.parse(r.stdout) as Task;
+    const before = tokensOf(db, doomed.id);
+    expect(before.length).toBe(6);
+    r = await run("rm", String(doomed.id), "--force");
+    expect(r.code).toBe(0);
+
+    r = await run("init");
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain("✓ migration applied: tasks-priority-nullable");
+
+    r = await run("add", "after the rebuild", "--json");
+    expect(r.code).toBe(0);
+    const next = JSON.parse(r.stdout) as Task;
+    const after = tokensOf(db, next.id);
+    expect(after.length).toBe(6);
+    for (const value of after) expect(before).not.toContain(value);
+  });
+
+  // Pre-existing defect, reported with plan @400 Task 4 and NOT fixed here (N10
+  // forbids opportunistic rewrites of legacy migrations): _runMigration's DROP
+  // TABLE discards the old high-water mark and its `INSERT OR REPLACE INTO
+  // sqlite_sequence ... MAX(id)` appends a duplicate row, so ids deleted before
+  // the rebuild are issued again.
+  test.todo("200-era DB: the tasks rebuild keeps the AUTOINCREMENT high-water mark", async () => {
+    const e = legacyEnv("migrate-200-seq", LEGACY_200_DB);
+    const run = (...args: string[]) => runCli({ args, env: e.env });
+    let r = await run("add", "doomed", "-p", "1", "--json");
+    const doomed = JSON.parse(r.stdout) as Task;
+    await run("rm", String(doomed.id), "--force");
+    await run("init");
+    r = await run("add", "after the rebuild", "--json");
+    expect((JSON.parse(r.stdout) as Task).id).toBeGreaterThan(doomed.id);
   });
 });

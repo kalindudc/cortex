@@ -59,10 +59,12 @@ mock.module("../../../../src/ui/components/active/MdEditor.tsx", () => {
 import { EditableTaskBody } from "../../../../src/ui/components/active/EditableTaskBody.tsx";
 import type { TaskDraft, DraftField } from "../../../../src/ui/lib/useTaskDraft.ts";
 
-function fakeDraft(over: Partial<{ body: string; bodyEpoch: number }> = {}): TaskDraft & {
-  calls: { set: Array<[DraftField, string]>; flush: number };
+function fakeDraft(
+  over: Partial<{ body: string; bodyEpoch: number; ready: boolean; loadError: string | null }> = {},
+): TaskDraft & {
+  calls: { set: Array<[DraftField, string]>; flush: number; reload: number };
 } {
-  const calls = { set: [] as Array<[DraftField, string]>, flush: 0 };
+  const calls = { set: [] as Array<[DraftField, string]>, flush: 0, reload: 0 };
   return {
     calls,
     title: "t",
@@ -70,6 +72,8 @@ function fakeDraft(over: Partial<{ body: string; bodyEpoch: number }> = {}): Tas
     bodyEpoch: over.bodyEpoch ?? 0,
     saveState: "saved",
     external: { title: null, body: null },
+    ready: over.ready ?? true,
+    loadError: over.loadError ?? null,
     set(field: DraftField, value: string) {
       calls.set.push([field, value]);
     },
@@ -79,6 +83,9 @@ function fakeDraft(over: Partial<{ body: string; bodyEpoch: number }> = {}): Tas
     retry() {},
     apply() {},
     keep() {},
+    reload() {
+      calls.reload++;
+    },
   };
 }
 
@@ -130,6 +137,35 @@ describe("EditableTaskBody", () => {
     const after = container.querySelector(".md-editor");
     expect(after).not.toBe(before); // key change → fresh mount
     expect(after?.getAttribute("data-value")).toBe("v2 external");
+  });
+
+  test("no editor until the atomic baseline is known: an honest loading status holds its place", () => {
+    const seen: Array<unknown> = [];
+    const { container, rerender } = render(
+      <EditableTaskBody draft={fakeDraft({ ready: false })} visible={true} onReady={h => seen.push(h)} />,
+    );
+    expect(container.querySelector(".md-editor")).toBeNull(); // nothing can be typed yet
+    const status = container.querySelector(".editor-baseline");
+    expect(status?.getAttribute("role")).toBe("status");
+    expect(status?.textContent ?? "").toContain("Loading");
+    expect(seen).toEqual([]);
+    // The baseline arrives: the editor mounts ONCE with the seeded text.
+    rerender(<EditableTaskBody draft={fakeDraft({ ready: true, body: "seeded" })} visible={true} />);
+    expect(container.querySelector(".editor-baseline")).toBeNull();
+    expect(container.querySelector(".md-editor")?.getAttribute("data-value")).toBe("seeded");
+  });
+
+  test("a failed baseline says why and offers a Retry that reloads it", () => {
+    const draft = fakeDraft({ ready: false, loadError: "daemon unreachable" });
+    const { container } = render(<EditableTaskBody draft={draft} visible={true} />);
+    expect(container.querySelector(".md-editor")).toBeNull();
+    const status = container.querySelector(".editor-baseline");
+    expect(status?.getAttribute("role")).toBe("alert");
+    expect(status?.textContent ?? "").toContain("daemon unreachable");
+    const retry = status?.querySelector("button");
+    if (!retry) throw new Error("expected Retry");
+    fireEvent.click(retry);
+    expect(draft.calls.reload).toBe(1);
   });
 
   test("forwards the typed editor handle through onReady", () => {

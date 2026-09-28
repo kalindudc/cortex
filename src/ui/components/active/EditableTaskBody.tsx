@@ -11,6 +11,11 @@
 // by task id (D4). `visible` HIDES rather than unmounts so cursor, undo
 // history and pending edits survive Read/Activity/Related passes; the
 // hidden host is removed from layout and the tab order (V3).
+//
+// Editing starts only once the draft's atomic baseline (text + version
+// tokens, plan @400 N8) is known: until then an honest loading status (or
+// the failure with a Retry) holds the editor's place, and the editor mounts
+// ONCE, seeded with the baseline text — never swapped in just to animate.
 
 import type { VNode } from "preact";
 
@@ -33,15 +38,28 @@ export function EditableTaskBody({ draft, visible, onReady }: EditableTaskBodyPr
           fire blur on tab-hide. The draft's 600ms idle timer catches normal
           focus moves; the 3s max-wait is the safety net; Mod-S inside the
           editor flushes immediately. */}
-      <MdEditor
-        key={`body-${draft.bodyEpoch}`}
-        value={draft.body}
-        placeholder="Add a description…"
-        visible={visible}
-        onReady={onReady}
-        onChange={v => draft.set("body", v)}
-        onSubmit={() => draft.flush()}
-      />
+      {draft.ready ? (
+        <MdEditor
+          key={`body-${draft.bodyEpoch}`}
+          value={draft.body}
+          placeholder="Add a description…"
+          visible={visible}
+          onReady={onReady}
+          onChange={v => draft.set("body", v)}
+          onSubmit={() => draft.flush()}
+        />
+      ) : draft.loadError == null ? (
+        <div class="editor-baseline" role="status">
+          Loading the latest version for editing…
+        </div>
+      ) : (
+        <div class="editor-baseline is-error" role="alert">
+          <span>Editing is unavailable: {draft.loadError}</span>
+          <button type="button" class="draft-retry" onClick={() => draft.reload()}>
+            Retry
+          </button>
+        </div>
+      )}
     </div>
   );
 }

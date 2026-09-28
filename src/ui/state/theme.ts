@@ -8,6 +8,11 @@
 // First-load default: matchMedia(prefers-color-scheme: dark). After that,
 // the user's choice always wins and is persisted forever — no "system"
 // option that changes under them.
+//
+// Loading this module only APPLIES the resolved theme (applyTheme): the
+// dashboard's boot (dashboard.tsx) persists its first-load theme, while the
+// rich draft preview, which imports this module through MarkdownView,
+// persists no preference at all (review @405 F19).
 
 import { signal } from "@preact/signals";
 
@@ -33,15 +38,20 @@ function readStoredTheme(): Theme {
 
 export const theme = signal<Theme>(readStoredTheme());
 
-// Apply a theme to the DOM and persist it.
-export function setTheme(mode: Theme): void {
+// Apply a theme to the signal and the DOM without persisting it.
+export function applyTheme(mode: Theme): void {
   if (!THEME_VALUES.includes(mode)) mode = "light";
   theme.value = mode;
   if (typeof document !== "undefined") {
     document.documentElement.setAttribute("data-theme", mode);
   }
+}
+
+// Apply a theme to the DOM and persist it.
+export function setTheme(mode: Theme): void {
+  applyTheme(mode);
   try {
-    localStorage.setItem(THEME_KEY, mode);
+    localStorage.setItem(THEME_KEY, theme.value);
   } catch {
     /* ignore */
   }
@@ -53,5 +63,6 @@ export function toggleTheme(): void {
 }
 
 // Apply the resolved theme to the DOM at module load (before first paint),
-// so a hard refresh never flashes the wrong palette.
-if (typeof document !== "undefined") setTheme(theme.value);
+// so a hard refresh never flashes the wrong palette. Persisting is the
+// dashboard boot's job, never an import's.
+if (typeof document !== "undefined") applyTheme(theme.value);
