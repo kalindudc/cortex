@@ -100,7 +100,8 @@ It needs at least 80×24 cells. `TERM=dumb` is refused (use the CLI there), and 
 - COMMAND (`:`): a one-line command. Tab completes commands and their arguments, Up/Down recall history, Enter
   runs it, Esc cancels. `:<id>` (for example `:42`) jumps to a task.
 - SEARCH (`/`): filters the task list with the dashboard's search (`@id`, `@title`, `#tag`, then AND words over
-  titles, bodies and tags), or searches the rendered document while it has the focus (`n`/`N` step).
+  titles, bodies and tags), or searches the rendered document while it has the focus, or the help while it is
+  open (`n`/`N` step).
 
 Read and Split's preview render the Markdown: headings over rules, lists with `☐`/`☑` task boxes, quotes behind a
 bar, code on a tinted panel (`:copy N`), tables and rules. Links show their text only (an OSC 8 hyperlink where
@@ -117,11 +118,15 @@ relevance in one list, and the list header says which order is shown. `f` opens 
 and Tags with live counts, one key per status (`d` `o` `r` `b` `x`), `u` for untagged, `a` for done tasks, Space
 on any row, and `/` to search the lanes and tags as you type. Every toggle applies at once; Enter and Esc only
 close the picker, so the filters stay. `F` clears the search and every filter (done tasks stay shown if they
-were). The active filters are always on the list header as chips (`status:review lane:cortex #ui`).
+were). The active filters are always on the list header as chips (`status:review lane:cortex #ui`). `;d` shows
+or hides the done tasks in one key (`+done` on the list header while they are shown). `;m` sets the selected
+task's status: a picker with the same letters (`d` `o` `r` `b` `x`, so `;m x` marks it done) whose highlight
+starts on the next step, so Enter does what the web's next-step button does (open → review → done).
 
-`?` or `:help` lists the modes, every command and the keys as configured; `:commands` (`Ctrl-p`) is a searchable
-reference. A bare `q` only reminds you that `:q` quits; `Esc` and `Ctrl-C` cancel pending input and never quit;
-function keys are never bound. Titles and bodies autosave (600 ms idle, 3 s at most; `:w` or `Ctrl-s` saves now)
+`?` or `:help` lists the modes, every command and the keys as configured (long descriptions wrap under their
+column); `/` searches it while it is open, highlighting every match, and `n`/`N` step through them (`Esc`
+closes it and forgets the search). `:commands` (`Ctrl-p`) is a searchable reference. A bare `q` only reminds you
+that `:q` quits; `Esc` and `Ctrl-C` cancel pending input and never quit; function keys are never bound. Titles and bodies autosave (600 ms idle, 3 s at most; `:w` or `Ctrl-s` saves now)
 with guarded writes: when another client changed the same field first, both versions stay and the status line
 offers `:apply` (take theirs) or `:keep` (save yours over it). `:q` refuses while a draft is unsaved; `:q!`
 discards. Status changes from the TUI are human changes, never attributed to an agent. The panels (`]`/`[`) are
@@ -172,7 +177,7 @@ Every command, as `:help` shows it (Tab completes names and arguments):
 | `:set <option>` | | Options: done (show done tasks), tasks (show the task list), number (source line numbers in Read and the Split preview); name, noname, name! toggles, name? shows |
 | `:new [title]` | | Create a task in the filtered lane (else now) and select it; without a title it is named untitled-\<id> (:title renames it) |
 | `:title [text]` | | Rename the current task; without text, edit its full title in place (Enter or Esc saves) |
-| `:status <draft\|open\|review\|blocked\|done>` | | Set the current task's status (a human change, never attributed to an agent) |
+| `:status [draft\|open\|review\|blocked\|done]` | | Set the current task's status (a human change, never attributed to an agent); bare picks it in a list: d o r b x set one, Enter the next step |
 | `:next` | | Move the current task one step on, like the web's next-step button: draft→open, open→review, review→done, blocked→open, done→open |
 | `:priority <n\|none>` | | Set the current task's priority: any whole number from 0 (the highest) up, or none |
 | `:lane <name>` | | Move the current task to another lane (:lanes manages the lanes) |
@@ -185,7 +190,7 @@ Every command, as `:help` shows it (Tab completes names and arguments):
 | `:forward` | | Go forward again in the task history |
 | `:theme [name\|auto]` | | Pick a color theme with a live preview (Esc restores, Enter applies and saves it); auto follows the terminal again |
 | `:density [compact\|comfortable]` | | Set the spacing, saved for the profile (over tui.toml's density): comfortable (the default) adds blank rows under the headers and above the status line; compact fits more rows; bare toggles. A terminal cannot set its font size: use its zoom keys |
-| `:help` | `:h` | Modes, commands and the configured keys |
+| `:help` | `:h` | Modes, commands and the configured keys; / searches it while it is open, n/N step |
 | `:commands [search]` | | Searchable command reference: / searches it, Enter picks a command |
 | `:messages` | `:mes` | Configuration problems, errors and notices |
 | `:notifications` | | The notifications (read state shared with every client) and this session's errors, unread first: Enter opens the task and marks it read; r read, u unread, a all read, x dismiss, X clear all |
@@ -247,7 +252,7 @@ legacy terminals send `ctrl+i` as Tab; bind one in `tui.toml` if you want it.
 | `visual_line` | `V` | | VISUAL LINE: select whole lines (rendered rows while reading); again or Esc ends it |
 | `paste_after` | `p` | | Paste the last yank or delete after the cursor (whole lines: below this line) |
 | `paste_before` | `P` | | Paste the last yank or delete before the cursor (whole lines: above this line) |
-| `help` | `?` | | Help: modes, commands and the configured keys |
+| `help` | `?` | | Help: modes, commands and the configured keys (/ searches it, n/N step) |
 | `commands` | `ctrl+p` | | Searchable command reference (:commands) |
 | `back` | `ctrl+o` | | Go back (:back) |
 | `forward` | | | Go forward (:forward) |
@@ -255,10 +260,12 @@ legacy terminals send `ctrl+i` as Tab; bind one in `tui.toml` if you want it.
 | `focus_tasks` | | `;h` | Focus the task list |
 | `focus_document` | | `;l` | Focus the document |
 | `toggle_tasks` | | `;e` | Show or hide the task list |
+| `toggle_done` | | `;d` | Show or hide the done tasks in the task list (:set done!) |
 | `read` | | `;r` | Read mode (:read) |
 | `edit` | | `;i` | Edit mode (:edit) |
 | `split` | | `;s` | Split mode (:split) |
 | `tags` | | `;t` | Edit this task's tags |
+| `status` | | `;m` | Set this task's status in a picker (bare :status): d o r b x set one, Enter the next step |
 | `sort` | | `;o` | Sort and group the task list (:sort) |
 | `filters` | `f` | | Pick filters: status, lane, tags, untagged and include-done (the list follows each toggle) |
 | `clear_filters` | `F` | | Clear the search and every filter (:clear; include-done stays) |

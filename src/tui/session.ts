@@ -98,6 +98,7 @@ import {
   writeDraftFile,
 } from "./drafts.ts";
 import { createDocumentEditor, createEditorState, type DocumentEditor, editorText } from "./editor.ts";
+import type { Help } from "./help.ts";
 import { createKeyDispatcher, type KeyConfig, type KeyDispatcher, type KeyEvent, type KeyMode } from "./keys.ts";
 import { WheelNotches } from "./mouse.ts";
 import type {
@@ -130,6 +131,8 @@ export type Focus = "tasks" | "document";
 export const TASK_PANELS = ["document", "activity", "related", "authors"] as const;
 export type TaskPanel = (typeof TASK_PANELS)[number];
 export type SessionView = "workspace" | "help" | "messages" | "commands";
+/** What `/` searches: the task list (and a dialog's rows), the rendered document, or the open help. */
+export type SearchTarget = "list" | "document" | "help";
 export type MessageLevel = "info" | "warn" | "error";
 
 export interface SessionMessage {
@@ -561,8 +564,8 @@ export class TuiSession {
   #prompt: CommandLine | null = null;
   /** A live dialog search in the open `/` prompt, and the filter to restore if it is cancelled. */
   #liveSearch: { readonly dialog: SessionDialog; readonly before: string } | null = null;
-  /** What the open `/` searches: the task list, or the rendered document (the reader had the focus). */
-  #searchTarget: "list" | "document" = "list";
+  /** What the open `/` searches: the task list, the rendered document (the reader had the focus) or the open help. */
+  #searchTarget: SearchTarget = "list";
   readonly #histories: Record<CommandLineKind, string[]> = { ":": [], "/": [] };
   #commandsQuery = "";
   #commandsSelected = 0;
@@ -579,6 +582,8 @@ export class TuiSession {
   #themeControl: ThemeControl | null = null;
   /** The document reader (src/tui/reader.ts), registered by createReader. */
   #reader: Reader | null = null;
+  /** The help view's wrapping and search (src/tui/help.ts), registered by createHelp. */
+  #help: Help | null = null;
   /** The task panels and the update composer (src/tui/activity.ts), registered by createActivity. */
   #activity: Activity | null = null;
   #panel: TaskPanel = "document";
@@ -1268,11 +1273,16 @@ export class TuiSession {
   }
 
   /**
-   * n / N: while the rendered document has the focus, its next or previous
-   * match; otherwise the next or previous task-list search result (wrapping;
-   * from outside the results, the first or last).
+   * n / N: while the help is open, its next or previous match; while the
+   * rendered document has the focus, its next or previous match; otherwise
+   * the next or previous task-list search result (wrapping; from outside the
+   * results, the first or last).
    */
   stepResult(delta: number): void {
+    if (this.#help !== null && this.#view === "help") {
+      this.#help.step(delta);
+      return;
+    }
     if (this.#reader !== null && this.readerFocused()) {
       this.#reader.step(delta);
       return;
@@ -1563,6 +1573,8 @@ export class TuiSession {
   }
 
   openView(view: SessionView): void {
+    // The help's search lasts while it is open: opening it (again) or another view starts without one.
+    if (view === "help" || this.#view === "help") this.#help?.clear();
     this.#view = view;
     this.#viewScroll = 0;
     this.#settleInsert(); // the view covers the workspace: its INSERT ends
@@ -1617,6 +1629,7 @@ export class TuiSession {
 
   closeView(): void {
     if (this.#view === "workspace") return;
+    if (this.#view === "help") this.#help?.clear();
     this.#view = "workspace";
     this.#viewScroll = 0;
     this.#changed();
@@ -1713,6 +1726,11 @@ export class TuiSession {
 
   attachReader(reader: Reader | null): void {
     this.#reader = reader;
+  }
+
+  /** The help view (src/tui/help.ts createHelp registers it). */
+  attachHelp(help: Help | null): void {
+    this.#help = help;
   }
 
   get activity(): Activity | null {
@@ -1836,15 +1854,25 @@ export class TuiSession {
     return this.#prompt;
   }
 
-  /** What the open `/` searches: the rendered document when the reader had the focus, else the task list. */
-  get searchTarget(): "list" | "document" {
+  /** What the open `/` searches: the open help, the rendered document when the reader had the focus, else the task list. */
+  get searchTarget(): SearchTarget {
     return this.#searchTarget;
   }
 
   /** Open the `:` command line or `/` search (keys.ts's mode follows). */
   openPrompt(kind: CommandLineKind, initial = ""): void {
-    if (kind === "/") this.#searchTarget = this.dialog === null && this.readerFocused() ? "document" : "list";
-    const document = kind === "/" && this.#searchTarget === "document";
+    if (kind === "/") {
+      this.#searchTarget =
+        this.dialog !== null
+          ? "list"
+          : this.#view === "help" && this.#help !== null
+            ? "help"
+            : this.readerFocused()
+              ? "document"
+              : "list";
+    }
+    // Only the task list's search completes (#tags); the document's and the help's are plain text.
+    const listSearch = kind === "/" && this.#searchTarget === "list";
     const dialog = this.dialog;
     // A live dialog (the filter picker) filters as the prompt is typed, starting from its current search.
     const live =
@@ -1857,9 +1885,9 @@ export class TuiSession {
       complete:
         kind === ":"
           ? line => completeCommandLine(line, this.commands, this)
-          : document
-            ? () => []
-            : line => this.#completeSearch(line),
+          : listSearch
+            ? line => this.#completeSearch(line)
+            : () => [],
       initial: live !== null && initial === "" ? live.before : initial,
       onChange: () => {
         if (live !== null && this.#liveSearch === live && this.#prompt !== null)
@@ -1907,8 +1935,9 @@ export class TuiSession {
 
   /**
    * Enter: run the command line (remembered in its history), or apply the
-   * search: to the :commands reference when it is open, else to the task
-   * list (an empty search clears it).
+   * search: to the :commands reference or the help when it is open, the
+   * rendered document when it had the focus, else to the task list (an
+   * empty search clears it).
    */
   async submitPrompt(): Promise<void> {
     const p = this.#prompt;
@@ -1925,6 +1954,8 @@ export class TuiSession {
         this.#commandsQuery = text.trim();
         this.#commandsSelected = 0;
         this.#changed();
+      } else if (this.#searchTarget === "help" && this.#view === "help" && this.#help !== null) {
+        this.#help.search(text);
       } else if (this.#searchTarget === "document" && this.#reader !== null) this.#reader.search(text);
       else this.setQuery(text);
       return;

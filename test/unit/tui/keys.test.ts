@@ -115,6 +115,8 @@ describe("default key table (N18)", () => {
       split: ["s"],
       post: ["c"],
       tags: ["t"],
+      status: ["m"],
+      toggle_done: ["d"],
       sort: ["o"],
     };
     for (const [act, ids] of Object.entries(expected)) expect(names(k, "leader", act as NormalAction)).toEqual(ids);
@@ -145,6 +147,20 @@ describe("default key table (N18)", () => {
     ]);
     // Reserved keys stay refused for them too (N18).
     expect(parseKeys({ keys: { normal: { filters: ["1"] } } }).problems.length).toBeGreaterThan(0);
+  });
+
+  test("the task-list keys ;d (show or hide done tasks) and ;m (the status picker) are configurable leader actions", () => {
+    expect(feedAll(DEFAULT_KEYS, [";", "d", ";", "m"])).toEqual([
+      action("toggle_done", null, "leader"),
+      action("status", null, "leader"),
+    ]);
+    // Neither is a NORMAL key: d and m alone stay unbound there (vi keys in the editor).
+    expect(names(DEFAULT_KEYS, "normal", "toggle_done")).toEqual([]);
+    expect(names(DEFAULT_KEYS, "normal", "status")).toEqual([]);
+    const moved = parsed({ keys: { normal: { status: ["s"] }, leader: { toggle_done: ["a"], status: [] } } });
+    expect(names(moved, "leader", "toggle_done")).toEqual(["a"]);
+    expect(names(moved, "normal", "status")).toEqual(["s"]);
+    expect(feedAll(moved, ["s", ";", "a"])).toEqual([action("status"), action("toggle_done", null, "leader")]);
   });
 
   test("every action has a description for help", () => {

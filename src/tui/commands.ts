@@ -302,7 +302,7 @@ function nextFilter(session: TuiSession, slot: string, value: string): TaskFilte
 
 // ---------- the filter picker (f) ----------
 
-/** The picker's one-key status toggles (digits are reserved; done is `x`, a checked box). */
+/** The one-key statuses of the filter and status pickers (digits are reserved; done is `x`, a checked box). */
 const STATUS_KEYS: Readonly<Record<TaskStatus, string>> = {
   draft: "d",
   open: "o",
@@ -724,18 +724,81 @@ async function writeField(
 
 function setStatus(session: TuiSession, target: TaskStatus | "next", attempt: string): Promise<void> {
   const submitted = submittedTask(session, attempt);
-  return session.mutate(async client => {
-    const shown = submitted();
-    const status = target === "next" ? nextStatusFor(shown.status) : target;
-    if (status === shown.status) {
-      session.notify("info", `@${shown.id} is already ${STATUS_LABEL[status]}`);
-      return;
-    }
-    // No author: a human change, exactly as the web's status buttons (N9).
-    await writeField(client, shown, "status", attempt, expected =>
-      client.versioned.setStatus(shown.id, { status }, { expected, mutationId: newMutationId() }),
-    );
-    session.notify("info", `@${shown.id}: ${STATUS_LABEL[shown.status]} → ${STATUS_LABEL[status]}`);
+  return session.mutate(client => writeStatus(session, client, submitted(), target, attempt));
+}
+
+/** ONE guarded status write of `shown` (the current status is a no-op, said so). */
+async function writeStatus(
+  session: TuiSession,
+  client: CortexClient,
+  shown: Task,
+  target: TaskStatus | "next",
+  attempt: string,
+): Promise<void> {
+  const status = target === "next" ? nextStatusFor(shown.status) : target;
+  if (status === shown.status) {
+    session.notify("info", `@${shown.id} is already ${STATUS_LABEL[status]}`);
+    return;
+  }
+  // No author: a human change, exactly as the web's status buttons (N9).
+  await writeField(client, shown, "status", attempt, expected =>
+    client.versioned.setStatus(shown.id, { status }, { expected, mutationId: newMutationId() }),
+  );
+  session.notify("info", `@${shown.id}: ${STATUS_LABEL[shown.status]} → ${STATUS_LABEL[status]}`);
+}
+
+/**
+ * The status picker (bare :status, ;m): the web's status buttons as one
+ * list. Each status is a radio row (the current one marked) with the filter
+ * picker's letter (d o r b x), which sets it at once; the highlight starts on
+ * the next step (the web's next-step button), so Enter takes it. Any pick
+ * closes the picker and writes the task it was opened for, on the database
+ * it was opened for (a task deleted meanwhile is an error, nothing written).
+ */
+function openStatusPicker(session: TuiSession, task: Task): void {
+  const id = task.id;
+  const database = session.databaseGeneration;
+  const live = (): Task | null => session.tasks.find(t => t.id === id) ?? null;
+  const set = (status: TaskStatus, dialog: Dialog): Promise<void> => {
+    dialog.finish();
+    const attempt = `:status ${status}`;
+    return session.mutate(async client => {
+      const shown = live();
+      if (shown === null) throw new CommandError(`@${id} no longer exists; ${attempt} did nothing`);
+      await writeStatus(session, client, shown, status, attempt);
+    }, database);
+  };
+  showDialog(session, {
+    kind: "list",
+    title: `STATUS OF @${id}`,
+    label: "status",
+    pickLabel: "sets it",
+    hints: ["Enter sets it", "d o r b x set one", "q/Esc close"],
+    initial: nextStatusFor(task.status),
+    summary: () => {
+      const current = live();
+      return current === null ? `@${id} no longer exists` : `@${id} ${current.title} · ${STATUS_LABEL[current.status]}`;
+    },
+    rows: () => {
+      const current = live()?.status ?? task.status;
+      const next = nextStatusFor(current);
+      return STATUS.map(status => ({
+        key: status,
+        toggle: true,
+        mark: status === current ? "(\u2022)" : "( )",
+        label: `${STATUS_MARK[status]} ${status}`,
+        detail: `${STATUS_KEYS[status]}${status === current ? " · current" : status === next ? " · next step" : ""}`,
+      }));
+    },
+    keys: STATUS.map(status => ({
+      key: STATUS_KEYS[status],
+      label: status,
+      run: (_row, dialog) => set(status, dialog),
+    })),
+    pick: (row, dialog) => {
+      const status = STATUS.find(s => s === row.key);
+      return status === undefined ? undefined : set(status, dialog);
+    },
   });
 }
 
@@ -1639,11 +1702,15 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "status",
     aliases: [],
-    usage: ":status <draft|open|review|blocked|done>",
-    description: "Set the current task's status (a human change, never attributed to an agent)",
+    usage: ":status [draft|open|review|blocked|done]",
+    description:
+      "Set the current task's status (a human change, never attributed to an agent); bare picks it in a list: d o r b x set one, Enter the next step",
     complete: prefix => STATUS.filter(s => s.startsWith(prefix)),
     run: (session, argument) => {
-      if (argument === "") throw new CommandError("Usage: :status <draft|open|review|blocked|done>");
+      if (argument === "") {
+        openStatusPicker(session, currentTask(session));
+        return;
+      }
       const status = STATUS.find(s => s === argument);
       if (status === undefined) {
         throw new CommandError(`Unknown status "${argument}": draft, open, review, blocked or done`);
@@ -1842,7 +1909,7 @@ export const COMMANDS: readonly CommandSpec[] = [
     name: "help",
     aliases: ["h"],
     usage: ":help",
-    description: "Modes, commands and the configured keys",
+    description: "Modes, commands and the configured keys; / searches it while it is open, n/N step",
     run: (session, argument) => {
       noArgument("help", argument);
       session.openView("help");

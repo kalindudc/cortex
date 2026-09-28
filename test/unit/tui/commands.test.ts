@@ -80,6 +80,7 @@ const REQUIRED: readonly { input: string; name: string; argument: string; prefix
   { input: "title Better title", name: "title", argument: "Better title", prefix: "ti" },
   { input: "title", name: "title", argument: "" },
   { input: "status review", name: "status", argument: "review", prefix: "sta" },
+  { input: "status", name: "status", argument: "" },
   { input: "next", name: "next", argument: "", prefix: "nex" },
   { input: "priority 2", name: "priority", argument: "2", prefix: "pr" },
   { input: "priority none", name: "priority", argument: "none" },
@@ -193,10 +194,12 @@ const KEY_ACTION_TARGETS: Readonly<
   focus_tasks: { command: "focus" },
   focus_document: { command: "focus" },
   toggle_tasks: { command: "set" },
+  toggle_done: { command: "set" },
   read: { command: "read" },
   edit: { command: "edit" },
   split: { command: "split" },
   tags: { command: "tag" },
+  status: { command: "status" },
   sort: { command: "sort" },
   filters: "handled",
   clear_filters: { command: "clear" },
@@ -1062,8 +1065,6 @@ describe(":status and :next (smart transition)", () => {
     const { s, daemon } = withDaemon();
     await s.execute("status nope");
     expect(s.status?.text).toMatch(/Unknown status "nope"/);
-    await s.execute("status");
-    expect(s.status?.text).toMatch(/:status <draft\|open\|review\|blocked\|done>/);
     await s.execute("status open");
     expect(s.status?.text).toMatch(/already Open/);
     expect(daemon.writes()).toEqual([]);
@@ -1117,6 +1118,104 @@ describe(":status and :next (smart transition)", () => {
     await s.execute("status done");
     expect(daemon.writes().length).toBe(1);
     expect(s.status?.text).toMatch(/may or may not have applied/);
+  });
+});
+
+describe("the status picker (bare :status; ;m): the web's status buttons in one list", () => {
+  const keysOf = (d: Dialog) => d.visibleRows().map(r => r.key);
+  const guarded = (id: number, status: TaskStatus) => ({
+    name: "setStatus",
+    args: [id, { status }, { expected: { status: `status-${id}` }, mutationId: anyId }],
+  });
+
+  test("every status as a radio row (the current one marked, with its letter); the next step is highlighted; Enter sets it and closes", async () => {
+    const { s, daemon, type } = withDaemon();
+    await s.execute("status");
+    const picker = topDialog(s);
+    expect(picker.label).toBe("status");
+    expect(keysOf(picker)).toEqual([...STATUS]);
+    const text = plainText(picker.render(96));
+    expect(text).toContain("STATUS OF @1");
+    expect(text).toContain("@1 Fix the login flow · Open");
+    expect(text).toMatch(/\( \) ○ draft +d/);
+    expect(text).toMatch(/\(\u2022\) ● open +o · current/);
+    expect(text).toMatch(/◐ review +r · next step/);
+    expect(text).toMatch(/✓ done +x/);
+    expect(picker.highlighted()?.key).toBe("review"); // Enter is the web's next-step button
+    expect(picker.hints()).toMatch(/Enter sets it.*d o r b x set one/);
+    type("\r");
+    await flush();
+    expect(s.dialog).toBeNull();
+    expect(daemon.writes()).toEqual([guarded(1, "review")]);
+    const request = daemon.writes()[0]?.args[1] as Record<string, unknown>;
+    expect(Object.keys(request)).toEqual(["status"]); // no author: a human change
+    expect(s.selectedTask()?.status).toBe("review");
+    expect(s.status?.text).toMatch(/@1: Open → In review/);
+  });
+
+  test("one letter sets a status at once (d o r b x, as in the filter picker); j/k and Space pick too; the current status writes nothing", async () => {
+    const { s, daemon, type } = withDaemon();
+    s.select(1); // explicit: a done task is never the fallback
+    await s.execute("status");
+    type("x");
+    await flush();
+    expect(s.dialog).toBeNull();
+    expect(daemon.writes()).toEqual([guarded(1, "done")]);
+    expect(s.status?.text).toMatch(/@1: Open → Done/);
+    // The done task stays selected (an explicit selection), so the picker opens for it again.
+    await s.execute("status");
+    expect(topDialog(s).highlighted()?.key).toBe("open"); // done → open is the next step
+    type("k", "k", " ");
+    await flush();
+    expect(daemon.writes().at(-1)).toEqual(guarded(1, "draft"));
+    await s.execute("status");
+    type("d");
+    await flush();
+    expect(daemon.writes().length).toBe(2);
+    expect(s.status?.text).toMatch(/already Draft/);
+  });
+
+  test("Esc and q close it without a write; the filters and the selection never change", async () => {
+    const { s, daemon, type } = withDaemon();
+    const before = snapshotOf(s);
+    await s.execute("status");
+    type("\x1b");
+    expect(s.dialog).toBeNull();
+    await s.execute("status");
+    type("q");
+    expect(s.dialog).toBeNull();
+    expect(daemon.writes()).toEqual([]);
+    expect(snapshotOf(s)).toEqual(before);
+  });
+
+  test("it writes the task it was opened for: deleted meanwhile, nothing is written and the status line says so", async () => {
+    const { s, daemon, type } = withDaemon();
+    await s.execute("status");
+    daemon.removeElsewhere(1);
+    await flush();
+    type("b");
+    await flush();
+    expect(daemon.writes()).toEqual([]);
+    expect(s.status?.level).toBe("error");
+    expect(s.status?.text).toMatch(/@1 no longer exists; :status blocked did nothing/);
+  });
+
+  test("a conflict or failure reaches the status line after the picker closed", async () => {
+    const { s, daemon, type } = withDaemon();
+    daemon.fail(conflict("task", 1, "status"));
+    await s.execute("status");
+    type("r");
+    await flush();
+    expect(s.dialog).toBeNull();
+    expect(s.status?.level).toBe("error");
+    expect(s.status?.text).toMatch(/Conflict: @1's status changed.*:status review.*Nothing was changed/);
+  });
+
+  test("without a task there is nothing to pick for", async () => {
+    const { s } = withDaemon([]);
+    await s.execute("status");
+    expect(s.dialog).toBeNull();
+    expect(s.status?.text).toMatch(/No task selected/);
   });
 });
 

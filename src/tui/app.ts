@@ -49,7 +49,9 @@
 //   frame: the prompt, a dialog field, the title or the editor cursor. The `:` line (src/tui/commandline.ts) completes from the
 //   ONE command registry (src/tui/commands.ts) and shows the candidates
 //   above it; `?`/:help and the searchable :commands view list the same
-//   registry. Every untrusted string crosses src/tui/safety.ts before
+//   registry. The help is drawn by src/tui/help.ts: wrapped under its
+//   description column, and `/` and n/N search it while it is open (never
+//   the task list). Every untrusted string crosses src/tui/safety.ts before
 //   style() colors it.
 // - Dialogs (src/tui/dialogs.ts) are toolkit overlays through this shell's
 //   overlay host; every input, whichever component the toolkit focused,
@@ -105,6 +107,7 @@ import { CommandError, commandHelp, openFilterPicker, reportPendingMigrations } 
 import type { CommandLine } from "./commandline.ts";
 import { DRAFT_FIELDS, type FieldState } from "./drafts.ts";
 import type { DocumentEditor, EditorMotion, Register, VisualKind } from "./editor.ts";
+import { createHelp, type Help, type HelpLine } from "./help.ts";
 import { createReader, type EditorCursor, type Reader, type ReaderPoint, type SelectionMotion } from "./reader.ts";
 import { type ConfigProblem, loadConfig, type TuiConfig } from "./config.ts";
 import {
@@ -147,6 +150,8 @@ import { createWorkspace, STATUS_MARK, statusPair, type WorkspaceComponent } fro
 /** N19: the smallest workspace; below it a recoverable resize screen. */
 export const MIN_COLUMNS = 80;
 export const MIN_ROWS = 24;
+/** The help's key column: an entry is two cells in, this wide, then one blank (its description's column). */
+const HELP_KEY_WIDTH = 24;
 /** From this width the task list sits beside the document. */
 export const SIDE_BY_SIDE_COLUMNS = 100;
 /** From this width Split shows the editor and the preview side by side; below it, the focused half. */
@@ -288,10 +293,12 @@ const AVAILABLE_ACTIONS: ReadonlySet<NormalAction> = new Set<NormalAction>([
   "focus_tasks",
   "focus_document",
   "toggle_tasks",
+  "toggle_done",
   "help",
   "commands",
   "suspend",
   "tags",
+  "status",
   "insert",
   "next_panel",
   "previous_panel",
@@ -502,6 +509,8 @@ export class Shell {
   readonly #list: WorkspaceComponent;
   /** Read and the Split preview (src/tui/reader.ts). */
   readonly #reader: Reader;
+  /** The help view: its lines wrapped to the pane, and `/` over them while it is open (src/tui/help.ts). */
+  readonly #help: Help;
   /** The task panels and the update composer (src/tui/activity.ts). */
   readonly #activity: Activity;
   /** The notification feed, :notifications and blocked-transition attention (src/tui/notifications.ts). */
@@ -527,6 +536,7 @@ export class Shell {
     this.#view = new ShellView(this);
     this.#list = createWorkspace(this.session);
     this.#reader = createReader(this.session);
+    this.#help = createHelp(this.session, () => this.#helpLines());
     this.#activity = createActivity(this.session);
     // Attention for blocked transitions: the status flash (default) and the opt-in bell, on this terminal.
     this.#notifications = createNotifications(this.session, {
@@ -1272,6 +1282,17 @@ export class Shell {
         s.closeView();
         s.toggleTaskList();
         break;
+      case "toggle_done": {
+        // ;d is :set done!, saying which way it went (the list header also shows +done while they are shown).
+        s.closeView();
+        s.setIncludeDone(!s.includeDone);
+        const key = actionKeyLabels(s.keys.keys, "toggle_done")[0];
+        const again = key === undefined ? "" : ` (${key} ${s.includeDone ? "hides" : "shows"} them)`;
+        const filtered =
+          !s.includeDone && s.filter.status === "done" ? "; the done status filter still lists them" : "";
+        s.notify("info", `${s.includeDone ? "Showing" : "Hiding"} done tasks${again}${filtered}`);
+        break;
+      }
       case "next_heading":
       case "previous_heading": {
         s.closeView();
@@ -1282,12 +1303,10 @@ export class Shell {
         break;
       }
       case "next_match":
-        s.closeView();
-        s.stepResult(count);
-        break;
       case "previous_match":
-        s.closeView();
-        s.stepResult(-count);
+        // In the help they step through its matches (it stays open); elsewhere, the workspace's.
+        if (s.view !== "help") s.closeView();
+        s.stepResult(action === "next_match" ? count : -count);
         break;
       case "back":
         s.closeView();
@@ -1312,6 +1331,11 @@ export class Shell {
         // ;t is :tag: the current task's tag picker.
         s.closeView();
         void s.execute("tag");
+        break;
+      case "status":
+        // ;m is a bare :status: the current task's status picker.
+        s.closeView();
+        void s.execute("status");
         break;
       case "insert":
         s.closeView();
@@ -2060,7 +2084,8 @@ export class Shell {
 
   #viewPane(theme: ResolvedTheme, width: number, height: number): string[] {
     const s = this.session;
-    const content = s.view === "help" ? this.#helpLines() : this.#messageLines(width - 2);
+    if (s.view === "help") return this.#help.render(theme, width, height);
+    const content = this.#messageLines(width - 2);
     const max = Math.max(0, content.length - height);
     const scroll = Math.min(s.viewScroll, max);
     s.setViewScroll(scroll);
@@ -2125,18 +2150,23 @@ export class Shell {
     return out.slice(0, height);
   }
 
-  #helpLines(): Seg[][] {
+  /** The help's lines (src/tui/help.ts wraps and searches them): an entry's description column is its hang. */
+  #helpLines(): HelpLine[] {
     const keys = this.session.keys.keys;
-    const out: Seg[][] = [];
-    const heading = (text: string) => out.push([seg("accent@bg", text, { bold: true })]);
+    const out: HelpLine[] = [];
+    const blank = () => out.push({ segs: [] });
+    const heading = (text: string) => out.push({ segs: [seg("accent@bg", text, { bold: true })] });
     const entry = (left: string, right: string, later = false) =>
-      out.push([
-        seg("text@bg", `  ${esc(left).padEnd(24)} `),
-        seg("muted@bg", esc(right)),
-        ...(later ? [seg("dim@bg", "  (later)")] : []),
-      ]);
-    heading("CORTEX TERMINAL WORKSPACE · help (q or Esc closes)");
-    out.push([]);
+      out.push({
+        segs: [
+          seg("text@bg", `  ${esc(left).padEnd(HELP_KEY_WIDTH)} `),
+          seg("muted@bg", esc(right)),
+          ...(later ? [seg("dim@bg", "  (later)")] : []),
+        ],
+        hang: HELP_KEY_WIDTH + 3,
+      });
+    heading("CORTEX TERMINAL WORKSPACE · help (/ searches it · q or Esc closes)");
+    blank();
     heading("MODES");
     entry("NORMAL", "Keys move and act; they never insert text");
     entry("INSERT", "Every key is text until Esc: the body editor, or the title in place (Enter or Esc saves it)");
@@ -2151,9 +2181,9 @@ export class Shell {
     entry(":  COMMAND", "A one-line command: Tab completes, Up/Down recall, Enter runs it, Esc cancels");
     entry(
       "/  SEARCH",
-      "Filter the task list, or search the rendered document while it has the focus (n/N step): Enter applies, Esc cancels, an empty search clears it",
+      "Filter the task list, search the rendered document while it has the focus, or search this help while it is open (n/N step): Enter applies, Esc cancels, an empty search clears it",
     );
-    out.push([]);
+    blank();
     // The mouse is optional: every row here also has a key or a command.
     heading(
       this.#options.config.mouse
@@ -2180,11 +2210,11 @@ export class Shell {
       "A click highlights a row, a double click picks it; checkbox and radio rows toggle on each click; outside does nothing",
     );
     entry("Shift-drag", "The terminal's native selection while the mouse is on (Option-drag in some macOS terminals)");
-    out.push([]);
+    blank();
     heading("COMMANDS");
     for (const c of commandHelp(this.session.commands)) entry([c.usage, ...c.names].join("  "), c.description);
     entry(":<id>", "Jump to a task by id, for example :42");
-    out.push([]);
+    blank();
     heading("KEYS · NORMAL");
     for (const action of NORMAL_ACTIONS) {
       const labels = keys.bindings.normal[action].map(k => k.label);
@@ -2197,13 +2227,13 @@ export class Shell {
     entry("Enter (a task panel)", "Activity: expand or collapse the update; Related: open the task");
     entry("q", "Reminds you that :q quits");
     entry("Esc  Ctrl-C", "Cancel pending input, close this view; never quits");
-    out.push([]);
+    blank();
     heading(`KEYS · LEADER ${leaderLabel(keys)}`);
     for (const action of NORMAL_ACTIONS) {
       const labels = actionKeyLabels(keys, action).slice(keys.bindings.normal[action].length);
       if (labels.length > 0) entry(labels.join(" "), KEY_ACTIONS[action].description, !AVAILABLE_ACTIONS.has(action));
     }
-    out.push([]);
+    blank();
     heading("KEYS · VISUAL");
     for (const action of VISUAL_ACTIONS) {
       const labels = visualKeyLabels(keys, action);
@@ -2211,7 +2241,7 @@ export class Shell {
     }
     entry("motions", "The NORMAL motions and counts extend the selection (0 is the line start)");
     entry("Esc  Ctrl-C", "Back to NORMAL (the selection ends; the cursor stays)");
-    out.push([]);
+    blank();
     heading("KEYS · INSERT");
     for (const action of INSERT_ACTIONS) {
       const labels = insertKeyLabels(keys, action);
@@ -2221,9 +2251,9 @@ export class Shell {
     entry("Enter", "A new line (continuing a Markdown list); in the title, save it");
     entry("Shift-arrows", "Select; typing or a paste replaces the selection");
     entry("Esc", "Back to NORMAL (the body saves by autosave or :w; the title saves now)");
-    out.push([]);
+    blank();
     const later = NORMAL_ACTIONS.some(action => !AVAILABLE_ACTIONS.has(action));
-    out.push([seg("dim@bg", `${later ? "(later): not in this build yet. " : ""}Keys are set in tui.toml.`)]);
+    out.push({ segs: [seg("dim@bg", `${later ? "(later): not in this build yet. " : ""}Keys are set in tui.toml.`)] });
     return out;
   }
 
@@ -2294,7 +2324,9 @@ export class Shell {
             ? "Tab completes · Up/Down history · Enter runs · Esc cancels"
             : s.searchTarget === "document"
               ? "Enter searches the document · Esc cancels · empty clears"
-              : "Enter applies · Esc cancels · empty clears",
+              : s.searchTarget === "help"
+                ? "Enter searches the help · Esc cancels · empty clears"
+                : "Enter applies · Esc cancels · empty clears",
         ),
       );
     } else if (s.status !== null) {
@@ -2446,6 +2478,10 @@ export class Shell {
                       : [
                           hint(pair(key("down"), key("up")), "scroll"),
                           hint(pair(key("top"), key("bottom")), "top/bottom"),
+                          s.view === "help" ? "/ searches" : undefined,
+                          s.view === "help" && this.#help.query !== ""
+                            ? hint(pair(key("next_match"), key("previous_match")), "matches")
+                            : undefined,
                           "q/Esc close",
                           ": commands",
                         ];

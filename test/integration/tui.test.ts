@@ -514,6 +514,7 @@ describe("the command line and the task list in a real terminal (plan @400 Task 
       ["lanes", "LANES"],
       ["tags", "TAGS"],
       ["tag", "TAGS OF @1"],
+      ["status", "STATUS OF @1"],
       ["theme", "THEME"],
     ] as const) {
       mark = pty.mark();
@@ -582,6 +583,33 @@ describe("metadata and catalog commands in a real terminal (plan @400 Task 8 par
     };
     const audit = created.updates.find(u => u.summary === "status → review");
     expect(audit?.author).toBe(me.author);
+  });
+
+  test(";m opens the status picker; x marks the selected task done as a human (not an agent)", async () => {
+    const box = sandbox("tui-status-picker");
+    await seedTasks(box.env, ["alpha one"], ["beta two"]);
+    const pty = spawnPty([BIN, "tui", "1"], { env: box.tuiEnv, cols: 110, rows: 32 });
+    await ready(pty);
+    await expectPlain(pty, "beta two");
+    let mark = pty.mark();
+    await keys(pty, ";", "m");
+    await expectPlain(pty, "STATUS OF @1", mark);
+    await expectPlain(pty, "next step", mark);
+    mark = pty.mark();
+    await keys(pty, "x");
+    await expectPlain(pty, "@1: Open \u2192 Done", mark);
+    pty.write(":q\r");
+    expect(await pty.exited()).toEqual({ code: 0, signal: null });
+    const done = await show(box.env, 1);
+    expect(done.task.status).toBe("done");
+    // The audit row carries the dashboard's human default author, as :status does.
+    const identity = readIdentity(metadataFileFor(box.env.CORTEX_DB ?? ""));
+    if (identity?.endpoint.kind !== "unix") throw new Error("no daemon metadata");
+    const me = (await (await fetch("http://localhost/api/me", { unix: identity.endpoint.socketPath })).json()) as {
+      author: string;
+    };
+    expect(done.updates.find(u => u.summary === "status \u2192 done")?.author).toBe(me.author);
+    expect((await show(box.env, 2)).task.status).toBe("open");
   });
 
   test(":tag +x -y applies membership deltas; removing a tag from a task keeps its definition", async () => {
@@ -1250,6 +1278,53 @@ describe("pane focus, sorting and fast filters in a real terminal", () => {
     await keys(pty, "F");
     await expectPlain(pty, "4 shown", mark);
     await expectPlain(pty, "no filters · f picks", mark);
+    pty.write(":q\r");
+    expect(await pty.exited()).toEqual({ code: 0, signal: null });
+    expect(isCooked(pty.localFlags())).toBe(true);
+  });
+
+  test(";d shows and hides the done tasks in one key; the list header says +done while they are shown", async () => {
+    const box = sandbox("tui-toggle-done");
+    await seedTasks(box.env, ["alpha one"], ["shipped thing", "-s", "done"]);
+    const pty = spawnPty([BIN, "tui"], { env: box.tuiEnv, cols: 120, rows: 32 });
+    await ready(pty);
+    await expectPlain(pty, "1 shown");
+    expect(plainText(pty.output())).not.toContain("shipped thing");
+    let mark = pty.mark();
+    await keys(pty, ";", "d");
+    await expectPlain(pty, "shipped thing", mark);
+    await expectPlain(pty, "2 shown", mark);
+    await expectPlain(pty, "+done", mark);
+    await expectPlain(pty, "Showing done tasks (;d hides them)", mark);
+    mark = pty.mark();
+    await keys(pty, ";", "d");
+    await expectPlain(pty, "1 shown", mark);
+    await expectPlain(pty, "Hiding done tasks (;d shows them)", mark);
+    pty.write(":q\r");
+    expect(await pty.exited()).toEqual({ code: 0, signal: null });
+    expect(isCooked(pty.localFlags())).toBe(true);
+  });
+
+  test("/ in the help searches the help, never the list: n steps through its matches; Esc closes it", async () => {
+    const box = sandbox("tui-help-search");
+    await seedTasks(box.env, ["alpha one"], ["beta two"]);
+    const pty = spawnPty([BIN, "tui"], { env: box.tuiEnv, cols: 110, rows: 32 });
+    await ready(pty);
+    await expectPlain(pty, "beta two");
+    let mark = pty.mark();
+    await keys(pty, "?");
+    await expectPlain(pty, "CORTEX TERMINAL WORKSPACE \u00b7 help", mark);
+    mark = pty.mark();
+    await keys(pty, "/", ..."picker", "\r");
+    await expectPlain(pty, /\/picker: match 1 of \d+/, mark);
+    mark = pty.mark();
+    await keys(pty, "n");
+    await expectPlain(pty, /\/picker: match 2 of \d+/, mark);
+    mark = pty.mark();
+    await keys(pty, "\x1b");
+    // Back in the workspace, the list is unfiltered: the help's search never reached it.
+    await expectPlain(pty, "2 shown", mark);
+    await expectPlain(pty, "no filters \u00b7 f picks \u00b7 / search", mark);
     pty.write(":q\r");
     expect(await pty.exited()).toEqual({ code: 0, signal: null });
     expect(isCooked(pty.localFlags())).toBe(true);

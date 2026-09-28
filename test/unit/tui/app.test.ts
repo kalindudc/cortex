@@ -175,6 +175,10 @@ function harness(
         writes.push({ id, request });
         return { ...stateOf(id), replayed: false };
       },
+      setStatus: async (id: number, request: Record<string, unknown>) => {
+        writes.push({ id, request });
+        return { ...stateOf(id), replayed: false };
+      },
       postUpdate: async (id: number, request: { author: string; summary: string }) => {
         posts.push({ id, request });
         const update: Update = {
@@ -821,6 +825,82 @@ describe("keys (N17/N18)", () => {
     expect(h.session.view).toBe("workspace");
   });
 
+  test("/ in the help searches the help, never the task list: the first match is shown and marked; n/N step and wrap; the help stays open", async () => {
+    const h = await started();
+    type(h, "?");
+    expect(plain(h.shell.frame()).at(-1)).toContain("/ searches");
+    type(h, "/");
+    expect(screen(h)).toContain("Enter searches the help");
+    type(h, ..."picker", "\r");
+    expect(h.session.view).toBe("help");
+    expect(h.session.query).toBe(""); // the task list's search is untouched
+    const first = /^\/picker: match 1 of (\d+)$/.exec(h.session.status?.text ?? "");
+    expect(first).not.toBeNull();
+    const count = Number(first?.[1]);
+    expect(count).toBeGreaterThan(2);
+    const marked = () => plain(h.shell.frame()).filter(row => row.startsWith("\u25b8"));
+    expect(marked().length).toBe(1); // the current match's row, in the margin
+    expect(marked()[0]).toContain("picker");
+    // Every match is underlined in the search pair (inverse without color); the current one is also bold.
+    expect(h.shell.frame().join("\n")).toContain("\x1b[1;4;7mpicker\x1b[0m");
+    expect(plain(h.shell.frame()).at(-1)).toContain("n/N matches");
+    type(h, "n");
+    expect(h.session.status?.text).toBe(`/picker: match 2 of ${count}`);
+    expect(h.session.view).toBe("help");
+    type(h, "N", "N");
+    expect(h.session.status?.text).toBe(`/picker: match ${count} of ${count} (wrapped to the last)`);
+    expect(h.session.viewScroll).toBeGreaterThan(0); // scrolled to the last match
+    expect(marked().length).toBe(1);
+    type(h, "n");
+    expect(h.session.status?.text).toBe(`/picker: match 1 of ${count} (wrapped to the first)`);
+    expect(marked().length).toBe(1);
+    // Case-insensitive and literal; no match and an empty search say so.
+    type(h, "/", ..."KEYS \u00b7 LEADER", "\r");
+    expect(h.session.status?.text).toBe("/KEYS \u00b7 LEADER: match 1 of 1");
+    type(h, "/", ..."(zz", "\r");
+    expect(h.session.status?.text).toBe("No match for /(zz in the help");
+    expect(marked()).toEqual([]);
+    type(h, "/", ..."picker", "\r", "/", "\r");
+    expect(h.session.status?.text).toBe("Help search cleared");
+    expect(marked()).toEqual([]);
+    expect(h.shell.frame().join("\n")).not.toContain("\x1b[4;7m");
+    expect(h.session.query).toBe("");
+  });
+
+  test("closing the help forgets its search; n/N in the help without one explain themselves", async () => {
+    const h = await started();
+    type(h, "?", "/", ..."picker", "\r");
+    expect(h.session.status?.text).toMatch(/^\/picker: match 1 of/);
+    type(h, "\x1b");
+    expect(h.session.view).toBe("workspace");
+    type(h, "?");
+    expect(plain(h.shell.frame()).some(row => row.startsWith("\u25b8"))).toBe(false);
+    expect(h.shell.frame().join("\n")).not.toContain("\x1b[4;7m");
+    type(h, "n");
+    expect(h.session.view).toBe("help");
+    expect(h.session.status?.text).toBe("No search in the help: / searches it, then n and N step through the matches");
+    // Outside the help, n/N are the task list's again.
+    type(h, "q", "n");
+    expect(h.session.status?.text).toMatch(/No search: \/ searches the task list/);
+  });
+
+  test("the help wraps a long description under its column instead of cutting it", async () => {
+    const h = await started({ columns: 80 });
+    type(h, "?");
+    h.terminal.rows = 600; // the whole help on one screen
+    const rows = plain(h.shell.frame());
+    const at = rows.findIndex(row => row.includes(":set <option>"));
+    expect(rows[at]).toContain("Options: done");
+    // The rest of it continues on the next rows, indented to the description column (the margin, then 27 cells).
+    const rest = rows.slice(at + 1, at + 6);
+    expect(rest.join(" ")).toContain("name? shows");
+    expect(rest[0]?.startsWith(" ".repeat(28))).toBe(true);
+    expect(rest[0]?.[28]).not.toBe(" ");
+    // No row is cut short any more.
+    expect(rows.slice(0, -2).some(row => row.includes("\u2026"))).toBe(false);
+    for (const row of rows) expect(visibleWidth(row)).toBeLessThanOrEqual(80);
+  });
+
   test("no view ever hints a function key", async () => {
     const h = await started();
     for (const view of ["workspace", "help", "messages", "commands"] as const) {
@@ -1397,6 +1477,56 @@ describe("dialogs in the shell (Task 8 part B: N17/N19)", () => {
     const help = screen(h);
     const line = help.split("\n").find(l => l.includes(";t")) ?? "";
     expect(line).toContain("Edit this task's tags");
+    expect(line).not.toContain("(later)");
+  });
+
+  test(";d (the leader done key) shows or hides the done tasks, says which, and the list header shows +done", async () => {
+    const h = await started({ tasks: [...TASKS, task(5, { title: "Shipped last week", status: "done" })] });
+    expect(screen(h)).not.toContain("Shipped last week");
+    type(h, ";", "d");
+    expect(h.session.includeDone).toBe(true);
+    let text = screen(h);
+    expect(text).toContain("Shipped last week");
+    expect(text).toContain("+done");
+    expect(h.session.status?.text).toBe("Showing done tasks (;d hides them)");
+    type(h, ";", "d");
+    expect(h.session.includeDone).toBe(false);
+    text = screen(h);
+    expect(text).not.toContain("Shipped last week");
+    expect(text).not.toContain("+done");
+    expect(h.session.status?.text).toBe("Hiding done tasks (;d shows them)");
+    // A done status filter shows them whatever include-done says: the message says so.
+    h.session.setFilter({ status: "done", lane: null, tags: [] });
+    type(h, ";", "d", ";", "d");
+    expect(h.session.status?.text).toBe("Hiding done tasks (;d shows them); the done status filter still lists them");
+    type(h, "?");
+    h.terminal.rows = 400;
+    const line =
+      screen(h)
+        .split("\n")
+        .find(l => l.includes(";d ")) ?? "";
+    expect(line).toContain("Show or hide the done tasks");
+    expect(line).not.toContain("(later)");
+  });
+
+  test(";m (the leader status key) opens the status picker for the selected task; a letter sets it and closes it", async () => {
+    const h = await started();
+    h.session.select(2);
+    type(h, ";", "m");
+    expect(h.session.dialog?.label).toBe("status");
+    expect(plain((h.session.dialog as unknown as Dialog).render(80)).join("\n")).toContain("STATUS OF @2");
+    type(h, "o");
+    for (let i = 0; i < 5; i++) await settle();
+    expect(h.session.dialog).toBeNull();
+    expect(h.writes).toEqual([{ id: 2, request: { status: "open" } }]);
+    expect(h.session.status?.text).toBe("@2: Blocked \u2192 Open");
+    type(h, "?");
+    h.terminal.rows = 400;
+    const line =
+      screen(h)
+        .split("\n")
+        .find(l => l.includes(";m ")) ?? "";
+    expect(line).toContain("Set this task's status in a picker");
     expect(line).not.toContain("(later)");
   });
 
