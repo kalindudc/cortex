@@ -392,9 +392,10 @@ describe("density: the spacing around the document header and the footer (comfor
     expect(split(lines, 1).doc).toContain("Fix the login flow");
     expect(split(lines, 2).doc.trim()).toBe("");
     expect(split(lines, 3).doc).toMatch(/^\u2500\u2500 READ /);
-    // A one-line title: the list's first task row and the document's first body row share a screen row.
+    // The list's first task row sits beside S5's blank row under the divider; the body follows it.
     expect(split(lines, 4).list).toContain("@1  Fix the login flow");
-    expect(split(lines, 4).doc).toMatch(/^ *Plan/);
+    expect(split(lines, 4).doc.trim()).toBe("");
+    expect(split(lines, 5).doc).toMatch(/^ *Plan/);
     h.session.setDensity("compact");
     lines = plain(h.shell.frame());
     expect(split(lines, 2).doc).toMatch(/^\u2500\u2500 READ /);
@@ -423,6 +424,57 @@ describe("density: the spacing around the document header and the footer (comfor
     expect(split(lines, 3).doc).toMatch(/^\u2500\u2500 EDIT /);
     h.session.setDensity("compact");
     expect(split(plain(h.shell.frame()), 2).doc).toMatch(/^\u2500\u2500 EDIT /);
+  });
+
+  test("S5: comfortable leaves one blank row under every document divider (Read, Edit, Split, panels); compact none", async () => {
+    const h = await started();
+    /** The document part of each row at the current width (the list is a third of it, then its divider). */
+    const docRows = (): string[] => {
+      const list = Math.max(28, Math.min(56, Math.floor(h.terminal.columns * 0.33)));
+      return plain(h.shell.frame()).map(l => l.slice(list + 1));
+    };
+    /** The row of the divider matching `label`, the blank row under it, and the first content row. */
+    const underDivider = (label: RegExp, blank = (s: string) => s.trim() === "") => {
+      const rows = docRows();
+      const y = rows.findIndex(r => label.test(r));
+      expect(y).toBeGreaterThan(0);
+      expect(blank(rows[y + 1] ?? "x")).toBe(true);
+      expect((rows[y + 2] ?? "").trim()).not.toBe("");
+      return y;
+    };
+    expect(underDivider(/^\u2500\u2500 READ /)).toBe(3);
+    expect(docRows()[5]).toMatch(/^ *Plan/);
+    h.session.setFocus("document");
+    h.session.setDocumentMode("edit");
+    await settle();
+    underDivider(/^\u2500\u2500 EDIT /);
+    // The editor's rows start under the spacer: a click on "Step one" puts the cursor there (offset 8).
+    const lines = plain(h.shell.frame());
+    const y = lines.findIndex(l => l.includes("Step one"));
+    const x = (lines[y] ?? "").indexOf("Step one");
+    h.terminal.reply(`\x1b[<0;${x + 1};${y + 1}M`);
+    h.terminal.reply(`\x1b[<0;${x + 1};${y + 1}m`);
+    expect(h.session.documentOf(1)?.editor?.cursor()).toBe(8);
+    // Wide Split (120 columns): the halves' rule runs through the spacer row.
+    h.session.setDocumentMode("split");
+    await settle();
+    underDivider(
+      /^\u2500\u2500 EDIT .*\u252c.*PREVIEW/,
+      s => s.replace("\u2502", "").trim() === "" && s.includes("\u2502"),
+    );
+    // Narrow Split: only the focused half, the same spacer.
+    h.terminal.columns = 110;
+    underDivider(/^\u2500\u2500 SPLIT /);
+    h.terminal.columns = 120;
+    h.session.setDocumentMode("read");
+    type(h, "]");
+    await settle();
+    underDivider(/^\u2500\u2500 ACTIVITY/);
+    type(h, "[");
+    h.session.setDensity("compact");
+    const compact = docRows();
+    expect(compact[2]).toMatch(/^\u2500\u2500 READ /);
+    expect(compact[3]).toMatch(/^ *Plan/);
   });
 
   test("S3: comfortable puts one blank bg row right above the status line in every view; compact none", async () => {
@@ -1132,7 +1184,9 @@ describe("--heading, the reader keys and the mouse", () => {
   const readerRows = (h: Harness): string[] => {
     const lines = plain(h.shell.frame());
     const divider = lines.findIndex(l => l.includes("READ"));
-    return lines.slice(divider + 1).map(l => l.slice(l.indexOf("│") + 1));
+    // S5: comfortable leaves one blank row under the divider.
+    const gap = h.session.density === "comfortable" ? 1 : 0;
+    return lines.slice(divider + 1 + gap).map(l => l.slice(l.indexOf("│") + 1));
   };
 
   test("the requested heading (the web's slugger: setext headings and repeats count) opens at the top, once", async () => {

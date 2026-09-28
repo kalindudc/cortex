@@ -1776,6 +1776,11 @@ export class Shell {
       // S2: comfortable leaves one blank row between the header block and the divider below it (every
       // branch below starts with one): a one-line title's body then starts on the list's first task row.
       if (s.density === "comfortable") out.push(row([]));
+      // S5: comfortable also leaves one blank row under the divider, so the content never touches it.
+      const gap = s.density === "comfortable" ? 1 : 0;
+      const underDivider = (): void => {
+        if (gap > 0) out.push(row([]));
+      };
       const editorFocused = focused && s.documentTarget === "body";
       const wideSplit = mode === "split" && this.#terminal.columns >= SPLIT_COLUMNS;
       if (s.panel !== "document") {
@@ -1786,15 +1791,18 @@ export class Shell {
         const labels: (readonly [string, boolean])[] = [[` ${this.#activity.title()} `, focused]];
         if (steps.length > 0) labels.push([` ${steps.join(" ")} panels `, false]);
         out.push(this.#divider(theme, width, labels, fill));
+        underDivider();
         const rows = Math.max(0, height - out.length);
         this.#activity.height = rows;
         this.#layout.panel = { x, y: out.length, width, height: rows };
         out.push(...this.#activity.render(width));
       } else if (mode === "read") {
         out.push(this.#divider(theme, width, [[" READ ", focused], ...this.#readerLabels()], fill));
+        underDivider();
         out.push(...this.#readerRows(width, Math.max(0, height - out.length), x, out.length, false, null));
       } else if (draft === null || doc?.editor == null) {
         out.push(this.#divider(theme, width, [[mode === "edit" ? " EDIT " : " SPLIT ", focused]], fill));
+        underDivider();
         out.push(
           doc?.error
             ? row([seg("danger@bg", `error: could not load it for editing: ${esc(doc.error)} · :edit retries`)])
@@ -1802,6 +1810,7 @@ export class Shell {
         );
       } else if (mode === "edit") {
         out.push(this.#divider(theme, width, [[" EDIT ", editorFocused]], fill));
+        underDivider();
         const rows = Math.max(0, height - out.length);
         const lines = this.#editorRows(
           theme,
@@ -1824,7 +1833,7 @@ export class Shell {
         const previewTheme = focused && s.splitHalf !== "preview" ? inactiveTheme(theme) : theme;
         // The halves render before their divider: the preview follows the editor's cursor (the editor
         // renders first, so its cursor row is this frame's), and the labels then name what it shows.
-        const top = out.length + 1;
+        const top = out.length + 1 + gap;
         const rows = Math.max(0, height - top);
         const editorLines = this.#editorRows(
           editorTheme,
@@ -1845,6 +1854,14 @@ export class Shell {
             style(theme, "border@bg", "┬") +
             this.#divider(previewTheme, right, [[" PREVIEW ", onPreview], ...this.#readerLabels()], fill),
         );
+        // The halves' rule runs through the spacer row.
+        if (gap > 0) {
+          out.push(
+            paint(editorTheme, [], left, fill) +
+              style(theme, "border@bg", "\u2502") +
+              paint(previewTheme, [], right, fill),
+          );
+        }
         for (let i = 0; i < rows; i++) {
           out.push(
             style(editorTheme, "text@bg", " ") +
@@ -1859,7 +1876,7 @@ export class Shell {
         const label =
           half === "editor" ? " SPLIT · editor · Tab shows the preview " : " SPLIT · preview · Tab moves on ";
         // The half renders before its divider (the preview's labels then name what it shows).
-        const top = out.length + 1;
+        const top = out.length + 1 + gap;
         const rows = Math.max(0, height - top);
         const body =
           half === "editor"
@@ -1874,8 +1891,9 @@ export class Shell {
             [[label, editorFocused], ...(half === "preview" ? this.#readerLabels() : [])],
             fill,
           ),
-          ...body,
         );
+        underDivider();
+        out.push(...body);
       }
     }
     while (out.length < height) out.push(row([]));
