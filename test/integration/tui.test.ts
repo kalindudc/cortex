@@ -1350,6 +1350,36 @@ describe("the mouse in a real terminal (SGR 1006 reports; N19: optional, on by d
     expect(state.view.mode).toBe("edit");
   });
 
+  test("one wheel notch sent as three reports in ONE read (Ghostty's default mouse-scroll-multiplier) moves the list one task", async () => {
+    const box = sandbox("tui-wheel");
+    await seedTasks(
+      box.env,
+      ["wheel one", "-b", "notchbody-1"],
+      ["wheel two", "-b", "notchbody-2"],
+      ["wheel three", "-b", "notchbody-3"],
+      ["wheel four", "-b", "notchbody-4"],
+    );
+    const rows = 32;
+    const pty = spawnPty([BIN, "tui", "1"], { env: box.tuiEnv, cols: 120, rows });
+    await ready(pty);
+    await expectPlain(pty, "notchbody-1");
+    const list = locate(pty, rows, "wheel three");
+    const notch = async (code: 64 | 65, shows: string, never: readonly string[]) => {
+      const mark = pty.mark();
+      pty.write(report(code, list).repeat(3)); // one write: the TUI reads the notch's reports together
+      await expectPlain(pty, shows, mark);
+      // The notch's frames are drawn (none shows a task past it); the wait also outlasts a notch, so the next is new.
+      await Bun.sleep(150);
+      const after = plainText(pty.output().slice(mark));
+      for (const body of never) expect(after).not.toContain(body);
+    };
+    await notch(65, "notchbody-2", ["notchbody-3", "notchbody-4"]);
+    await notch(65, "notchbody-3", ["notchbody-4"]);
+    await notch(64, "notchbody-2", ["notchbody-1"]);
+    pty.write(":q\r");
+    expect(await pty.exited()).toEqual({ code: 0, signal: null });
+  });
+
   test("mouse = false in tui.toml: no mouse reporting is ever enabled", async () => {
     const box = sandbox("tui-nomouse");
     await seed(box.env, "keyboard only");

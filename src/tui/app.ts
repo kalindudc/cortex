@@ -71,7 +71,8 @@
 //   document header's view tabs run :read/:edit/:split/:activity/:related/
 //   :authors; the list header's chips and sort label open the `f` and `;o`
 //   pickers; the status line's unread count opens :notifications; the wheel
-//   scrolls the pane under the pointer. In the editor a click places the
+//   scrolls the pane under the pointer (a list one row a notch, however many
+//   reports the terminal sends for it). In the editor a click places the
 //   cursor and a drag, double click (a word) or triple click (a line) makes a
 //   VISUAL selection, the same one v/V make (y/d/c act on it); the rendered
 //   document selects its rows the same way.
@@ -842,13 +843,18 @@ export class Shell {
     return layout.docX >= 0 && x >= layout.docX ? "document" : "none";
   }
 
-  /** The wheel scrolls what is under the pointer, whichever pane has the keyboard. */
+  /**
+   * The wheel scrolls what is under the pointer, whichever pane has the keyboard.
+   * A list moves one row a notch, however many reports the terminal sends for it
+   * (session.wheelNotch); scrolled text takes every report.
+   */
   #wheel(event: TuiMouseEvent): void {
     const s = this.session;
     const delta = Math.sign(event.wheelDelta ?? 0);
     if (delta === 0) return;
     if (s.view === "commands") {
-      s.moveCommandSelection(delta);
+      const step = s.wheelNotch(delta);
+      if (step !== 0) s.moveCommandSelection(step);
       return;
     }
     if (s.view !== "workspace") {
@@ -856,9 +862,11 @@ export class Shell {
       return;
     }
     switch (this.#areaAt(event.x, event.y)) {
-      case "list":
-        s.moveSelection(delta);
+      case "list": {
+        const step = s.wheelNotch(delta);
+        if (step !== 0) s.moveSelection(step);
         return;
+      }
       case "panel":
         this.#activity.scroll(delta * 3);
         return;
@@ -2166,7 +2174,7 @@ export class Shell {
     entry("drag", "Select from the press to the pointer: VISUAL in the editor or the rendered document (then y, d, c)");
     entry("double / triple click", "Select the word / the line (VISUAL LINE) under the pointer");
     entry("click in the editor", "Place the cursor there (VISUAL ends; INSERT keeps typing there)");
-    entry("wheel", "Scroll the pane under the pointer, whichever has the keyboard");
+    entry("wheel", "Scroll the pane under the pointer, whichever has the keyboard; a list moves one row a notch");
     entry(
       "in a dialog",
       "A click highlights a row, a double click picks it; checkbox and radio rows toggle on each click; outside does nothing",

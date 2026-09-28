@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import type { Terminal } from "@earendil-works/pi-tui";
-import { filterMouseInput, MOUSE_OFF, MOUSE_ON, parseMouse } from "../../../src/tui/mouse.ts";
+import {
+  filterMouseInput,
+  MOUSE_OFF,
+  MOUSE_ON,
+  parseMouse,
+  WHEEL_NOTCH_MS,
+  WheelNotches,
+} from "../../../src/tui/mouse.ts";
 
 // The terminal mouse (N19: optional, on by default, never the only path to an
 // action): SGR reports (DECSET 1006) of button-event tracking (1002) are
@@ -101,6 +108,63 @@ describe("parseMouse: unsupported reports are ignored, never guessed", () => {
     ]) {
       expect(parseMouse(data)).toBeNull();
     }
+  });
+});
+
+describe("WheelNotches: one step a notch, however many reports the terminal sends for it", () => {
+  /** A notch counter on a clock the test sets. */
+  const notches = () => {
+    let now = 1_000;
+    const wheel = new WheelNotches(() => now);
+    return {
+      step: (delta: number) => wheel.step(delta),
+      at: (ms: number) => {
+        now = ms;
+      },
+    };
+  };
+
+  test("a notch's first report steps; its other reports (same direction, inside the window) do not", () => {
+    const w = notches();
+    // Ghostty's default mouse-scroll-multiplier: three reports for one notch, sent together.
+    expect([w.step(1), w.step(1), w.step(1)]).toEqual([1, 0, 0]);
+    w.at(1_000 + WHEEL_NOTCH_MS - 1); // a late report of the same notch (a frame rendered between two reads)
+    expect(w.step(1)).toBe(0);
+    w.at(1_000 + WHEEL_NOTCH_MS); // the next notch
+    expect([w.step(1), w.step(1), w.step(1)]).toEqual([1, 0, 0]);
+  });
+
+  test("the window runs from the notch's first report, so a steady fast scroll keeps stepping", () => {
+    const w = notches();
+    const steps: number[] = [];
+    // Reports every quarter window for ten windows: one step each window, never a stall.
+    for (let t = 1_000; t < 1_000 + 10 * WHEEL_NOTCH_MS; t += WHEEL_NOTCH_MS / 4) {
+      w.at(t);
+      steps.push(w.step(1));
+    }
+    expect(steps.filter(s => s !== 0)).toEqual(Array.from({ length: 10 }, () => 1));
+  });
+
+  test("the other direction starts a notch at once", () => {
+    const w = notches();
+    expect([w.step(1), w.step(-1), w.step(-1), w.step(1), w.step(1)]).toEqual([1, -1, 0, 1, 0]);
+  });
+
+  test("only the direction counts: a zero is no step and leaves the notch; a larger delta is one step", () => {
+    const w = notches();
+    expect(w.step(0)).toBe(0);
+    expect(w.step(5)).toBe(1); // the toolkit's Alt-wheel delta
+    expect(w.step(0)).toBe(0);
+    expect(w.step(1)).toBe(0); // still that notch
+    expect(w.step(-5)).toBe(-1);
+  });
+
+  test("a clock that went back starts a notch rather than stalling the wheel", () => {
+    const w = notches();
+    expect(w.step(1)).toBe(1);
+    w.at(0); // the wall clock was set back
+    expect(w.step(1)).toBe(1);
+    expect(w.step(1)).toBe(0);
   });
 });
 

@@ -18,7 +18,7 @@ import { withExternalProgram } from "../../../src/tui/bridge.ts";
 import { DEFAULT_CONFIG, type TuiConfig } from "../../../src/tui/config.ts";
 import { Dialog } from "../../../src/tui/dialogs.ts";
 import { parseKeys } from "../../../src/tui/keys.ts";
-import { MOUSE_OFF, MOUSE_ON } from "../../../src/tui/mouse.ts";
+import { MOUSE_OFF, MOUSE_ON, WHEEL_NOTCH_MS } from "../../../src/tui/mouse.ts";
 import { openPreferences, readPreferences } from "../../../src/tui/preferences.ts";
 import { TuiSession } from "../../../src/tui/session.ts";
 
@@ -139,6 +139,8 @@ function harness(
     updates?: Record<number, Update[]>;
     /** Wraps each TaskState read (a slow or failing baseline); `read` gives the answer. */
     taskState?: (id: number, read: () => unknown) => Promise<unknown>;
+    /** The session's clock (default Date.now); the wheel's notches follow it. */
+    now?: () => number;
   } = {},
 ): Harness {
   const terminal = new FakeTerminal();
@@ -196,6 +198,7 @@ function harness(
     preferences: openPreferences(path.join(dir, "tui", "default.state.json")),
     initialTask: options.initialTask ?? null,
     heading: options.heading ?? null,
+    now: options.now,
     onQuit: force => quits.push(force),
   });
   session.applySnapshot(snapshot);
@@ -2187,6 +2190,48 @@ describe("the mouse, top level (N19: on by default, never the only path to an ac
     wheel(h, find(h, "@3"));
     expect(h.session.selectedTask()?.id).toBe(2); // the list under the pointer moved; the document had the focus
     expect(h.session.focus).toBe("document");
+  });
+
+  test("one wheel notch moves one row (the task list, :commands, a dialog), however many reports the terminal sends for it", async () => {
+    // Ghostty reports one notch as mouse-scroll-multiplier (3 by default) wheel reports, more while macOS
+    // speeds a fast scroll up, and a multiplexer (Herdr) forwards each one: they arrive together.
+    let now = 1_000;
+    const long = Array.from({ length: 80 }, (_, i) => `line ${i}`).join("\n\n");
+    const h = await ready({
+      tasks: [task(1, { title: "long", body: long }), task(2), task(3), task(4)],
+      now: () => now,
+    });
+    const notch = (at: readonly [number, number], direction: 1 | -1 = 1) => {
+      for (let i = 0; i < 3; i++) wheel(h, at, direction);
+    };
+    // Scrolled text still takes every report (three rows each): the terminal chose the lines a notch.
+    notch(find(h, "line 0"));
+    expect(h.session.docScroll(1)).toBe(9);
+    const list = find(h, "@3");
+    now += WHEEL_NOTCH_MS;
+    notch(list);
+    expect(h.session.selectedTask()?.id).toBe(2);
+    now += WHEEL_NOTCH_MS;
+    notch(list);
+    expect(h.session.selectedTask()?.id).toBe(3);
+    notch(list, -1); // the other way is a new notch at once
+    expect(h.session.selectedTask()?.id).toBe(2);
+    h.session.openView("commands");
+    await rendered(h);
+    expect(h.session.commandsSelected).toBe(0);
+    now += WHEEL_NOTCH_MS;
+    notch([10, 5]);
+    expect(h.session.commandsSelected).toBe(1);
+    h.session.closeView();
+    type(h, "f");
+    await rendered(h);
+    const dialog = h.session.dialog as unknown as Dialog;
+    expect(dialog.label).toBe("filters");
+    const keys = dialog.visibleRows().map(r => r.key);
+    const before = keys.indexOf(dialog.highlighted()?.key ?? "");
+    now += WHEEL_NOTCH_MS;
+    notch(dialog.rowOnScreen("status:open") as [number, number]);
+    expect(keys.indexOf(dialog.highlighted()?.key ?? "")).toBe(before + 1);
   });
 
   test("the wheel over the editor scrolls its view; the cursor stays while it is shown (review F15)", async () => {

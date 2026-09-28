@@ -138,8 +138,11 @@ anything: each click below has a key or a command. The TUI asks for button-event
   panel). A click on a task row selects it; a click on the selected row (or a double click) opens its document.
   A click that takes the keyboard away from the text you are typing (Read, a panel, another view, the list,
   Split's preview, the title) ends INSERT first, so no later key types into what is not shown.
-  The wheel scrolls the pane under the pointer, not the focused one; in a dialog it moves through the list. In
-  the editor it scrolls the view three rows a notch and moves the cursor only when it would leave the view.
+  The wheel scrolls the pane under the pointer, not the focused one; in a dialog it moves through the list. A
+  list (the task list, `:commands`, a dialog's rows or fields) moves one row a notch, however many wheel
+  reports the terminal sends for it (Ghostty sends its `mouse-scroll-multiplier`, 3 by default, and
+  multiplexers forward each). In the editor it scrolls the view three rows a wheel report and moves the cursor
+  only when it would leave the view.
 - Views: the document's header row ends in the view tabs `Read  Edit  Split  │  Activity  Related  Authors`
   (the one shown is bold and inverse; wide panes add the keys, narrow ones abbreviate them). A click runs
   `:read`, `:edit`, `:split`, `:activity`, `:related` or `:authors`, so only Read, Edit and Split change your

@@ -15,6 +15,7 @@ import {
   showDialog,
 } from "../../../src/tui/dialogs.ts";
 import { DEFAULT_KEYS } from "../../../src/tui/keys.ts";
+import { WHEEL_NOTCH_MS } from "../../../src/tui/mouse.ts";
 import { openPreferences } from "../../../src/tui/preferences.ts";
 import { type OverlayHost, TuiSession } from "../../../src/tui/session.ts";
 import { resolveTheme } from "../../../src/tui/theme.ts";
@@ -86,7 +87,7 @@ afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-function setup(tasks: Task[] = [task(1), task(2)]) {
+function setup(tasks: Task[] = [task(1), task(2)], now?: () => number) {
   const snapshot: WorkspaceSnapshot = {
     identity: IDENTITY,
     cursor: "e:1",
@@ -102,6 +103,7 @@ function setup(tasks: Task[] = [task(1), task(2)]) {
     keys: DEFAULT_KEYS,
     preferences: openPreferences(path.join(dir, "tui", "default.state.json")),
     schedule: () => () => {},
+    now,
     onQuit: force => quits.push(force),
   });
   session.applySnapshot(snapshot);
@@ -455,6 +457,43 @@ describe("forms", () => {
     type("\x1b[200~#12\n34\r\n56\x1b[201~");
     expect(dialog.values()).toEqual({ name: "now", color: "#12 34 56" });
     expect(plain(dialog.render(80))).toContain("the now lane cannot be renamed");
+  });
+});
+
+describe("the wheel", () => {
+  test("one notch moves one row (a list) or one field (a form), however many reports the terminal sends for it", () => {
+    // Ghostty reports one notch as mouse-scroll-multiplier (3 by default) wheel reports; a multiplexer forwards each.
+    let now = 1_000;
+    const { session, type } = setup(undefined, () => now);
+    const notch = (dialog: Dialog, direction: 1 | -1 = 1) => {
+      for (let i = 0; i < 3; i++) {
+        const event = { type: "wheel", button: "none", x: 1, y: 1, wheelDelta: direction };
+        expect(dialog.handleMouse(event as never)).toEqual({ handled: true });
+      }
+    };
+    const list = showDialog(session, listSpec());
+    notch(list.dialog);
+    expect(list.dialog.highlighted()?.key).toBe("beta");
+    now += WHEEL_NOTCH_MS;
+    notch(list.dialog);
+    expect(list.dialog.highlighted()?.key).toBe("gamma");
+    notch(list.dialog, -1); // the other way is a new notch at once
+    expect(list.dialog.highlighted()?.key).toBe("beta");
+    type("q");
+    const form = showDialog(
+      session,
+      formSpec({
+        fields: [
+          { name: "name", label: "Name", value: "" },
+          { name: "color", label: "Color", value: "" },
+          { name: "note", label: "Note", value: "" },
+        ],
+      }),
+    );
+    now += WHEEL_NOTCH_MS;
+    notch(form.dialog);
+    type("x"); // INSERT: typed into the field the notch moved to
+    expect(form.dialog.values()).toEqual({ name: "", color: "x", note: "" });
   });
 });
 

@@ -15,6 +15,9 @@
 //   it, so an unsupported report can never be guessed into a click.
 // - Routing (which pane is under the pointer, clicks and their counts,
 //   drags) is the shell's (src/tui/app.ts) over the toolkit's dispatch.
+// - One wheel notch may arrive as several reports (WheelNotches): what moves
+//   one item a notch (the task list, :commands, a dialog) steps once for
+//   them; scrolled text takes every report.
 
 import type { Terminal } from "@earendil-works/pi-tui";
 
@@ -52,6 +55,12 @@ const SGR = /^\x1b\[<(\d{1,3});(\d{1,5});(\d{1,5})([Mm])$/;
 const X10 = /^\x1b\[M[\s\S]{3}$/;
 /** Larger than any terminal: a report beyond it is garbage. */
 const MAX_CELL = 10_000;
+/**
+ * How long one wheel notch's reports keep arriving (see WheelNotches). They
+ * are sent together, so they land well inside this even with a 16 ms frame
+ * drawn between two reads of them; a person turns notches further apart.
+ */
+export const WHEEL_NOTCH_MS = 40;
 
 const ignored = (reason: string): IgnoredMouse => ({ kind: "ignored", reason });
 
@@ -93,6 +102,38 @@ export function parseMouse(data: string): MouseReport | IgnoredMouse | null {
   if (release) return { kind: "release", button: BUTTONS[low] ?? "none", ...base };
   if (low === 3) return ignored("a press of no button");
   return { kind: "press", button: BUTTONS[low] ?? "none", ...base };
+}
+
+/**
+ * The wheel in notches, for what moves one item a notch (the task list, the
+ * `:commands` list, a dialog's rows and fields). A terminal may report ONE
+ * notch as several wheel reports: Ghostty sends one per row its
+ * mouse-scroll-multiplier (3 by default) makes of the notch, more while macOS
+ * speeds a fast scroll up, and a multiplexer (Herdr, tmux) forwards each. So
+ * a report starts a notch (its direction is the step) unless it follows the
+ * notch's first report in the same direction within WHEEL_NOTCH_MS (no step).
+ * The window runs from that first report, so a steady fast scroll still steps
+ * once a window; the other direction starts a notch at once. Scrolled text
+ * (the document, the reader, a panel, the editor) moves on every report: the
+ * terminal chose how far a notch scrolls.
+ */
+export class WheelNotches {
+  #direction = 0;
+  #start = 0;
+  constructor(private readonly now: () => number) {}
+
+  /** The step for one report's `delta` (only its sign counts): its direction when it starts a notch, else 0. */
+  step(delta: number): number {
+    const direction = Math.sign(delta);
+    if (direction === 0) return 0;
+    const now = this.now();
+    const elapsed = now - this.#start;
+    // A clock that went back (the wall clock was set back) starts a notch: it never stalls the wheel.
+    if (direction === this.#direction && elapsed >= 0 && elapsed < WHEEL_NOTCH_MS) return 0;
+    this.#direction = direction;
+    this.#start = now;
+    return direction;
+  }
 }
 
 /**

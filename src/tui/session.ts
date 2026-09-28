@@ -99,6 +99,7 @@ import {
 } from "./drafts.ts";
 import { createDocumentEditor, createEditorState, type DocumentEditor, editorText } from "./editor.ts";
 import { createKeyDispatcher, type KeyConfig, type KeyDispatcher, type KeyEvent, type KeyMode } from "./keys.ts";
+import { WheelNotches } from "./mouse.ts";
 import type {
   DocumentMode,
   PreferenceSession,
@@ -487,6 +488,8 @@ export class TuiSession {
   readonly #options: SessionOptions;
   readonly #schedule: (fn: () => void, ms: number) => () => void;
   readonly #now: () => number;
+  /** The wheel in notches for what moves one item a notch (src/tui/mouse.ts). */
+  readonly #wheel: WheelNotches;
 
   // shared data
   #tasks: Task[] = [];
@@ -620,6 +623,7 @@ export class TuiSession {
     this.#identity = options.identity;
     this.#schedule = options.schedule ?? defaultSchedule;
     this.#now = options.now ?? Date.now;
+    this.#wheel = new WheelNotches(this.#now);
     this.keys = createKeyDispatcher(options.keys);
     this.commands = options.commands ?? COMMANDS;
     const view = options.preferences.view();
@@ -1584,6 +1588,16 @@ export class TuiSession {
   /** Index of the highlighted command in commandList(). */
   get commandsSelected(): number {
     return Math.max(0, Math.min(this.#commandsSelected, this.commandList().length - 1));
+  }
+
+  /**
+   * One wheel report's step for what moves one item a notch (the task list,
+   * :commands, a dialog's rows and fields): its direction when it starts a
+   * notch, 0 for the notch's other reports (a terminal may send several for
+   * one notch: src/tui/mouse.ts WheelNotches).
+   */
+  wheelNotch(delta: number): number {
+    return this.#wheel.step(delta);
   }
 
   moveCommandSelection(delta: number): void {
