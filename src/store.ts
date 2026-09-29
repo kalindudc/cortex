@@ -2307,10 +2307,14 @@ export class Store {
   /**
    * Ranked memory hits for already-tokenized `terms` (src/memory.ts
    * memoryTerms: the ONLY text that may reach MATCH, each term quoted).
-   * Coverage is per SECTION: a section qualifies when it matches at least
-   * min(terms, minMatched) distinct terms (title and tags count in every
-   * section), so incidental matches spread across a long body do not (a
-   * wrong memory is worse than none). A task scores as its best qualifying
+   * Coverage is per SECTION and counts STEMS, not terms: query terms whose
+   * section match sets are identical share a porter stem (implement /
+   * implementer / implementation) and form ONE group, so one word never
+   * counts two or three times (validation F1 on @415). A section qualifies
+   * when it matches at least min(groups, minMatched) groups (title and tags
+   * count in every section), so incidental matches spread across a long body
+   * do not (a wrong memory is worse than none). `matched` still lists every
+   * matching term. A task scores as its best qualifying
    * section under BM25 (title > tags > text); `matched` and the snippet come
    * from that section (the snippet from its text, or from the title when only
    * the title/tags matched). Ensures and reconciles the index in the same
@@ -2323,7 +2327,6 @@ export class Store {
     if (terms.length === 0) return [];
     const limit = clampInt(opts.limit ?? MEMORY_LIMITS.hits, 1, MEMORY_LIMITS.maxHits);
     const exclude = new Set(opts.exclude ?? []);
-    const needed = Math.min(terms.length, MEMORY_LIMITS.minMatched);
     return this.db.transaction((): MemoryHit[] => {
       this.ensureMemoryIndex();
       this.reconcileMemoryIndex();
@@ -2331,8 +2334,15 @@ export class Store {
         `SELECT rowid AS id FROM _memory_sections WHERE _memory_sections MATCH ?;`,
       );
       const sets = terms.map(term => new Set(matchOne.all(quoteTerm(term)).map(row => row.id)));
+      // One group per distinct match set; a term matching nothing is its own group.
+      const groups = new Map<string, Set<number>>();
+      sets.forEach((set, i) => {
+        const key = set.size === 0 ? `none:${i}` : [...set].sort((a, b) => a - b).join(",");
+        groups.set(key, set);
+      });
+      const needed = Math.min(groups.size, MEMORY_LIMITS.minMatched);
       const coverage = new Map<number, number>();
-      for (const set of sets) for (const id of set) coverage.set(id, (coverage.get(id) ?? 0) + 1);
+      for (const set of groups.values()) for (const id of set) coverage.set(id, (coverage.get(id) ?? 0) + 1);
       const qualifying = new Set([...coverage].filter(([, n]) => n >= needed).map(([id]) => id));
       if (qualifying.size === 0) return [];
       const match = terms.map(quoteTerm).join(" OR ");

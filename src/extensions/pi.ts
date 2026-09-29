@@ -25,6 +25,11 @@
  *     every substantive prompt surfaces only NEW relevant streams.
  *   - `cortex_recall` loads one stream with its staleness check, or searches.
  *
+ * Roles: writer = a human-facing UI is attached (ctx.hasUI); reader = headless
+ * (delegates, pi -p); CORTEX_MEMORY=write|read|off overrides process-wide.
+ * Cortex core has no notion of roles. Readers get hits only (no primer,
+ * <= 3 hits, <= 2 recalls per request); `off` injects and spawns nothing.
+ *
  * Overhead contract (memory must speed agents up, not make them loop):
  *   - A user prompt costs at most ONE `cortex memory context` spawn (3 s
  *     timeout; a failure never blocks or throws). After the session's first
@@ -56,6 +61,113 @@ const FIRST_HITS = 5;
 const LATER_HITS = 3;
 const QUERY_CHARS = 1000;
 const STATUS_KEY = "cortex-memory";
+const READER_HITS = 3;
+const READER_RECALL_BUDGET = 2;
+const ROLE_OVERRIDES = ["write", "read", "off"];
+const FOCUS_CAP = 5;
+/** Commands that name a stream the session works on (`cortex add` ids come from its output). */
+const FOCUS_COMMAND = /\bcortex\s+(?:edit|update|mv|show|memory\s+show)\s+(\d+)\b/g;
+/** Bash commands that count as writing memory (the cortex_update tool counts too). */
+const MEMORY_WRITE = /\bcortex\s+(?:edit|add)\b/;
+const CHECKPOINT_MIN_FILES = 3;
+const CHECKPOINT_CANDIDATES = 3;
+const CHECKPOINT_FILES_SHOWN = 10;
+const BREADCRUMB_STREAMS = 2;
+const BREADCRUMB_CHARS = 4000;
+
+/**
+ * Who keeps memory in this session: the one human-driven session writes;
+ * headless ones (minions, `pi -p`, any SDK sub-session) only read. `hasUI` is
+ * pi's own generic "a human is attached" bit, so no harness is special-cased.
+ */
+export function memoryRole(
+  ctx: { hasUI: boolean },
+  env: Record<string, string | undefined> = process.env,
+): "writer" | "reader" | "off" {
+  switch (env.CORTEX_MEMORY) {
+    case "write":
+      return "writer";
+    case "read":
+      return "reader";
+    case "off":
+      return "off";
+    default:
+      return ctx.hasUI ? "writer" : "reader";
+  }
+}
+
+/** The stream ids a bash command touched: named ids, plus the new id a `cortex add` printed. */
+export function focusFromBash(command: string, output: string): number[] {
+  const ids = [...command.matchAll(FOCUS_COMMAND)].map(m => Number(m[1]));
+  if (/\bcortex\s+add\b/.test(command)) {
+    const added = /^\[(\d+)\]/m.exec(output) ?? /"id":(\d+)/.exec(output);
+    if (added) ids.push(Number(added[1]));
+  }
+  return ids;
+}
+
+/**
+ * Whether a finished request earns ONE memory checkpoint turn: a writer's
+ * completed request that changed files and wrote no memory, either with focus
+ * streams to re-sync ("update") or, with none, big enough to be worth a stream
+ * ("attach"). Everything else, including the checkpoint turn itself, is null.
+ */
+export function shouldCheckpoint(s: {
+  role: string;
+  outcome: string;
+  checkpointed: boolean;
+  wroteMemory: boolean;
+  edited: number;
+  focus: number;
+}): "update" | "attach" | null {
+  if (s.role !== "writer" || s.outcome !== "completed" || s.checkpointed || s.wroteMemory) return null;
+  if (s.edited > 0 && s.focus > 0) return "update";
+  if (s.focus === 0 && s.edited >= CHECKPOINT_MIN_FILES) return "attach";
+  return null;
+}
+
+/** The checkpoint message: what changed, the streams to consider, and exactly one choice to make. */
+export function checkpointPrompt(input: {
+  kind: "update" | "attach";
+  edited: string[];
+  focus: number[];
+  candidates: string;
+  author: string;
+}): string {
+  const files = input.edited.slice(0, CHECKPOINT_FILES_SHOWN).map(path => `- ${path}`);
+  const more = input.edited.length - CHECKPOINT_FILES_SHOWN;
+  if (more > 0) files.push(`- \u2026 and ${more} more`);
+  const streams =
+    input.kind === "update"
+      ? `Focus streams (most recent first): ${input.focus.map(id => `@${id}`).join(", ")}`
+      : `Candidate streams (one memory search):\n${input.candidates || "(none found)"}`;
+  return [
+    "Memory checkpoint (automatic, once per request)",
+    "",
+    "This request changed files and wrote no cortex memory. Files changed:",
+    ...files,
+    "",
+    streams,
+    "",
+    "Do EXACTLY ONE of:",
+    "- UPDATE: re-sync a listed stream: anchored edits of its ## State, ## Decisions and ## Next and its `Verified:` line " +
+      '(`cortex edit <id> --body-search "<exact old text>" --body-replace "<new text>"`), then ONE cortex_update. ' +
+      "A `review`-status stream gets the cortex_update only, never a body edit.",
+    "- ATTACH: ONE cortex_update on a listed stream naming this work.",
+    "- CREATE: only when no listed stream fits (at most one new stream per request):",
+    `  cortex add "<title>" --lane "$(cortex memory lane)" --status open --as ${input.author} --body-file - <<'EOF'`,
+    "  ## Goal",
+    "  ## State",
+    "  ## Decisions",
+    "  ## Next",
+    "  ## Files",
+    "  Verified: YYYY-MM-DD",
+    "  EOF",
+    "- NOTHING: no durable knowledge (a typo, formatting, throwaway work).",
+    "",
+    "Reply with one short line naming your choice.",
+  ].join("\n");
+}
 
 /** Leading dashes and whitespace carry no terms, and a dash-leading value would read as a flag. */
 function sanitize(text: string): string {
@@ -96,8 +208,22 @@ function parseContext(stdout: string) {
   return ok ? out : null;
 }
 
+function freshRequest() {
+  return { edited: new Set<string>(), wroteMemory: false, checkpointed: false, query: "" };
+}
+
 function freshStats() {
-  return { prompts: 0, execs: 0, lastMs: 0, injectedChars: 0, lastError: "", lastHits: "", silentRuns: 0 };
+  return {
+    prompts: 0,
+    execs: 0,
+    lastMs: 0,
+    injectedChars: 0,
+    lastError: "",
+    lastHits: "",
+    silentRuns: 0,
+    checkpoints: 0,
+    breadcrumbs: 0,
+  };
 }
 
 export default function (pi: ExtensionAPI): void {
@@ -110,6 +236,29 @@ export default function (pi: ExtensionAPI): void {
   const recalled = new Set<string>();
   let sawPrompt = false;
   let stats = freshStats();
+  let roleWarned = false;
+  // Writer tracking: focus streams live for the session (most recent last); `request` per user prompt.
+  let focus: number[] = [];
+  let request = freshRequest();
+  let lastQuery = "";
+
+  function addFocus(ids: number[]) {
+    for (const id of ids) {
+      if (!Number.isInteger(id) || id <= 0) continue;
+      focus = [...focus.filter(f => f !== id), id];
+    }
+    focus = focus.slice(-FOCUS_CAP);
+  }
+
+  /** memoryRole for this event; an unknown CORTEX_MEMORY is ignored and reported once. */
+  function roleOf(ctx) {
+    const value = process.env.CORTEX_MEMORY;
+    if (value && !ROLE_OVERRIDES.includes(value) && !roleWarned) {
+      roleWarned = true;
+      stats.lastError = `CORTEX_MEMORY=${value} is not write|read|off; ignored`;
+    }
+    return memoryRole(ctx);
+  }
 
   pi.on("session_start", () => {
     primer = null;
@@ -120,11 +269,38 @@ export default function (pi: ExtensionAPI): void {
     recalled.clear();
     sawPrompt = false;
     stats = freshStats();
+    focus = [];
+    request = freshRequest();
+    lastQuery = "";
   });
 
-  pi.on("session_compact", () => {
+  // pi's own compaction summary becomes a breadcrumb on the newest focus streams:
+  // an append-only update, never a body rewrite, and no extra model call.
+  pi.on("session_compact", async (event, ctx) => {
     primer = null;
     shown.clear();
+    const summary = event.compactionEntry?.summary ?? "";
+    if (!summary.trim() || roleOf(ctx) !== "writer") return;
+    try {
+      const author = `pi-${ctx.sessionManager.getSessionId()}`;
+      for (const id of focus.slice(-BREADCRUMB_STREAMS).reverse()) {
+        const args = [
+          "update",
+          String(id),
+          "-m",
+          "auto: progress snapshot at compaction",
+          "-b",
+          summary.slice(0, BREADCRUMB_CHARS),
+          "--as",
+          author,
+        ];
+        const r = await pi.exec("cortex", args, { cwd: ctx.cwd, timeout: MEMORY_TIMEOUT_MS });
+        if (failed(r)) stats.lastError = failureText(r, `cortex update ${id}`);
+        else stats.breadcrumbs++;
+      }
+    } catch (err) {
+      stats.lastError = String(err?.message ?? err);
+    }
   });
 
   // The RAW text, before `/skill:` and prompt-template expansion (before_agent_start
@@ -144,9 +320,10 @@ export default function (pi: ExtensionAPI): void {
     sawPrompt = false;
   });
 
-  async function injectMemory(event, ctx, query: string) {
+  async function injectMemory(event, ctx, query: string, reader: boolean) {
     stats.prompts++;
-    const first = primer === null;
+    // Readers never fetch or inject the primer: their hits ride alone.
+    const first = !reader && primer === null;
     const withQuery = contentWords(query) >= 2;
     let ids: number[] = [];
     let hitsText = "";
@@ -158,7 +335,7 @@ export default function (pi: ExtensionAPI): void {
         "context",
         "--json",
         `--author=pi-${ctx.sessionManager.getSessionId()}`,
-        `--limit=${first ? FIRST_HITS : LATER_HITS}`,
+        `--limit=${reader ? READER_HITS : first ? FIRST_HITS : LATER_HITS}`,
       ];
       if (withQuery) args.push(`--query=${query}`);
       if (shown.size > 0) args.push(`--exclude=${[...shown].join(",")}`);
@@ -170,13 +347,13 @@ export default function (pi: ExtensionAPI): void {
       const out = failed(r) ? null : parseContext(r.stdout);
       if (out === null) {
         // Fail open but visibly, and never retry the primer this session (no retry storm).
-        primer ??= "";
+        if (first) primer = "";
         stats.lastError = failed(r)
           ? failureText(r, "cortex memory context")
           : "cortex memory context printed unreadable JSON";
         status = "memory: unavailable";
       } else {
-        primer ??= out.primer;
+        if (first) primer = out.primer;
         lane = out.lane;
         ids = out.hits.map(hit => hit.id);
         for (const id of ids) shown.add(id);
@@ -211,14 +388,95 @@ export default function (pi: ExtensionAPI): void {
     recalled.clear();
     const query = sanitize((pendingInput ?? event.prompt).slice(0, QUERY_CHARS));
     pendingInput = null;
+    request = freshRequest();
+    request.query = query;
+    if (contentWords(query) >= 2) lastQuery = query;
+    const role = roleOf(ctx);
+    if (role === "off") return undefined;
     try {
-      return await injectMemory(event, ctx, query);
+      return await injectMemory(event, ctx, query, role === "reader");
     } catch (err) {
       // Never fail the user's prompt over memory.
-      primer ??= "";
+      if (role === "writer") primer ??= "";
       stats.lastError = String(err?.message ?? err);
       return undefined;
     }
+  });
+
+  // Deterministic and cheap: in-memory bookkeeping only, never a spawn per tool.
+  pi.on("tool_result", (event, ctx) => {
+    if (event.isError || roleOf(ctx) !== "writer") return;
+    const input = event.input ?? {};
+    if (event.toolName === "edit" || event.toolName === "write") {
+      if (input.path !== undefined) request.edited.add(String(input.path));
+    } else if (event.toolName === "bash") {
+      const command = String(input.command ?? "");
+      const output = (event.content ?? []).map(c => (c.type === "text" ? c.text : "")).join("\n");
+      addFocus(focusFromBash(command, output));
+      if (MEMORY_WRITE.test(command)) request.wroteMemory = true;
+    } else if (event.toolName === "cortex_update") {
+      addFocus([Number(input.task_id)]);
+      request.wroteMemory = true;
+    }
+  });
+
+  // At most ONE extra turn per request: `checkpointed` survives the continuation
+  // (it is the same run, no before_agent_start), so the turn's own settle is a no-op.
+  pi.on("agent_before_settle", async (event, ctx) => {
+    const kind = shouldCheckpoint({
+      role: roleOf(ctx),
+      outcome: event.outcome,
+      checkpointed: request.checkpointed,
+      wroteMemory: request.wroteMemory,
+      edited: request.edited.size,
+      focus: focus.length,
+    });
+    if (kind === null) return undefined;
+    request.checkpointed = true;
+    let candidates = "";
+    if (kind === "attach" && lastQuery) {
+      const args = [
+        "memory",
+        "context",
+        "--json",
+        "--no-primer",
+        `--query=${lastQuery}`,
+        `--limit=${CHECKPOINT_CANDIDATES}`,
+      ];
+      const r = await pi.exec("cortex", args, { cwd: ctx.cwd, timeout: MEMORY_TIMEOUT_MS });
+      const out = failed(r) ? null : parseContext(r.stdout);
+      // No candidates on failure: the checkpoint still offers CREATE and NOTHING.
+      if (out === null) {
+        stats.lastError = failed(r)
+          ? failureText(r, "cortex memory context")
+          : "cortex memory context printed unreadable JSON";
+      } else {
+        candidates = out.hitsText;
+      }
+    }
+    stats.checkpoints++;
+    // The continuation emits agent_start again; it belongs to this request, not a silent run.
+    sawPrompt = true;
+    const content = checkpointPrompt({
+      kind,
+      edited: [...request.edited],
+      focus: [...focus].reverse(),
+      candidates,
+      author: `pi-${ctx.sessionManager.getSessionId()}`,
+    });
+    if (ctx.hasUI) ctx.ui.setStatus(STATUS_KEY, "memory: checkpoint");
+    return {
+      entries: [
+        {
+          type: "custom_message",
+          customType: "cortex-memory-checkpoint",
+          content,
+          display: false,
+          details: { kind, focus: [...focus] },
+        },
+      ],
+      continue: true,
+    };
   });
 
   pi.registerTool(
@@ -300,7 +558,8 @@ export default function (pi: ExtensionAPI): void {
 
       async execute(_toolCallId, params, signal, _onUpdate, ctx) {
         const text = (message: string) => ({ content: [{ type: "text", text: message }], details: undefined });
-        if (++recalls > RECALL_BUDGET) {
+        const budget = roleOf(ctx) === "reader" ? READER_RECALL_BUDGET : RECALL_BUDGET;
+        if (++recalls > budget) {
           return text("Recall budget for this request is spent; continue the task with what you have.");
         }
         const query = params.query.trim();
@@ -325,7 +584,10 @@ export default function (pi: ExtensionAPI): void {
           recalled.delete(key);
           throw new Error(failureText(r, `cortex ${args.slice(0, 2).join(" ")}`));
         }
-        if (byId) shown.add(Number(byId[1]));
+        if (byId) {
+          shown.add(Number(byId[1]));
+          addFocus([Number(byId[1])]);
+        }
         return text(r.stdout);
       },
     }),
@@ -340,6 +602,13 @@ export default function (pi: ExtensionAPI): void {
         ctx.ui.notify("cortex memory: the primer and hits are re-read on the next prompt", "info");
         return;
       }
+      const focusText =
+        focus.length > 0
+          ? [...focus]
+              .reverse()
+              .map(id => `@${id}`)
+              .join(", ")
+          : "(none)";
       const lines = [
         `cortex memory — lane: ${lane ?? "(unknown)"}`,
         `primer (${primer?.length ?? 0} chars):`,
@@ -349,6 +618,8 @@ export default function (pi: ExtensionAPI): void {
         stats.lastHits || "(none)",
         `prompts ${stats.prompts} · context spawns ${stats.execs} · last ${stats.lastMs} ms · ` +
           `injected ${stats.injectedChars} chars · runs without memory ${stats.silentRuns}`,
+        `role: ${roleOf(ctx)} · focus streams: ${focusText} · files changed this request: ${request.edited.size}`,
+        `checkpoints: ${stats.checkpoints} · breadcrumbs: ${stats.breadcrumbs}`,
         `last error: ${stats.lastError || "(none)"}`,
       ];
       ctx.ui.notify(lines.join("\n"), "info");

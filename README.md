@@ -490,14 +490,27 @@ agents follow lives in the cortex skill
   injects only never-shown relevant streams as hidden messages. A prompt costs at most one
   `cortex memory context` spawn, and none after the first prompt when it has fewer than 2 content words.
 - `cortex_recall`: `"@<id>"` loads one stream with its staleness report; keywords search this repo's lane.
-  At most 3 calls per request, and a repeated query short-circuits.
-- `/memory` in pi shows the lane, the primer, the injected hits, spawn count, latency, injected characters and
-  the last error.
+  At most 3 calls per request (2 in a headless session), and a repeated query short-circuits.
+- `/memory` in pi shows the lane, the primer, the injected hits, spawn count, latency, injected characters,
+  the role, the focus streams, checkpoint and breadcrumb counts, and the last error.
 - Staleness is measured from the stream's last body edit: cited files changed or missing since then, or a sync
   older than 30 days, mark it stale before an agent relies on it. Status flips and updates never count as a sync.
 
 Without pi, agents run `cortex memory context --query="<ask>"` once and `cortex memory show <id>` for the stream
 they continue.
+
+### Roles and automatic upkeep
+
+In a tree of pi agents, the one session with a human attached (pi's `hasUI`: the interactive TUI or an RPC
+client) is the memory writer; headless sessions (delegates such as minions, `pi -p` scripts) are readers that
+get at most 3 hits per prompt and 2 recalls per request, with no primer. `CORTEX_MEMORY=write|read|off` overrides
+the role for the whole process (`CORTEX_MEMORY=write pi -p ...` makes a scripted writer; `off` injects nothing).
+The writer tracks the files each request changes and the streams it works on. When a request changed files but
+wrote no memory, it gets ONE extra hidden checkpoint turn, and the agent picks exactly one of UPDATE (re-sync the
+stream), ATTACH (post an update on a listed stream), CREATE (at most one new stream) or NOTHING. When the writer's
+context is compacted, pi's own compaction summary is appended as an update on its two most recent streams. The
+cost is bounded: at most one extra turn per qualifying request and no extra model calls for breadcrumbs.
+Automation never rewrites a stream body; only the agent edits bodies, and never a `review` stream's.
 
 ## Lanes
 

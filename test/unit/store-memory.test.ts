@@ -144,6 +144,19 @@ describe("Store.searchMemory", () => {
     expect(s.searchMemory(["wheel", "mouse"])[0]?.matched).toEqual(["wheel", "mouse"]);
   });
 
+  test("coverage counts stems, not terms: word forms of one stem are one group (validation F1)", () => {
+    const s = open();
+    const doc = s.addTask({ title: "rollout", body: "notes on the implementation" });
+    s.addTask({ title: "zebra crossing" });
+    const terms = ["implement", "implementer", "zebra"];
+    // implement + implementer both match `implementation`: ONE of the two groups needed.
+    expect(s.searchMemory(terms)).toEqual([]);
+    s.editTask(doc.id, { body: "notes on the implementation of the zebra" });
+    const hits = s.searchMemory(terms);
+    expect(ids(hits)).toEqual([doc.id]);
+    expect(hits[0]?.matched).toEqual(terms);
+  });
+
   test("lane, exclude and limit (clamped to [1, maxHits])", () => {
     const s = open();
     const a = s.addTask({ title: "gizmo alpha", lane: "one" });

@@ -19,7 +19,7 @@ import type { MemoryHit, MemoryStream, MemoryStreamRow, Update } from "./store.t
 export const MEMORY_LIMITS = {
   /** Distinct query terms kept from a prompt. */
   terms: 16,
-  /** A hit must match at least min(terms, minMatched) distinct terms. */
+  /** A hit must match at least min(groups, minMatched) distinct term groups (one per porter stem). */
   minMatched: 2,
   /** Default and maximum number of hits. */
   hits: 5,
