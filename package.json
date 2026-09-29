@@ -19,10 +19,10 @@
     "dev": "bash scripts/dev-cli.sh",
     "serve:dev": "bash scripts/dev.sh",
     "deploy": "pnpm run build && rm -rf ~/bin/cortex && cp bin/cortex ~/bin/",
-    "style": "bash scripts/build-repo-map.sh && node node_modules/@biomejs/biome/bin/biome check --error-on-warnings --write . && pnpm exec tsc",
+    "style": "pnpm exec bun scripts/sync-arch-block.ts && node node_modules/@biomejs/biome/bin/biome check --error-on-warnings --write . && pnpm exec tsc",
     "style:check": "node node_modules/@biomejs/biome/bin/biome check --error-on-warnings . && pnpm exec tsc --noEmit && pnpm exec bun scripts/check-agents.ts",
     "agents:check": "pnpm exec bun scripts/check-agents.ts",
-    "agents:map": "bash scripts/build-repo-map.sh"
+    "agents:map": "pnpm exec bun scripts/sync-arch-block.ts"
   },
   "dependencies": {
     "@codemirror/commands": "^6.0.0",
@@ -49,7 +49,6 @@
     "@types/bun": "1.4.2",
     "bun": "1.4.2",
     "happy-dom": "^17.0.0",
-    "repomix": "^1.14.0",
     "typescript": "^5.7.0"
   },
   "pnpm": {

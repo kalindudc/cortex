@@ -134,6 +134,22 @@ describe("api: legacy methods keep the browser client's routes and bodies", () =
     ["taskState", a => a.taskState(5), "GET", "/api/tasks/5/state", null],
     ["laneState", a => a.laneState("a b"), "GET", "/api/lanes/a%20b/state", null],
     ["tagState", a => a.tagState("x"), "GET", "/api/tags/x/state", null],
+    [
+      "memorySearch",
+      a => a.memorySearch({ q: "a b", lane: "l", limit: 3, exclude: [1, 2] }),
+      "GET",
+      "/api/memory/search?q=a%20b&lane=l&limit=3&exclude=1%2C2",
+      null,
+    ],
+    [
+      "memoryStreams",
+      a => a.memoryStreams({ lane: "l", author: "pi-x", active: true }),
+      "GET",
+      "/api/memory/streams?lane=l&author=pi-x&active=1",
+      null,
+    ],
+    ["memoryStreams()", a => a.memoryStreams(), "GET", "/api/memory/streams", null],
+    ["memoryStream", a => a.memoryStream(4), "GET", "/api/memory/streams/4", null],
   ];
 
   for (const [name, call, method, route, body] of cases) {

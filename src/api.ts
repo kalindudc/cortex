@@ -17,6 +17,8 @@
 import type {
   CortexClient,
   CreateTaskRequest,
+  MemorySearchQuery,
+  MemoryStreamsQuery,
   PostUpdateRequest,
   TaskListQuery,
   VersionConflict,
@@ -151,6 +153,17 @@ function taskQueryString(query: TaskListQuery | undefined): string {
   return pairs.length === 0 ? "" : `?${pairs.join("&")}`;
 }
 
+/** `?k=v&...` for the memory routes: booleans become `1` only when true, number lists join with `,`. */
+function queryString(params: Record<string, string | number | boolean | number[] | undefined>): string {
+  const pairs: string[] = [];
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === false || value === "") continue;
+    const text = value === true ? "1" : Array.isArray(value) ? value.join(",") : String(value);
+    if (text) pairs.push(`${key}=${enc(text)}`);
+  }
+  return pairs.length === 0 ? "" : `?${pairs.join("&")}`;
+}
+
 export function createApi(send: RequestSender, options: ApiOptions = {}): CortexClient {
   type Method = "GET" | "POST" | "PATCH" | "DELETE";
   type Call = { body?: unknown; versioned?: boolean };
@@ -269,6 +282,9 @@ export function createApi(send: RequestSender, options: ApiOptions = {}): Cortex
     laneState: name => request("GET", `/api/lanes/${enc(name)}/state`),
     tagState: name => request("GET", `/api/tags/${enc(name)}/state`),
     preview: token => request("GET", `/api/preview/${enc(token)}`),
+    memorySearch: (query: MemorySearchQuery) => request("GET", `/api/memory/search${queryString({ ...query })}`),
+    memoryStreams: (query?: MemoryStreamsQuery) => request("GET", `/api/memory/streams${queryString({ ...query })}`),
+    memoryStream: id => request("GET", `/api/memory/streams/${id}`),
 
     // ---- legacy writes (unguarded; legacy JSON) ----
     backup: body => request("POST", "/api/backup", { body: body ?? {} }),

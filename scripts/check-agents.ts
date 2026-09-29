@@ -5,10 +5,10 @@
 // before `pnpm test` so PR feedback on drift is < 30 s.
 //
 // Pure Bun stdlib — no deps (no chalk / picocolors). Reads AGENTS.md,
-// `package.json` scripts, the `src/` tree, and `.cortex/repo-map.md`.
+// `package.json` scripts, and the `src/` tree.
 // Exit 0 = clean. Exit 1 = at least one fail-severity finding.
 //
-// Six rules — each implemented as one discrete function. ALL findings are
+// Five rules — each implemented as one discrete function. ALL findings are
 // collected before exiting (not short-circuited) for better PR feedback.
 //
 //   1. size.too_large         — > 32 768 bytes      (fail)  Codex truncate cap.
@@ -19,8 +19,6 @@
 //                                 exist on disk (fail).
 //   5. arch.dir_drift         — `arch:src` marker block must list every
 //                                 immediate child of src/ exactly once (fail).
-//   6. repomap.exists         — `.cortex/repo-map.md` exists and > 200 bytes
-//                                 (fail).
 
 import fs from "node:fs";
 import path from "node:path";
@@ -39,14 +37,13 @@ const IGNORED_PNPM_VERBS = new Set(["install", "exec", "dlx", "add", "store"]);
 // Caps from Implementation Notes.
 const SIZE_FAIL_BYTES = 32_768;
 const SIZE_WARN_LINES = 350;
-const REPOMAP_MIN_BYTES = 200;
 
 // Marker block sentinels (kept in sync with `scripts/sync-arch-block.ts`).
 const ARCH_BEGIN = "<!-- arch:src:begin -->";
 const ARCH_END = "<!-- arch:src:end -->";
 
 // Path tokens we recognize as repo-relative inside backticks.
-const PATH_PREFIX_RE = /^(?:\.\/|src\/|scripts\/|test\/|out\/|bin\/|\.cortex\/|\.github\/)[^\s`]+$/;
+const PATH_PREFIX_RE = /^(?:\.\/|src\/|scripts\/|test\/|out\/|bin\/|\.github\/)[^\s`]+$/;
 
 type Severity = "fail" | "warn";
 type Finding = {
@@ -213,24 +210,6 @@ function checkArchDirDrift(): void {
   }
 }
 
-// 6. repomap.exists
-function checkRepomapExists(): void {
-  const repomap = path.join(ROOT, ".cortex", "repo-map.md");
-  if (!fs.existsSync(repomap)) {
-    add(1, "repomap.exists", "fail", `.cortex/repo-map.md not found (run \`pnpm run agents:map\`)`);
-    return;
-  }
-  const size = fs.statSync(repomap).size;
-  if (size <= REPOMAP_MIN_BYTES) {
-    add(
-      1,
-      "repomap.exists",
-      "fail",
-      `.cortex/repo-map.md is ${size} bytes (≤ ${REPOMAP_MIN_BYTES}); regenerate with \`pnpm run agents:map\``,
-    );
-  }
-}
-
 // --- Run + report -------------------------------------------------------------
 
 checkSizeTooLarge();
@@ -238,7 +217,6 @@ checkSizeTooLong();
 checkMissingScripts();
 checkPathsMissing();
 checkArchDirDrift();
-checkRepomapExists();
 
 // Sort findings by line number then rule for stable output.
 findings.sort((a, b) => a.line - b.line || a.rule.localeCompare(b.rule));

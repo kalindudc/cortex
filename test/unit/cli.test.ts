@@ -33,6 +33,7 @@ const EXPECTED_SUBCOMMANDS = [
   "resume",
   "backup",
   "restore",
+  "memory",
 ] as const;
 
 const cliSourcePromise = Bun.file("src/cli.ts").text();

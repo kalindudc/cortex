@@ -378,6 +378,48 @@ describe("server: authors", () => {
   });
 });
 
+describe("server: memory", () => {
+  test("GET /api/memory/search validates q, limit and exclude", async () => {
+    expect((await fetchJson(req("GET", "/api/memory/search"))).status).toBe(400);
+    expect((await fetchJson(req("GET", "/api/memory/search?q=mouse&limit=x"))).status).toBe(400);
+    expect((await fetchJson(req("GET", "/api/memory/search?q=mouse&exclude=a"))).status).toBe(400);
+    const punctuation = await fetchJson(req("GET", "/api/memory/search?q=%3F%3F"));
+    expect(punctuation).toEqual({ status: 200, json: { terms: [], hits: [] } });
+  });
+
+  test("GET /api/memory/search returns bodiless hits with the exact key set", async () => {
+    const t = store.addTask({ title: "Mouse wheel handler", lane: "cortex", body: "secret body" });
+    const { status, json } = await fetchJson(req("GET", "/api/memory/search?q=mouse%20wheel&lane=cortex"));
+    expect(status).toBe(200);
+    const result = json as { terms: string[]; hits: Record<string, unknown>[] };
+    expect(result.terms).toEqual(["mouse", "wheel"]);
+    expect(result.hits.map(hit => hit.id)).toEqual([t.id]);
+    expect(Object.keys(result.hits[0] ?? {}).sort()).toEqual(
+      ["id", "title", "lane", "status", "tags", "updated", "synced", "score", "matched", "snippet"].sort(),
+    );
+  });
+
+  test("GET /api/memory/streams filters by active and author and validates the author tag", async () => {
+    const open = store.addTask({ title: "open", lane: "l" });
+    const done = store.addTask({ title: "done", lane: "l" });
+    store.setStatus(done.id, "done", { author: "pi-x" });
+    const active = await fetchJson(req("GET", "/api/memory/streams?lane=l&active=1"));
+    expect((active.json as { id: number }[]).map(row => row.id)).toEqual([open.id]);
+    const authored = await fetchJson(req("GET", "/api/memory/streams?author=pi-x"));
+    expect((authored.json as { id: number }[]).map(row => row.id)).toEqual([done.id]);
+    expect((await fetchJson(req("GET", "/api/memory/streams?author=a%0Ab"))).status).toBe(400);
+    expect((await fetchJson(req("GET", "/api/memory/streams?limit=0"))).status).toBe(400);
+  });
+
+  test("GET /api/memory/streams/:id returns { task, updates, synced } or 404", async () => {
+    const t = store.addTask({ title: "stream" });
+    const { status, json } = await fetchJson(req("GET", `/api/memory/streams/${t.id}`));
+    expect(status).toBe(200);
+    expect(Object.keys(json as object).sort()).toEqual(["synced", "syncedUpdateId", "task", "updates"]);
+    expect((await fetchJson(req("GET", "/api/memory/streams/999"))).status).toBe(404);
+  });
+});
+
 describe("server: lanes", () => {
   test("GET /api/lanes returns an array containing 'now'", async () => {
     const { status, json } = await fetchJson(req("GET", "/api/lanes"));

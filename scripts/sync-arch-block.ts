@@ -10,7 +10,7 @@
 // Pure Bun stdlib — no deps. Idempotent. Atomic write (tmp + rename) so a
 // Ctrl-C mid-run does not leave AGENTS.md half-written.
 //
-// Run via `pnpm run agents:map` (which also regenerates `.cortex/repo-map.md`).
+// Run via `pnpm run agents:map` (also the first step of `pnpm run style`).
 
 import fs from "node:fs";
 import path from "node:path";

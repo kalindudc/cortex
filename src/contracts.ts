@@ -8,7 +8,19 @@
  */
 
 import type { EventKind } from "./events.ts";
-import type { AuthorRow, Lane, Notification, RelatedTasks, Tag, Task, TaskStatus, Update } from "./store.ts";
+import type {
+  AuthorRow,
+  Lane,
+  MemoryHit,
+  MemoryStream,
+  MemoryStreamRow,
+  Notification,
+  RelatedTasks,
+  Tag,
+  Task,
+  TaskStatus,
+  Update,
+} from "./store.ts";
 
 /**
  * One independently versioned part of a resource. Tasks use `entity` plus the
@@ -298,6 +310,27 @@ export interface TaskListQuery {
   tags?: string[];
 }
 
+/** GET /api/memory/search: `q` is tokenized server-side; `exclude` drops task ids the caller already showed. */
+export interface MemorySearchQuery {
+  q: string;
+  lane?: string;
+  limit?: number;
+  exclude?: number[];
+}
+
+export interface MemorySearchResult {
+  terms: string[];
+  hits: MemoryHit[];
+}
+
+/** GET /api/memory/streams: bodiless rows, newest activity first. */
+export interface MemoryStreamsQuery {
+  lane?: string;
+  author?: string;
+  active?: boolean;
+  limit?: number;
+}
+
 type CreateTaskFields = {
   lane?: string;
   body?: string | null;
@@ -441,5 +474,9 @@ export interface CortexClient extends ApiClient {
   taskState(id: number): Promise<TaskStateSnapshot>;
   laneState(name: string): Promise<LaneStateSnapshot>;
   tagState(name: string): Promise<TagStateSnapshot>;
+  /** Agent memory over the derived FTS5 index and the body-sync record (GET /api/memory/...). */
+  memorySearch(query: MemorySearchQuery): Promise<MemorySearchResult>;
+  memoryStreams(query?: MemoryStreamsQuery): Promise<MemoryStreamRow[]>;
+  memoryStream(id: number): Promise<MemoryStream>;
   readonly versioned: VersionedWrites;
 }

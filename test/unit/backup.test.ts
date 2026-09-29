@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, setSystemTime, test } from "bun:test";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -384,6 +384,36 @@ describe("restore stamps destination revisions", () => {
       const next = dest.store.addTask({ title: "after the restore" });
       expect(next.id).toBeGreaterThan(Math.max(...result.idMap.values()));
     } finally {
+      source.store.close();
+      dest.store.close();
+    }
+  });
+});
+
+describe("restore and agent memory (plan @414, review @418 F1)", () => {
+  test("a reissued id falls back to its archived created time, never a deleted task's body sync", async () => {
+    const source = openTmpStore("source-sync");
+    const dest = openTmpStore("dest-sync");
+    try {
+      setSystemTime(new Date(4_000));
+      const archived = source.store.addTask({ title: "archived", body: "as archived" }); // id 1, created 4000
+      setSystemTime();
+      const outPath = path.join(source.dir, "sync.zip");
+      await createBackup({ liveDbPath: source.dbPath, outPath });
+
+      setSystemTime(new Date(1_000));
+      const doomed = dest.store.addTask({ title: "doomed" }); // id 1
+      setSystemTime(new Date(9_000));
+      dest.store.editTask(doomed.id, { body: "synced late" });
+      // An older cortex binary deletes the task without knowing `_body_edits`.
+      dest.store.runInTransaction(raw => raw.run("DELETE FROM tasks WHERE id = ?;", [doomed.id]));
+      setSystemTime();
+
+      const result = await restoreBackup({ backupPath: outPath, liveStore: dest.store });
+      expect(result.idMap.get(archived.id)).toBe(doomed.id);
+      expect(dest.store.memoryStream(doomed.id)?.synced).toBe(4_000);
+    } finally {
+      setSystemTime();
       source.store.close();
       dest.store.close();
     }

@@ -459,6 +459,7 @@ commands while a new daemon owns the database: old binaries write the file direc
 | `ls [-l lane] [-s status] [--json]` | list tasks, grouped by lane, sorted by id (`s` = `open\|review\|blocked\|done`) |
 | `show <id> [--json]` | show one task with its updates |
 | `search [text] [--json]` | fuzzy-search tasks (same scorer + `@id`/`@title`/`#tag` prefixes as the dashboard palette) in an fzf picker with a `show` preview; enter copies the task id to the clipboard and prints the task like `show`; `--json` emits ranked matches without fzf |
+| `memory search\|show\|context\|lane [--json]` | agent memory: ranked recall, one task's staleness (since its last body edit) plus the breadcrumb trail since then, the one-call agent context (primer + hits), and this repo's lane |
 | `update <id> -m <msg> [-s status] [-b body]` | post an update; `status` = `open\|review\|blocked\|done` |
 | `edit <id> [-t title] [-b body] [-p int]` | edit task fields |
 | `mv <id> <lane>` | move a task to another lane (auto-creates `lane` if missing) |
@@ -541,6 +542,9 @@ Bound to `127.0.0.1` only.
 | PATCH | `/api/tasks/:id/lane` | move lane |
 | DELETE | `/api/tasks/:id` | remove a task |
 | GET | `/api/tasks/:id/updates` | list updates for a task |
+| GET | `/api/memory/search?q&lane&limit&exclude` | ranked memory hits (`{ terms, hits }`) |
+| GET | `/api/memory/streams?lane&author&active&limit` | bodiless memory stream rows (with `synced`, the last body edit) |
+| GET | `/api/memory/streams/:id` | one stream: `{ task, updates, synced }` |
 | POST | `/api/tasks/:id/updates` | post an update |
 | GET | `/api/lanes` | list lanes |
 | POST | `/api/lanes` | create a lane |

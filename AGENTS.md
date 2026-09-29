@@ -3,15 +3,15 @@
 > Cortex is a single-binary, single-user, localhost-only task tracker for one
 > human supervising several AI coding agents at once. This file is the
 > always-loaded entry point for any agent working in this repo. Read it in
-> full before touching code; consult `.cortex/repo-map.md` on demand for a
-> deep structural view.
+> full before touching code; for anything deeper, search the code on demand
+> (`rg`, or a structural search) and read only the files that matter.
 
 Spec: <https://agents.md/>. Linter: `pnpm run agents:check`.
 
 ## 1. Project overview
 
 - One binary (`bin/cortex`) bundles CLI, REST + SSE API, and a Preact dashboard.
-- Storage is a single SQLite WAL file at `~/.config/cortex/cortex.db` (NOT in this repo — `.cortex/` here is repo-data, not user-data).
+- Storage is a single SQLite WAL file at `~/.config/cortex/cortex.db` (NOT in this repo).
 - The daemon (`cortex serve`) binds `127.0.0.1` only; there is no auth.
 - Every `cortex update` REQUIRES `--as <session-id>` so multi-agent activity is attributable in the audit trail.
 - Browser notifications fire ONLY on transitions into `blocked`.
@@ -21,7 +21,6 @@ Spec: <https://agents.md/>. Linter: `pnpm run agents:check`.
 - Bun is pinned to EXACTLY `1.4.2` (`devDependencies.bun`, `@types/bun`, CI). The compiled binary uses ESM bytecode (`--bytecode --format=esm`) because CJS bytecode fails on this module graph with newer Bun (verified on 1.3.14 and 1.4.2); see the rationale at the top of `scripts/build.sh` before changing the pin.
 - Node is NOT used at runtime. `pnpm` is the package manager; install with `pnpm install --frozen-lockfile` (matches CI). The binary `bun` resolves via `pnpm exec bun` from `node_modules/.bin` — no global Bun required.
 - Build output `bin/cortex` is produced by `pnpm run build`.
-- `.cortex/` is THIS repo's auto-generated agent-metadata directory. It is unrelated to `~/.config/cortex/` (the SQLite home). Do not confuse them.
 
 ## 3. Commands
 
@@ -35,10 +34,10 @@ Every command below is a real script in `package.json` — the linter rule `comm
 - `pnpm run dev -- <cortex-args>` — run the CLI from source via Bun (no compile step); with no args on a TTY it opens the TUI. Uses the `tmp/dev/` data sandbox unless `CORTEX_DEV_REAL=1` (see `scripts/dev-env.sh`, `scripts/dev-cli.sh`).
 - `pnpm run serve:dev` — live-reload dashboard (UI bundler watch + CSS watcher + `bun --watch` server) on port 7788, same `tmp/dev/` sandbox. See `scripts/dev.sh`.
 - `pnpm run ui:build` / `pnpm run ui:watch` — produce `out/bundle.js` and `out/bundle.css`.
-- `pnpm run style` — biome `--write` + `tsc --noEmit`.
+- `pnpm run style` — sync the `arch:src` block (as `agents:map`), then biome `--write` + `tsc --noEmit`.
 - `pnpm run style:check` — same, read-only (CI-friendly).
 - `pnpm run agents:check` — deterministic AGENTS.md drift linter (`scripts/check-agents.ts`).
-- `pnpm run agents:map` — regenerate `.cortex/repo-map.md` AND the `arch:src` block below (`scripts/build-repo-map.sh`).
+- `pnpm run agents:map` — rewrite the `arch:src` block below from the immediate children of `src/` (`scripts/sync-arch-block.ts`).
 - `pnpm run deploy` — local install: rebuild + copy to `~/bin/cortex`.
 
 ## 4. Architecture map
@@ -64,8 +63,7 @@ Other notable single-file modules (curated; not auto-rewritten):
 - `src/extensions.ts` — registers the pi extension surface.
 - `src/paths.ts` — central source of truth for `CORTEX_DB` + config paths.
 
-For a deep, tree-sitter-extracted signature view of every TS file in `src/`, `scripts/`, and `test/`, read `.cortex/repo-map.md`.
-Note: If a `repo-map` does not exist, run `pnpm run agents:map` to generate one. The repo is excluded from version control.
+There is deliberately no generated repo map (removed after it proved too large to read and almost never used, research @416): find signatures and call sites on demand with `rg` or a structural (tree-sitter) search, then read only the files you need.
 
 ## 5. Code conventions
 
@@ -89,6 +87,7 @@ Note: If a `repo-map` does not exist, run `pnpm run agents:map` to generate one.
 - The SSE heartbeat (`DEFAULT_STREAM_LIMITS.heartbeatMs` in `src/server.ts`, 5 s) MUST stay under Bun.serve's 10 s default idle timeout; a longer gap lets Bun close idle streams and every client sees spurious reconnects.
 - Title/body drafts (`src/ui/lib/useTaskDraft.ts`, like `src/tui/drafts.ts`) enable editing only after an atomic `api.taskState` baseline and save ONLY through `api.versioned.editTask` guarded by that field's token. A 412 keeps both versions behind the existing Apply / Keep my changes banner (Keep rebases on the displayed token and writes conditionally); live task copies are hints that trigger a re-read, never adopted text. Unguarded CLI/API writes stay last-writer-wins by design.
 - Lane/tag dropdown search is OPTIONAL: `src/ui/lib/catalogSearch.ts` returns every entry for an empty query and every literal, case-insensitive AND-keyword match otherwise. NEVER impose a result cap or forced-refinement policy.
+- Agent memory (`src/memory.ts`, `Store.searchMemory`): `_memory_fts`/`_memory_index` are DERIVED — created on the first search (never in `migrate()`), reconciled by the `entity` revision token on every search, never backed up. `_body_edits` records BODY changes only (createTask/editTask); staleness and breadcrumbs are measured from it, never from `updated`. Never pass raw text to FTS5 MATCH (only quoted `memoryTerms()`); staleness runs in the CLI process (`cortex memory show`), never in the daemon.
 - Mode shortcut matching/hints live in `src/ui/lib/keys.ts`; route actions through `requestMode`, preserve common browser shortcuts and AltGr text input, and suspend mode changes behind overlays. Browser coverage lives in `test/e2e/workspace-shortcuts.spec.ts`.
 - `preferredReaderMode` is the browser-persisted Read/Edit/Split choice; `readerMode` is the effective view (heading links may temporarily show Read). NEVER reset the preference on task navigation or title editing; only explicit mode choices update it.
 - `src/ui/styles/motion.css` owns shared motion (90/140/180ms; opacity/transform keyframes; localized tag-remove width transitions; the clamped title's in-flow `max-height` reveal is the ONLY sanctioned animation that moves document panels). NEVER defer state/focus or remount editors just to animate. Respect live reduced-motion changes and keep sidebar filter sessions alive during fallback-task changes; explicit task navigation still dismisses them.
@@ -110,7 +109,6 @@ different I/O assumptions:
 - Locally green BEFORE pushing: `pnpm run style:check && pnpm test && pnpm run agents:check`.
 - CI runs the same three plus Playwright (`.github/workflows/test.yml`); `agents:check` is the FIRST gate — fast-fail on AGENTS.md drift.
 - Never commit `out/`, `bin/`, or `tmp/` — `.gitignore` excludes them.
-- DO commit `.cortex/repo-map.md` (sidecar is reviewed in the diff; agents on first clone get it without running `agents:map`).
 
 ## 8. Where to look
 
@@ -121,16 +119,16 @@ different I/O assumptions:
 - `src/ui/state/workspace.ts` — document-workspace controller (query/body-mode preference persistence, Document entry, `requestMode` / `requestPostUpdate` / `revealSidebarFilter`, transient-state reset, narrow-viewport tracking).
 - `src/ui/components/active/TaskToolbar.tsx` — workspace actions and Read/Edit/Split; `TaskHeader` owns only the document identity/metadata and shared title draft. Its pinned display title clamps to `TITLE_CLAMP_LINES`; a reveal (pointer rests on the title for `TITLE_REVEAL_INTENT_MS`, stays until it leaves the header; or keyboard focus-visible) grows the title IN FLOW so the metadata row and reader/editor move down with it — never as an overlay. `TaskHeader` owns the reveal state and measurement; `document.css` + `motion.css` own the look. The title textarea is never clamped.
 - `src/ui/lib/markdown.ts` — the sanitized Markdown/Mermaid rendering boundary (see §5).
+- `src/memory.ts` — agent-memory helpers (terms, cited paths, lane from git's common dir, staleness, breadcrumbs, rendering); `src/commands/memory.ts` is the `cortex memory` CLI.
 - `src/skills/` — markdown skill bodies embedded by `cortex init`.
 - `src/extensions/pi.ts` — pi extension surface (custom tools).
 - `src/daemon.ts` — database-scoped daemon discovery/start/stop, the legacy-daemon fence and `withClient`; `src/commands/serve.ts` hosts the daemon.
 - `src/tui/app.ts` — the terminal workspace (`runTui`, the `Shell`): pre-screen checks, theme detection before the first frame, pi-tui wiring, key routing and terminal restoration on every exit path; `src/tui/session.ts` holds one TUI's state, live sync and the `:` command table; PTY tests use `test/integration/fixtures/pty.ts`.
-- `.cortex/repo-map.md` — full tree-sitter signature dump (deep search).
 - `.github/workflows/test.yml` — CI definition (one `test` job on an ubuntu-latest + macos-latest matrix).
 
 ## 9. Maintenance loop
 
-This file plus `.cortex/repo-map.md` form an auto-improving contract. Any agent that touches the repo MUST keep them honest; the linter makes it enforceable, not aspirational.
+This file is an auto-improving contract. Any agent that touches the repo MUST keep it honest; the linter makes it enforceable, not aspirational.
 
 Update AGENTS.md (and run `pnpm run agents:map`) IN THE SAME PR when you:
 
@@ -140,7 +138,7 @@ Update AGENTS.md (and run `pnpm run agents:map`) IN THE SAME PR when you:
 - add or remove a top-level path that this file cites in backticks (`paths.missing` will fail CI otherwise);
 - bump or unpin a runtime version (Bun, Node, pnpm) → update §2.
 
-`pnpm run agents:check` is the deterministic gate; six rules are spec'd at the top of `scripts/check-agents.ts`. Spec: <https://agents.md/>.
+`pnpm run agents:check` is the deterministic gate; five rules are spec'd at the top of `scripts/check-agents.ts`. Spec: <https://agents.md/>.
 
 ---
 
@@ -149,8 +147,8 @@ Update AGENTS.md (and run `pnpm run agents:map`) IN THE SAME PR when you:
 - NEVER change the Bun pin without re-reading `scripts/build.sh` and re-verifying the compiled `--bytecode --format=esm` binary and the full suite.
 - NEVER inline `cortex update --as <id>` in skills when the `cortex_update` pi tool is available — manual attribution is not resumable.
 - NEVER add husky / lefthook / pre-commit infrastructure without an issue first; CI + `pnpm run agents:check` covers the lint surface.
-- NEVER hand-edit files under `out/`, `bin/`, `tmp/`, or `.cortex/repo-map.md` — all are generated.
-- NEVER inline `.cortex/repo-map.md` into this file. The sidecar exists to keep the always-loaded budget small (Codex truncates AGENTS.md silently above 32 KiB; Claude Code's first-200-line load matters).
+- NEVER hand-edit files under `out/`, `bin/`, or `tmp/` — all are generated.
+- NEVER paste generated structure dumps (file trees, signature maps, repo overviews) into this file or the repo: Codex truncates AGENTS.md silently above 32 KiB, Claude Code's first-200-line load matters, and repository overviews do not improve agent task success (research @416).
 - NEVER open `bun:sqlite` outside `src/store.ts`.
 - NEVER add new top-level dirs to `src/` without running `pnpm run agents:map` and filling in the new `— TODO` line.
 - NEVER add research findings or temporary metadata to the root of the project, ALWAYS us the `./tmp/` directory for temporary files and research notes

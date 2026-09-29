@@ -282,6 +282,10 @@ function emptyTouched(): Touched {
  */
 function stampRestored(store: Store, idMap: Map<number, number>, touched: Touched): void {
   store.stampRevisions("task", idMap.values());
+  // Body-sync records (agent memory) are never backed up: a reissued id must
+  // not inherit a deleted task's record, so restored tasks fall back to their
+  // archived `created` (plan @414, review @418 F1).
+  store.forgetBodySync(idMap.values());
   store.stampRevisions("lane", touched.newLanes);
   store.stampRevisions(
     "lane",

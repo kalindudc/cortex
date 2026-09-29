@@ -75,6 +75,7 @@ function snapshot(s: Store): Record<string, unknown[]> {
     notifications: "SELECT * FROM notifications ORDER BY id",
     revisions: "SELECT * FROM _resource_revisions ORDER BY resource, scope",
     receipts: "SELECT * FROM _mutation_receipts ORDER BY mutation_id",
+    bodyEdits: "SELECT * FROM _body_edits ORDER BY task_id",
   };
   return s.runInTransaction(raw => {
     const out: Record<string, unknown[]> = {};

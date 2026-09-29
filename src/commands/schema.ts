@@ -19,6 +19,7 @@ const COMMANDS: { name: string; summary: string }[] = [
   { name: "ls", summary: "list tasks (--json omits body; --full includes it)" },
   { name: "show", summary: "show one task + its updates (--json)" },
   { name: "search", summary: "fuzzy task finder via fzf (--json for scripted use)" },
+  { name: "memory", summary: "agent memory: search|show|context|lane (ranked recall, staleness, breadcrumbs; --json)" },
   { name: "update", summary: "post an update / change status (--as required, --json)" },
   { name: "edit", summary: "edit title/body/priority/tags (--json; anchor body edits)" },
   { name: "mv", summary: "move a task to a lane (--json)" },

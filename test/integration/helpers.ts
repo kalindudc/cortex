@@ -49,6 +49,8 @@ export type RunOpts = {
   args: string[];
   env: Record<string, string>;
   stdin?: string;
+  /** Working directory (default: the repo root). Memory tests run inside a tmp git checkout. */
+  cwd?: string;
 };
 
 const ISOLATED_KEYS = [
@@ -114,7 +116,7 @@ export function mkTmpEnv(label: string): {
 export async function runCli(opts: RunOpts): Promise<RunResult> {
   const proc = Bun.spawn([BIN, ...opts.args], {
     env: opts.env,
-    cwd: ROOT,
+    cwd: opts.cwd ?? ROOT,
     stdin: opts.stdin !== undefined ? "pipe" : undefined,
     stdout: "pipe",
     stderr: "pipe",

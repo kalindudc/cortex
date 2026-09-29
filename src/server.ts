@@ -22,12 +22,14 @@ import { backupNotificationInput, createBackup, defaultBackupPath } from "./back
 import { createEventPublisher, type EventKind, type EventPublisher } from "./events.ts";
 import { CONTROL_PATHS, INSTANCE_HEADER, PREFER_VERSIONED } from "./api.ts";
 import { createPreviewStore, type PreviewStore, registerPreviewRoutes } from "./preview.ts";
+import { memoryTerms } from "./memory.ts";
 import type {
   BlockedTransition,
   DaemonIdentity,
   EnableWebRequest,
   HealthResponse,
   LaneStateSnapshot,
+  MemorySearchResult,
   NotificationChange,
   PostUpdateResult,
   ReadyPayload,
@@ -877,6 +879,62 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
   // Powers the dashboard's Authors tab. No new schema, no new column — just
   // a GROUP BY over the last 24h of updates. See Store.listAuthorsLast24h.
   app.get("/api/authors", c => c.json(store.listAuthorsLast24h()));
+
+  // ---------- memory ----------
+  // Agent memory (plan @414): ranked recall over the derived FTS5 index and
+  // bodiless stream rows carrying `synced` (the last BODY change). Reads
+  // only; the index is created and reconciled inside Store.searchMemory.
+  const positiveInt = (raw: string | undefined): number | undefined | null => {
+    if (raw === undefined || raw === "") return undefined;
+    return /^[1-9][0-9]*$/.test(raw) ? Number(raw) : null;
+  };
+
+  app.get("/api/memory/search", c => {
+    const q = c.req.query("q")?.trim();
+    if (!q) return c.json({ error: "q is required" }, 400);
+    const limit = positiveInt(c.req.query("limit"));
+    if (limit === null) return c.json({ error: "limit must be a positive integer" }, 400);
+    let exclude: number[] | undefined;
+    const excludeArg = c.req.query("exclude");
+    if (excludeArg) {
+      const ids = excludeArg.split(",").map(s => positiveInt(s.trim()));
+      if (ids.some(id => id === null || id === undefined)) {
+        return c.json({ error: "exclude must be a comma-separated list of positive task ids" }, 400);
+      }
+      exclude = ids as number[];
+    }
+    const lane = c.req.query("lane") || undefined;
+    const terms = memoryTerms(q);
+    try {
+      const hits = terms.length > 0 ? store.searchMemory(terms, { lane, limit, exclude }) : [];
+      const body: MemorySearchResult = { terms, hits };
+      return c.json(body);
+    } catch (err) {
+      return c.json({ error: `memory search unavailable: ${(err as Error).message}` }, 500);
+    }
+  });
+
+  app.get("/api/memory/streams", c => {
+    const limit = positiveInt(c.req.query("limit"));
+    if (limit === null) return c.json({ error: "limit must be a positive integer" }, 400);
+    let author: string | undefined;
+    const authorArg = c.req.query("author");
+    if (authorArg) {
+      try {
+        author = validateAuthorTag(authorArg);
+      } catch (e) {
+        return c.json({ error: (e as Error).message }, 400);
+      }
+    }
+    const active = c.req.query("active") === "1";
+    return c.json(store.memoryStreams({ lane: c.req.query("lane") || undefined, author, active, limit }));
+  });
+
+  app.get("/api/memory/streams/:id", c => {
+    const stream = store.memoryStream(Number(c.req.param("id")));
+    if (!stream) return c.json({ error: "not found" }, 404);
+    return c.json(stream);
+  });
 
   // ---------- notifications ----------
   // Persisted bell-drawer feed. Read endpoint returns rows newest-first.

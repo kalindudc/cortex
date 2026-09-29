@@ -4,6 +4,7 @@ import fs from "node:fs";
 import type { ResourceScope, TaskState, Versions, WriteGuard } from "./contracts.ts";
 import { canonicalDatabasePath, type OwnerLease, OwnershipError, tryAcquireOwnership } from "./ownership.ts";
 import { dbPath, ensureConfigDir } from "./paths.ts";
+import { MEMORY_LIMITS } from "./memory.ts";
 
 export type TaskStatus = "draft" | "open" | "review" | "blocked" | "done";
 export type Severity = "progress" | "review" | "blocked";
@@ -111,6 +112,23 @@ export type RelatedTasks = {
  * we add a richer tag-kind model.
  */
 export const SHARED_TAG_BLOCKLIST: ReadonlySet<string> = new Set(["plan", "pr-desc", "research"]);
+
+/**
+ * A memory stream row (plan @414): bodiless and token-lean. `synced` is the
+ * last time the task's BODY changed (`_body_edits`), falling back to
+ * `created`; title, status, lane, tag and update writes never move it.
+ */
+export type MemoryStreamRow = Pick<Task, "id" | "title" | "lane" | "status" | "tags" | "updated"> & { synced: number };
+/** One ranked memory-search hit (GET /api/memory/search). */
+export type MemoryHit = MemoryStreamRow & { score: number; matched: string[]; snippet: string };
+/** One stream with its full update history (GET /api/memory/streams/:id). */
+export type MemoryStream = {
+  task: Task;
+  updates: Update[];
+  synced: number;
+  /** Highest update id at the sync: updates above it are the breadcrumbs (ids order same-millisecond writes). */
+  syncedUpdateId: number;
+};
 
 /**
  * Tag-name regex: lowercase letters, digits, `_`, `@`, `-`, length 1-32.
@@ -447,6 +465,27 @@ export type ListTasksFilter = {
 
 const now = (): number => Date.now();
 
+const clampInt = (value: number, min: number, max: number): number =>
+  Math.min(max, Math.max(min, Math.trunc(Number.isFinite(value) ? value : min)));
+
+/** One FTS5 phrase for a memory term (terms are letters/digits only; quotes are doubled defensively). */
+const quoteTerm = (term: string): string => `"${term.replaceAll('"', '""')}"`;
+
+/** The memory stream row: bodiless task columns, sorted tag list, and `synced` (last body change, else `created`). */
+const STREAM_ROW_SELECT = `
+  SELECT t.id, t.title, t.lane, t.status, t.updated,
+         COALESCE(e.edited, t.created) AS synced,
+         COALESCE((SELECT GROUP_CONCAT(tag_name, ',' ORDER BY tag_name) FROM task_tags WHERE task_id = t.id), '') AS tag_csv
+    FROM tasks t
+    LEFT JOIN _body_edits e ON e.task_id = t.id`;
+
+type StreamRowSql = Omit<MemoryStreamRow, "tags"> & { tag_csv: string };
+
+const rowToStream = ({ tag_csv, ...rest }: StreamRowSql): MemoryStreamRow => ({
+  ...rest,
+  tags: tag_csv ? tag_csv.split(",") : [],
+});
+
 export type StoreOpenOptions = {
   warnMigrations?: boolean;
   /**
@@ -677,6 +716,24 @@ export class Store {
           digest      TEXT    NOT NULL,
           result      TEXT    NOT NULL,
           created     INTEGER NOT NULL
+        ) WITHOUT ROWID;
+      `);
+      // Body-sync record for agent memory (plan @414): when each task's BODY
+      // last changed, written ONLY by createTask and by editTask when the body
+      // text actually changes. Staleness and breadcrumbs are measured from it,
+      // never from `tasks.updated` (which status/lane writes also move).
+      // Private metadata under the `_mutation_receipts` precedent: additive,
+      // no foreign keys or triggers, never backed up. `update_id` is the
+      // task's highest update id at the sync: the breadcrumb watermark (a post
+      // in the same millisecond as the sync, but after it, still counts;
+      // timestamps cannot order the two). removeTask deletes the row and the
+      // backup merge forgets the ids it writes (a restore can reissue a deleted
+      // id), so a restored task falls back to its archived `created`.
+      this.db.run(`
+        CREATE TABLE IF NOT EXISTS _body_edits (
+          task_id   INTEGER PRIMARY KEY,
+          edited    INTEGER NOT NULL,
+          update_id INTEGER NOT NULL DEFAULT 0
         ) WITHOUT ROWID;
       `);
       this.db.run(`INSERT OR IGNORE INTO lanes (name, color, sort) VALUES ('now', '#fe8019', 0);`);
@@ -1178,6 +1235,28 @@ export class Store {
     })();
   }
 
+  /**
+   * Forget the body-sync record (agent memory) of tasks written by a raw
+   * writer, which must call it inside the same transaction: the backup merge
+   * can reissue a deleted id, whose stale record (left by an older binary's
+   * delete) must not make the restored task look synced. Those tasks fall
+   * back to their archived `created`.
+   */
+  forgetBodySync(taskIds: Iterable<number>): void {
+    this.db.transaction(() => {
+      for (const id of taskIds) this.db.run(`DELETE FROM _body_edits WHERE task_id = ?;`, [id]);
+    })();
+  }
+
+  /** Record a body sync at `ts`, watermarked with the task's highest update id (call inside the write's transaction). */
+  private recordBodySync(id: number, ts: number): void {
+    this.db.run(
+      `INSERT OR REPLACE INTO _body_edits (task_id, edited, update_id)
+       VALUES (?, ?, COALESCE((SELECT MAX(id) FROM updates WHERE task_id = ?), 0));`,
+      [id, ts, id],
+    );
+  }
+
   private resourceExists(kind: ResourceKind, key: number | string): boolean {
     const sql =
       kind === "task"
@@ -1389,6 +1468,8 @@ export class Store {
           .get(row.id, author, ts);
         if (!created) throw new Error("failed to insert created update");
       }
+      // The body as created is the stream's first sync (agent memory).
+      this.recordBodySync(row.id, ts);
       // Every scope starts fresh (an id reissued after a legacy rebuild never
       // inherits old tokens); the lane and tags gained a member.
       this.bump("task", row.id, TASK_SCOPES);
@@ -1688,15 +1769,19 @@ export class Store {
         params.push(fields.priority);
       }
       if (sets.length === 0) return existing;
+      const ts = now();
       sets.push("updated = ?");
-      params.push(now());
+      params.push(ts);
       params.push(id);
       const sql = `UPDATE tasks SET ${sets.join(", ")} WHERE id = ? RETURNING id;`;
       const row = this.db.query<{ id: number }, (string | number | null)[]>(sql).get(...params);
       if (!row) throw new Error(`task ${id} not found`);
       const bumped: ResourceScope[] = ["entity"];
       if (fields.title !== undefined && fields.title !== existing.title) bumped.push("title");
-      if (resolvedBody !== undefined && resolvedBody !== existing.body) bumped.push("body");
+      if (resolvedBody !== undefined && resolvedBody !== existing.body) {
+        bumped.push("body");
+        this.recordBodySync(id, ts);
+      }
       if (fields.priority !== undefined && fields.priority !== existing.priority) bumped.push("priority");
       this.bump("task", id, bumped);
       const full = this.getTask(row.id);
@@ -1830,6 +1915,7 @@ export class Store {
         this.db.query<{ n: number }, [number]>(`SELECT COUNT(*) AS n FROM notifications WHERE task_id = ?;`).get(id)
           ?.n ?? 0;
       this.db.run(`DELETE FROM tasks WHERE id = ?;`, [id]);
+      this.db.run(`DELETE FROM _body_edits WHERE task_id = ?;`, [id]);
       this.bump("task", id, TASK_SCOPES);
       this.bump("lane", existing.lane, ["entity"]);
       for (const tag of existing.tags) this.bump("tag", tag, ["entity"]);
@@ -2118,6 +2204,178 @@ export class Store {
           ORDER BY last_seen DESC;`,
       )
       .all();
+  }
+
+  // ---------- memory index (plan @414: derived; lazily created; reconciled on every search) ----------
+
+  /**
+   * Create the derived FTS5 index on first use, never in migrate(): a SQLite
+   * built without FTS5 then breaks only memory search, loudly. Both tables
+   * are private (not in backup.ts TABLES), so backups never export them.
+   */
+  private ensureMemoryIndex(): void {
+    this.db.run(
+      `CREATE VIRTUAL TABLE IF NOT EXISTS _memory_fts USING fts5(title, tags, body, log, tokenize='porter unicode61');`,
+    );
+    this.db.run(
+      `CREATE TABLE IF NOT EXISTS _memory_index (task_id INTEGER PRIMARY KEY, sig TEXT NOT NULL) WITHOUT ROWID;`,
+    );
+  }
+
+  /**
+   * Bring the index in line with `tasks` (reconcile-on-read: no write path
+   * knows the index exists). A task is re-indexed when its signature differs:
+   * the `entity` revision token, fresh on EVERY accepted task write (edits,
+   * moves, status, posts, tag changes and cascades, restores), plus `updated`
+   * for rows never stamped. Removed tasks leave the index. The log column
+   * holds update summaries minus machine rows (status audits, `created`).
+   */
+  private reconcileMemoryIndex(): void {
+    const current = this.db
+      .query<{ id: number; sig: string }, []>(
+        `SELECT t.id AS id, COALESCE(r.token, '') || ':' || t.updated AS sig
+           FROM tasks t
+           LEFT JOIN _resource_revisions r ON r.resource = 'task:' || t.id AND r.scope = 'entity';`,
+      )
+      .all();
+    const indexed = new Map(
+      this.db
+        .query<{ task_id: number; sig: string }, []>(`SELECT task_id, sig FROM _memory_index;`)
+        .all()
+        .map(row => [row.task_id, row.sig]),
+    );
+    const drop = this.db.query<unknown, [number]>(`DELETE FROM _memory_fts WHERE rowid = ?;`);
+    const insert = this.db.query<unknown, [number, string, string, string, string]>(
+      `INSERT INTO _memory_fts (rowid, title, tags, body, log) VALUES (?, ?, ?, ?, ?);`,
+    );
+    const stamp = this.db.query<unknown, [number, string]>(
+      `INSERT OR REPLACE INTO _memory_index (task_id, sig) VALUES (?, ?);`,
+    );
+    const log = this.db.query<{ summary: string }, [number]>(
+      `SELECT summary FROM updates
+        WHERE task_id = ? AND summary NOT LIKE 'status \u2192 %' AND summary <> 'created'
+        ORDER BY id;`,
+    );
+    for (const { id, sig } of current) {
+      const seen = indexed.get(id);
+      indexed.delete(id);
+      if (seen === sig) continue;
+      const task = this.getTask(id);
+      if (!task) continue;
+      drop.run(id);
+      const summaries = log.all(id).map(row => row.summary);
+      insert.run(id, task.title, task.tags.join(" "), task.body ?? "", summaries.join("\n"));
+      stamp.run(id, sig);
+    }
+    for (const gone of indexed.keys()) {
+      drop.run(gone);
+      this.db.run(`DELETE FROM _memory_index WHERE task_id = ?;`, [gone]);
+    }
+  }
+
+  /**
+   * Ranked memory hits for already-tokenized `terms` (src/memory.ts
+   * memoryTerms: the ONLY text that may reach MATCH, each term quoted).
+   * Coverage first: a task must match at least min(terms, minMatched)
+   * distinct terms (a wrong memory is worse than none), then BM25 with
+   * title > tags > body > log weights. Ensures and reconciles the index in
+   * the same transaction, so a hit always reflects the current task.
+   */
+  searchMemory(
+    terms: readonly string[],
+    opts: { lane?: string; limit?: number; exclude?: readonly number[] } = {},
+  ): MemoryHit[] {
+    if (terms.length === 0) return [];
+    const limit = clampInt(opts.limit ?? MEMORY_LIMITS.hits, 1, MEMORY_LIMITS.maxHits);
+    const exclude = new Set(opts.exclude ?? []);
+    const needed = Math.min(terms.length, MEMORY_LIMITS.minMatched);
+    return this.db.transaction((): MemoryHit[] => {
+      this.ensureMemoryIndex();
+      this.reconcileMemoryIndex();
+      const matchOne = this.db.query<{ id: number }, [string]>(
+        `SELECT rowid AS id FROM _memory_fts WHERE _memory_fts MATCH ?;`,
+      );
+      const sets = terms.map(term => new Set(matchOne.all(quoteTerm(term)).map(row => row.id)));
+      const coverage = new Map<number, number>();
+      for (const set of sets) for (const id of set) coverage.set(id, (coverage.get(id) ?? 0) + 1);
+      const candidates = [...coverage].filter(([id, n]) => n >= needed && !exclude.has(id)).map(([id]) => id);
+      if (candidates.length === 0) return [];
+      const params: (string | number)[] = [terms.map(quoteTerm).join(" OR "), ...candidates];
+      let laneClause = "";
+      if (opts.lane) {
+        laneClause = "AND t.lane = ?";
+        params.push(opts.lane);
+      }
+      params.push(limit);
+      const rows = this.db
+        .query<{ id: number; rank: number; snippet: string }, (string | number)[]>(
+          `SELECT _memory_fts.rowid AS id,
+                  bm25(_memory_fts, 6.0, 4.0, 1.0, 0.5) AS rank,
+                  snippet(_memory_fts, -1, '**', '**', '\u2026', ${MEMORY_LIMITS.snippetTokens}) AS snippet
+             FROM _memory_fts JOIN tasks t ON t.id = _memory_fts.rowid
+            WHERE _memory_fts MATCH ? AND _memory_fts.rowid IN (${candidates.map(() => "?").join(", ")}) ${laneClause}
+            ORDER BY rank
+            LIMIT ?;`,
+        )
+        .all(...params);
+      return rows.flatMap(row => {
+        const stream = this.streamRow(row.id);
+        if (!stream) return [];
+        const matched = terms.filter((_, i) => sets[i]?.has(row.id));
+        return [{ ...stream, score: Number((-row.rank).toPrecision(4)), matched, snippet: row.snippet }];
+      });
+    })();
+  }
+
+  /**
+   * Bodiless stream rows, newest activity first: `lane`, `author` (tasks with
+   * an update by exactly that tag) and `active` (not done) filters. Powers
+   * the agent primer (GET /api/memory/streams).
+   */
+  memoryStreams(filter: { lane?: string; author?: string; active?: boolean; limit?: number } = {}): MemoryStreamRow[] {
+    const clauses: string[] = [];
+    const params: (string | number)[] = [];
+    if (filter.lane) {
+      clauses.push("t.lane = ?");
+      params.push(filter.lane);
+    }
+    if (filter.author) {
+      clauses.push("t.id IN (SELECT task_id FROM updates WHERE author = ?)");
+      params.push(filter.author);
+    }
+    if (filter.active) clauses.push("t.status <> 'done'");
+    params.push(clampInt(filter.limit ?? MEMORY_LIMITS.primerStreams + 1, 1, 50));
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+    return this.db
+      .query<StreamRowSql, (string | number)[]>(
+        `${STREAM_ROW_SELECT} ${where} ORDER BY t.updated DESC, t.id DESC LIMIT ?;`,
+      )
+      .all(...params)
+      .map(rowToStream);
+  }
+
+  /** One stream with its full update history and body-sync time, from one read transaction; null when missing. */
+  memoryStream(id: number): MemoryStream | null {
+    return this.db.transaction((): MemoryStream | null => {
+      const task = this.getTask(id);
+      if (!task) return null;
+      const updates = this.listUpdates(id);
+      const sync = this.db
+        .query<{ edited: number; update_id: number }, [number]>(
+          `SELECT edited, update_id FROM _body_edits WHERE task_id = ?;`,
+        )
+        .get(id);
+      if (sync) return { task, updates, synced: sync.edited, syncedUpdateId: sync.update_id };
+      // No record (legacy, restored, or written by an older binary): the body
+      // as created is the sync; updates written with the task are not breadcrumbs.
+      const atCreation = updates.filter(u => u.created <= task.created).reduce((max, u) => Math.max(max, u.id), 0);
+      return { task, updates, synced: task.created, syncedUpdateId: atCreation };
+    })();
+  }
+
+  private streamRow(id: number): MemoryStreamRow | null {
+    const row = this.db.query<StreamRowSql, [number]>(`${STREAM_ROW_SELECT} WHERE t.id = ?;`).get(id);
+    return row ? rowToStream(row) : null;
   }
 
   // ---------- notification methods ----------
