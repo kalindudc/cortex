@@ -33,6 +33,10 @@ export const MEMORY_LIMITS = {
   showBodyChars: 12_000,
   /** Newest breadcrumbs (updates since the last body sync) shown. */
   trail: 10,
+  /** Index unit: a body section (split at headings) of at most this many characters. */
+  sectionChars: 2_000,
+  /** Index unit for the update log (summaries joined by newlines). */
+  logSectionChars: 1_500,
   citedPaths: 30,
   /** A stream whose body has not been synced for longer than this is old. */
   oldDays: 30,
@@ -78,6 +82,33 @@ export function memoryTerms(text: string): string[] {
     if (terms.length === MEMORY_LIMITS.terms) break;
   }
   return terms;
+}
+
+/**
+ * Split text into index sections: a new section starts at every Markdown
+ * heading and whenever the next line would push the section past
+ * `maxChars` (a single longer line stays whole). Search coverage is decided
+ * per section, so terms scattered across a long document no longer qualify
+ * it (review of @414: long documents dominated broad queries). Never
+ * returns an empty list: text without content is one empty section, so the
+ * task's title and tags stay searchable.
+ */
+export function memorySections(text: string, maxChars: number): string[] {
+  const sections: string[] = [];
+  let current: string[] = [];
+  let size = 0;
+  const flush = (): void => {
+    if (current.length > 0) sections.push(current.join("\n"));
+    current = [];
+    size = 0;
+  };
+  for (const line of text.split("\n")) {
+    if (/^#{1,6}\s/.test(line) || (size > 0 && size + line.length > maxChars)) flush();
+    current.push(line);
+    size += line.length + 1;
+  }
+  flush();
+  return sections.length > 0 ? sections : [""];
 }
 
 /** Headings whose lines list the files a stream relies on (the stream template and planner bodies). */

@@ -1,6 +1,7 @@
 // store-memory.test.ts — agent memory in the Store (plan @414): the body-sync
-// record (`_body_edits`), the derived FTS5 index (`_memory_fts` /
-// `_memory_index`, created on first search and reconciled on every search)
+// record (`_body_edits`), the derived section-level FTS5 index
+// (`_memory_sections` / `_memory_section_map`, created on first search and
+// reconciled on every search)
 // and the bodiless stream reads. Hermetic: Store.open(":memory:").
 
 import { afterEach, describe, expect, setSystemTime, test } from "bun:test";
@@ -110,10 +111,10 @@ describe("Store.searchMemory", () => {
     const s = open();
     s.addTask({ title: "mouse wheel" });
     expect(s.searchMemory([])).toEqual([]);
-    expect(hasTable(s, "_memory_fts")).toBe(false);
+    expect(hasTable(s, "_memory_sections")).toBe(false);
     expect(ids(s.searchMemory(["mouse"]))).toHaveLength(1);
-    expect(hasTable(s, "_memory_fts")).toBe(true);
-    expect(hasTable(s, "_memory_index")).toBe(true);
+    expect(hasTable(s, "_memory_sections")).toBe(true);
+    expect(hasTable(s, "_memory_section_map")).toBe(true);
   });
 
   test("title/tag matches outrank body-only matches; hits carry matched terms, snippet and synced", () => {
@@ -153,6 +154,61 @@ describe("Store.searchMemory", () => {
     expect(s.searchMemory(["gizmo"], { limit: 0 })).toHaveLength(1);
     expect(s.searchMemory(["gizmo"], { limit: 99 })).toHaveLength(MEMORY_LIMITS.maxHits);
     expect(s.searchMemory(["gizmo"])).toHaveLength(MEMORY_LIMITS.hits);
+  });
+});
+
+describe("section-level coverage", () => {
+  test("terms scattered across sections do not qualify a task; co-occurring terms (or a title term) do", () => {
+    const s = open();
+    const scattered = s.addTask({ title: "long plan", body: "## Alpha\nzebra notes\n## Beta\nquokka notes" });
+    const together = s.addTask({ title: "short note", body: "## Gamma\nzebra and quokka together" });
+    const titled = s.addTask({ title: "zebra handbook", body: "## Delta\nquokka care" });
+    const hits = ids(s.searchMemory(["zebra", "quokka"]));
+    expect(hits).toContain(together.id);
+    expect(hits).toContain(titled.id);
+    expect(hits).not.toContain(scattered.id);
+    // A single-term query still finds every task that has the term anywhere.
+    expect(ids(s.searchMemory(["quokka"])).sort()).toEqual([scattered.id, together.id, titled.id].sort());
+  });
+
+  test("matched terms and the snippet come from the best section", () => {
+    const s = open();
+    const t = s.addTask({ title: "stream", body: "## One\nwidget only\n## Two\nwidget and sprocket" });
+    const [hit] = s.searchMemory(["widget", "sprocket"]);
+    expect(hit?.id).toBe(t.id);
+    expect(hit?.matched).toEqual(["widget", "sprocket"]);
+    expect(hit?.snippet).toContain("**sprocket**");
+  });
+
+  test("re-indexing replaces a task's sections without leftovers; removal drops them", () => {
+    const s = open();
+    const t = s.addTask({ title: "stream", body: "## A\none\n## B\ntwo\n## C\nthree" });
+    const sections = (): number =>
+      s.runInTransaction(
+        raw =>
+          raw.query<{ n: number }, [number]>("SELECT count(*) AS n FROM _memory_sections WHERE task_id = ?;").get(t.id)
+            ?.n ?? 0,
+      );
+    s.searchMemory(["warmup"]);
+    expect(sections()).toBe(3);
+    s.editTask(t.id, { body: "flat body" });
+    s.searchMemory(["warmup"]);
+    expect(sections()).toBe(1);
+    s.removeTask(t.id);
+    s.searchMemory(["warmup"]);
+    expect(sections()).toBe(0);
+  });
+
+  test("a legacy whole-document index is dropped and rebuilt as sections", () => {
+    const s = open();
+    const t = s.addTask({ title: "mouse wheel" });
+    s.runInTransaction(raw => {
+      raw.run("CREATE VIRTUAL TABLE _memory_fts USING fts5(title, tags, body, log);");
+      raw.run("CREATE TABLE _memory_index (task_id INTEGER PRIMARY KEY, sig TEXT NOT NULL) WITHOUT ROWID;");
+    });
+    expect(ids(s.searchMemory(["mouse", "wheel"]))).toEqual([t.id]);
+    expect(hasTable(s, "_memory_fts")).toBe(false);
+    expect(hasTable(s, "_memory_index")).toBe(false);
   });
 });
 

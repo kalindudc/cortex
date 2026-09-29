@@ -11,6 +11,7 @@ import {
   MEMORY_LIMITS,
   MEMORY_PREAMBLE,
   memoryLane,
+  memorySections,
   memoryTerms,
   renderHits,
   renderPrimer,
@@ -116,6 +117,22 @@ describe("memoryTerms", () => {
     expect(memoryTerms("zeta alpha zeta beta alpha")).toEqual(["zeta", "alpha", "beta"]);
     const many = Array.from({ length: 40 }, (_, i) => `word${String.fromCharCode(97 + (i % 26))}${i}`).join(" ");
     expect(memoryTerms(many)).toHaveLength(MEMORY_LIMITS.terms);
+  });
+});
+
+describe("memorySections", () => {
+  test("splits at headings and keeps each heading with its section", () => {
+    expect(memorySections("intro\n## A\na1\n### B\nb1", 2000)).toEqual(["intro", "## A\na1", "### B\nb1"]);
+  });
+
+  test("splits oversized sections at line boundaries; a single long line stays whole", () => {
+    const line = "x".repeat(30);
+    expect(memorySections([line, line, line].join("\n"), 70)).toEqual([`${line}\n${line}`, line]);
+    expect(memorySections("y".repeat(100), 10)).toEqual(["y".repeat(100)]);
+  });
+
+  test("empty text is one empty section (title and tags stay indexed)", () => {
+    expect(memorySections("", 2000)).toEqual([""]);
   });
 });
 
