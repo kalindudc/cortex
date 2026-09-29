@@ -6,8 +6,6 @@ import { assertNoLegacyDaemon, claimOrAttach, DaemonError, discoverDaemon, stopD
 import { canonicalDatabasePath } from "../ownership.ts";
 import { Store } from "../store.ts";
 import { dbPath, ensureConfigDir, ownerLockPath } from "../paths.ts";
-import { writeAllSkills, skillDir, skillsRoot, listSkills } from "../skills.ts";
-import { writeAllExtensions, extensionDir, extensionsRoot, listExtensions } from "../extensions.ts";
 
 const CONFIRM = "RESET";
 
@@ -42,6 +40,8 @@ function fail(err: unknown): never {
  * sockets are recovered only by the lease holder. Daemons of other
  * databases, and a daemon of an older cortex (which cannot be verified, so
  * it is refused rather than signalled), are never touched.
+ *
+ * Datastore only: agent skills/extensions are untouched (`cortex agents install|reset`).
  */
 export default defineCommand({
   meta: {
@@ -70,8 +70,6 @@ export default defineCommand({
     console.log(
       `  • remove stale daemon metadata/socket for this database, if present (keeping ${ownerLockPath(canonical)})`,
     );
-    console.log(`  • wipe and regenerate ${listSkills().length} skill dir(s) under ${skillsRoot()}`);
-    console.log(`  • wipe and regenerate ${listExtensions().length} pi extension(s) under ${extensionsRoot()}`);
     console.log(`  • re-initialize an empty database with the default 'now' lane`);
     const answer = await prompt(`Type ${CONFIRM} to confirm: `);
     if (answer.trim() !== CONFIRM) {
@@ -115,22 +113,7 @@ export default defineCommand({
       fail(err);
     }
 
-    // 4. Wipe + regenerate every skill dir. We rmSync first (rather than
-    // just overwriting via writeAllSkills) so files removed in a binary
-    // upgrade are dropped, not stranded. Hand-edits are LOST — documented
-    // in cli/reset.md.
-    for (const name of listSkills()) {
-      fs.rmSync(skillDir(name), { recursive: true, force: true });
-    }
-    await writeAllSkills();
-    console.log(`✓ regenerated ${listSkills().length} skill(s)`);
-
-    for (const name of listExtensions()) {
-      fs.rmSync(extensionDir(name), { recursive: true, force: true });
-    }
-    await writeAllExtensions();
-    console.log(`✓ regenerated ${listExtensions().length} extension(s)`);
-
     console.log("✓ reset complete");
+    console.log("→ agent skills and the pi extension are untouched; `cortex agents reset` resets them");
   },
 });

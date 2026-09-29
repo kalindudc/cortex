@@ -4,8 +4,6 @@ import { claimOrAttach } from "../daemon.ts";
 import { canonicalDatabasePath } from "../ownership.ts";
 import { Store } from "../store.ts";
 import { dbPath, ensureConfigDir } from "../paths.ts";
-import { writeAllSkills, skillDir, listSkills } from "../skills.ts";
-import { writeAllExtensions, extensionDir, listExtensions } from "../extensions.ts";
 
 /**
  * Create (or migrate) the database as its owner (plan @400 N6): acquire the
@@ -55,18 +53,7 @@ export default defineCommand({
     for (const name of applied) {
       console.log(`✓ migration applied: ${name}`);
     }
-    // Self-install every shipped skill (cortex, cortex-planner,
-    // cortex-implementer) so coding agents have authoritative recipes on
-    // disk. Always overwrites — skills are machine-generated; hand-edits
-    // are LOST.
-    await writeAllSkills();
-    for (const name of listSkills()) {
-      console.log(`✓ skill written to ${skillDir(name)}`);
-    }
-    await writeAllExtensions();
-    for (const name of listExtensions()) {
-      console.log(`✓ extension written to ${extensionDir(name)}`);
-    }
     console.log(`✓ initialized ${dbPath()}`);
+    console.log("→ agent skills and the pi extension: run `cortex agents install`");
   },
 });

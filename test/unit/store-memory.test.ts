@@ -180,6 +180,25 @@ describe("section-level coverage", () => {
     expect(hit?.snippet).toContain("**sprocket**");
   });
 
+  test("the snippet comes from the section text, never the tags column (validation F3)", () => {
+    const s = open();
+    const t = s.addTask({ title: "stream", body: "the wheel handler moves one notch", tags: ["wheel"] });
+    const [hit] = s.searchMemory(["wheel", "notch"]);
+    expect(hit?.id).toBe(t.id);
+    expect(hit?.snippet).toContain("**wheel** handler");
+    expect(hit?.snippet).toContain("**notch**");
+  });
+
+  test("a title/tag-only match falls back to a title snippet, not tag names (validation F3)", () => {
+    const s = open();
+    const t = s.addTask({ title: "Scrolling notes", body: "unrelated body text", tags: ["mouse-wheel"] });
+    const [hit] = s.searchMemory(["mouse", "wheel"]);
+    expect(hit?.id).toBe(t.id);
+    expect(hit?.snippet).toBe("Scrolling notes");
+    const [titled] = s.searchMemory(["scrolling", "mouse"]);
+    expect(titled?.snippet).toBe("**Scrolling** notes");
+  });
+
   test("re-indexing replaces a task's sections without leftovers; removal drops them", () => {
     const s = open();
     const t = s.addTask({ title: "stream", body: "## A\none\n## B\ntwo\n## C\nthree" });

@@ -12,17 +12,11 @@ import { Store } from "../../../src/store.ts";
 // assertion (we need the second-init test to control whether state already
 // exists). See helpers.ts header for why all five env vars MUST be pinned.
 //
-// Hermetic guards: this file ALSO writes to CORTEX_PI_EXTENSION_DIR (which
-// mkTmpEnv does NOT pin by default — see src/extensions.ts:extensionsRoot).
-// Each test sets `env.CORTEX_PI_EXTENSION_DIR = path.join(tmpDir, "ext")`
-// BEFORE invoking runCli, and a beforeAll/afterAll snapshot pair asserts
-// the user's real ~/.config/cortex/cortex.db and
+// Hermetic guards: mkTmpEnv pins CORTEX_SKILL_DIR and CORTEX_PI_EXTENSION_DIR,
+// and mkInitEnv re-pins the extension root as <tmpDir>/ext so the "installs no
+// agent tools" test can assert on it. A beforeAll snapshot plus the last two
+// tests assert the user's real ~/.config/cortex/cortex.db and
 // ~/.pi/agent/extensions/cortex/index.ts mtimes did not move.
-
-// Expected shipped skill names. Hardcoded (not derived from listSkills())
-// so the test fails LOUD if a skill is removed without an explicit test
-// update.
-const EXPECTED_SKILLS = ["cortex", "cortex-planner", "cortex-implementer", "cortex-research"] as const;
 
 // Real user-home paths we MUST NOT touch.
 const REAL_DB = path.join(os.homedir(), ".config", "cortex", "cortex.db");
@@ -82,33 +76,17 @@ describe("cortex init integration", () => {
     }
   });
 
-  test("writes every shipped skill under CORTEX_SKILL_DIR", async () => {
-    const { env, cleanup } = mkInitEnv("init-skills");
+  test("init installs no agent tools and points to `cortex agents install`", async () => {
+    const { env, extRoot, cleanup } = mkInitEnv("init-no-agents");
     try {
       const r = await runCli({ args: ["init"], env });
       expect(r.code).toBe(0);
+      expect(r.stdout).toContain("cortex agents install");
 
       const skillRoot = env.CORTEX_SKILL_DIR ?? "";
       expect(skillRoot).not.toBe("");
-      for (const name of EXPECTED_SKILLS) {
-        const skillFile = path.join(skillRoot, name, "SKILL.md");
-        expect(fs.existsSync(skillFile)).toBe(true);
-      }
-    } finally {
-      cleanup();
-    }
-  });
-
-  test("writes the pi extension to CORTEX_PI_EXTENSION_DIR/cortex/index.ts", async () => {
-    const { env, extRoot, cleanup } = mkInitEnv("init-ext");
-    try {
-      const r = await runCli({ args: ["init"], env });
-      expect(r.code).toBe(0);
-
-      const extFile = path.join(extRoot, "cortex", "index.ts");
-      expect(fs.existsSync(extFile)).toBe(true);
-      const stat = fs.statSync(extFile);
-      expect(stat.size).toBeGreaterThan(200);
+      expect(fs.existsSync(skillRoot)).toBe(false);
+      expect(fs.existsSync(extRoot)).toBe(false);
     } finally {
       cleanup();
     }

@@ -6,6 +6,8 @@ import {
   listExtensions,
   extensionsRoot,
   extensionDir,
+  piAgentDir,
+  piDetected,
   writeExtension,
   writeAllExtensions,
 } from "../../src/extensions.ts";
@@ -19,18 +21,23 @@ import {
 // hand-edits during local `bun test`.
 
 const ENV_KEY = "CORTEX_PI_EXTENSION_DIR";
+const AGENT_DIR_KEY = "PI_CODING_AGENT_DIR";
 
 let tmpDir: string;
 let priorEnv: string | undefined;
+let priorAgentDir: string | undefined;
 
 beforeEach(() => {
   priorEnv = process.env[ENV_KEY];
+  priorAgentDir = process.env[AGENT_DIR_KEY];
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-ext-test-"));
 });
 
 afterEach(() => {
   if (priorEnv === undefined) delete process.env[ENV_KEY];
   else process.env[ENV_KEY] = priorEnv;
+  if (priorAgentDir === undefined) delete process.env[AGENT_DIR_KEY];
+  else process.env[AGENT_DIR_KEY] = priorAgentDir;
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -46,6 +53,7 @@ describe("extensions registry — pure API", () => {
 
   test("extensionsRoot() falls back to <home>/.pi/agent/extensions when env unset", () => {
     delete process.env[ENV_KEY];
+    delete process.env[AGENT_DIR_KEY];
     const root = extensionsRoot();
     // String-only assertion: never touch the fs at this path.
     expect(root.endsWith(path.join(".pi", "agent", "extensions"))).toBe(true);
@@ -55,6 +63,48 @@ describe("extensions registry — pure API", () => {
   test("extensionDir('pi') = <extensionsRoot>/cortex", () => {
     process.env[ENV_KEY] = tmpDir;
     expect(extensionDir("pi")).toBe(path.join(tmpDir, "cortex"));
+  });
+
+  test("extensionsRoot() follows pi's PI_CODING_AGENT_DIR when CORTEX_PI_EXTENSION_DIR is unset", () => {
+    delete process.env[ENV_KEY];
+    process.env[AGENT_DIR_KEY] = tmpDir;
+    expect(extensionsRoot()).toBe(path.join(tmpDir, "extensions"));
+  });
+});
+
+describe("piAgentDir / piDetected", () => {
+  test("piAgentDir honours PI_CODING_AGENT_DIR and expands a leading ~", () => {
+    expect(piAgentDir({}, "/home/u")).toBe(path.join("/home/u", ".pi", "agent"));
+    expect(piAgentDir({ PI_CODING_AGENT_DIR: "/opt/pi" }, "/home/u")).toBe("/opt/pi");
+    expect(piAgentDir({ PI_CODING_AGENT_DIR: "~/pi-agent" }, "/home/u")).toBe(path.join("/home/u", "pi-agent"));
+    expect(piAgentDir({ PI_CODING_AGENT_DIR: "~" }, "/home/u")).toBe("/home/u");
+  });
+
+  // Every case injects env, which and home: nothing reads the real machine.
+  const none = () => null;
+
+  test("no signal at all (empty env, no pi on PATH, empty home) \u2192 false", () => {
+    expect(piDetected({ env: {}, which: none, home: tmpDir })).toBe(false);
+  });
+
+  test("an explicit CORTEX_PI_EXTENSION_DIR target \u2192 true", () => {
+    expect(piDetected({ env: { [ENV_KEY]: path.join(tmpDir, "ext") }, which: none, home: tmpDir })).toBe(true);
+  });
+
+  test("`pi` on PATH \u2192 true", () => {
+    expect(piDetected({ env: {}, which: cmd => (cmd === "pi" ? "/bin/pi" : null), home: tmpDir })).toBe(true);
+  });
+
+  test("a home containing .pi/agent \u2192 true", () => {
+    fs.mkdirSync(path.join(tmpDir, ".pi", "agent"), { recursive: true });
+    expect(piDetected({ env: {}, which: none, home: tmpDir })).toBe(true);
+  });
+
+  test("PI_CODING_AGENT_DIR naming an existing dir \u2192 true; a missing one \u2192 false", () => {
+    const agentDir = path.join(tmpDir, "agent");
+    expect(piDetected({ env: { [AGENT_DIR_KEY]: agentDir }, which: none, home: tmpDir })).toBe(false);
+    fs.mkdirSync(agentDir);
+    expect(piDetected({ env: { [AGENT_DIR_KEY]: agentDir }, which: none, home: tmpDir })).toBe(true);
   });
 });
 

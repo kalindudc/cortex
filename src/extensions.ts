@@ -1,7 +1,7 @@
 /**
  * Embedded pi-extension registry — written into
- * `~/.pi/agent/extensions/<harness>/` on `cortex init` (and wiped+rewritten
- * on `cortex reset`).
+ * `<pi agent dir>/extensions/<harness>/` by `cortex agents install` (and
+ * wiped+rewritten by `cortex agents reset`).
  *
  * Why embedded: the cortex binary ships the pi-side glue (the
  * `cortex_update` tool) so coding agents running inside pi can post
@@ -16,12 +16,12 @@
  * Idempotency: `writeExtension()` / `writeAllExtensions()` always
  * overwrite. Extensions are machine-generated; documenting that here is
  * the load-bearing convention. Hand-edits are LOST on the next
- * init/reset.
+ * `cortex agents install|reset`.
  *
  * Multi-extension registry: `EXTENSIONS` maps each extension name to its
  * file manifest. Adding a new extension = add a new entry to `EXTENSIONS`
- * + import its files; init/reset/test pick it up automatically via
- * `listExtensions()`.
+ * + import its files; `cortex agents` and the tests pick it up automatically
+ * via `listExtensions()`.
  */
 
 import fs from "node:fs";
@@ -61,6 +61,21 @@ const SUBDIR: Record<ExtensionName, string> = {
 };
 
 /**
+ * pi's agent dir, mirroring pi's own `getAgentDir()` (config.ts:528-534):
+ * `PI_CODING_AGENT_DIR` (a leading `~` expanded to home) else
+ * `<home>/.pi/agent`. pi loads global extensions from `<agentDir>/extensions`.
+ */
+export function piAgentDir(env: NodeJS.ProcessEnv = process.env, home: string = os.homedir()): string {
+  const override = env.PI_CODING_AGENT_DIR;
+  if (override) {
+    if (override === "~") return home;
+    if (override.startsWith("~/")) return path.join(home, override.slice(2));
+    return override;
+  }
+  return path.join(home, ".pi", "agent");
+}
+
+/**
  * Root install directory for ALL cortex-shipped pi extensions.
  * `CORTEX_PI_EXTENSION_DIR` env var overrides for test isolation — same
  * idiom as `CORTEX_SKILL_DIR` in `src/skills.ts` so the integration test
@@ -70,7 +85,7 @@ const SUBDIR: Record<ExtensionName, string> = {
  * (containing per-extension subdirs).
  */
 export function extensionsRoot(): string {
-  return process.env.CORTEX_PI_EXTENSION_DIR ?? path.join(os.homedir(), ".pi", "agent", "extensions");
+  return process.env.CORTEX_PI_EXTENSION_DIR ?? path.join(piAgentDir(), "extensions");
 }
 
 /**
@@ -78,6 +93,17 @@ export function extensionsRoot(): string {
  */
 export function extensionDir(name: ExtensionName): string {
   return path.join(extensionsRoot(), SUBDIR[name]);
+}
+
+/** Whether this machine runs pi: an explicit CORTEX_PI_EXTENSION_DIR target, `pi` on PATH, or pi's agent dir. */
+export function piDetected(
+  opts: { env?: NodeJS.ProcessEnv; which?: (cmd: string) => string | null; home?: string } = {},
+): boolean {
+  const env = opts.env ?? process.env;
+  if (env.CORTEX_PI_EXTENSION_DIR) return true;
+  const which = opts.which ?? ((cmd: string) => Bun.which(cmd));
+  if (which("pi") !== null) return true;
+  return fs.existsSync(piAgentDir(env, opts.home ?? os.homedir()));
 }
 
 /**
@@ -109,7 +135,7 @@ export async function writeExtension(name: ExtensionName, targetDir: string = ex
 
 /**
  * Write all shipped extensions under their default `extensionDir()`
- * locations. Called by `cortex init` and `cortex reset`.
+ * locations. Called by `cortex agents install|reset`.
  */
 export async function writeAllExtensions(): Promise<void> {
   for (const name of listExtensions()) {

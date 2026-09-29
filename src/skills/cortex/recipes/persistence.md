@@ -25,7 +25,7 @@ Default lane = current repository directory name. Override only when the
 user explicitly names a different lane.
 
 ```bash
-LANE=$(git rev-parse --show-toplevel 2>/dev/null | xargs basename || basename "$PWD")
+LANE=$(cortex memory lane)
 ```
 
 ## 3. Create with a body file

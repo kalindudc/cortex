@@ -11,6 +11,7 @@ API on `127.0.0.1`, and a SQLite WAL store at `~/.config/cortex/cortex.db`.
 ```bash
 pnpm run build                       # compile to bin/cortex
 cortex init                          # create ~/.config/cortex/cortex.db
+cortex agents install                # skills + pi extension (when pi is installed)
 cortex add "ship plan 1" -p 0
 cortex                               # the terminal workspace (starts a headless daemon if none runs)
 cortex ls
@@ -35,7 +36,7 @@ runs against real data would fail while it is up. Both dev commands share the sa
 `pnpm run dev` and the dashboard from `pnpm run serve:dev` talk to the same dev daemon.
 
 ```bash
-pnpm run dev -- init                 # optional: seed the sandbox (lanes, skills) once
+pnpm run dev -- init && pnpm run dev -- agents install  # optional: seed the sandbox (database, skills, pi extension) once
 CORTEX_DEV_HOME=/tmp/cx pnpm run dev # a different sandbox
 CORTEX_DEV_REAL=1 pnpm run dev       # your real config and database (stop the installed daemon first)
 pnpm run dev -- stop                 # stop the sandbox's daemon
@@ -425,7 +426,7 @@ command of this binary, reads included, refuses to run beside it until it stops.
 2. Back up: `cortex backup` with the old binary (or copy the database files while nothing runs).
 3. Deploy the new binary (`pnpm run deploy` copies `bin/cortex` to `~/bin/cortex`).
 4. Start it: `cortex serve`, or just `cortex` (headless). `cortex doctor` shows the state; run `cortex init` if
-   it lists pending migrations.
+   it lists pending migrations, and `cortex agents install` to refresh the agent skills and pi extension.
 
 To roll back, stop the new daemon, back up, and redeploy the previous binary. Never run an old binary's
 commands while a new daemon owns the database: old binaries write the file directly, bypassing it.
@@ -454,7 +455,9 @@ commands while a new daemon owns the database: old binaries write the file direc
 
 | Command | Purpose |
 | --- | --- |
-| `init` | initialize the SQLite database |
+| `init` | initialize or migrate the SQLite database (datastore only; agent tools: `agents install`) |
+| `agents install [--json]` | write (overwrite) the agent skills under `~/.agents/skills`, plus the pi extension when pi is installed (`pi` on PATH or pi's agent dir); otherwise reports the skip |
+| `agents reset [--force] [--json]` | wipe the cortex skill and pi extension dirs, then reinstall (drops stale files and hand-edits). Requires typing `RESET` unless `--force`; `--json` needs `--force` |
 | `add <title> [-l lane] [-p int] [-b body]` | create a task (auto-creates `lane` if missing) |
 | `ls [-l lane] [-s status] [--json]` | list tasks, grouped by lane, sorted by id (`s` = `open\|review\|blocked\|done`) |
 | `show <id> [--json]` | show one task with its updates |
@@ -469,10 +472,32 @@ commands while a new daemon owns the database: old binaries write the file direc
 | `tui [id] [--heading slug] [--profile name] [--theme name]` | open the terminal workspace (plain `cortex` does the same in an interactive terminal); starts a headless daemon over the private socket if none runs, and leaves it running on quit |
 | `serve [-p port] [--foreground] [--open\|--no-open] [--no-web] [--host name]` | run the daemon for this database (`CORTEX_DB`): a private socket every command goes through, plus the dashboard at `/` on `127.0.0.1` (`--no-web`: socket only). Headless unless `--open`. Prints `http://cortex.localhost:<port>` once ready (server still binds `127.0.0.1`); a second `serve` attaches to it. |
 | `open` | open this database's dashboard in your default browser (enabling it on a headless daemon); never starts one |
-| `reset` | stop this database's daemon (if running), wipe the DB + WAL sidecars (keeping the `<db>.owner.lock` file), then re-init an empty DB. Requires typing `RESET` to confirm. |
+| `reset` | stop this database's daemon (if running), wipe the DB + WAL sidecars (keeping the `<db>.owner.lock` file), then re-init an empty DB. Requires typing `RESET` to confirm. Datastore only (agent tools: `agents reset`). |
 | `stop` | stop the daemon serving this database; daemons of other databases keep running |
 | `backup [-o path] [--rotate N]` | export cortex's row data as a single JSON document inside a `.zip` (default `~/.config/cortex/backups/cortex-<host>-<ISO>.zip`). Safe to run while the daemon is up. Refuses a missing database (it never creates one, writes no archive and rotates nothing). |
 | `restore <file> [--dry-run]` | re-insert backup rows into the live DB. Lanes/tags merge by name (existing wins). Tasks try to keep their original id; on collision they get the next available id. Updates, task_tags, and notifications follow the task-id remap. Refuses while the daemon is running — run `cortex stop` first. `--dry-run` only reads, even beside a running daemon, and never creates a missing DB. |
+
+## Agent memory
+
+Cortex tasks double as memory streams that coding agents carry across sessions: the body is the current state
+(Goal, State, Decisions, Next, Files, `Verified:`), updates are breadcrumbs, the lane is the repo
+(`cortex memory lane`); status is only the user's tracking, so `done` streams stay searchable memory. The protocol
+agents follow lives in the cortex skill
+(`recipes/memory.md`, installed by `cortex agents install`).
+
+- Automatic pi context: the pi extension adds a primer of the repo's streams to the system prompt once per
+  session (frozen, so the prompt cache survives; refetched only after compaction or `/memory refresh`) and
+  injects only never-shown relevant streams as hidden messages. A prompt costs at most one
+  `cortex memory context` spawn, and none after the first prompt when it has fewer than 2 content words.
+- `cortex_recall`: `"@<id>"` loads one stream with its staleness report; keywords search this repo's lane.
+  At most 3 calls per request, and a repeated query short-circuits.
+- `/memory` in pi shows the lane, the primer, the injected hits, spawn count, latency, injected characters and
+  the last error.
+- Staleness is measured from the stream's last body edit: cited files changed or missing since then, or a sync
+  older than 30 days, mark it stale before an agent relies on it. Status flips and updates never count as a sync.
+
+Without pi, agents run `cortex memory context --query="<ask>"` once and `cortex memory show <id>` for the stream
+they continue.
 
 ## Lanes
 
@@ -522,7 +547,7 @@ For every flag that takes a fixed enum (`--status`, `--severity`), `cortex
 - Updates, task_tags, and notifications reference the remapped task ids automatically.
 - Data-only restores are backwards-compatible with v1 backups: unknown row columns are ignored, missing optional tables are treated as empty, and missing nullable/defaulted destination columns are filled by the current schema defaults.
 
-Restoring the same backup twice will duplicate tasks (each with a different id). Use `cortex restore <file> --dry-run` to preview the counts before committing. Restore refuses while `cortex serve` is running; stop the daemon first so the CLI is the only writer (`--dry-run` works beside it: it only reads). Skills, extensions, and daemon/lock files are NOT backed up — skills and extensions are regenerated by `cortex init`.
+Restoring the same backup twice will duplicate tasks (each with a different id). Use `cortex restore <file> --dry-run` to preview the counts before committing. Restore refuses while `cortex serve` is running; stop the daemon first so the CLI is the only writer (`--dry-run` works beside it: it only reads). Skills, extensions, and daemon/lock files are NOT backed up — skills and extensions are reinstalled by `cortex agents install`.
 
 ## API surface
 

@@ -17,8 +17,8 @@
 #
 # XDG_CONFIG_HOME alone is NOT treated as an opt-out: many setups export it
 # globally (often as ~/.config), which would silently point dev at real data.
-# The skill and pi-extension directories are sandboxed too, so `init` from dev
-# never rewrites ~/.agents/skills or ~/.pi/agent/extensions.
+# The skill and pi-extension directories are sandboxed too, so `agents install`
+# from dev never rewrites ~/.agents/skills or ~/.pi/agent/extensions.
 
 dev_env_setup() {
   local root="$1"

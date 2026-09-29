@@ -277,14 +277,17 @@ function streamLine(row: MemoryStreamRow, now: number): string {
   return `- [${row.id}] ${row.status} \u00b7 ${row.lane} \u00b7 synced ${isoDay(row.synced)}${old} \u00b7 ${title}`;
 }
 
-/** Hits for a query, or "" when there are none. */
+/** Hits for a query, or "" when there are none: the header names the query, each hit its own matched terms. */
 export function renderHits(terms: readonly string[], hits: readonly MemoryHit[], now: number = Date.now()): string {
   if (hits.length === 0) return "";
   const lines = [
     MEMORY_PREAMBLE,
-    `Possibly relevant cortex memory (matched: ${terms.join(", ")}). Load one with \`cortex memory show <id>\` before relying on it.`,
+    `Possibly relevant cortex memory (query: ${terms.join(", ")}). Load one with \`cortex memory show <id>\` before relying on it.`,
   ];
-  for (const hit of hits) lines.push(`${streamLine(hit, now)} \u2014 ${hit.snippet.replaceAll("\n", " ")}`);
+  for (const hit of hits) {
+    const matched = `(${hit.matched.length}/${terms.length}: ${hit.matched.join(", ")})`;
+    lines.push(`${streamLine(hit, now)} ${matched} \u2014 ${hit.snippet.replaceAll("\n", " ")}`);
+  }
   return lines.join("\n");
 }
 

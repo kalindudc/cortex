@@ -102,6 +102,8 @@ describe("cortex memory (compiled binary)", () => {
     expect(ctx.primer).toContain(`[${streamId}]`);
     expect(ctx.primer).not.toContain("Archived");
     expect(ctx.hitsText).toContain(`[${streamId}]`);
+    expect(ctx.hitsText).toContain("(query: mouse, wheel)");
+    expect(ctx.hitsText).toContain("(2/2: mouse, wheel)");
     const hitsOnly = await json<{ primer: string; hits: unknown[] }>([
       "memory",
       "context",

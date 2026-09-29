@@ -2312,7 +2312,8 @@ export class Store {
    * section), so incidental matches spread across a long body do not (a
    * wrong memory is worse than none). A task scores as its best qualifying
    * section under BM25 (title > tags > text); `matched` and the snippet come
-   * from that section. Ensures and reconciles the index in the same
+   * from that section (the snippet from its text, or from the title when only
+   * the title/tags matched). Ensures and reconciles the index in the same
    * transaction, so a hit always reflects the current task.
    */
   searchMemory(
@@ -2360,15 +2361,22 @@ export class Store {
         seen.add(row.task_id);
         best.push({ rowid: row.rowid, taskId: row.task_id, rank: row.rank });
       }
-      const snippetOf = this.db.query<{ snippet: string }, [string, number]>(
-        `SELECT snippet(_memory_sections, -1, '**', '**', '\u2026', ${MEMORY_LIMITS.snippetTokens}) AS snippet
-           FROM _memory_sections WHERE _memory_sections MATCH ? AND rowid = ?;`,
-      );
+      // The snippet comes from the section TEXT (column 3) when it matched, else
+      // from the title (column 1): a tags-column snippet is just the tag names.
+      const snippetOf = (column: number) =>
+        this.db.query<{ snippet: string }, [string, number]>(
+          `SELECT snippet(_memory_sections, ${column}, '**', '**', '\u2026', ${MEMORY_LIMITS.snippetTokens}) AS snippet
+             FROM _memory_sections WHERE _memory_sections MATCH ? AND rowid = ?;`,
+        );
+      const textSnippet = snippetOf(3);
+      const titleSnippet = snippetOf(1);
+      const textMatch = `text : (${match})`;
       return best.flatMap(hit => {
         const stream = this.streamRow(hit.taskId);
         if (!stream) return [];
         const matched = terms.filter((_, i) => sets[i]?.has(hit.rowid));
-        const snippet = snippetOf.get(match, hit.rowid)?.snippet ?? "";
+        const snippet =
+          textSnippet.get(textMatch, hit.rowid)?.snippet ?? titleSnippet.get(match, hit.rowid)?.snippet ?? "";
         return [{ ...stream, score: Number((-hit.rank).toPrecision(4)), matched, snippet }];
       });
     })();

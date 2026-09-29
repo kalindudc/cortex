@@ -34,6 +34,7 @@ const subCommands = {
   backup: () => import("./commands/backup.ts").then(m => m.default),
   restore: () => import("./commands/restore.ts").then(m => m.default),
   memory: () => import("./commands/memory.ts").then(m => m.default),
+  agents: () => import("./commands/agents.ts").then(m => m.default),
 };
 
 const main = defineCommand({

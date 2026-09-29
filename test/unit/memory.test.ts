@@ -279,13 +279,16 @@ describe("rendering", () => {
     expect(text).toContain(`(+${8 - MEMORY_LIMITS.primerStreams} more: cortex ls -l l)`);
   });
 
-  test("renderHits is empty without hits and names the matched terms and snippets", () => {
+  test("renderHits is empty without hits; the header names the query, each hit its own matched terms (validation F2)", () => {
     expect(renderHits(["mouse"], [], now)).toBe("");
     const hit: MemoryHit = { ...row({ id: 4, synced: now }), score: 1, matched: ["mouse"], snippet: "the **mouse**" };
     const text = renderHits(["mouse", "wheel"], [hit], now);
     expect(text.split("\n")[0]).toBe(MEMORY_PREAMBLE);
-    expect(text).toContain("matched: mouse, wheel");
-    expect(text).toContain("- [4] open \u00b7 l \u00b7 synced 2026-09-29 \u00b7 a stream \u2014 the **mouse**");
+    expect(text).toContain("(query: mouse, wheel)");
+    expect(text).not.toContain("matched: mouse, wheel");
+    expect(text).toContain(
+      "- [4] open \u00b7 l \u00b7 synced 2026-09-29 \u00b7 a stream (1/2: mouse) \u2014 the **mouse**",
+    );
   });
 
   test("renderStream truncates long bodies and caps the trail", () => {

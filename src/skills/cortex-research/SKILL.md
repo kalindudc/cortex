@@ -47,7 +47,7 @@ The analysis lives as the BODY of a cortex task. Three cortex specifics apply.
 
 3. DEFAULT LANE = current repository directory name:
     ```bash
-    LANE=$(git rev-parse --show-toplevel 2>/dev/null | xargs basename || basename "$PWD")
+    LANE=$(cortex memory lane)
     ```
     Override only when the user explicitly names a different lane.
 

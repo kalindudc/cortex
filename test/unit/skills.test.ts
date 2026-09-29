@@ -48,8 +48,11 @@ describe("cortex base skill — Plan 3 leaf files", () => {
     "cli/add.md",
     "cli/update.md",
     "cli/serve.md",
+    "cli/memory.md",
+    "cli/agents.md",
     "recipes/session-id.md",
     "recipes/persistence.md",
+    "recipes/memory.md",
   ];
 
   test("every cli/*.md and recipes/*.md exists and > 200 bytes", async () => {

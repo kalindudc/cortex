@@ -11,11 +11,10 @@ active harness session, and the resulting updates are **resumable** — the
 human supervising you can run `cortex resume <task-id>` and re-open your
 exact session.
 
-For pi: `cortex init` writes the bundled extension to
-`~/.pi/agent/extensions/cortex/cortex.ts`. Enable it once via `pi config`
-(per pi's README — pi only loads global extensions when explicitly
-enabled). After enabling, `cortex_update` shows up in your "Available
-tools" list.
+For pi: `cortex agents install` writes the bundled extension to
+`~/.pi/agent/extensions/cortex/index.ts`; pi discovers it on the next start
+(no enable step). `cortex_update` and `cortex_recall` then show up in your
+"Available tools" list.
 
 ```ts
 // Inside pi, your tool call looks like:

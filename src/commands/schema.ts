@@ -14,7 +14,11 @@ const STATUSES = ["draft", "open", "review", "blocked", "done"] as const;
 const SEVERITIES = ["progress", "review", "blocked"] as const;
 
 const COMMANDS: { name: string; summary: string }[] = [
-  { name: "init", summary: "initialize the database + write skills/extension" },
+  { name: "init", summary: "initialize or migrate the database (agent tools: `cortex agents install`)" },
+  {
+    name: "agents",
+    summary: "agents install|reset: the skills + pi extension (when pi is present); reset wipes first",
+  },
   { name: "add", summary: "create a task (--json, --as, --body-file -)" },
   { name: "ls", summary: "list tasks (--json omits body; --full includes it)" },
   { name: "show", summary: "show one task + its updates (--json)" },

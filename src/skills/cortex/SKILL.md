@@ -1,6 +1,6 @@
 ---
 name: cortex
-description: Personal task tracker for engineers supervising parallel AI coding agents. Use to add tasks, post updates with a required session-id author tag, change task status (draft/open/review/blocked/done), or bootstrap (init) / tear down (reset) cortex on a fresh repo.
+description: Personal task tracker for engineers supervising parallel AI coding agents. Use to add tasks, post updates with a required session-id author tag, change task status (draft/open/review/blocked/done), or install (agents install) / tear down (reset) cortex on a fresh repo.
 ---
 
 # Cortex
@@ -22,16 +22,18 @@ Humans usually work in the terminal workspace (TUI): plain `cortex` in an intera
 
 | Command | Description | Docs |
 |---|---|---|
-| `cortex init` | Initialize the SQLite DB and (re)write the embedded skill at `~/.agents/skills/cortex/`. | [init.md](cli/init.md) |
+| `cortex init` | Initialize or migrate the SQLite DB (agent tools: `cortex agents install`). | [init.md](cli/init.md) |
+| `cortex agents install\|reset` | Write the embedded skills, plus the pi extension when pi is present; `reset` wipes them first. | [agents.md](cli/agents.md) |
 | `cortex add <title>` | Create a new task. | [add.md](cli/add.md) |
 | `cortex edit <id>` | Edit a task's title, body, or priority. Body edits prefer anchor-based partial replace. | [edit.md](cli/edit.md) |
 | `cortex update <id> -m <msg> --as <id>` | Post an update on a task; optionally flip status. | [cli/update.md](cli/update.md) |
 | `cortex schema` | Print the data model + command grammar (agent orientation, DB-free). | [schema.md](cli/schema.md) |
 | `cortex doctor` | Report version, db path, daemon state, pending migrations, counts (read-only; never starts a daemon). | [doctor.md](cli/doctor.md) |
+| `cortex memory search\|show\|context\|lane` | Agent memory: ranked recall, staleness since the last body sync, breadcrumbs, one-call context. | [memory.md](cli/memory.md) |
 | `cortex tui [id]` | Open the terminal workspace (for humans; needs a TTY). Plain `cortex` in an interactive terminal does the same. | `cortex tui --help` |
 | `cortex serve` | Run this database's daemon (private socket + localhost API/dashboard; headless unless `--open`; `--no-web` for socket only). | [serve.md](cli/serve.md) |
 | `cortex open` | Open this database's dashboard in your default browser (enables it on a headless daemon). | [open.md](cli/open.md) |
-| `cortex reset` | Stop this database's daemon, wipe the DB and regenerate the skill (destructive, requires typing `RESET`). | [reset.md](cli/reset.md) |
+| `cortex reset` | Stop this database's daemon, wipe the DB (destructive, requires typing `RESET`). | [reset.md](cli/reset.md) |
 
 Other commands (`ls`, `show`, `search`, `mv`, `rm`, `lane`, `stop`) follow the same shape — run `cortex <cmd> --help` for argument reference. `cortex stop` stops only the daemon serving the current database.
 
@@ -45,6 +47,12 @@ Every mutating command (`add`, `edit`, `update`, `mv`, `rm`, `tag add|edit|rm`, 
 - **stdin body:** `cortex add --body-file -` (or `--body-file=-`) reads the body from stdin; `cortex edit` supports the same.
 - **One-shot attribution:** `cortex add --as <id>` records the first `created` update so the task is not anonymous (otherwise `add` is anonymous and attribution starts at the first `cortex update`).
 - **Non-interactive `rm`:** `cortex rm --json` refuses to prompt (agents can't answer y/N) — pass `--force`. The human, non-`--json` prompt still works via piped stdin and aborts safely on EOF.
+
+## Memory
+
+Tasks double as memory streams across sessions: the body is the current state, updates are breadcrumbs, the lane is the repo (`cortex memory lane`).
+Under pi, relevant memory is injected automatically and `cortex_recall` loads a stream with its staleness check.
+When to read, trust, write and re-sync memory: [recipes/memory.md](recipes/memory.md).
 
 ## Recipes
 

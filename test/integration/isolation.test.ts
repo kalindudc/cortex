@@ -67,6 +67,8 @@ describe("CLI isolation guard", () => {
     try {
       let r = await runCli({ args: ["init"], env });
       expect(r.code).toBe(0);
+      r = await runCli({ args: ["agents", "install"], env });
+      expect(r.code).toBe(0);
       r = await runCli({ args: ["add", "guard-task"], env });
       expect(r.code).toBe(0);
 
@@ -87,8 +89,8 @@ describe("CLI isolation guard", () => {
       expect(fs.existsSync(tmpDb)).toBe(true);
       expect(fs.statSync(tmpDb).size).toBeGreaterThan(0);
 
-      // init's other installs landed in the pinned dirs too: the pi
-      // extension (unpinned before Task 3 of plan @400) and the skills.
+      // `agents install` landed in the pinned dirs too: the pi extension
+      // (unpinned before Task 3 of plan @400) and the skills.
       const extRoot = env.CORTEX_PI_EXTENSION_DIR ?? "";
       const skillRoot = env.CORTEX_SKILL_DIR ?? "";
       expect(extRoot.startsWith(tmpDir)).toBe(true);

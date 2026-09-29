@@ -1,7 +1,7 @@
 /**
  * Embedded multi-skill registry — written into ~/.agents/skills/{cortex,
- * cortex-planner,cortex-implementer}/ on `cortex init` (and wiped+rewritten
- * on `cortex reset`).
+ * cortex-planner,cortex-implementer,cortex-research}/ by `cortex agents install`
+ * (and wiped+rewritten by `cortex agents reset`).
  *
  * Why embedded: the CLI binary ships everything an agent needs to learn
  * cortex — the base vocabulary skill plus the two methodology skills
@@ -13,12 +13,12 @@
  * Identical idiom to UI_ASSETS in server.ts — same single-binary discipline.
  *
  * Idempotency: writeSkill() / writeAllSkills() always overwrite. Skills are
- * machine-generated; documenting that in cli/init.md and cli/reset.md is
- * the load-bearing convention. Hand-edits are LOST on the next init/reset.
+ * machine-generated; documenting that in cli/agents.md is the load-bearing
+ * convention. Hand-edits are LOST on the next `cortex agents install|reset`.
  *
  * Multi-skill registry (Plan 4): SKILLS maps each skill name to its file
  * manifest. Adding a new skill = add a new entry to SKILLS + import its
- * files; init/reset/test pick it up automatically via listSkills().
+ * files; `cortex agents` and the tests pick it up automatically via listSkills().
  */
 
 import fs from "node:fs";
@@ -37,8 +37,11 @@ import cortexCliOpenPath from "./skills/cortex/cli/open.md" with { type: "file" 
 import cortexCliTagPath from "./skills/cortex/cli/tag.md" with { type: "file" };
 import cortexCliSchemaPath from "./skills/cortex/cli/schema.md" with { type: "file" };
 import cortexCliDoctorPath from "./skills/cortex/cli/doctor.md" with { type: "file" };
+import cortexCliMemoryPath from "./skills/cortex/cli/memory.md" with { type: "file" };
+import cortexCliAgentsPath from "./skills/cortex/cli/agents.md" with { type: "file" };
 import cortexRecipeSession from "./skills/cortex/recipes/session-id.md" with { type: "file" };
 import cortexRecipePersistence from "./skills/cortex/recipes/persistence.md" with { type: "file" };
+import cortexRecipeMemory from "./skills/cortex/recipes/memory.md" with { type: "file" };
 
 // --- Methodology skills (Plan 4) ------------------------------------------
 import plannerSkillMd from "./skills/cortex-planner/SKILL.md" with { type: "file" };
@@ -64,8 +67,11 @@ const SKILLS: Record<SkillName, Manifest> = {
     "cli/tag.md": cortexCliTagPath,
     "cli/schema.md": cortexCliSchemaPath,
     "cli/doctor.md": cortexCliDoctorPath,
+    "cli/memory.md": cortexCliMemoryPath,
+    "cli/agents.md": cortexCliAgentsPath,
     "recipes/session-id.md": cortexRecipeSession,
     "recipes/persistence.md": cortexRecipePersistence,
+    "recipes/memory.md": cortexRecipeMemory,
   },
   "cortex-planner": {
     "SKILL.md": plannerSkillMd,
@@ -126,7 +132,7 @@ export async function writeSkill(name: SkillName, targetDir: string = skillDir(n
 
 /**
  * Write all shipped skills under their default skillDir() locations.
- * Called by `cortex init` and `cortex reset`.
+ * Called by `cortex agents install|reset`.
  */
 export async function writeAllSkills(): Promise<void> {
   for (const name of listSkills()) {

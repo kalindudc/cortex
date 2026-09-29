@@ -1,8 +1,8 @@
 # `cortex reset`
 
-Stop the daemon serving THIS database (if any), wipe the SQLite database and its WAL sidecars, regenerate the embedded skills and pi extension, and re-initialize an empty DB with the default `now` lane.
+Stop the daemon serving THIS database (if any), wipe the SQLite database and its WAL sidecars, and re-initialize an empty DB with the default `now` lane. Datastore only: agent skills and the pi extension belong to [`cortex agents reset`](agents.md).
 
-This is **destructive and irreversible**. All tasks, updates, lane history, and any hand-edited skill files are gone.
+This is **destructive and irreversible**. All tasks, updates, and lane history are gone.
 
 ## Usage
 
@@ -23,16 +23,13 @@ This will:
   • delete /Users/you/.config/cortex/cortex.db
   • delete /Users/you/.config/cortex/cortex.db-wal, ...-shm (SQLite WAL sidecars, if present)
   • remove stale daemon metadata/socket for this database, if present (keeping /Users/you/.config/cortex/cortex.db.owner.lock)
-  • wipe and regenerate 4 skill dir(s) under /Users/you/.agents/skills
-  • wipe and regenerate 1 pi extension(s) under /Users/you/.pi/agent/extensions
   • re-initialize an empty database with the default 'now' lane
 Type RESET to confirm: RESET
 ✓ stopped daemon
 ✓ wiped database files
 ✓ re-initialized /Users/you/.config/cortex/cortex.db
-✓ regenerated 4 skill(s)
-✓ regenerated 1 extension(s)
 ✓ reset complete
+→ agent skills and the pi extension are untouched; `cortex agents reset` resets them
 ```
 
 ## How it shuts things down
@@ -45,7 +42,7 @@ Type RESET to confirm: RESET
 
 ## Pitfalls
 
-- **The skill directory at `~/.agents/skills/cortex/` is wiped and regenerated** from the binary's embedded copy. Any hand-edits to `SKILL.md`, `cli/*.md`, or `recipes/*.md` are **LOST**. Edit the cortex source repo and rebuild if you need permanent changes.
+- **Agent skills and the pi extension are NOT touched.** `reset` wipes only the datastore; [`cortex agents reset`](agents.md) wipes and reinstalls the agent tools (hand-edits there are LOST).
 - **`reset` is NOT how you pick up schema changes.** Older cortex DBs were created with a 200- or 1024-char summary `CHECK`; the current schema allows 4096. Schema changes ship as migrations: `cortex doctor` lists them as pending and [`cortex init`](init.md) applies them safely (backup, rebuild, validate) with all data kept. Reaching for `reset` instead throws away **every task and update** for nothing.
 - The `RESET` confirmation is **case-sensitive and must match exactly**. `reset`, `Reset`, or whitespace around it all abort.
 - A daemon started by an OLDER cortex binary (it wrote `cortex.pid`/`cortex.url`) cannot be verified, so reset refuses before prompting. Stop it yourself (Ctrl+C in its terminal), then reset.

@@ -1,28 +1,30 @@
 # `cortex init`
 
-Initialize the cortex SQLite database under `~/.config/cortex/cortex.db`, create the default `now` lane, and (re)write the embedded skill files at `~/.agents/skills/cortex/`.
+Initialize (or migrate) the cortex SQLite database under `~/.config/cortex/cortex.db` and create the default `now` lane. `init` touches ONLY the datastore: agent skills and the pi extension are installed by [`cortex agents install`](agents.md).
 
 ## Usage
 
 ```bash
 cortex init
+cortex agents install   # skills + pi extension (when pi is installed)
 ```
 
 ## Args
 
-None. `init` is idempotent on a healthy DB but is destructive to the on-disk skill (see Pitfalls).
+None. `init` is idempotent: a second run keeps every task and applies only pending migrations.
 
 ## Example
 
 ```bash
 $ cortex init
 ✓ initialized /Users/you/.config/cortex/cortex.db
+→ agent skills and the pi extension: run `cortex agents install`
 ```
 
-After this, both the CLI is ready to use and any AI agent reading from `~/.agents/skills/cortex/` will see the latest cortex skill.
+After this the CLI is ready to use. Run `cortex agents install` so AI agents reading `~/.agents/skills/` see the latest cortex skills.
 
 ## Pitfalls
 
-- **The skill at `~/.agents/skills/cortex/` is machine-generated.** `cortex init` writes the skill files embedded in the binary. Re-running `cortex init` (or upgrading the cortex binary and running `init` again) **OVERWRITES the skill directory**. Any hand-edits to `~/.agents/skills/cortex/SKILL.md`, `cli/*.md`, or `recipes/*.md` are **LOST**. To customize the skill, edit it in the cortex source repo and rebuild the binary.
+- `init` no longer writes skills or the pi extension. Upgrading the binary and re-running `init` does NOT refresh them: run [`cortex agents install`](agents.md) (or `cortex agents reset` to also drop stale files).
 - `init` IS the migration path for an existing DB. When the schema changes (e.g. the summary `CHECK` cap went 200 → 1024 → 4096), every command warns `database migrations pending (...)`, [`cortex doctor`](doctor.md) lists them, and `init` applies them safely: it backs the DB up (`VACUUM INTO`), rebuilds the affected table, validates row counts + integrity, and only then drops the old table. Data is kept; `✓ migration applied: <name>` is printed per migration. Do NOT use [`cortex reset`](reset.md) for this — it wipes everything.
 - `init` does NOT start the daemon. Run [`cortex serve`](serve.md) afterwards to bring up the dashboard.
