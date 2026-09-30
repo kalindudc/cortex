@@ -1,5 +1,5 @@
-// Database ownership (plan @400 N2/N3): at most one cooperating cortex
-// process owns a canonical database at a time.
+// Database ownership: at most one cooperating cortex process owns a
+// canonical database at a time.
 //
 // - The lease is an OS advisory `flock(2)` (LOCK_EX|LOCK_NB) on a persistent
 //   sidecar beside the canonical database (`ownerLockPath`), NOT a SQLite

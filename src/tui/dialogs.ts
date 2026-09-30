@@ -1,5 +1,5 @@
-// Dialogs (plan @400 N17/N19/N20): keyboard-complete overlays that own input
-// and hand focus back when they close.
+// Dialogs: keyboard-complete overlays that own input and hand focus back when
+// they close.
 //
 // - ONE Dialog component serves three kinds. Lists: the configured motions
 //   (j/k, arrows, g/G, half pages) move, Enter (or Space) picks (the pick

@@ -99,7 +99,6 @@ describe("api: legacy methods keep their routes and bodies", () => {
     ["backup(opts)", a => a.backup({ rotate: 2 }), "POST", "/api/backup", { rotate: 2 }],
     ["addTask", a => a.addTask({ title: "t", lane: "now" }), "POST", "/api/tasks", { title: "t", lane: "now" }],
     ["editTask", a => a.editTask(3, { title: "x" }), "PATCH", "/api/tasks/3", { title: "x" }],
-    ["setStat", a => a.setStat(3, "done"), "PATCH", "/api/tasks/3/status", { status: "done" }],
     ["moveLane", a => a.moveLane(3, "later"), "PATCH", "/api/tasks/3/lane", { lane: "later" }],
     ["delTask", a => a.delTask(3), "DELETE", "/api/tasks/3", null],
     [
@@ -128,7 +127,6 @@ describe("api: legacy methods keep their routes and bodies", () => {
     ["clearNotifs", a => a.clearNotifs(), "DELETE", "/api/notifications", null],
     ["health", a => a.health(), "GET", "/api/health", null],
     ["me", a => a.me(), "GET", "/api/me", null],
-    ["task", a => a.task(5), "GET", "/api/tasks/5", null],
     ["workspace", a => a.workspace(), "GET", "/api/workspace", null],
     ["taskState", a => a.taskState(5), "GET", "/api/tasks/5/state", null],
     ["laneState", a => a.laneState("a b"), "GET", "/api/lanes/a%20b/state", null],

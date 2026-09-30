@@ -1,6 +1,6 @@
 /**
  * cortex pi extension — the memory footer status and the `/memory` panel
- * (embedded asset, plan @423).
+ * (embedded asset).
  *
  * Installed by `cortex agents install` beside the extension's `index.ts`
  * under this same name, so pi.ts's `./memory-view.ts` import resolves both

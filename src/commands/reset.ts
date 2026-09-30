@@ -2,7 +2,7 @@ import { defineCommand } from "citty";
 import readline from "node:readline";
 import fs from "node:fs";
 import type { DaemonIdentity } from "../contracts.ts";
-import { assertNoLegacyDaemon, claimOrAttach, DaemonError, discoverDaemon, stopDaemon } from "../daemon.ts";
+import { claimOrAttach, DaemonError, discoverDaemon, stopDaemon } from "../daemon.ts";
 import { canonicalDatabasePath } from "../ownership.ts";
 import { Store } from "../store.ts";
 import { dbPath, ensureConfigDir, ownerLockPath } from "../paths.ts";
@@ -28,7 +28,7 @@ function fail(err: unknown): never {
 }
 
 /**
- * `cortex reset` — wipe THIS database and re-initialize it (plan @400 N5/N6).
+ * `cortex reset` — wipe THIS database and re-initialize it.
  *
  * Nothing is held while the user types the confirmation. Afterwards the
  * verified daemon serving this database (found again, instance-bound) is
@@ -38,8 +38,7 @@ function fail(err: unknown): never {
  * canonical database and its WAL sidecars), never the persistent owner lock
  * file (a new inode would admit a second owner); stale daemon metadata and
  * sockets are recovered only by the lease holder. Daemons of other
- * databases, and a daemon of an older cortex (which cannot be verified, so
- * it is refused rather than signalled), are never touched.
+ * databases are never touched.
  *
  * Datastore only: agent skills/extensions are untouched (`cortex agents install|reset`).
  */
@@ -56,7 +55,6 @@ export default defineCommand({
     try {
       canonical = canonicalDatabasePath(db);
       daemon = await discoverDaemon(db);
-      await assertNoLegacyDaemon();
     } catch (err) {
       fail(err);
     }

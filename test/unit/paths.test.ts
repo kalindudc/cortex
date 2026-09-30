@@ -3,8 +3,6 @@ import * as paths from "../../src/paths.ts";
 import {
   configDir,
   dbPath,
-  pidPath,
-  urlPath,
   ensureConfigDir,
   runtimeDir,
   ensureRuntimeDir,
@@ -93,16 +91,6 @@ describe("paths", () => {
     process.env.CORTEX_DB = override;
     expect(dbPath()).toBe(override);
     expect(dbPath()).not.toBe(path.join(configDir(), "cortex.db"));
-  });
-
-  test("pidPath() resolves under configDir()", () => {
-    expect(pidPath()).toBe(path.join(tmpDir, "cortex", "cortex.pid"));
-    expect(pidPath()).toBe(path.join(configDir(), "cortex.pid"));
-  });
-
-  test("urlPath() resolves under configDir()", () => {
-    expect(urlPath()).toBe(path.join(tmpDir, "cortex", "cortex.url"));
-    expect(urlPath()).toBe(path.join(configDir(), "cortex.url"));
   });
 
   test("the pid-file daemon helpers are gone: nothing reads a pid to signal or route (plan @400 N4-N6)", () => {
@@ -269,13 +257,13 @@ describe("paths: runtime dir, daemon socket, metadata and owner lock", () => {
     expect(() => daemonSocketPath("/data/cortex.db")).toThrow(/AF_UNIX/);
   });
 
-  test("owner lock and daemon metadata sit beside the canonical DB, distinct from SQLite and legacy daemon files", () => {
+  test("owner lock and daemon metadata sit beside the canonical DB, distinct from the SQLite files", () => {
     const db = "/data/cortex.db";
     const lock = ownerLockPath(db);
     const meta = daemonMetadataPath(db);
     expect(path.dirname(lock)).toBe("/data");
     expect(path.dirname(meta)).toBe("/data");
-    const others = [db, `${db}-wal`, `${db}-shm`, `${db}-journal`, pidPath(), urlPath()];
+    const others = [db, `${db}-wal`, `${db}-shm`, `${db}-journal`];
     for (const p of [lock, meta]) expect(others).not.toContain(p);
     expect(lock).not.toBe(meta);
   });

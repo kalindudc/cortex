@@ -27,8 +27,6 @@ import {
 //   - a transient owner (another offline command) is waited for, not failed;
 //   - a verified daemon: commands send their requests to it, so its SSE
 //     subscribers see CLI writes;
-//   - a healthy legacy (pre-identity) daemon blocks commands with a restart
-//     instruction even though the new lock is free;
 //   - `doctor` reports without starting a daemon or taking the lease;
 //   - prompts and launched programs (pi, fzf) never run inside a lease;
 //   - `reset` stops exactly this database's daemon and keeps the lock file.
@@ -255,42 +253,6 @@ describe("a verified daemon serves every command", () => {
       expect(isRunning(daemon)).toBe(true);
     } finally {
       stream.close();
-    }
-  }, 30_000);
-
-  test("a healthy legacy daemon blocks commands with a restart instruction; its pid is never signalled", async () => {
-    const { tmpDir, env } = sandbox("route-legacy");
-    const db = env.CORTEX_DB ?? "";
-    await ok(env, "init");
-    await ok(env, "add", "before the legacy daemon");
-    const foreign = spawnForeignCortexServe();
-    const legacy = Bun.serve({
-      port: 0,
-      hostname: "127.0.0.1",
-      // An old binary's daemon: answers everything, never with an identity.
-      fetch: () => Response.json({ ok: true, version: "0.1.0" }),
-    });
-    try {
-      fs.writeFileSync(path.join(tmpDir, "cortex", "cortex.pid"), String(foreign.proc.pid));
-      fs.writeFileSync(path.join(tmpDir, "cortex", "cortex.url"), `http://127.0.0.1:${legacy.port}`);
-      expect(leaseIsFree(db)).toBe(true);
-
-      for (const args of [["add", "must not land"], ["ls"]]) {
-        const r = await runBounded(args, env);
-        expect(r.code, args.join(" ")).toBe(1);
-        expect(r.stderr).toContain("older cortex binary");
-        expect(r.stderr).toMatch(/stop it first/);
-      }
-      const asJson = await runBounded(["add", "must not land", "--json"], env);
-      expect(asJson.code).toBe(1);
-      expect((JSON.parse(asJson.stdout) as { error: { message: string } }).error.message).toContain(
-        "older cortex binary",
-      );
-      expect(taskTitles(db)).toEqual(["before the legacy daemon"]);
-      expect(leaseIsFree(db)).toBe(true);
-      expect(isRunning(foreign)).toBe(true);
-    } finally {
-      await legacy.stop(true);
     }
   }, 30_000);
 });

@@ -45,4 +45,3 @@ Type RESET to confirm: RESET
 - **Agent skills and the pi extension are NOT touched.** `reset` wipes only the datastore; [`cortex agents reset`](agents.md) wipes and reinstalls the agent tools (hand-edits there are LOST).
 - **`reset` is NOT how you pick up schema changes.** Older cortex DBs were created with a 200- or 1024-char summary `CHECK`; the current schema allows 4096. Schema changes ship as migrations: `cortex doctor` lists them as pending and [`cortex init`](init.md) applies them safely (backup, rebuild, validate) with all data kept. Reaching for `reset` instead throws away **every task and update** for nothing.
 - The `RESET` confirmation is **case-sensitive and must match exactly**. `reset`, `Reset`, or whitespace around it all abort.
-- A daemon started by an OLDER cortex binary (it wrote `cortex.pid`/`cortex.url`) cannot be verified, so reset refuses before prompting. Stop it yourself (Ctrl+C in its terminal), then reset.

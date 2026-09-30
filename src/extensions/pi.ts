@@ -98,8 +98,8 @@ const CHECKPOINT_FILES_SHOWN = 10;
 const BREADCRUMB_STREAMS = 2;
 const BREADCRUMB_CHARS = 4000;
 /**
- * A later prompt that asks for earlier or current work (plan @422): recency
- * words, continue/resume/pick up/left off/remember/previous/earlier/again,
+ * A later prompt that asks for earlier or current work: recency words,
+ * continue/resume/pick up/left off/remember/previous/earlier/again,
  * "where/what was|were|did|is", or an `@<id>` reference.
  */
 export const RECALL_CUE =

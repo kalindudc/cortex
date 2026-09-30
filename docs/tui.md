@@ -123,6 +123,10 @@ versioned `editTask` of `src/contracts.ts#VersionedWrites`, guarded by that fiel
 (HTTP 412) keeps both versions; `:keep` writes again against the incoming token, so it can conflict again. A live
 copy of a drafted task only triggers a re-read; a stale read never reverts saved text.
 
+Metadata and catalog commands (`src/tui/commands.ts`) send the version tokens of the scopes they change and no
+mutation id: they never retry an uncertain write, so a receipt could never be replayed. The update composer
+(`src/tui/activity.ts`) is the one idempotent write: re-posting the same text reuses its id, so it posts once.
+
 Why not plain last-writer-wins? An autosave from a draft opened minutes ago would silently erase what an agent wrote
 since. CLI and API writes (`src/store.ts#editTask`) stay last-writer-wins by design; do not drop the TUI's guards
 to simplify.

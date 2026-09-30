@@ -22,8 +22,7 @@ type Server = ReturnType<typeof Bun.serve>;
 /**
  * The daemon itself (`serve --foreground`). Owns the database for its whole
  * lifetime: claim the lease (retrying a transient owner, recovering stale
- * metadata/socket, refusing next to a legacy daemon or an already-published
- * one), open the Store with it, bind the private Unix socket, and only
+ * metadata/socket, refusing an already-published one), open the Store with it, bind the private Unix socket, and only
  * then publish its metadata and print the success line. Shutdown
  * (SIGTERM/SIGINT or the IPC shutdown route) closes the listener, removes
  * its own metadata and socket, closes the Store and releases the lease last.
@@ -125,5 +124,5 @@ export default defineCommand({
 });
 
 function describeEndpoint(identity: DaemonIdentity): string {
-  return identity.endpoint.kind === "unix" ? identity.endpoint.socketPath : identity.endpoint.url;
+  return identity.endpoint.socketPath;
 }

@@ -1,5 +1,5 @@
-// Terminal key model (plan @400 N17/N18): the modes, counts, the leader,
-// single-key bindings and tui.toml key validation.
+// Terminal key model: the modes, counts, the leader, single-key bindings and
+// tui.toml key validation.
 //
 // - NORMAL (default) never inserts text: keys are actions, counts (`5j`),
 //   the leader (`;` + one key) or pass-through keys for the focused pane
@@ -166,7 +166,7 @@ export const DEFAULT_LEADER = ";";
 
 type RawTable<A extends string> = Readonly<Partial<Record<A, readonly string[]>>>;
 
-// The N18 default table. `forward` has no default key: legacy terminals send
+// The default key table. `forward` has no default key: legacy terminals send
 // ctrl+i as Tab. `0` (no count pending) is the fixed line-start key: digits
 // are reserved for counts.
 const DEFAULT_TABLES: {
@@ -697,7 +697,7 @@ export function parseKeys(raw: unknown): { keys: KeyConfig; problems: KeyProblem
   return { keys: { leader, bindings: { normal, leader: leaderTable, insert, visual } }, problems };
 }
 
-/** The N18 defaults. */
+/** The default key bindings. */
 export const DEFAULT_KEYS: KeyConfig = {
   leader: DEFAULT_LEADER_BINDING,
   bindings: {

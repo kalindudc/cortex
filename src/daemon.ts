@@ -1,8 +1,8 @@
-// Database-scoped daemon lifecycle (plan @400 N4-N6): find the ONE daemon
-// serving a canonical database, start it, stop exactly that instance, and
-// the withClient boundary normal CLI operations go through.
+// Database-scoped daemon lifecycle: find the ONE daemon serving a canonical
+// database, start it, stop exactly that instance, and the withClient
+// boundary normal CLI operations go through.
 //
-// Discovery (N4) reads `<db>.daemon.json` beside the canonical database and
+// Discovery reads `<db>.daemon.json` beside the canonical database and
 // asks the endpoint it names who it is (`GET /api/health` carries the
 // daemon's identity):
 //   - a healthy instance matching the metadata            -> attach
@@ -13,12 +13,6 @@
 //   - another instance answering before it has published  -> retry
 // A busy owner that publishes nothing (a daemon still starting, or an offline
 // command, which never publishes) is retried for a bounded time.
-//
-// Before any writable fallback (offline withClient, starting a daemon) the
-// legacy fence runs: a healthy pre-identity daemon found through the old
-// `cortex.pid` + `cortex.url` files blocks with a stop/restart instruction,
-// even when the new lock is free, because old binaries write the database
-// directly and cannot be verified.
 //
 // Nothing here signals a pid taken from metadata. Stop is the IPC-only
 // shutdown route bound to the verified instance, then a wait for the lease.
@@ -43,16 +37,13 @@ import { createClient, endpointSender } from "./client.ts";
 import type { CortexClient, DaemonIdentity, Endpoint } from "./contracts.ts";
 import { canonicalDatabasePath, type OwnerLease, tryAcquireOwnership } from "./ownership.ts";
 import {
-  configDir,
   daemonLogPath,
   daemonMetadataPath,
   daemonSocketName,
   dbPath,
   ensureConfigDir,
   ensureRuntimeDir,
-  pidPath,
   runtimeDir,
-  urlPath,
 } from "./paths.ts";
 
 /** The wire/metadata protocol this cortex speaks. */
@@ -71,8 +62,6 @@ const STOP_TIMEOUT_MS = 10_000;
 const CONTROL_TIMEOUT_MS = 10_000;
 
 export type DaemonErrorCode =
-  /** A healthy pre-identity daemon runs for this config dir; it must be stopped first. */
-  | "legacy-daemon"
   /** The daemon behind the metadata serves (or claims) another database. */
   | "wrong-database"
   /** Something answers at the daemon endpoint but not as a protocol-1 cortex daemon. */
@@ -112,7 +101,7 @@ function unlinkIfPresent(file: string): void {
 }
 
 function describeEndpoint(endpoint: Endpoint): string {
-  return endpoint.kind === "unix" ? endpoint.socketPath : endpoint.url;
+  return endpoint.socketPath;
 }
 
 // ---------- identity and metadata ----------
@@ -122,8 +111,6 @@ function parseEndpoint(value: unknown): Endpoint | null {
   if (value.kind === "unix" && typeof value.socketPath === "string" && value.socketPath !== "") {
     return { kind: "unix", socketPath: value.socketPath };
   }
-  if (value.kind === "http" && typeof value.url === "string" && value.url !== "")
-    return { kind: "http", url: value.url };
   return null;
 }
 
@@ -241,7 +228,7 @@ type Inspection =
   | { kind: "stale"; reason: string }
   | { kind: "unpublished"; reason: string };
 
-/** One N4 classification of the metadata beside `canonical`; throws for a wrong database or protocol. */
+/** One discovery classification of the metadata beside `canonical`; throws for a wrong database or protocol. */
 async function inspect(canonical: string, probeTimeoutMs: number): Promise<Inspection> {
   const read = readDaemonMetadata(canonical);
   if (read.kind === "absent") return { kind: "none" };
@@ -307,16 +294,6 @@ export async function discoverDaemon(
   return found.kind === "attach" ? found.identity : null;
 }
 
-// ---------- the legacy fence ----------
-
-/** A pre-identity daemon recorded by old binaries in `cortex.pid` + `cortex.url` under the config dir. */
-export interface LegacyDaemon {
-  pid: number;
-  url: string;
-}
-
-const LOOPBACK_URL = /^http:\/\/(?:127\.0\.0\.1|localhost)(?::\d{1,5})?\/?$/;
-
 function readIfPresent(file: string): string | null {
   try {
     return fs.readFileSync(file, "utf8");
@@ -324,39 +301,6 @@ function readIfPresent(file: string): string | null {
     if (errnoCode(err) === "ENOENT") return null;
     throw err;
   }
-}
-
-/**
- * The legacy daemon recorded for this config dir, when its loopback URL
- * answers /api/health WITHOUT an identity; null otherwise (no files, nothing
- * answering, or a protocol-1 daemon). The recorded pid is reported, never
- * signalled or even probed.
- */
-export async function findLegacyDaemon(options: { probeTimeoutMs?: number } = {}): Promise<LegacyDaemon | null> {
-  const pidText = readIfPresent(pidPath());
-  const urlText = readIfPresent(urlPath());
-  if (pidText === null || urlText === null) return null;
-  const pid = Number(pidText.trim());
-  const url = urlText.trim().replace(/\/$/, "");
-  if (!Number.isSafeInteger(pid) || pid <= 0 || !LOOPBACK_URL.test(url)) return null;
-  const probe = await probeHealth({ kind: "http", url }, options.probeTimeoutMs ?? PROBE_TIMEOUT_MS);
-  if (!probe.reachable || !isRecord(probe.health) || probe.health.ok !== true) return null;
-  return probe.health.identity === undefined ? { pid, url } : null;
-}
-
-/** One sentence naming a legacy daemon and how to stop it; shared by the fence and `cortex stop`. */
-export function describeLegacyDaemon(legacy: LegacyDaemon): string {
-  return (
-    `a cortex daemon from an older cortex binary is running (pid ${legacy.pid}, ${legacy.url}, recorded in ` +
-    `${configDir()}); it writes the database directly and cannot be verified, so stop it first ` +
-    `(Ctrl-C in its terminal, or end pid ${legacy.pid} after checking it is that cortex), then restart with this cortex`
-  );
-}
-
-/** Throw `legacy-daemon` when findLegacyDaemon finds one: no writable fallback may run beside it. */
-export async function assertNoLegacyDaemon(options: { probeTimeoutMs?: number } = {}): Promise<void> {
-  const legacy = await findLegacyDaemon(options);
-  if (legacy !== null) throw new DaemonError("legacy-daemon", describeLegacyDaemon(legacy));
 }
 
 // ---------- claiming a database ----------
@@ -370,11 +314,11 @@ export interface ClaimOptions {
 }
 
 /**
- * The N4 startup decision for a canonical database: `{ identity }` for its
+ * The startup decision for a canonical database: `{ identity }` for its
  * verified daemon, or `{ lease }` once this process owns the database, with
- * the legacy fence passed and stale metadata/socket already recovered.
+ * stale metadata/socket already recovered.
  * Retries (discovery AND lease acquisition, with backoff) while an owner
- * publishes nothing; throws wrong-database/protocol-mismatch/legacy-daemon at
+ * publishes nothing; throws wrong-database/protocol-mismatch at
  * once and `busy` at the deadline.
  */
 export async function claimOrAttach(canonical: string, options: ClaimOptions = {}): Promise<Claim> {
@@ -385,7 +329,6 @@ export async function claimOrAttach(canonical: string, options: ClaimOptions = {
   for (;;) {
     const found = await inspect(canonical, probeTimeoutMs);
     if (found.kind === "attach") return { identity: found.identity };
-    await assertNoLegacyDaemon({ probeTimeoutMs });
     // An unpublished instance already holds the lease; wait for it to publish.
     if (found.kind !== "unpublished") {
       const lease = tryAcquireOwnership(canonical);

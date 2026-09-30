@@ -1,6 +1,6 @@
 ---
 name: docs
-description: Keep cortex's docs (README.md, docs/*.md, AGENTS.md) true to the code and easy to read. Use before a PR, when `pnpm run docs:check` warns, or to audit one doc claim by claim. Modes: sync (default), audit <doc>.
+description: Keep cortex's docs (README.md, docs/*.md, AGENTS.md) true to the code and easy to read. Use before a PR, when `pnpm run docs:check` warns, or to audit one doc claim by claim.
 ---
 
 # Docs
@@ -39,9 +39,10 @@ wrong thing. Code is the truth; a doc that is not readable is not worth keeping.
 1. Run `pnpm run docs:check --base "$(git merge-base HEAD main)"`.
 2. For each `docs.stale_candidate`, read the doc and `git diff <base> -- <its sources>`.
 3. Edit ONLY the sentences whose facts changed, in the doc's voice. A new design choice gets its "Why not ...?".
-4. For each `comments.plan_ref` in a file the diff touches, replace the ref with the reason in words.
-5. Re-run step 1 until there is no fail and no `docs.stale_candidate`. Never silence a fail by editing the linter;
-   fix the doc or the code.
+4. For each `comments.plan_ref` (a fail), replace the ref with the reason in words.
+5. Re-run step 1 until there is no fail. A `docs.stale_candidate` whose sources changed without changing any fact
+   the doc states (comments, refactors) stays a warning: say so in the report, NEVER edit a doc just to silence it.
+   Never silence a fail by editing the linter; fix the doc or the code.
 
 ## audit <doc>
 

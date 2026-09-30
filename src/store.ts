@@ -114,12 +114,12 @@ export type RelatedTasks = {
 export const SHARED_TAG_BLOCKLIST: ReadonlySet<string> = new Set(["plan", "pr-desc", "research"]);
 
 /**
- * A memory stream row (plan @414): bodiless and token-lean. `synced` is the
- * last time the task's BODY changed (`_body_edits`), falling back to
- * `created`; title, status, lane, tag and update writes never move it.
+ * A memory stream row: bodiless and token-lean. `synced` is the last time
+ * the task's BODY changed (`_body_edits`), falling back to `created`;
+ * title, status, lane, tag and update writes never move it.
  * `activity` is the newest of `created`, the last body change and the
  * newest update that is not a status audit or `created` row: bulk status
- * flips and lane/tag moves are not activity (plan @422).
+ * flips and lane/tag moves are not activity.
  */
 export type MemoryStreamRow = Pick<Task, "id" | "title" | "lane" | "status" | "tags" | "updated"> & {
   synced: number;
@@ -202,9 +202,9 @@ export type TagDelta = { add?: string[]; remove?: string[] };
 
 /**
  * Task creation input. An ordinary create names its title; the opt-in
- * `untitled: true` form (plan @400 N9) titles the task `untitled-<id>` inside
- * the insert's transaction, replacing the old POST-then-rename window. An
- * explicit title is never renamed.
+ * `untitled: true` form titles the task `untitled-<id>` inside the insert's
+ * transaction, replacing the old POST-then-rename window. An explicit title
+ * is never renamed.
  */
 export type AddTaskInput =
   | (AddTaskFields & { title: string; untitled?: false })
@@ -236,7 +236,7 @@ export class DatabaseNotFoundError extends Error {
   }
 }
 
-// ---------- revisions, guards and receipts (plan @400 N7-N9) ----------
+// ---------- revisions, guards and receipts ----------
 //
 // Private side tables, never columns on the public tables: `SELECT t.*`
 // stays clean, legacy `INSERT INTO tasks_new SELECT * FROM tasks` rebuilds
@@ -250,7 +250,8 @@ export class DatabaseNotFoundError extends Error {
 //                        from (database UUID, resource, scope), so reads never
 //                        write.
 //   _mutation_receipts   mutation id -> request digest + JSON result, written
-//                        in the SAME transaction as the mutation's effects.
+//                        in the SAME transaction as the mutation's effects;
+//                        pruned after RECEIPT_RETENTION_MS.
 
 /** Resource families that carry revision tokens. */
 export type ResourceKind = "task" | "lane" | "tag";
@@ -368,7 +369,7 @@ export type StatusOptions = {
   /**
    * Persist the transition notification in the same transaction,
    * only when the status actually changes. Callers set it for attributed agent
-   * writes; a human's own change stays silent (plan @400 N9).
+   * writes; a human's own change stays silent.
    */
   notify?: boolean;
 };
@@ -474,6 +475,9 @@ export type ListTasksFilter = {
 
 const now = (): number => Date.now();
 
+/** How long a mutation receipt can be replayed; older ones are pruned on every Store.open. */
+export const RECEIPT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
 const clampInt = (value: number, min: number, max: number): number =>
   Math.min(max, Math.max(min, Math.trunc(Number.isFinite(value) ? value : min)));
 
@@ -517,11 +521,11 @@ export type StoreOpenOptions = {
 };
 
 /**
- * Ownership for a writable open (plan @400 N2/N6): EVERY file-backed open
- * owns its database. A supplied lease must name the same canonical database
- * and is reused; otherwise the open acquires one for the Store's lifetime,
- * throwing `busy` when another owner holds it. There is no opt-out: code
- * that already holds the lease passes it. flock is per open file
+ * Ownership for a writable open: EVERY file-backed open owns its database.
+ * A supplied lease must name the same canonical database and is reused;
+ * otherwise the open acquires one for the Store's lifetime, throwing `busy`
+ * when another owner holds it. There is no opt-out: code that already holds
+ * the lease passes it. flock is per open file
  * description, so a second open of the same file in ONE process contends too
  * (share the Store, or pass the lease). `:memory:` has no file identity and
  * is exempt. Returns only a lease THIS open acquired. Readers that must not
@@ -573,6 +577,7 @@ export class Store {
       db.run("PRAGMA foreign_keys = ON;");
       const store = new Store(db, path, acquired);
       store.migrate();
+      store.pruneReceipts();
       if (opts.warnMigrations !== false) {
         const pending = store.pendingMigrations();
         if (pending.length > 0) {
@@ -660,7 +665,7 @@ export class Store {
           applied_at INTEGER NOT NULL
         );
       `);
-      // Tag tables (Plan 5). `task_tags` cascades from BOTH parents:
+      // Tag tables. `task_tags` cascades from BOTH parents:
       //   ON DELETE on tasks  -> mirrors `updates` so removeTask drops join rows
       //   ON DELETE on tags   -> `cortex tag rm -f` drops join rows but never tasks
       //   ON UPDATE on tags   -> rename via editTag propagates without manual updates
@@ -703,8 +708,8 @@ export class Store {
         );
       `);
       this.db.run(`CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created DESC);`);
-      // Private concurrency metadata (plan @400 N7/N8). Additive side tables
-      // under the notifications precedent: CREATE TABLE IF NOT EXISTS, no
+      // Private concurrency metadata. Additive side tables under the
+      // notifications precedent: CREATE TABLE IF NOT EXISTS, no
       // _migrations entry (no transform of an existing table), no foreign
       // keys or triggers (so the legacy table rebuilds and their integrity /
       // foreign_key checks never see them) and no AUTOINCREMENT. Never
@@ -738,8 +743,9 @@ export class Store {
           created     INTEGER NOT NULL
         ) WITHOUT ROWID;
       `);
-      // Body-sync record for agent memory (plan @414): when each task's BODY
-      // last changed, written ONLY by createTask and by editTask when the body
+      this.db.run(`CREATE INDEX IF NOT EXISTS _mutation_receipts_created ON _mutation_receipts (created);`);
+      // Body-sync record for agent memory: when each task's BODY last
+      // changed, written ONLY by createTask and by editTask when the body
       // text actually changes. Staleness and breadcrumbs are measured from it,
       // never from `tasks.updated` (which status/lane writes also move).
       // Private metadata under the `_mutation_receipts` precedent: additive,
@@ -1125,7 +1131,7 @@ export class Store {
     return { ok: true };
   }
 
-  // ---------- identity, revisions and receipts (plan @400 N7/N8) ----------
+  // ---------- identity, revisions and receipts ----------
 
   /** This database's UUID: stable for the file's lifetime, new after `cortex reset`. */
   databaseId(): string {
@@ -1190,6 +1196,11 @@ export class Store {
     return this.db.transaction(() => (this.resourceExists(kind, key) ? this.readVersions(kind, key) : null))();
   }
 
+  /** Delete receipts created before `before` (default: RECEIPT_RETENTION_MS ago): one indexed DELETE. */
+  pruneReceipts(before: number = now() - RECEIPT_RETENTION_MS): number {
+    return this.db.run(`DELETE FROM _mutation_receipts WHERE created < ?;`, [before]).changes;
+  }
+
   /**
    * Run `write` at most once per mutation id. Looks the receipt up FIRST
    * (before any guard or existence check inside `write`): the same id and
@@ -1198,7 +1209,7 @@ export class Store {
    * Otherwise `write` runs and its receipt (digest + JSON of the result) is
    * inserted in the SAME transaction, so effects and receipt commit or roll
    * back together; a failed attempt leaves no receipt. Receipts survive
-   * restarts until the database is reset. `write` must be synchronous and
+   * restarts for RECEIPT_RETENTION_MS (pruneReceipts). `write` must be synchronous and
    * return JSON-serializable data (a replay returns the JSON round-trip;
    * `undefined` becomes `null`). Guards passed to Store writes inside `write`
    * may carry this same `mutationId`.
@@ -1433,10 +1444,10 @@ export class Store {
 
   /**
    * Create a task. Tags, the optional `created` attribution row and the
-   * opt-in `untitled-<id>` title all commit in the insert's transaction
-   * (plan @400 N9), after validation, so a create never half-applies. A guard
-   * may carry a mutationId (see runIdempotent); a create has no prior
-   * versions, so `expected` must be empty.
+   * opt-in `untitled-<id>` title all commit in the insert's transaction,
+   * after validation, so a create never half-applies. A guard may carry a
+   * mutationId (see runIdempotent); a create has no prior versions, so
+   * `expected` must be empty.
    */
   addTask(input: AddTaskInput, guard?: WriteGuard): Task {
     return this.createTask(input, guard).task;
@@ -1874,8 +1885,8 @@ export class Store {
     const ts = now();
     this.db.run(`UPDATE tasks SET status = ?, updated = ? WHERE id = ?;`, [status, ts, id]);
     // Audit-trail: an append-only marker row in `updates` so the inbox
-    // surfaces every status flip, attributed to its caller. Preserved
-    // verbatim from Plan 3 — setStatus's audit-row write is load-bearing.
+    // surfaces every status flip, attributed to its caller. This audit-row
+    // write is load-bearing: keep it verbatim.
     const audit = this.db
       .query<Update, [number, string, string, number]>(
         `INSERT INTO updates (task_id, author, summary, body, severity, created)
@@ -2144,15 +2155,15 @@ export class Store {
   /**
    * Post an update. With `status`, ONE transaction writes the message row,
    * then the task's status and its `status → x` audit row by the same author
-   * and, with `notify`, the transition notification (plan @400 N9). Every
-   * post advances the task's `entity` token (a delete would cascade the new
-   * row, so a delete confirmed before it must conflict) and never a field
-   * token, so title/body drafts stay valid (N7). A guard must cover `status`
-   * when one is set; a stale guard writes neither row.
+   * and, with `notify`, the transition notification. Every post advances the
+   * task's `entity` token (a delete would cascade the new row, so a delete
+   * confirmed before it must conflict) and never a field token, so title/body
+   * drafts stay valid. A guard must cover `status` when one is set; a stale
+   * guard writes neither row.
    */
   postUpdate(input: AddUpdateInput, guard?: WriteGuard): PostedUpdate {
-    // Schema requires a non-null severity; Plan 3 makes the column inert —
-    // no flag writes to it, no UI surfaces it. Always 'progress'. The column
+    // Schema requires a non-null severity, but the column is inert — no
+    // flag writes to it, no UI surfaces it. Always 'progress'. The column
     // stays in the schema (zero migration cost); a future plan can drop it.
     const severity: Severity = "progress";
     const body = input.body ?? null;
@@ -2206,7 +2217,7 @@ export class Store {
       .all(taskId);
   }
 
-  // ---------- memory index (plan @414: derived; lazily created; reconciled on every search) ----------
+  // ---------- memory index (derived; lazily created; reconciled on every search) ----------
 
   /**
    * Create the derived FTS5 index on first use, never in migrate(): a SQLite
@@ -2223,10 +2234,10 @@ export class Store {
    * (`_memory_fts`, `_memory_index`) are derived data: dropped here and
    * rebuilt as sections by the reconcile.
    *
-   * `_memory_links` is the derived `@id` graph (plan @422): one row per
-   * task and every `@<id>` its body or update summaries cite, maintained
-   * with the sections. An index built before it existed is rebuilt whole
-   * once, so every task's links are recorded.
+   * `_memory_links` is the derived `@id` graph: one row per task and every
+   * `@<id>` its body or update summaries cite, maintained with the sections.
+   * An index built before it existed is rebuilt whole once, so every task's
+   * links are recorded.
    */
   private ensureMemoryIndex(): void {
     this.db.run(`DROP TABLE IF EXISTS _memory_fts;`);
@@ -2376,14 +2387,14 @@ export class Store {
    * Coverage is per SECTION and counts STEMS, not terms: query terms whose
    * section match sets are identical share a porter stem (implement /
    * implementer / implementation) and form ONE group, so one word never
-   * counts two or three times (validation F1 on @415). A section qualifies
-   * when it matches at least min(groups, minMatched) groups (title and tags
-   * count in every section), so incidental matches spread across a long body
-   * do not (a wrong memory is worse than none). `matched` still lists every
+   * counts two or three times. A section qualifies when it matches at least
+   * min(groups, minMatched) groups (title and tags count in every section),
+   * so incidental matches spread across a long body do not (a wrong memory
+   * is worse than none). `matched` still lists every
    * matching term.
    *
-   * Search spans ALL lanes (plan @422); `lane` is an explicit filter, `boost`
-   * the caller's lane, whose BM25 scores count MEMORY_LIMITS.laneBoost times.
+   * Search spans ALL lanes; `lane` is an explicit filter, `boost` the
+   * caller's lane, whose BM25 scores count MEMORY_LIMITS.laneBoost times.
    * A task is represented by its best qualifying section (more groups, then
    * BM25 with title > tags > text), and tasks sort by: (1) a section matching
    * one of `phrases` (a hyphen/underscore/dot compound as adjacent tokens:

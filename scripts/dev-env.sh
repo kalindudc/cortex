@@ -5,9 +5,6 @@
 # By default, development runs use a sandbox under tmp/dev/ (gitignored), not
 # your real ~/.config/cortex:
 #   - Unreleased code must not migrate the database your installed cortex uses.
-#   - A running daemon from an older installed binary blocks new-binary commands
-#     against the same config (the legacy-daemon fence), so dev runs against
-#     real data would fail anyway while it is up.
 #
 # Overrides:
 #   CORTEX_DEV_REAL=1       use your real config/database (nothing is redirected)

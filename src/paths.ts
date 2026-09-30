@@ -20,24 +20,6 @@ export function dbPath(): string {
   return process.env.CORTEX_DB ?? path.join(configDir(), "cortex.db");
 }
 
-// ---------- legacy daemon files (read, never written) ----------
-//
-// A `cortex serve` from an OLDER binary recorded itself in these files under
-// the config dir. This cortex never writes them and never signals the pid in
-// them (plan @400 N4): only the legacy-daemon fence (daemon.ts
-// findLegacyDaemon) reads them, probing cortex.url to refuse writable work
-// beside such a daemon.
-
-/** An older binary's daemon PID file. */
-export function pidPath(): string {
-  return path.join(configDir(), "cortex.pid");
-}
-
-/** An older binary's daemon loopback API URL file. */
-export function urlPath(): string {
-  return path.join(configDir(), "cortex.url");
-}
-
 /**
  * Ensure the config directory exists. Idempotent.
  */
@@ -45,7 +27,7 @@ export function ensureConfigDir(): void {
   fs.mkdirSync(configDir(), { recursive: true });
 }
 
-// ---------- ownership + daemon runtime locations (plan @400 N2/N4) ----------
+// ---------- ownership + daemon runtime locations ----------
 //
 // The owner lock and daemon metadata live BESIDE the canonical database (see
 // `canonicalDatabasePath` in ownership.ts), so every process that resolves
@@ -154,7 +136,7 @@ export function daemonLogPath(canonicalDatabasePath: string): string {
   return daemonSocketPath(canonicalDatabasePath).replace(/\.sock$/, ".log");
 }
 
-// ---------- terminal UI configuration (plan @400 N15) ----------
+// ---------- terminal UI configuration ----------
 //
 // `tui.toml` and `themes/*.toml` are USER-authored and read-only to cortex;
 // every profile shares them. Only `tui/<profile>.state.json` is app-written

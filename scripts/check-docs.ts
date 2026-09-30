@@ -15,7 +15,7 @@
 //   links.broken             fail      relative Markdown links and #anchors (GitHub heading slugs)
 //   commands.missing_script  fail      `pnpm run X` / `pnpm test[:Y]` that package.json does not define
 //   docs.stale_candidate     warn      with --base: a doc's `sources` changed since <ref>, the doc did not
-//   comments.plan_ref        warn      `plan @N`, `N<k>` or `F<k>` refs in src/**/*.ts comments (state the reason)
+//   comments.plan_ref        fail      `plan @N`, `N<k>` or `F<k>` refs in src/**/*.ts comments (state the reason)
 //   io.git                   fail      git failed while computing --base changes
 
 import fs from "node:fs";
@@ -300,7 +300,7 @@ function checkPlanRefs(): void {
         rel,
         first,
         "comments.plan_ref",
-        "warn",
+        "fail",
         `${count} plan-id ref(s) in comments: state the reason instead (plan ids resolve only in one person's cortex)`,
       );
     }

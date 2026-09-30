@@ -1,5 +1,5 @@
-// The terminal mouse (plan @400 N19: optional, on by default, `mouse = false`
-// in tui.toml turns it off, and never the only path to an action).
+// The terminal mouse (optional, on by default, `mouse = false` in tui.toml
+// turns it off, and never the only path to an action).
 //
 // - The shell enables button-event tracking (DECSET 1002: presses, releases
 //   and motion while a button is held, so drags) in SGR encoding (1006) after

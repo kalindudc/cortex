@@ -30,9 +30,9 @@ function printCounts(counts: RestoreCounts): void {
 }
 
 /**
- * The dry run (plan @400 N6): project the archive onto a readonly snapshot
- * of the database (no migration, no ownership lease, so it works beside a
- * live daemon and leaves legacy schemas untouched). A database that does not
+ * The dry run: project the archive onto a readonly snapshot of the database
+ * (no migration, no ownership lease, so it works beside a live daemon and
+ * leaves legacy schemas untouched). A database that does not
  * exist yet is projected as the fresh one a real restore would create, and
  * is never created here; corrupt or unsupported databases are errors.
  */

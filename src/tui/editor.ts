@@ -1,7 +1,6 @@
-// The document editor (plan @400 N14/N19, Task 9): a thin terminal
-// Component/Focusable over a CodeMirror STATE, never an
-// EditorView and never the toolkit's prompt Editor (which turns tabs into
-// spaces and has no redo).
+// The document editor: a thin terminal Component/Focusable over a CodeMirror
+// STATE, never an EditorView and never the toolkit's prompt Editor (which
+// turns tabs into spaces and has no redo).
 //
 // - The state is an EditorState with CodeMirror history and the Markdown
 //   language (with CodeMirror's defaults: tab size 4, two-space indent

@@ -1664,3 +1664,57 @@ describe("server: IPC-only control routes (N11)", () => {
     expect((await call(a, "GET", "/api/health")).json).toMatchObject({ ok: true, identity });
   });
 });
+
+describe("server: parallel update posts", () => {
+  test("8 concurrent posts: all 201, all rows persisted, 8 update.posted events with their authors", async () => {
+    const runtime = createRuntime();
+    const live = buildApp(store, runtime);
+    store.addTask({ title: "concurrent-target" });
+    const events: PublishedEvent[] = [];
+    const unsubscribe = runtime.events.subscribe(ev => {
+      if (ev.kind === "update.posted") events.push(ev);
+    });
+    try {
+      const authors = Array.from({ length: 8 }, (_, i) => `agent-${i}`);
+      const responses = await Promise.all(
+        authors.map(author =>
+          live.fetch(req("POST", "/api/tasks/1/updates", { author, summary: `concurrent post from ${author}` })),
+        ),
+      );
+      expect(responses.map(r => r.status)).toEqual(Array(8).fill(201));
+      expect(
+        store
+          .listUpdates(1)
+          .map(u => u.author)
+          .sort(),
+      ).toEqual([...authors].sort());
+      expect(events.map(e => (e.payload as { author: string }).author).sort()).toEqual([...authors].sort());
+    } finally {
+      unsubscribe();
+    }
+  });
+});
+
+describe("server: GET /api/tasks/:id/related", () => {
+  test("returns the three buckets, and 404 for a missing task", async () => {
+    // A is referenced by D (an update), references B (its body) and shares a topical tag with C.
+    const a = store.addTask({ title: "A" });
+    const b = store.addTask({ title: "B" });
+    const c = store.addTask({ title: "C" });
+    const d = store.addTask({ title: "D" });
+    store.editTask(a.id, { body: `out to @${b.id}` });
+    store.addUpdate({ task_id: d.id, author: "test-9999", summary: `ping @${a.id}` });
+    store.setTaskTags(a.id, ["share"]);
+    store.setTaskTags(c.id, ["share"]);
+    const { status, json } = await fetchJson(req("GET", `/api/tasks/${a.id}/related`));
+    expect(status).toBe(200);
+    const related = json as { referencedBy: Task[]; references: Task[]; shared: Task[] };
+    expect(related.referencedBy.map(t => t.title)).toEqual(["D"]);
+    expect(related.references.map(t => t.title)).toEqual(["B"]);
+    expect(related.shared.map(t => t.title)).toEqual(["C"]);
+    expect(await fetchJson(req("GET", "/api/tasks/9999/related"))).toEqual({
+      status: 404,
+      json: { error: "not found" },
+    });
+  });
+});

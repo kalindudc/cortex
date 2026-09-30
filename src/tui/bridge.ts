@@ -1,5 +1,4 @@
-// Bridges from the terminal workspace to other programs (plan @400 Task 10
-// part B: N5, N20, N21).
+// Bridges from the terminal workspace to other programs.
 //
 // - withExternalProgram: an interactive program (a resume or editor handoff)
 //   gets the terminal through the shell's handoff: the same restore as

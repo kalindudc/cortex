@@ -1,5 +1,5 @@
 /**
- * Shared, environment-neutral wire contracts (plan @400 N7, N8, N11, N12).
+ * Shared, environment-neutral wire contracts.
  *
  * TYPE-ONLY by design: the daemon, the native client and the environment-
  * neutral src/api.ts all import this module, so it must never pull a runtime
@@ -55,14 +55,14 @@ export interface TaskState {
   versions: Versions;
 }
 
-/** Where a daemon listens: its private Unix socket, or an explicit HTTP URL (an older binary's daemon, probed by the legacy fence). */
-export type Endpoint = { kind: "unix"; socketPath: string } | { kind: "http"; url: string };
+/** Where a daemon listens: its private Unix socket (`kind` keeps the published metadata shape). */
+export type Endpoint = { kind: "unix"; socketPath: string };
 
 /**
- * Published daemon metadata (`<db>.daemon.json`, plan @400 N4) and what a
- * daemon answers in `GET /api/health`; clients attach only when every
- * identity field matches. `databasePath` is canonical; `pid` is informative
- * and never signalled.
+ * Published daemon metadata (`<db>.daemon.json`) and what a daemon answers
+ * in `GET /api/health`; clients attach only when every identity field
+ * matches. `databasePath` is canonical; `pid` is informative and never
+ * signalled.
  */
 export interface DaemonIdentity {
   protocol: 1;
@@ -75,7 +75,7 @@ export interface DaemonIdentity {
   capabilities?: string[];
 }
 
-/** `GET /api/health`. A published daemon adds its identity; a legacy (pre-identity) daemon never does. */
+/** `GET /api/health`. A published daemon adds its identity; an in-process app has none. */
 export interface HealthResponse {
   ok: boolean;
   version: string;
@@ -103,7 +103,7 @@ export interface WorkspaceSnapshot {
   notifications: Notification[];
 }
 
-// ---------- wire DTOs (plan @400 N8-N12) ----------
+// ---------- wire DTOs ----------
 //
 // Legacy JSON bodies are unchanged. A request opts into the versioned result
 // shapes below with `Prefer: cortex-versioned` (the response then carries
@@ -194,7 +194,7 @@ export interface VersionConflict {
   current: Versions;
 }
 
-// ---------- live-stream payloads (plan @400 N12) ----------
+// ---------- live-stream payloads ----------
 //
 // SSE ids (and every `cursor`) are `<epoch>:<seq>`: `epoch` names one
 // publisher lifetime (a new one after every daemon start) and `seq` counts
@@ -373,7 +373,6 @@ export interface ApiClient {
   backup(request?: BackupRequest): Promise<BackupResult>;
   addTask(request: CreateTaskRequest): Promise<Task>;
   editTask(id: number, request: EditTaskRequest): Promise<Task>;
-  setStat(id: number, status: TaskStatus): Promise<Task>;
   moveLane(id: number, lane: string): Promise<Task>;
   delTask(id: number): Promise<void>;
   postUpd(id: number, request: PostUpdateRequest): Promise<Update>;
@@ -416,7 +415,6 @@ export interface VersionedWrites {
 export interface CortexClient extends ApiClient {
   health(): Promise<HealthResponse>;
   me(): Promise<{ author: string }>;
-  task(id: number): Promise<Task>;
   workspace(): Promise<WorkspaceSnapshot>;
   taskState(id: number): Promise<TaskStateSnapshot>;
   laneState(name: string): Promise<LaneStateSnapshot>;

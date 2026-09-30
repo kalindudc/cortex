@@ -130,7 +130,7 @@ function run(options: SubscribeOptions, until: (events: LiveEvent[]) => boolean)
   const events: LiveEvent[] = [];
   const states: ConnectionState[] = [];
   const done = subscribeChanges(
-    { kind: "http", url: "http://cortex.test" },
+    { kind: "unix", socketPath: "/cortex.test.sock" },
     event => {
       events.push(event);
       if (until(events)) controller.abort();
@@ -242,7 +242,7 @@ describe("subscribeChanges (scripted server)", () => {
     await r.done;
     expect(kinds(r.events)).toEqual(["ready@old:3", "task.added@old:4", "ready@new:0", "task.removed@new:1"]);
     expect(r.states).toEqual(["connecting", "live", "stale", "live"]);
-    expect(calls).toEqual(["http://cortex.test/events", "http://cortex.test/events"]);
+    expect(calls).toEqual(["http://localhost/events /cortex.test.sock", "http://localhost/events /cortex.test.sock"]);
   });
 
   test("an epoch change inside one stream is a resync", async () => {
@@ -315,7 +315,7 @@ describe("subscribeChanges (scripted server)", () => {
       return new Promise<Response>(() => {});
     };
     await subscribeChanges(
-      { kind: "http", url: "http://x" },
+      { kind: "unix", socketPath: "/x.sock" },
       () => {},
       () => {},
       pre.signal,
@@ -325,7 +325,7 @@ describe("subscribeChanges (scripted server)", () => {
 
     const mid = new AbortController();
     const hung = subscribeChanges(
-      { kind: "http", url: "http://x" },
+      { kind: "unix", socketPath: "/x.sock" },
       () => {},
       () => {},
       mid.signal,
@@ -338,7 +338,7 @@ describe("subscribeChanges (scripted server)", () => {
 
     const backoff = new AbortController();
     const failing = subscribeChanges(
-      { kind: "http", url: "http://x" },
+      { kind: "unix", socketPath: "/x.sock" },
       () => {},
       () => {},
       backoff.signal,
@@ -354,7 +354,7 @@ describe("subscribeChanges (scripted server)", () => {
   test("a throwing consumer rejects the subscription instead of being retried silently", async () => {
     const controller = new AbortController();
     const done = subscribeChanges(
-      { kind: "http", url: "http://x" },
+      { kind: "unix", socketPath: "/x.sock" },
       () => {
         throw new Error("consumer bug");
       },
@@ -366,7 +366,7 @@ describe("subscribeChanges (scripted server)", () => {
   });
 });
 
-// ---------- real transports: a Unix socket and loopback HTTP ----------
+// ---------- the real transport: a Unix socket ----------
 
 async function waitFor(check: () => boolean, label: string, timeoutMs = 3000): Promise<void> {
   const deadline = performance.now() + timeoutMs;
@@ -376,7 +376,7 @@ async function waitFor(check: () => boolean, label: string, timeoutMs = 3000): P
   }
 }
 
-describe("subscribeChanges over real transports", () => {
+describe("subscribeChanges over the real transport", () => {
   let socketDir: string;
 
   beforeAll(() => {
@@ -394,63 +394,49 @@ describe("subscribeChanges over real transports", () => {
     fs.rmSync(socketDir, { recursive: true, force: true });
   });
 
-  for (const transport of ["unix", "http"] as const) {
-    test(`${transport}: ready, then live writes with increasing cursors; abort unsubscribes`, async () => {
-      const store = Store.open(":memory:");
-      const runtime = createRuntime();
-      const app = buildApp(store, runtime);
-      const socketPath = path.join(socketDir, `${transport}.sock`);
-      const server =
-        transport === "unix"
-          ? Bun.serve({ unix: socketPath, fetch: app.fetch })
-          : Bun.serve({ port: 0, fetch: app.fetch });
-      const endpoint =
-        transport === "unix"
-          ? ({ kind: "unix", socketPath } as const)
-          : ({ kind: "http", url: `http://127.0.0.1:${server.port}` } as const);
-      const post = (body: unknown): Promise<Response> =>
-        transport === "unix"
-          ? fetch("http://localhost/api/tasks", {
-              method: "POST",
-              unix: socketPath,
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify(body),
-            })
-          : fetch(`${endpoint.kind === "http" ? endpoint.url : ""}/api/tasks`, {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify(body),
-            });
-      const controller = new AbortController();
-      const events: LiveEvent[] = [];
-      const states: ConnectionState[] = [];
-      try {
-        const done = subscribeChanges(
-          endpoint,
-          e => events.push(e),
-          s => states.push(s),
-          controller.signal,
-        );
-        await waitFor(() => events.length === 1, "ready");
-        expect(events[0]?.kind).toBe("ready");
-        expect(events[0]?.cursor).toBe(runtime.events.cursor());
-        expect(runtime.events.listenerCount()).toBe(1);
+  test("unix: ready, then live writes with increasing cursors; abort unsubscribes", async () => {
+    const store = Store.open(":memory:");
+    const runtime = createRuntime();
+    const app = buildApp(store, runtime);
+    const socketPath = path.join(socketDir, "unix.sock");
+    const server = Bun.serve({ unix: socketPath, fetch: app.fetch });
+    const endpoint = { kind: "unix", socketPath } as const;
+    const post = (body: unknown): Promise<Response> =>
+      fetch("http://localhost/api/tasks", {
+        method: "POST",
+        unix: socketPath,
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const controller = new AbortController();
+    const events: LiveEvent[] = [];
+    const states: ConnectionState[] = [];
+    try {
+      const done = subscribeChanges(
+        endpoint,
+        e => events.push(e),
+        s => states.push(s),
+        controller.signal,
+      );
+      await waitFor(() => events.length === 1, "ready");
+      expect(events[0]?.kind).toBe("ready");
+      expect(events[0]?.cursor).toBe(runtime.events.cursor());
+      expect(runtime.events.listenerCount()).toBe(1);
 
-        expect((await post({ title: `over ${transport}` })).status).toBe(201);
-        await waitFor(() => events.length === 3, "task.added + notification.added");
-        expect(events.map(e => e.kind)).toEqual(["ready", "task.added", "notification.added"]);
-        expect((events[1]?.payload as { title: string }).title).toBe(`over ${transport}`);
-        expect(events.map(e => e.cursor)).toEqual([0, 1, 2].map(seq => `${runtime.events.epoch}:${seq}`));
-        expect(states).toEqual(["connecting", "live"]);
+      expect((await post({ title: "over unix" })).status).toBe(201);
+      await waitFor(() => events.length === 3, "task.added + notification.added");
+      expect(events.map(e => e.kind)).toEqual(["ready", "task.added", "notification.added"]);
+      expect((events[1]?.payload as { title: string }).title).toBe("over unix");
+      expect(events.map(e => e.cursor)).toEqual([0, 1, 2].map(seq => `${runtime.events.epoch}:${seq}`));
+      expect(states).toEqual(["connecting", "live"]);
 
-        controller.abort();
-        await done;
-        await waitFor(() => runtime.events.listenerCount() === 0, "server-side unsubscribe");
-      } finally {
-        controller.abort();
-        server.stop(true);
-        store.close();
-      }
-    });
-  }
+      controller.abort();
+      await done;
+      await waitFor(() => runtime.events.listenerCount() === 0, "server-side unsubscribe");
+    } finally {
+      controller.abort();
+      server.stop(true);
+      store.close();
+    }
+  });
 });

@@ -106,8 +106,8 @@ export default defineCommand({
       }
     }
     // ONE create request: tags and the optional `created` attribution row
-    // commit in the task's own transaction (plan @400 N9), through the
-    // verified daemon or, without one, the same handler in-process.
+    // commit in the task's own transaction, through the verified daemon
+    // or, without one, the same handler in-process.
     const payload: CreateTaskRequest = {
       title: args.title,
       lane: args.lane,

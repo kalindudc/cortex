@@ -1,5 +1,4 @@
-// The task panels and the update composer (plan @400 Task 11 part A: P7,
-// P10, N9, N16, N17).
+// The task panels and the update composer.
 //
 // - The panels (Document/Activity/Related/Authors) are one per-session
 //   choice (session.panel):
@@ -1051,7 +1050,7 @@ export class Activity implements Component {
         mutationId: same && previous !== null ? previous.mutationId : newMutationId(),
       };
       draft.attempt = attempt;
-      // A human's post: an author, no notify, no status (N9).
+      // A human's post: an author, no notify, no status.
       const result = await session.mutate(
         client => client.versioned.postUpdate(taskId, { author, summary }, { mutationId: attempt.mutationId }),
         database,
@@ -1076,7 +1075,7 @@ export class Activity implements Component {
       draft.error = null;
     }
     if (current && draft.revision === attempt.revision) {
-      // Exactly the text that was posted: done. The author choice stays for the next post (web parity).
+      // Exactly the text that was posted: done. The author choice stays for the next post.
       draft.state = createEditorState("");
       draft.revision++;
       if (draft.author === null) this.#drafts.delete(taskId);

@@ -11,6 +11,7 @@ import {
   MutationReuseError,
   WriteGuardError,
   mutationDigest,
+  RECEIPT_RETENTION_MS,
   validateTagName,
   TAG_NAME_RE,
   type Task,
@@ -1757,6 +1758,39 @@ describe("Store: revisions and receipts across restarts", () => {
     s = Store.open(fileDb);
     expect(s.databaseId()).not.toBe(databaseId);
     expect(s.runIdempotent("m-restart", digest, () => s.addTask(input)).replayed).toBe(false);
+    s.close();
+  });
+
+  test("receipts older than RECEIPT_RETENTION_MS are pruned on the next open; younger ones still replay", () => {
+    let s = Store.open(fileDb);
+    const create = (title: string) => () => s.addTask({ title });
+    const oldDigest = mutationDigest("task.create", { title: "old" });
+    const youngDigest = mutationDigest("task.create", { title: "young" });
+    s.runIdempotent("m-old", oldDigest, create("old"));
+    s.runIdempotent("m-young", youngDigest, create("young"));
+    const at = Date.now();
+    s.runInTransaction(raw => {
+      raw.run(`UPDATE _mutation_receipts SET created = ? WHERE mutation_id = 'm-old';`, [
+        at - RECEIPT_RETENTION_MS - 1000,
+      ]);
+      raw.run(`UPDATE _mutation_receipts SET created = ? WHERE mutation_id = 'm-young';`, [
+        at - RECEIPT_RETENTION_MS + 60_000,
+      ]);
+    });
+    s.close();
+
+    s = Store.open(fileDb);
+    expect(s.runIdempotent("m-young", youngDigest, create("young")).replayed).toBe(true);
+    expect(s.runIdempotent("m-old", oldDigest, create("old")).replayed).toBe(false);
+    expect(s.listTasks().length).toBe(3);
+    const index = s.runInTransaction(raw =>
+      raw
+        .query<{ tbl_name: string }, []>(
+          `SELECT tbl_name FROM sqlite_master WHERE type = 'index' AND name = '_mutation_receipts_created';`,
+        )
+        .get(),
+    );
+    expect(index?.tbl_name).toBe("_mutation_receipts");
     s.close();
   });
 

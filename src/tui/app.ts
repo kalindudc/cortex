@@ -1,4 +1,4 @@
-// The terminal workspace (plan @400 Task 7: N13, N17-N20, N22-N23).
+// The terminal workspace.
 //
 // `runTui` checks everything that can fail with a message BEFORE it takes the
 // terminal (tui.toml, the view state, the daemon, the requested task), then
@@ -150,7 +150,7 @@ import {
 } from "./theme.ts";
 import { createWorkspace, STATUS_MARK, statusPair, type WorkspaceComponent } from "./workspace.ts";
 
-/** N19: the smallest workspace; below it a recoverable resize screen. */
+/** The smallest workspace; below it a recoverable resize screen. */
 export const MIN_COLUMNS = 80;
 export const MIN_ROWS = 24;
 /** The help's key column: an entry is two cells in, this wide, then one blank (its description's column). */
@@ -161,7 +161,7 @@ export const SIDE_BY_SIDE_COLUMNS = 100;
 export const SPLIT_COLUMNS = 120;
 /** How long a termination signal waits for the drafts to save before restoring the terminal. */
 const SIGNAL_FLUSH_MS = 1500;
-/** N22: one deadline for both appearance queries. */
+/** One deadline for both appearance queries, before the first content frame. */
 export const APPEARANCE_BUDGET_MS = 150;
 const DEFAULT_PROFILE = "default";
 const TITLE_LINES = 4;
@@ -183,7 +183,7 @@ export const TERMINAL_RESET = `\x1b[?2004l${MOUSE_OFF}\x1b[?1004l\x1b[?2031l\x1b
 const TERMINAL_ABORT = "\x1b[<u\x1b[?1049l";
 
 /**
- * N19: the toolkit's fullscreen viewport keys (Home/End/PageUp/PageDown,
+ * The toolkit's fullscreen viewport keys (Home/End/PageUp/PageDown,
  * prompt navigation, alt-screen search) are bound to NOTHING, explicitly:
  * an `undefined` override would restore the default, and the viewport
  * would otherwise take these keys before the focused pane (even over
@@ -493,7 +493,7 @@ export class Shell {
   #theme: ResolvedTheme | null = null;
   #detected: "dark" | "light" | null = null;
   #followAppearance = false;
-  /** The theme levels this session can change (N22): `:theme` > `--theme` > the saved choice. */
+  /** The theme levels this session can change: `:theme` > `--theme` > the saved choice. */
   #sessionTheme: string | null = null;
   #cliTheme: string | null;
   #savedTheme: string | null;
@@ -1684,7 +1684,7 @@ export class Shell {
     if (s.taskListVisible && width >= SIDE_BY_SIDE_COLUMNS) {
       const listWidth = Math.max(28, Math.min(56, Math.floor(width * 0.33)));
       this.#list.height = height;
-      // N23: the pane without the focus is greyed (never by color alone: dim without color, and
+      // The pane without the focus is greyed (never by color alone: dim without color, and
       // the focused pane's label is inverse); every component in it paints through that theme.
       const listTheme = s.focus === "tasks" ? theme : inactiveTheme(theme);
       const docTheme = s.focus === "tasks" ? inactiveTheme(theme) : theme;

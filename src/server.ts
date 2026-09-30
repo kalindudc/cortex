@@ -85,12 +85,12 @@ const VERSION = pkg.version;
 const isStatus = (v: string): v is TaskStatus =>
   v === "draft" || v === "open" || v === "review" || v === "blocked" || v === "done";
 
-// ---------- daemon runtime (plan @400 N11/N12) ----------
+// ---------- daemon runtime ----------
 
 /**
  * What the control routes may do to the daemon hosting this app. Only
  * `cortex serve` supplies it, for the app on its private Unix socket;
- * in-process apps (withClient, startServer) have none, so they have no
+ * in-process apps (withClient, tests) have none, so they have no
  * control routes.
  */
 export interface DaemonControl {
@@ -266,7 +266,7 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
     }
   };
 
-  // Bind requests to the instance a native client verified (N11). A request
+  // Bind requests to the instance a native client verified. A request
   // without the header is unbound (a legacy CLI).
   const checkInstance: MiddlewareHandler = async (c, next) => {
     const expected = c.req.header(INSTANCE_HEADER);
@@ -284,15 +284,15 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
   app.use("/api/*", checkInstance);
   app.use("/events", checkInstance);
 
-  // A published daemon names itself, which is how clients tell it from a
-  // legacy (pre-identity) daemon and verify the instance behind a socket.
+  // A published daemon names itself, which is how clients verify the
+  // instance behind a socket.
   app.get("/api/health", c => {
     const health: HealthResponse = { ok: true, version: VERSION };
     if (runtime.identity !== null) health.identity = runtime.identity;
     return c.json(health);
   });
 
-  // ---------- control (plan @400 N5/N11): the daemon's socket app only ----------
+  // ---------- control: the daemon's socket app only ----------
   // Registered only when the code that bound this app's listener supplied
   // control (`cortex serve`, for its private socket); an in-process app never
   // has these routes, whatever a request's headers claim. checkInstance
@@ -323,7 +323,7 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
   // UI checks for pending migrations on boot so it can show a banner.
   app.get("/api/migrations", c => c.json({ pending: store.pendingMigrations() }));
 
-  // ---------- snapshots (N11/N12) ----------
+  // ---------- snapshots ----------
   // Store reads are synchronous and every write publishes in the same turn
   // it commits, so the cursor read here covers exactly the writes this
   // snapshot can see: apply only stream events after it.
@@ -425,7 +425,7 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
       ? { ...fields, untitled: true, author }
       : { ...fields, title: title as string, author };
     try {
-      // The `created` notification row commits with the task (N9); its author
+      // The `created` notification row commits with the task; its author
       // stays the server-side default, as before. Resolved outside the
       // transaction: the first call may spawn `git config`.
       const notification = { author: resolveAuthor() };
@@ -547,7 +547,7 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
     try {
       // The notification (attributed, actual change only) commits inside the
       // status transaction; everything publishes after commit, and nothing on
-      // a deduplicated replay (N9).
+      // a deduplicated replay.
       const { result, replayed } = mutate(guard, "task.status", { id, body }, () => {
         const change = store.transitionStatus(id, status, { author, notify: isAttributed }, guard as WriteGuard);
         return { change, versions: versionsOf("task", id) };
@@ -680,7 +680,7 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
     }
-    // Optional status in the SAME transaction as the message (N9). `notify`
+    // Optional status in the SAME transaction as the message. `notify`
     // marks an attributed agent change: a human's own post never notifies.
     const status = body.status;
     if (status !== undefined && (typeof status !== "string" || !isStatus(status))) {
@@ -743,9 +743,9 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
   });
 
   // ---------- memory ----------
-  // Agent memory (plan @414): ranked recall over the derived FTS5 index and
-  // bodiless stream rows carrying `synced` (the last BODY change). Reads
-  // only; the index is created and reconciled inside Store.searchMemory.
+  // Agent memory: ranked recall over the derived FTS5 index and bodiless
+  // stream rows carrying `synced` (the last BODY change). Reads only; the
+  // index is created and reconciled inside Store.searchMemory.
   const positiveInt = (raw: string | undefined): number | undefined | null => {
     if (raw === undefined || raw === "") return undefined;
     return /^[1-9][0-9]*$/.test(raw) ? Number(raw) : null;
@@ -767,7 +767,7 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
     }
     const lane = c.req.query("lane") || undefined;
     const boost = c.req.query("boost") || undefined;
-    // Recency words leave the terms and only re-order equally covered hits (plan @422).
+    // Recency words leave the terms and only re-order equally covered hits.
     const { terms, recent } = recencyIntent(memoryTerms(q));
     const phrases = memoryPhrases(q);
     try {
@@ -813,7 +813,7 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
   // Persisted notification feed. Read endpoint returns rows newest-first.
   // Mutation endpoints validate :id as a number and return 400 on NaN;
   // none of these accept a request body. An acknowledgement that changed a
-  // row publishes a `notification.changed` invalidation (N12) so every
+  // row publishes a `notification.changed` invalidation so every
   // other connected client converges; a no-op publishes nothing.
   const notificationChanged = (action: NotificationChange["action"], id: number | null): void => {
     const change: NotificationChange = { action, id, task_id: null };
@@ -1004,7 +1004,7 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
   // ---------- SSE ----------
   // Subscribe FIRST, then send `ready` carrying the cursor at subscription:
   // a client snapshots after `ready` and applies only events after the
-  // snapshot's cursor, so nothing published in between is lost (N12). Each
+  // snapshot's cursor, so nothing published in between is lost. Each
   // event's id is its `<epoch>:<seq>` cursor; names and data are the legacy
   // ones. A slow reader's queue is bounded: past either bound (one frame
   // larger than the character bound included, even into an empty queue) the
@@ -1090,33 +1090,4 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
   );
 
   return app;
-}
-
-export type ServerHandle = {
-  port: number;
-  /** Loopback URL of the listener. */
-  url: string;
-  stop(): Promise<void>;
-};
-
-/**
- * The in-process integration-test listener: a bare loopback app with no
- * published identity and no control routes. `cortex serve` hosts the real
- * daemon, on its private socket only.
- */
-export function startServer({ port, store }: { port: number; store: Store }): ServerHandle {
-  const app = buildApp(store, createRuntime());
-  const server = Bun.serve({
-    port,
-    hostname: "127.0.0.1",
-    fetch: app.fetch,
-  });
-  const resolvedPort = server.port ?? port;
-  return {
-    port: resolvedPort,
-    url: `http://127.0.0.1:${resolvedPort}`,
-    async stop() {
-      server.stop(true);
-    },
-  };
 }

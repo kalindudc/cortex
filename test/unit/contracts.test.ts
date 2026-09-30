@@ -82,9 +82,8 @@ describe("contracts: shapes (compile-time, checked by tsc)", () => {
     expectTypeOf<ReturnType<Store["taskState"]>>().toEqualTypeOf<TaskState | null>();
   });
 
-  test("Endpoint is a unix-socket or http discriminated union", () => {
-    expectTypeOf<Extract<Endpoint, { kind: "unix" }>>().toEqualTypeOf<{ kind: "unix"; socketPath: string }>();
-    expectTypeOf<Extract<Endpoint, { kind: "http" }>>().toEqualTypeOf<{ kind: "http"; url: string }>();
+  test("Endpoint is the daemon's unix socket", () => {
+    expectTypeOf<Endpoint>().toEqualTypeOf<{ kind: "unix"; socketPath: string }>();
     // @ts-expect-error — a unix endpoint needs its socket path
     const bad: Endpoint = { kind: "unix", url: "http://127.0.0.1:1" };
     expect(bad.kind).toBe("unix");

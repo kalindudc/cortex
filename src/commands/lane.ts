@@ -8,7 +8,7 @@ import { emitError, emitOk } from "../output.ts";
  * Lane (or `{ ok, name }` for rm) on stdout; failures route through
  * emitError for the shared machine-readable error envelope. Every
  * subcommand goes through withClient: the verified daemon, or the same
- * handlers in-process while owning the database (plan @400 N6).
+ * handlers in-process while owning the database.
  */
 
 const jsonArg = {

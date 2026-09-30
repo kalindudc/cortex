@@ -1,5 +1,4 @@
-// The one-line prompt (plan @400 N17): ONE component serves the `:` command
-// line and `/` search.
+// The one-line prompt: ONE component serves the `:` command line and `/` search.
 //
 // - Text and a grapheme-aligned cursor; the usual line-editing keys, plus
 //   the Alt word motions keys.ts keeps intact inside text fields (Alt-b/f,

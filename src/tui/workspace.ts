@@ -1,14 +1,14 @@
-// The terminal workspace list (plan @400 Task 8: P1/P2, N19).
+// The terminal workspace list.
 //
 // - selectWorkspace is the PURE list model: the shared search/filter/
 //   fallback functions (src/lib/fuzzy.ts, src/lib/taskView.ts) applied to
 //   one session's view:
-//     P1  full-pool title/body/tag AND-word search; @id, @title and exact
-//         #tag before any substring fallback; slots AND together, tags OR
-//         (plus untagged); a done status filter shows done tasks anyway.
-//     P2  relevance order with a query (one flat list); an
-//         explicit selection survives the filters that exclude it; without
-//         one, the first non-done task in server order.
+//     - Search: full-pool title/body/tag AND-word search; @id, @title and
+//       exact #tag before any substring fallback; slots AND together, tags
+//       OR (plus untagged); a done status filter shows done tasks anyway.
+//     - Selection: relevance order with a query (one flat list); an explicit
+//       selection survives the filters that exclude it; without one, the
+//       first non-done task in server order.
 //   Without a query the list follows `:sort` (ascending id by default; ties
 //   always by ascending id) and `:group` (a header row per lane, in lane-catalog
 //   order, or per status, draft to done). Headers are not rows: motions
@@ -96,7 +96,7 @@ export interface WorkspaceSelection {
 }
 
 /**
- * The list model for `view` over the full task pool (P1/P2). `lanes` is the
+ * The list model for `view` over the full task pool. `lanes` is the
  * lane catalog (its order ranks the lane sort and the lane groups).
  */
 export function selectWorkspace(
@@ -113,7 +113,7 @@ export function selectWorkspace(
   const gated = gateDone(filtered, includeDone);
   const base = { results, filtered, active: null, activeIndex: -1, includeDone };
   if (results !== null) {
-    // A search keeps the relevance ranking (P1/P2), in one flat list.
+    // A search keeps the relevance ranking, in one flat list.
     const rows = orderTasks(gated, results);
     return withSelection({ ...base, rows, order: "relevance", group: "none", groups: [] }, pool, view.selectedId);
   }
@@ -395,7 +395,7 @@ class TaskList implements WorkspaceComponent {
     };
     const line = (segs: readonly Seg[], hit: ListHit = PANE): void => push({ segs, fill, hit });
     const sel = s.workspace();
-    // The focused pane's label is inverse (never color alone, N23); unfocused, the shell greys the pane.
+    // The focused pane's label is inverse (never color alone); unfocused, the shell greys the pane.
     const focused = s.focus === "tasks";
     line([
       focused ? seg("accent@panel", " TASKS ", { bold: true, inverse: true }) : seg("muted@panel", " TASKS "),

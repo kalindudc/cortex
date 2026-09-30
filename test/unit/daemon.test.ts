@@ -11,7 +11,6 @@ import {
   DaemonError,
   discoverDaemon,
   ensureDaemon,
-  findLegacyDaemon,
   publishDaemonMetadata,
   recoverStaleDaemonState,
   removeDaemonMetadata,
@@ -21,17 +20,16 @@ import {
 import { INSTANCE_HEADER } from "../../src/api.ts";
 import type { DaemonIdentity } from "../../src/contracts.ts";
 import { canonicalDatabasePath, type OwnerLease, tryAcquireOwnership } from "../../src/ownership.ts";
-import { daemonMetadataPath, daemonSocketPath, ownerLockPath, pidPath, urlPath } from "../../src/paths.ts";
+import { daemonMetadataPath, daemonSocketPath, ownerLockPath } from "../../src/paths.ts";
 import { buildApp, createRuntime, type DaemonControl } from "../../src/server.ts";
 import { Store } from "../../src/store.ts";
 
 // Database-scoped daemon discovery, startup and the withClient boundary
 // (plan @400 N4-N6). Every N4 branch is driven with fakes in this process:
 // a "daemon" is a real Hono app on a real Unix socket plus the real lease,
-// wrong-database/protocol peers are hand-rolled health endpoints, a stale
-// socket is left behind by a SIGKILLed child, and a legacy daemon is a
-// loopback server answering /api/health without identity. The only processes
-// ever signalled are ones this file spawned.
+// wrong-database/protocol peers are hand-rolled health endpoints, and a stale
+// socket is left behind by a SIGKILLed child. The only processes ever
+// signalled are ones this file spawned.
 
 const ENV_KEYS = ["XDG_CONFIG_HOME", "XDG_RUNTIME_DIR", "CORTEX_DB"] as const;
 let savedEnv: Record<string, string | undefined> = {};
@@ -206,15 +204,6 @@ function identityFor(databasePath: string, overrides: Partial<DaemonIdentity> = 
   };
 }
 
-/** An old-binary daemon: cortex.pid + cortex.url in the config dir, /api/health without identity. */
-function startLegacyDaemon(pid: number, health: unknown = { ok: true, version: "0.1.0" }): Server {
-  const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => Response.json(health) });
-  cleanups.push(() => server.stop(true));
-  fs.writeFileSync(pidPath(), String(pid));
-  fs.writeFileSync(urlPath(), `http://127.0.0.1:${server.port}`);
-  return server;
-}
-
 async function rejection(promise: Promise<unknown>): Promise<unknown> {
   return promise.then(
     value => {
@@ -312,7 +301,7 @@ describe("discoverDaemon (N4)", () => {
   });
 });
 
-// ---------- stale recovery, busy owners and the legacy fence ----------
+// ---------- stale recovery and busy owners ----------
 
 describe("withClient ownership and recovery (N4/N6)", () => {
   test("stale metadata and socket are recovered ONLY by the lease holder; the pid they name is never signalled", async () => {
@@ -409,49 +398,6 @@ describe("withClient ownership and recovery (N4/N6)", () => {
     });
     expect(instance).toBe(fake.identity.instanceId);
   });
-
-  test("a healthy legacy daemon blocks the writable fallback even though the new lock is free", async () => {
-    const dummy = spawnDummy();
-    startLegacyDaemon(dummy.pid);
-    expect(leaseIsFree(db)).toBe(true);
-    expect(await findLegacyDaemon()).toMatchObject({ pid: dummy.pid });
-    const kill = spyOn(process, "kill");
-    let ran = false;
-    try {
-      const err = await rejection(
-        withClient(
-          async () => {
-            ran = true;
-          },
-          { databasePath: db },
-        ),
-      );
-      expect(err).toBeInstanceOf(DaemonError);
-      expect(err).toMatchObject({ code: "legacy-daemon" });
-      expect((err as Error).message).toMatch(/older cortex/);
-      expect((err as Error).message).toMatch(/stop/i);
-      expect((err as Error).message).toContain(String(dummy.pid));
-      expect(await rejection(ensureDaemon({ databasePath: db }))).toMatchObject({
-        code: "legacy-daemon",
-      });
-      expect(kill).not.toHaveBeenCalled();
-    } finally {
-      kill.mockRestore();
-    }
-    expect(ran).toBe(false);
-    expect(fs.existsSync(db)).toBe(false);
-    expect(leaseIsFree(db)).toBe(true);
-    expect(stillRunning(dummy)).toBe(true);
-  });
-
-  test("legacy files that nothing answers, or a daemon that has an identity, do not block", async () => {
-    const dummy = spawnDummy();
-    const server = startLegacyDaemon(dummy.pid, { ok: true, version: "x", identity: identityFor(db) });
-    expect(await findLegacyDaemon()).toBeNull();
-    await server.stop(true);
-    expect(await findLegacyDaemon()).toBeNull();
-    expect(await withClient(async client => (await client.lanes()).length > 0, { databasePath: db })).toBe(true);
-  });
 });
 
 // ---------- the two withClient paths ----------
@@ -485,7 +431,7 @@ describe("withClient paths (N6)", () => {
   });
 
   test("offline: handler errors surface as HttpError and still release the lease", async () => {
-    const err = await rejection(withClient(client => client.task(999), { databasePath: db }));
+    const err = await rejection(withClient(client => client.taskState(999), { databasePath: db }));
     expect(err).toMatchObject({ name: "HttpError", status: 404 });
     expect(leaseIsFree(db)).toBe(true);
   });

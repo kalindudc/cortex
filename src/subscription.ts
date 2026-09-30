@@ -1,7 +1,7 @@
 /**
- * Native live-change subscription (plan @400 N12). Bun 1.4.2 has no global
- * EventSource, so this module parses the daemon's `/events` stream itself,
- * over `fetch(url, { unix })` for the private socket or plain HTTP.
+ * Native live-change subscription. Bun 1.4.2 has no global EventSource, so
+ * this module parses the daemon's `/events` stream itself, over
+ * `fetch(url, { unix })` on the private socket.
  *
  * Contract for consumers: after every `ready` (first connect, reconnect, new
  * epoch) and every `resync`, take a new snapshot and apply only events whose
@@ -170,9 +170,8 @@ class ConsumerError extends Error {
   }
 }
 
-function eventsUrl(endpoint: Endpoint): { url: string; unix?: string } {
-  if (endpoint.kind === "unix") return { url: "http://localhost/events", unix: endpoint.socketPath };
-  return { url: `${endpoint.url.replace(/\/+$/, "")}/events` };
+function eventsUrl(endpoint: Endpoint): { url: string; unix: string } {
+  return { url: "http://localhost/events", unix: endpoint.socketPath };
 }
 
 const ABORTED: unique symbol = Symbol("aborted");
@@ -297,8 +296,10 @@ export async function subscribeChanges(
       deliver({ kind: frame.event as EventKind, cursor: frame.id, payload: parsePayload(frame.data, frame.event) });
     };
 
-    const init: BunFetchRequestInit = { headers: { accept: "text/event-stream", "cache-control": "no-cache" } };
-    if (target.unix !== undefined) init.unix = target.unix;
+    const init: BunFetchRequestInit = {
+      headers: { accept: "text/event-stream", "cache-control": "no-cache" },
+      unix: target.unix,
+    };
     let res: Response | typeof ABORTED;
     const pending = doFetch(target.url, init);
     try {

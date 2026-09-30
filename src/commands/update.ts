@@ -68,9 +68,9 @@ export default defineCommand({
     } catch (err) {
       emitError(json, err);
     }
-    // ONE request (plan @400 N9): the message row, and with --status the
-    // status change plus its `status → x` audit row by the same author,
-    // commit together or not at all. `notify` marks it an attributed agent
+    // ONE request: the message row, and with --status the status change
+    // plus its `status → x` audit row by the same author, commit together or
+    // not at all. `notify` marks it an attributed agent
     // change, so a real transition persists its notification.
     const status = args.status ? (args.status as TaskStatus) : undefined;
     const request: PostUpdateRequest = {

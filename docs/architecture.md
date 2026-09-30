@@ -99,15 +99,17 @@ the next command or daemon takes over and cleans up after it. For you, this mean
   `cortex stop` first.
 - The lease keeps cortex processes from stepping on each other. It does not stop other programs, such as a `sqlite3`
   shell, from opening the file.
-- A daemon from an older cortex binary cannot be verified, so commands refuse to work beside it (`cortex doctor`
-  reports it). Stop it with the old binary first.
+- Upgrading from a binary older than the database-scoped daemon? Stop its daemon with the old binary first. This
+  cortex no longer looks for one (every current daemon publishes its metadata), so one left running goes unnoticed.
 
 ## Under the hood
 
 ### The CLI boundary: withClient
 
 - `src/cli.ts` lazily imports one module per verb, routes the console through `src/stdio.ts#routeConsoleThroughStreams`
-  and normalizes argv with `src/args.ts#normalizeArgv` ([AGENTS.md](../AGENTS.md) says why both exist).
+  and normalizes argv with `src/args.ts#normalizeArgv` ([AGENTS.md](../AGENTS.md) says why both exist). Why not
+  upgrade citty to 0.2 and drop the shim? 0.2.2 strips `--no-*` tokens even as a string flag's value (an
+  `--body-replace "--no-x"` saved an empty body), keeps the `=` of `-b=value` and colours usage on a pipe.
 - `src/daemon.ts#withClient` is the one boundary for normal commands. `src/daemon.ts#claimOrAttach` either attaches
   to the verified daemon (`src/client.ts#createClient` sends `src/api.ts#INSTANCE_HEADER` on every request, so a
   different instance refuses it) or takes the lease and serves the same `src/server.ts#buildApp` in-process through
@@ -138,9 +140,8 @@ the next command or daemon takes over and cleans up after it. For you, this mean
   holds the lease while it serves, so the holder knows none is alive (and Bun cannot bind over a stale socket).
   No pid read from metadata is ever signalled. Stop is an IPC-only control route (`src/api.ts#CONTROL_PATHS`) bound to
   the verified instance, then a wait for the lease. Control routes exist only when serve passes control to
-  `src/server.ts#createRuntime`. `src/server.ts#startServer` binds loopback TCP for integration tests only.
-- `src/daemon.ts#assertNoLegacyDaemon` fences an older binary's daemon (pid and URL files in the config dir): old
-  binaries write the database directly, so it blocks the offline path and starting a daemon. Its pid is only reported.
+  `src/server.ts#createRuntime`. There is no TCP listener, not even for tests: in-process route tests call
+  `src/server.ts#buildApp` directly. `src/contracts.ts#Endpoint` is the socket only.
 
 ### Tables and migrations
 
@@ -177,15 +178,20 @@ the next command or daemon takes over and cleans up after it. For you, this mean
   `expected` must name every scope the write changes; a mismatch writes nothing and raises `src/store.ts#ConflictError`
   with every current token, so a client can keep both versions.
 - `src/store.ts#runIdempotent` checks a mutation id's receipt first: the same id and request replays the stored result
-  and writes nothing; the same id with another request is refused. Receipts commit with the effects and last until
-  reset; ids are for create, post and status retries, not every autosave. A `src/api.ts#TransportError` on a non-GET
-  is uncertain (the write may have committed): retry only with the same id (`src/api.ts#newMutationId`).
+  and writes nothing; the same id with another request is refused. Receipts commit with the effects and are pruned
+  after `src/store.ts#RECEIPT_RETENTION_MS` by `src/store.ts#pruneReceipts` on every open. A
+  `src/api.ts#TransportError` on a non-GET is uncertain (the write may have committed): retry only with the same id
+  (`src/api.ts#newMutationId`).
+- Only a write that may be retried sends an id. In the workspace that is the update composer (`src/tui/activity.ts`),
+  which re-posts identical text under the same id; its other writes send guards without ids, because they are never
+  retried. Why not drop receipts? The composer's re-post would post twice. Why not keep them forever? An unbounded
+  table for replays that can only come within seconds.
 
 ### Module ownership
 
 - Entry and plumbing: `src/cli.ts`, `src/args.ts`, `src/stdio.ts`, one citty verb per file in `src/commands/`, and
   `src/output.ts` (JSON on stdout; the JSON error code, not the exit code, tells errors apart).
-- Client side: `src/daemon.ts` (discovery, withClient, ensureDaemon, stop, the legacy fence), `src/client.ts` (the
+- Client side: `src/daemon.ts` (discovery, withClient, ensureDaemon, stop), `src/client.ts` (the
   socket transport), `src/api.ts` (the typed client and its errors), `src/subscription.ts` (the SSE client).
 - Daemon side: `src/server.ts` (the Hono app and SSE stream), `src/events.ts`, `src/store.ts` (schema, migrations,
   guards, receipts, memory index). Shared: `src/contracts.ts` (type-only wire types), `src/ownership.ts`,
@@ -213,7 +219,7 @@ the next command or daemon takes over and cleans up after it. For you, this mean
   `test/integration/tui-concurrency.test.ts`. Backups never contain private metadata: `test/unit/backup.test.ts`.
 - `src/contracts.ts` is type-only: `test/unit/contracts.test.ts`. `src/api.ts` imports only contract types and no
   runtime globals: `test/unit/api.test.ts`. Output past a pipe buffer: `test/integration/cli/large-output.test.ts`.
-- A mirror unit test per `src/` file (bar `src/commands/`, `src/extensions/`, `src/types.d.ts`), no integration
-  helpers in unit tests, never the real config dir: `test/unit/_layout.test.ts`, `test/integration/isolation.test.ts`.
+- Unit tests never use the integration helpers or spawn the binary, and no test touches the real config dir:
+  `test/unit/_layout.test.ts`, `test/integration/isolation.test.ts`.
 - The fixed workspace command list: `test/unit/tui/commands.test.ts`. Memory: `test/unit/store-memory.test.ts`,
   `test/unit/extensions-pi.test.ts`, `test/unit/memory-eval.test.ts`. Docs: `scripts/check-docs.ts`.

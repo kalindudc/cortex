@@ -1,10 +1,10 @@
-// Per-profile TUI view state (plan @400 N15): `configDir()/tui/<profile>.state.json`,
+// Per-profile TUI view state: `configDir()/tui/<profile>.state.json`,
 // the only terminal-UI file cortex writes (tui.toml and themes are read-only).
 //
 // - Global view preferences (include-done, task-list and panel disclosure,
 //   Read's line numbers, the preferred Read/Edit/Split mode, an explicit `:theme` choice, the
 //   task list's `:sort` order and `:group` grouping, an explicit `:density` choice) plus
-//   per-database entries keyed by the N7 database UUID (last task,
+//   per-database entries keyed by the database UUID (last task,
 //   filter/query), so another or a reset database never restores foreign
 //   tasks or filters.
 // - Saving re-reads the file, merges ONLY the fields this session changed

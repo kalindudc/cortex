@@ -6,11 +6,11 @@ import { Store } from "../store.ts";
 import { dbPath, ensureConfigDir } from "../paths.ts";
 
 /**
- * Create (or migrate) the database as its owner (plan @400 N6): acquire the
- * ownership lease before the writable open, apply pending migrations, and
- * release it. When a verified daemon already serves the database it is
- * already created and additively migrated; pending table rebuilds need the
- * database to themselves, so they refuse until the daemon is stopped.
+ * Create (or migrate) the database as its owner: acquire the ownership
+ * lease before the writable open, apply pending migrations, and release it.
+ * When a verified daemon already serves the database it is already created
+ * and additively migrated; pending table rebuilds need the database to
+ * themselves, so they refuse until the daemon is stopped.
  * Returns the migrations applied.
  */
 async function initDatabase(databasePath: string): Promise<string[]> {

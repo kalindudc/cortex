@@ -273,9 +273,9 @@ function emptyTouched(): Touched {
 }
 
 /**
- * Plan @400 N10: imported task ids (preserved OR bumped) get fresh tokens for
- * every scope, so an id the destination had deleted can never satisfy a guard
- * read before that deletion; created lanes/tags start fresh, and existing ones
+ * Imported task ids (preserved OR bumped) get fresh tokens for every scope,
+ * so an id the destination had deleted can never satisfy a guard read before
+ * that deletion; created lanes/tags start fresh, and existing ones
  * that gained members advance `entity` only (their definition was kept).
  * Destination identity and receipts are never touched, and the v1 archive
  * carries no source receipts to import.
@@ -284,7 +284,7 @@ function stampRestored(store: Store, idMap: Map<number, number>, touched: Touche
   store.stampRevisions("task", idMap.values());
   // Body-sync records (agent memory) are never backed up: a reissued id must
   // not inherit a deleted task's record, so restored tasks fall back to their
-  // archived `created` (plan @414, review @418 F1).
+  // archived `created`.
   store.forgetBodySync(idMap.values());
   store.stampRevisions("lane", touched.newLanes);
   store.stampRevisions(

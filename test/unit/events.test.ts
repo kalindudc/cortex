@@ -1,93 +1,7 @@
-import { test, expect, describe, afterEach, spyOn } from "bun:test";
-import {
-  subscribe,
-  emit,
-  EVENT_KINDS,
-  createEventPublisher,
-  formatCursor,
-  parseCursor,
-  type CortexEvent,
-  type PublishedEvent,
-} from "../../src/events.ts";
+import { test, expect, describe, spyOn } from "bun:test";
+import { EVENT_KINDS, createEventPublisher, formatCursor, parseCursor, type PublishedEvent } from "../../src/events.ts";
 
-const unsubs = new Set<() => void>();
-const track = (cb: (ev: CortexEvent) => void): (() => void) => {
-  const off = subscribe(cb);
-  unsubs.add(off);
-  return off;
-};
-
-afterEach(() => {
-  for (const off of unsubs) off();
-  unsubs.clear();
-});
-
-describe("events bus", () => {
-  test("subscribe returns an unsubscribe function", () => {
-    const off = track(() => {});
-    expect(typeof off).toBe("function");
-  });
-
-  test("emit fires subscribers with the same event object (kind, payload, ts)", () => {
-    const seen: CortexEvent[] = [];
-    track(ev => seen.push(ev));
-    const ev: CortexEvent = { kind: "task.added", payload: { id: 1 }, ts: 42 };
-    emit(ev);
-    expect(seen).toEqual([ev]);
-  });
-
-  test("after unsubscribe the callback is NOT fired", () => {
-    let count = 0;
-    const off = track(() => {
-      count++;
-    });
-    off();
-    unsubs.delete(off);
-    emit({ kind: "task.updated", payload: null, ts: 1 });
-    expect(count).toBe(0);
-  });
-
-  test("multiple subscribers each receive every emit", () => {
-    const a: number[] = [],
-      b: number[] = [];
-    track(ev => a.push(ev.ts));
-    track(ev => b.push(ev.ts));
-    emit({ kind: "task.added", payload: null, ts: 1 });
-    emit({ kind: "task.removed", payload: null, ts: 2 });
-    expect(a).toEqual([1, 2]);
-    expect(b).toEqual([1, 2]);
-  });
-
-  test("emitter is kind-agnostic — every subscriber sees every kind", () => {
-    const kinds: CortexEvent["kind"][] = [];
-    track(ev => kinds.push(ev.kind));
-    const all: CortexEvent["kind"][] = [
-      "task.added",
-      "task.updated",
-      "task.removed",
-      "update.posted",
-      "lane.changed",
-      "tag.changed",
-    ];
-    for (const k of all) emit({ kind: k, payload: null, ts: 0 });
-    expect(kinds).toEqual(all);
-  });
-
-  test("concurrent subscribers don't interfere — unsubscribing one leaves others active", () => {
-    const a: number[] = [],
-      b: number[] = [];
-    const offA = track(ev => a.push(ev.ts));
-    track(ev => b.push(ev.ts));
-    emit({ kind: "task.added", payload: null, ts: 1 });
-    offA();
-    unsubs.delete(offA);
-    emit({ kind: "task.added", payload: null, ts: 2 });
-    expect(a).toEqual([1]);
-    expect(b).toEqual([1, 2]);
-  });
-});
-
-// ---------- sequenced publisher (plan @400 N12) ----------
+// ---------- sequenced publisher ----------
 
 const LEGACY_KINDS = [
   "task.added",
@@ -170,14 +84,6 @@ describe("createEventPublisher", () => {
       ["lane.changed", 1],
       ["tag.changed", 2],
     ]);
-  });
-
-  test("mirrors every event to the legacy bus with its original kind/payload/ts", () => {
-    const p = createEventPublisher("ep");
-    const legacy: CortexEvent[] = [];
-    track(ev => legacy.push(ev));
-    const published = p.publish("task.blocked", { id: 3 });
-    expect(legacy).toEqual([{ kind: "task.blocked", payload: { id: 3 }, ts: published.ts }]);
   });
 
   test("a throwing subscriber cannot fail the publish (the write already committed)", () => {

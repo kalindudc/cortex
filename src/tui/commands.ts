@@ -1,4 +1,4 @@
-// The `:` command registry (plan @400 N17/P9): ONE list of CommandSpec
+// The `:` command registry: ONE list of CommandSpec
 // (name, aliases, usage, description, completer, handler) drives execution
 // (parseCommand + run), Tab completion (completeCommandLine), `?`/:help
 // (commandHelp) and the searchable :commands reference (searchCommands).
@@ -9,11 +9,12 @@
 //   task ids (by id prefix or by title search), statuses, lanes, tags,
 //   option names, themes, and the current document's heading slugs and code
 //   block numbers (`describe` says what a candidate names).
-// - Metadata and catalog commands (P3/P4) write through the shared guarded
+// - Metadata and catalog commands write through the shared guarded
 //   API only (session.client.versioned, `Prefer: cortex-versioned`): each
 //   reads ONE atomic state (task, lane or tag with its versions), refuses a
 //   stale view as a conflict before writing, then sends a guard {expected
-//   tokens of exactly the scopes it changes, mutationId}. A 412 is shown as
+//   tokens of exactly the scopes it changes} and no mutation id: these writes
+//   are never retried, so a receipt could never be replayed. A 412 is shown as
 //   a conflict with context and nothing is applied locally: the session's
 //   copy only ever changes through the live stream, never from a write's
 //   answer (no stale list replacement), and uncertain transport failures are
@@ -23,22 +24,21 @@
 //   through the client mutate hands it (refused once that database was
 //   replaced), and a command that reads or asks first passes mutate the
 //   database generation it captured when it was submitted.
-// - Human status changes send no author, so they never pose as attributed
-//   agent changes (N9).
+// - Human status changes send no author, so they never pose as attributed agent changes.
 // - Tag membership changes are atomic add/remove deltas, never a whole-list
 //   replace; removing a tag from a task never deletes its definition.
-// - Documents (Task 9): :read/:edit/:split change the saved preferred mode
+// - Documents: :read/:edit/:split change the saved preferred mode
 //   (nothing else does); :title goes through the task's draft (in place
 //   without text); :w saves every draft (or exports with a path, :w @<id>
 //   <path> a kept draft of a deleted task; :w! replaces), :wq/:x quit only
 //   after acknowledged saves, :q refuses while a draft is unsaved and :q!
 //   discards; :apply/:keep resolve a conflict.
-// - The reader (Task 10, src/tui/reader.ts): :heading [slug] (bare: the
+// - The reader (src/tui/reader.ts): :heading [slug] (bare: the
 //   outline), :links (links and references; Enter follows), :copy [n] (an
 //   explicit OSC 52 copy of a code block), :source (the raw source).
 // - Later slices add their commands to COMMANDS; nothing else needs to change.
 
-import { HttpError, newMutationId, TransportError } from "../api.ts";
+import { HttpError, TransportError } from "../api.ts";
 import type {
   BackupResult,
   CortexClient,
@@ -584,7 +584,7 @@ function runSet(session: TuiSession, argument: string): void {
   }
 }
 
-// ---------- guarded writes (P3/P4) ----------
+// ---------- guarded writes ----------
 
 const isConflict = (err: unknown): boolean => err instanceof HttpError && err.status === 412;
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -736,9 +736,9 @@ async function writeStatus(
     session.notify("info", `@${shown.id} is already ${STATUS_LABEL[status]}`);
     return;
   }
-  // No author: a human change (N9).
+  // No author: a human change.
   await writeField(client, shown, "status", attempt, expected =>
-    client.versioned.setStatus(shown.id, { status }, { expected, mutationId: newMutationId() }),
+    client.versioned.setStatus(shown.id, { status }, { expected }),
   );
   session.notify("info", `@${shown.id}: ${STATUS_LABEL[shown.status]} → ${STATUS_LABEL[status]}`);
 }
@@ -849,7 +849,7 @@ async function changeTags(
   // commutative with other writers, so it needs no expected tokens.
   if (adds.length > 0) {
     try {
-      await client.versioned.changeTags(shown.id, { add: adds }, { mutationId: newMutationId() });
+      await client.versioned.changeTags(shown.id, { add: adds });
     } catch (err) {
       throw writeFailure(err, `tag @${shown.id} ${hashes(adds)}`);
     }
@@ -857,7 +857,7 @@ async function changeTags(
   }
   if (removes.length > 0) {
     try {
-      await client.versioned.changeTags(shown.id, { remove: removes }, { mutationId: newMutationId() });
+      await client.versioned.changeTags(shown.id, { remove: removes });
     } catch (err) {
       const failure = writeFailure(err, `untag ${hashes(removes)}`);
       throw done.length > 0 ? new CommandError(`${done.join("")}, but ${lowerFirst(failure.message)}`) : failure;
@@ -910,9 +910,7 @@ function openTagPicker(session: TuiSession, task: Task): void {
         const name = create ? row.key.slice("+create:".length) : row.key;
         const remove = !create && current.tags.includes(name);
         try {
-          await client.versioned.changeTags(id, remove ? { remove: [name] } : { add: [name] }, {
-            mutationId: newMutationId(),
-          });
+          await client.versioned.changeTags(id, remove ? { remove: [name] } : { add: [name] });
         } catch (err) {
           throw writeFailure(err, `${remove ? "untag" : "tag"} @${id} #${name}`);
         }
@@ -932,7 +930,7 @@ async function confirmDelete(session: TuiSession): Promise<void> {
   const state = await readTask(session.client, shown.id, ":delete");
   session.requireDatabase(database);
   const updates = state.updates.length;
-  // N16: a dirty draft is offered for export (:w <path> works inside this dialog) or discarded by y.
+  // A dirty draft is offered for export (:w <path> works inside this dialog) or discarded by y.
   const unsaved = session.unsavedDrafts().filter(d => !d.orphaned && d.taskId === shown.id);
   const draftLines =
     unsaved.length === 0
@@ -959,7 +957,6 @@ async function confirmDelete(session: TuiSession): Promise<void> {
           // posted update (which the delete would cascade) included, is a 412.
           await client.versioned.removeTask(shown.id, {
             expected: { entity: token(state.versions, "entity", `@${shown.id}`) },
-            mutationId: newMutationId(),
           });
         } catch (err) {
           session.expectRemoval(shown.id, false);
@@ -975,7 +972,7 @@ async function confirmDelete(session: TuiSession): Promise<void> {
   });
 }
 
-// ---------- catalogs (P4) ----------
+// ---------- catalogs ----------
 
 const LANE_KEY = "lane:";
 const TAG_KEY = "tag:";
@@ -1039,7 +1036,7 @@ function openLaneForm(
         if (color !== null) request.color = color;
         await session.mutate(async client => {
           try {
-            await client.versioned.addLane(request, { mutationId: newMutationId() });
+            await client.versioned.addLane(request);
           } catch (err) {
             throw writeFailure(err, `create lane ${name}`);
           }
@@ -1064,7 +1061,7 @@ function openLaneForm(
       if (fields.rename !== undefined) expected.entity = token(current.versions, "entity", `lane ${was}`);
       await session.mutate(async client => {
         try {
-          await client.versioned.editLane(was, fields, { expected, mutationId: newMutationId() });
+          await client.versioned.editLane(was, fields, { expected });
         } catch (err) {
           if (isConflict(err)) {
             const fresh = await client.laneState(was).catch(() => null);
@@ -1119,7 +1116,6 @@ async function deleteLane(session: TuiSession, name: string): Promise<void> {
         try {
           await client.versioned.removeLane(name, {
             expected: { entity: token(state.versions, "entity", `lane ${name}`) },
-            mutationId: newMutationId(),
           });
         } catch (err) {
           if (isConflict(err)) {
@@ -1202,7 +1198,7 @@ function openTagForm(session: TuiSession, state: TagStateSnapshot | null, databa
         if (color !== null) request.color = color;
         await session.mutate(async client => {
           try {
-            await client.versioned.addTag(request, { mutationId: newMutationId() });
+            await client.versioned.addTag(request);
           } catch (err) {
             throw writeFailure(err, `create #${name}`);
           }
@@ -1223,7 +1219,7 @@ function openTagForm(session: TuiSession, state: TagStateSnapshot | null, databa
       if (fields.rename !== undefined) expected.entity = token(current.versions, "entity", `#${was}`);
       await session.mutate(async client => {
         try {
-          await client.versioned.editTag(was, fields, { expected, mutationId: newMutationId() });
+          await client.versioned.editTag(was, fields, { expected });
         } catch (err) {
           if (isConflict(err)) {
             const fresh = await client.tagState(was).catch(() => null);
@@ -1278,7 +1274,7 @@ async function deleteTag(session: TuiSession, name: string): Promise<void> {
           await client.versioned.removeTag(
             name,
             { force: count > 0 },
-            { expected: { entity: token(state.versions, "entity", `#${name}`) }, mutationId: newMutationId() },
+            { expected: { entity: token(state.versions, "entity", `#${name}`) } },
           );
         } catch (err) {
           if (isConflict(err)) {
@@ -1331,7 +1327,7 @@ function openTags(session: TuiSession): void {
   });
 }
 
-// ---------- themes (P9) ----------
+// ---------- themes ----------
 
 const THEME_SOURCE: Readonly<Record<ThemeSource, (theme: ResolvedTheme) => string>> = {
   session: () => "your :theme choice (saved)",
@@ -1343,7 +1339,7 @@ const THEME_SOURCE: Readonly<Record<ThemeSource, (theme: ResolvedTheme) => strin
   colors: () => "auto (a 16-color terminal)",
 };
 
-/** Which precedence level chose the active theme, for the status line (N22). */
+/** Which precedence level chose the active theme, for the status line. */
 export function themeSourceText(theme: ResolvedTheme): string {
   return `Theme ${theme.name} · ${THEME_SOURCE[theme.source](theme)}`;
 }
@@ -1404,7 +1400,7 @@ function requireReader(session: TuiSession): Reader {
   return reader;
 }
 
-// ---------- maintenance: :backup and pending migrations (P10, Task 11) ----------
+// ---------- maintenance: :backup and pending migrations ----------
 
 /** Sessions with a :backup in flight (one at a time: a backup is never sent twice by accident). */
 const backingUp = new WeakSet<TuiSession>();
@@ -1456,7 +1452,7 @@ export async function reportPendingMigrations(session: TuiSession): Promise<void
   ]);
 }
 
-// ---------- the task panels and the composer (Task 11, src/tui/activity.ts) ----------
+// ---------- the task panels and the composer (src/tui/activity.ts) ----------
 
 function requireActivity(session: TuiSession): Activity {
   const activity = session.activity;
@@ -1654,7 +1650,7 @@ export const COMMANDS: readonly CommandSpec[] = [
         const request: CreateTaskRequest = argument === "" ? { untitled: true, lane } : { title: argument, lane };
         let created: Task;
         try {
-          created = (await client.versioned.addTask(request, { mutationId: newMutationId() })).task;
+          created = (await client.versioned.addTask(request)).task;
         } catch (err) {
           throw writeFailure(err, `create a task in ${lane}`);
         }
@@ -1741,7 +1737,7 @@ export const COMMANDS: readonly CommandSpec[] = [
           return;
         }
         await writeField(client, shown, "priority", `:priority ${argument}`, expected =>
-          client.versioned.editTask(shown.id, { priority }, { expected, mutationId: newMutationId() }),
+          client.versioned.editTask(shown.id, { priority }, { expected }),
         );
         session.notify("info", `@${shown.id}: priority ${label}`);
       });
@@ -1767,7 +1763,7 @@ export const COMMANDS: readonly CommandSpec[] = [
           return;
         }
         await writeField(client, shown, "lane", `:lane ${argument}`, expected =>
-          client.versioned.moveTask(shown.id, argument, { expected, mutationId: newMutationId() }),
+          client.versioned.moveTask(shown.id, argument, { expected }),
         );
         session.notify("info", `Moved @${shown.id} to ${argument}`);
       });

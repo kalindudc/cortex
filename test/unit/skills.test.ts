@@ -39,9 +39,9 @@ describe("writeSkill — every shipped skill", () => {
   }
 });
 
-// Cortex base skill: preserve Plan 3 coverage of the cli/*.md and
-// recipes/*.md leaf files (each must be > 200 bytes).
-describe("cortex base skill — Plan 3 leaf files", () => {
+// Cortex base skill: the cli/*.md and recipes/*.md leaf files ship and
+// are not empty (each must be > 200 bytes).
+describe("cortex base skill — leaf files", () => {
   const expectedLeaves = [
     "cli/init.md",
     "cli/reset.md",
@@ -63,113 +63,6 @@ describe("cortex base skill — Plan 3 leaf files", () => {
       expect(fs.existsSync(abs)).toBe(true);
       expect(fs.statSync(abs).size).toBeGreaterThan(200);
     }
-  });
-
-  test("cli/update.md contains the literal 'REQUIRED' warning (Plan 3 contract)", async () => {
-    const dir = path.join(tmpDir, "cortex");
-    await writeSkill("cortex", dir);
-    const text = fs.readFileSync(path.join(dir, "cli/update.md"), "utf8");
-    expect(text).toContain("REQUIRED");
-  });
-});
-
-// Methodology skills: standalone discipline. Each MUST be a substantial,
-// self-contained skill that teaches the cortex methodology AND embeds the
-// cortex-CLI essentials it uses (no cross-references to a base skill).
-//
-// Discovery: the description follows Anthropic's third-person trigger-phrase
-// shape ("This skill should be used when ..."), and explicitly disambiguates
-// the sibling skill so the harness skill-picker doesn't fire both on
-// overlapping prompts.
-describe("methodology skills — standalone discipline", () => {
-  const methodologySkills: SkillName[] = ["cortex-planner", "cortex-implementer", "cortex-research"];
-  for (const name of methodologySkills) {
-    test(`${name}: substantial body (≥ 4 KB) and embeds cortex CLI essentials`, async () => {
-      const dir = path.join(tmpDir, name);
-      await writeSkill(name, dir);
-      const skillMd = path.join(dir, "SKILL.md");
-      const txt = fs.readFileSync(skillMd, "utf8");
-      // Standalone skills are substantive (~250 lines / ~4-15 KB).
-      expect(fs.statSync(skillMd).size).toBeGreaterThan(4_000);
-      // Embeds the session-id pattern inline (no cross-ref to a base skill).
-      expect(txt).toContain("$SESSION_ID");
-      expect(txt).toContain("openssl rand -hex 4");
-      // Embeds the cortex commands it actually uses.
-      expect(txt).toContain("cortex update");
-    });
-
-    test(`${name}: third-person trigger-phrase description (Anthropic discovery shape)`, async () => {
-      const dir = path.join(tmpDir, name);
-      await writeSkill(name, dir);
-      const txt = fs.readFileSync(path.join(dir, "SKILL.md"), "utf8");
-      const closingIdx = txt.indexOf("---", 4);
-      expect(closingIdx).toBeGreaterThan(0);
-      const frontmatter = txt.slice(0, closingIdx);
-      expect(frontmatter).toContain("This skill should be used when");
-    });
-  }
-
-  test("cortex-planner and cortex-implementer disambiguate each other", async () => {
-    await writeSkill("cortex-planner", path.join(tmpDir, "cortex-planner"));
-    await writeSkill("cortex-implementer", path.join(tmpDir, "cortex-implementer"));
-    const planner = fs.readFileSync(path.join(tmpDir, "cortex-planner", "SKILL.md"), "utf8");
-    const implementer = fs.readFileSync(path.join(tmpDir, "cortex-implementer", "SKILL.md"), "utf8");
-    // The planner description tells the picker to use the implementer for drafting.
-    expect(planner).toContain("cortex-implementer");
-    // The implementer description tells the picker to use the planner for drafting.
-    expect(implementer).toContain("cortex-planner");
-  });
-
-  // cortex-research must disambiguate against BOTH siblings: planning work is
-  // for cortex-planner, execution is for cortex-implementer. Without these
-  // names in the body, the pi skill-picker can fire cortex-research on
-  // prompts that should route to planner/implementer.
-  test("cortex-research disambiguates from cortex-planner and cortex-implementer", async () => {
-    await writeSkill("cortex-research", path.join(tmpDir, "cortex-research"));
-    const research = fs.readFileSync(path.join(tmpDir, "cortex-research", "SKILL.md"), "utf8");
-    expect(research).toContain("cortex-planner");
-    expect(research).toContain("cortex-implementer");
-  });
-});
-
-// Instruction contracts: approved planning history is not a running implementer.
-describe("cortex-implementer — approved handoffs and coordination", () => {
-  let text: string;
-
-  beforeAll(async () => {
-    const dir = path.join(tmpDir, "cortex-implementer");
-    await writeSkill("cortex-implementer", dir);
-    text = fs.readFileSync(path.join(dir, "SKILL.md"), "utf8");
-  });
-
-  test("open plans authorize requested implementation without rechecking planning", () => {
-    expect(text).toContain("`open` means planning is complete and the plan is approved for implementation.");
-    expect(text).toContain("Do NOT ask whether planning has finished");
-    expect(text).toContain("The current task status takes precedence over older planning notes.");
-  });
-
-  test("coordination requires evidence of ongoing implementation, not recent planning activity", () => {
-    expect(text).toContain("positive evidence of ongoing implementation");
-    expect(text).toContain(
-      "Planning/research updates, approval/status transitions, and completed `task N: ...` records alone are NOT evidence",
-    );
-    expect(text).toContain("has not been superseded by a later handoff, stop, or completion");
-    expect(text).not.toContain("for activity in the last few minutes from any author");
-  });
-
-  test("completion records from another session allow a verified resume", () => {
-    expect(text).toContain(
-      "`task N: ...` updates from a DIFFERENT author are completion records, not proof of an active implementer.",
-    );
-    expect(text).toContain(
-      "Verify that work and resume normally unless the coordination check finds separate evidence",
-    );
-    expect(text).not.toContain("treat as multi-agent coordination");
-  });
-
-  test("progress history reads the actual update summary field", () => {
-    expect(text).toContain('select(.summary | test("^task [0-9]+:")) | .summary');
-    expect(text).not.toContain(".message | test");
   });
 });
 

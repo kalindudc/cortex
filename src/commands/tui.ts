@@ -2,10 +2,10 @@ import { isatty } from "node:tty";
 import { defineCommand } from "citty";
 import type { RunTuiOptions } from "../tui/app.ts";
 
-// `cortex tui [id] [--heading slug] [--profile name] [--theme name]` (plan
-// @400 N5), and plain `cortex` on an interactive terminal. Every argument and
-// the terminal itself are checked BEFORE the alternate screen, so a mistake
-// prints one line and exits non-zero on the normal screen. This module stays
+// `cortex tui [id] [--heading slug] [--profile name] [--theme name]`, and
+// plain `cortex` on an interactive terminal. Every argument and the terminal
+// itself are checked BEFORE the alternate screen, so a mistake prints one
+// line and exits non-zero on the normal screen. This module stays
 // light on purpose (src/cli.ts imports entryArgs for every command): the
 // terminal runtime and its validators load only when the TUI actually runs.
 

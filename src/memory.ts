@@ -1,15 +1,15 @@
 /**
- * Agent-memory helpers (plan @414): query terms, cited paths, the lane of a
- * checkout, staleness and the text rendered into an agent's context.
+ * Agent-memory helpers: query terms, cited paths, the lane of a checkout,
+ * staleness and the text rendered into an agent's context.
  *
  * A cortex task is a memory STREAM: its body is the current state, its
  * updates are the breadcrumb history, its lane is the project (derived from
- * the ask; plan @422: recall spans every lane), its tags are topics and its
+ * the ask; recall spans every lane), its tags are topics and its
  * status is the lifecycle. The ranked index itself lives in
  * `Store.searchMemory` (the only SQLite user); nothing here opens the store.
  *
- * Every output budget is in MEMORY_LIMITS so the pi extension (plan @415)
- * and the CLI stay small and byte-stable.
+ * Every output budget is in MEMORY_LIMITS so the pi extension and the CLI
+ * stay small and byte-stable.
  */
 
 import fs from "node:fs";
@@ -147,9 +147,9 @@ export function memoryPhrases(text: string): string[][] {
  * heading and whenever the next line would push the section past
  * `maxChars` (a single longer line stays whole). Search coverage is decided
  * per section, so terms scattered across a long document no longer qualify
- * it (review of @414: long documents dominated broad queries). Never
- * returns an empty list: text without content is one empty section, so the
- * task's title and tags stay searchable.
+ * it (long documents used to dominate broad queries). Never returns an empty
+ * list: text without content is one empty section, so the task's title and
+ * tags stay searchable.
  */
 export function memorySections(text: string, maxChars: number): string[] {
   const sections: string[] = [];
@@ -485,7 +485,7 @@ export function headingSections(body: string): HeadingSection[] {
   return sections;
 }
 
-/** The headings `cortex memory show` leads a long body with, in this order (plan @422). */
+/** The headings `cortex memory show` leads a long body with, in this order. */
 const PRIORITY_HEADINGS = [
   /\bnext\b/i,
   /open questions?|blockers?|risks?/i,

@@ -1,5 +1,5 @@
 /**
- * Environment-neutral typed client for the daemon's JSON API (plan @400 N11).
+ * Environment-neutral typed client for the daemon's JSON API.
  *
  * `createApi(send)` takes the transport as a RequestSender: the native client
  * (src/client.ts) sends over the Unix socket or an absolute URL. This module
@@ -43,9 +43,9 @@ export const PREFER_VERSIONED = "cortex-versioned";
 export const INSTANCE_HEADER = "Cortex-Instance";
 
 /**
- * Daemon control routes (plan @400 N5/N11). Registered ONLY on the daemon's
- * private IPC (Unix socket) app, never on an in-process app, and every
- * request must carry INSTANCE_HEADER naming the verified instance.
+ * Daemon control routes. Registered ONLY on the daemon's private IPC (Unix
+ * socket) app, never on an in-process app, and every request must carry
+ * INSTANCE_HEADER naming the verified instance.
  *   shutdown: POST, no body -> 202 `{ ok, instanceId }`, then the daemon stops.
  */
 export const CONTROL_PATHS = {
@@ -265,7 +265,6 @@ export function createApi(send: RequestSender, options: ApiOptions = {}): Cortex
     me: () => request("GET", "/api/me"),
     migrations: () => request("GET", "/api/migrations"),
     tasks: query => request("GET", `/api/tasks${taskQueryString(query)}`),
-    task: id => request("GET", `/api/tasks/${id}`),
     lanes: () => request("GET", "/api/lanes"),
     tags: () => request("GET", "/api/tags"),
     updates: id => request("GET", `/api/tasks/${id}/updates`),
@@ -283,7 +282,6 @@ export function createApi(send: RequestSender, options: ApiOptions = {}): Cortex
     backup: body => request("POST", "/api/backup", { body: body ?? {} }),
     addTask: (body: CreateTaskRequest) => request("POST", "/api/tasks", { body }),
     editTask: (id, body) => request("PATCH", `/api/tasks/${id}`, { body }),
-    setStat: (id, status) => request("PATCH", `/api/tasks/${id}/status`, { body: { status } }),
     moveLane: (id, lane) => request("PATCH", `/api/tasks/${id}/lane`, { body: { lane } }),
     delTask: id => nothing("DELETE", `/api/tasks/${id}`),
     postUpd: (id, body: PostUpdateRequest) => request("POST", `/api/tasks/${id}/updates`, { body }),

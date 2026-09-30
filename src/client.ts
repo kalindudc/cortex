@@ -1,5 +1,5 @@
 /**
- * The native typed client for a daemon endpoint (plan @400 N6/N11).
+ * The native typed client for a daemon endpoint.
  *
  * Why: a daemon's event publisher is in-process, so a CLI mutation that
  * wrote SQLite directly would be invisible to its SSE subscribers. While a
@@ -19,17 +19,14 @@ export { HttpError };
 export const DEFAULT_TIMEOUT_MS = 30_000;
 
 /**
- * The native typed client for a daemon endpoint: its private Unix socket or
- * an absolute URL (the legacy probe and in-process test listeners), over createApi (typed errors, versioned guarded
- * writes, instance binding). `timeoutMs` defaults to DEFAULT_TIMEOUT_MS.
+ * The native typed client for a daemon endpoint, its private Unix socket,
+ * over createApi (typed errors, versioned guarded writes, instance binding). `timeoutMs` defaults to DEFAULT_TIMEOUT_MS.
  */
 export function createClient(endpoint: Endpoint, options: ApiOptions = {}): CortexClient {
   return createApi(endpointSender(endpoint), { timeoutMs: DEFAULT_TIMEOUT_MS, ...options });
 }
 
-/** The native RequestSender for an endpoint: fetch over its Unix socket, or against its absolute URL. */
+/** The native RequestSender for an endpoint: fetch over its Unix socket. */
 export function endpointSender(endpoint: Endpoint): RequestSender {
-  return endpoint.kind === "unix"
-    ? (path, init) => fetch(`http://localhost${path}`, { ...init, unix: endpoint.socketPath })
-    : (path, init) => fetch(`${endpoint.url.replace(/\/+$/, "")}${path}`, init);
+  return (path, init) => fetch(`http://localhost${path}`, { ...init, unix: endpoint.socketPath });
 }

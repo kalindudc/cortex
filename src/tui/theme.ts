@@ -1,4 +1,4 @@
-// Terminal themes (plan @400 N22/N23): data over semantic tokens.
+// Terminal themes: data over semantic tokens.
 //
 // - Components never embed colors: they call `style(theme, pair, text)` with a
 //   pair declared in CONTRAST_PAIRS, on text already escaped by
@@ -424,7 +424,7 @@ export function to16(color: string): number {
   return best;
 }
 
-// ---------- color mode (N23) ----------
+// ---------- color mode ----------
 
 export interface ColorEnvironment {
   readonly NO_COLOR?: string;
@@ -644,7 +644,7 @@ export function listThemes(dir: string = themesDir()): {
   return { themes, problems };
 }
 
-// ---------- resolution (N22 precedence) ----------
+// ---------- resolution (theme precedence) ----------
 
 export type ThemeSource = "session" | "cli" | "saved" | "config" | "appearance" | "default" | "colors";
 

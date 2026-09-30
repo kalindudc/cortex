@@ -1,17 +1,17 @@
 import { defineCommand } from "citty";
-import { describeLegacyDaemon, discoverDaemon, findLegacyDaemon, stopDaemon } from "../daemon.ts";
+import { discoverDaemon, stopDaemon } from "../daemon.ts";
 import { dbPath } from "../paths.ts";
 
 /**
  * `cortex stop` — stop the daemon serving THIS database (`CORTEX_DB`, else
- * the config dir's cortex.db) and nothing else (plan @400 N5).
+ * the config dir's cortex.db) and nothing else.
  *
  * The daemon is found through the metadata it published beside the
  * canonical database and verified over its private socket; the shutdown
  * request is bound to that instance (a different instance answers 421 and
  * keeps running), and stop then waits until the daemon has released the
  * database. There is no process-table scan and no signal to any pid:
- * daemons of other databases, a `cortex serve` from an older binary, and
+ * daemons of other databases and
  * unrelated processes whose argv merely contains "cortex serve" all survive.
  */
 export default defineCommand({
@@ -23,9 +23,6 @@ export default defineCommand({
     try {
       const identity = await discoverDaemon(dbPath());
       if (identity === null) {
-        // An old binary's daemon cannot be verified, so it is reported, never signalled.
-        const legacy = await findLegacyDaemon();
-        if (legacy !== null) console.error(`warn: cortex stop cannot stop it: ${describeLegacyDaemon(legacy)}`);
         console.log("not running");
         return;
       }

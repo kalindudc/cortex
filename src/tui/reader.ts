@@ -1,4 +1,4 @@
-// The terminal reader (plan @400 Task 10 part A: P6, N17, N19-N22).
+// The terminal reader.
 //
 // Read mode and the Split preview show the task's CURRENT text (its local
 // draft when there is one, else the saved body; the preview follows every

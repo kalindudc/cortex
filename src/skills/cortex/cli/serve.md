@@ -39,6 +39,5 @@ While the daemon runs, every command (`cortex add`, `cortex update`, `cortex ls`
 
 - **The private socket is the security boundary. There are no bearer tokens.** The socket is owner-only (`0600`) in a private (`0700`) runtime directory (`XDG_RUNTIME_DIR`, else `<tmpdir>/cortex-<uid>`). Do not expose it (for example with `socat` or an SSH forward) — anyone reaching it has full CRUD on every task.
 - One daemon per database. Different databases (different `CORTEX_DB`) get independent daemons.
-- A daemon started by an OLDER cortex binary (one that wrote `cortex.pid`/`cortex.url`) cannot be verified: every command refuses to run beside it with a restart instruction. Stop it (Ctrl+C in its terminal) and start `cortex serve` with this binary.
 - Never delete `<db>.owner.lock`: it is the ownership lease file, and a new one would admit a second owner.
 - Open TUIs signal (status-line flash, optional bell) only on transitions into `blocked` status (not on `done`, not on routine updates).

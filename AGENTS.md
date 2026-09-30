@@ -86,11 +86,11 @@ One line per rule; the linked doc holds the why. A code comment states its reaso
 
 Two concentric layers; the boundary matters because each makes different I/O assumptions.
 
-- `test/unit/` — `bun:test`, fast, pure in-process, no DOM: `Store.open(":memory:")` (or its own tmp `CORTEX_DB`), routes via `buildApp(store).fetch(new Request(...))`. NEVER spawn `bin/cortex`, import the integration helpers or call `runCli` / `startServer`.
+- `test/unit/` — `bun:test`, fast, pure in-process, no DOM: `Store.open(":memory:")` (or its own tmp `CORTEX_DB`), routes via `buildApp(store).fetch(new Request(...))`. NEVER spawn `bin/cortex`, import the integration helpers or call `runCli`.
 - Pin `XDG_CONFIG_HOME` / `CORTEX_DB` / `CORTEX_SKILL_DIR` / `CORTEX_PI_EXTENSION_DIR` to a `fs.mkdtempSync` dir BEFORE calling code that reads them, and restore them afterwards (`test/unit/paths.test.ts` shows the pattern). NEVER write to the real `~/.config/cortex`.
-- One mirror unit test per `src/` file (except `src/commands/`, `src/extensions/`, `src/types.d.ts`); `test/unit/_layout.test.ts` enforces the mirror, tier and hermetic rules.
+- `test/unit/_layout.test.ts` enforces the tier and hermetic rules (a new `src/` file needs tests where behaviour needs them, not a mirror file per source).
 - `test/integration/` — `bun:test` against the COMPILED `bin/cortex` (`pnpm run test:integration` builds it). Every spawn goes through `runCli` or receives the scrubbed env from `mkTmpEnv()` (`test/integration/helpers.ts`); NEVER inherit the parent env.
-- Daemons start through `test/integration/fixtures/daemon.ts` (tracks and reaps every process it spawns; `cortex stop` is instance-bound, so it is safe in a sandbox). `startServer` is only for in-process route tests. `test/integration/isolation.test.ts` is the runtime canary that the real config stays untouched.
+- Daemons start through `test/integration/fixtures/daemon.ts` (tracks and reaps every process it spawns; `cortex stop` is instance-bound, so it is safe in a sandbox). `test/integration/isolation.test.ts` is the runtime canary that the real config stays untouched.
 - TUI tests drive the compiled binary in a real PTY through `test/integration/fixtures/pty.ts` (drains output continuously, checks termios restoration from the parent): `test/integration/tui.test.ts` for rendering, modes, signals and restoration; `test/integration/tui-concurrency.test.ts` for several TUIs and CLI writers on one daemon.
 
 `pnpm test` runs both. Snapshot tests live alongside their unit file. There is no browser UI; do not add one without an issue.

@@ -17,9 +17,9 @@ import { emitError, printJson } from "../output.ts";
 import type { MemoryStream, MemoryStreamRow } from "../store.ts";
 
 /**
- * `cortex memory` — agent memory over cortex tasks (plan @414). A task is a
- * memory stream: body = current state, updates = breadcrumbs, lane = the
- * project (plan @422: derived from the ask; recall spans every lane).
+ * `cortex memory` — agent memory over cortex tasks. A task is a memory
+ * stream: body = current state, updates = breadcrumbs, lane = the project
+ * (derived from the ask; recall spans every lane).
  *
  *   search <query>  ranked recall across lanes (derived FTS5 index; punctuation ignored)
  *   show <id>       staleness since the last BODY sync + body (section-first when long) + breadcrumb trail
@@ -189,7 +189,7 @@ const context = defineCommand({
             limit: MEMORY_LIMITS.elsewhereStreams + MEMORY_LIMITS.primerStreams,
           });
         }
-        // Every lane, this one boosted: work spans repos (plan @422).
+        // Every lane, this one boosted: work spans repos.
         if (query) {
           found = await client.memorySearch({ q: query, boost: lane, limit: limit ?? MEMORY_LIMITS.hits, exclude });
         }

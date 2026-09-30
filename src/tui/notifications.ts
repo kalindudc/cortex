@@ -1,5 +1,4 @@
-// Notifications for one terminal session (plan @400 Task 11 part B: P8, N12,
-// N15), as a keyboard-complete list dialog.
+// Notifications for one terminal session, as a keyboard-complete list dialog.
 //
 // - The feed merges the daemon's persisted notifications (the session's
 //   workspace snapshot, `notification.added` rows, and one coalesced re-read

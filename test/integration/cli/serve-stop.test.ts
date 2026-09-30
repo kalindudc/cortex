@@ -211,42 +211,6 @@ describe("cortex serve / stop are scoped to one database", () => {
     expect(isRunning(foreign)).toBe(true);
   }, 30_000);
 
-  test("a healthy legacy daemon blocks serve even though the new lock is free, and stop only reports it", async () => {
-    const { tmpDir, env } = sandbox("serve-legacy");
-    const db = env.CORTEX_DB ?? "";
-    const foreign = spawnForeignCortexServe();
-    const legacy = Bun.serve({
-      port: 0,
-      hostname: "127.0.0.1",
-      fetch: () => Response.json({ ok: true, version: "0.1.0" }),
-    });
-    try {
-      fs.mkdirSync(path.join(tmpDir, "cortex"), { recursive: true });
-      fs.writeFileSync(path.join(tmpDir, "cortex", "cortex.pid"), String(foreign.proc.pid));
-      fs.writeFileSync(path.join(tmpDir, "cortex", "cortex.url"), `http://127.0.0.1:${legacy.port}`);
-      expect(leaseIsFree(db)).toBe(true);
-
-      for (const args of [["serve", "--foreground"], ["serve"]]) {
-        const r = await runBounded(args, env);
-        expect(r.code).toBe(1);
-        expect(r.stderr).toContain("older cortex binary");
-        expect(r.stderr).toContain(`pid ${foreign.proc.pid}`);
-        expect(r.stderr).toMatch(/stop it first/);
-      }
-      expect(fs.existsSync(db)).toBe(false);
-      expect(fs.existsSync(metadataFileFor(db))).toBe(false);
-      expect(leaseIsFree(db)).toBe(true);
-
-      const stop = await runBounded(["stop"], env);
-      expect(stop.code).toBe(0);
-      expect(stop.stdout.trim()).toBe("not running");
-      expect(stop.stderr).toContain("cortex stop cannot stop it");
-      expect(isRunning(foreign)).toBe(true);
-    } finally {
-      await legacy.stop(true);
-    }
-  }, 30_000);
-
   test("background serve prints its success line only once the daemon is ready, and attaches on a second run", async () => {
     const { env } = sandbox("serve-background");
     const metadataFile = metadataFileFor(env.CORTEX_DB ?? "");

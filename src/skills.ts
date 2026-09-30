@@ -14,7 +14,7 @@
  * machine-generated; documenting that in cli/agents.md is the load-bearing
  * convention. Hand-edits are LOST on the next `cortex agents install|reset`.
  *
- * Multi-skill registry (Plan 4): SKILLS maps each skill name to its file
+ * Multi-skill registry: SKILLS maps each skill name to its file
  * manifest. Adding a new skill = add a new entry to SKILLS + import its
  * files; `cortex agents` and the tests pick it up automatically via listSkills().
  */
@@ -23,7 +23,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-// --- Base cortex skill (Plan 3) -------------------------------------------
+// --- Base cortex skill ---------------------------------------------------
 import cortexSkillMd from "./skills/cortex/SKILL.md" with { type: "file" };
 import cortexCliInitPath from "./skills/cortex/cli/init.md" with { type: "file" };
 import cortexCliResetPath from "./skills/cortex/cli/reset.md" with { type: "file" };
@@ -40,7 +40,7 @@ import cortexRecipeSession from "./skills/cortex/recipes/session-id.md" with { t
 import cortexRecipePersistence from "./skills/cortex/recipes/persistence.md" with { type: "file" };
 import cortexRecipeMemory from "./skills/cortex/recipes/memory.md" with { type: "file" };
 
-// --- Methodology skills (Plan 4) ------------------------------------------
+// --- Methodology skills --------------------------------------------------
 import plannerSkillMd from "./skills/cortex-planner/SKILL.md" with { type: "file" };
 import implementerSkillMd from "./skills/cortex-implementer/SKILL.md" with { type: "file" };
 import researchSkillMd from "./skills/cortex-research/SKILL.md" with { type: "file" };

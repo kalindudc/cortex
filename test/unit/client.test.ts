@@ -58,22 +58,6 @@ describe("createClient", () => {
     };
   }
 
-  test("http endpoint: absolute URLs (trailing slashes tolerated), typed legacy + versioned calls", async () => {
-    const seen: Seen[] = [];
-    const server = Bun.serve({ port: 0, fetch: recordingFetch(seen) });
-    try {
-      const client = createClient({ kind: "http", url: `http://127.0.0.1:${server.port}/` });
-      expect(await client.tasks()).toEqual([{ id: 1 }] as never);
-      const result = await client.versioned.editTask(3, { title: "x" }, { expected: { title: "t" } });
-      expect(result).toEqual({ task: { id: 1 }, versions: {}, replayed: false } as never);
-      expect(seen.map(s => `${s.method} ${s.pathname}`)).toEqual(["GET /api/tasks", "PATCH /api/tasks/3"]);
-      expect(JSON.parse(seen[1]?.body ?? "")).toEqual({ title: "x", guard: { expected: { title: "t" } } });
-      expect(seen[1]?.headers.prefer).toBe(PREFER_VERSIONED);
-    } finally {
-      server.stop(true);
-    }
-  });
-
   test("unix endpoint: requests travel over the socket; instanceId binds every request", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-client-sock-"));
     const socketPath = path.join(dir, "d.sock");

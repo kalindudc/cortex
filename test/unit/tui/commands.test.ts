@@ -47,13 +47,10 @@ import { resolveTheme, type ResolvedTheme } from "../../../src/tui/theme.ts";
 // description, completer, handler) drives execution, completion, `?`/:help
 // and the searchable :commands reference.
 
-// FIXED list, deliberately NOT derived from the registry: the P1-P10
-// commands the terminal workspace must provide (navigation and views, task
-// metadata, the catalogs, themes, the form commands, document modes, the
-// reader, panels, notifications and maintenance). Each entry: an input line,
-// the command it must resolve to, the argument it must carry, and a prefix
-// whose completion must offer the name.
-const REQUIRED: readonly { input: string; name: string; argument: string; prefix?: string }[] = [
+// FIXED list, deliberately NOT derived from the registry, so removing a
+// command fails a test. Input lines, the command and argument each must
+// resolve to, and a prefix whose completion must offer the name.
+const COMMAND_CASES: readonly { input: string; name: string; argument: string; prefix?: string }[] = [
   { input: "open 2", name: "open", argument: "2", prefix: "op" },
   { input: "2", name: "open", argument: "2" },
   { input: "@2", name: "open", argument: "@2" },
@@ -74,7 +71,6 @@ const REQUIRED: readonly { input: string; name: string; argument: string; prefix
   { input: "help", name: "help", argument: "", prefix: "he" },
   { input: "h", name: "help", argument: "" },
   { input: "commands", name: "commands", argument: "", prefix: "comm" },
-  // P3: the current task's metadata
   { input: "new", name: "new", argument: "", prefix: "ne" },
   { input: "new Fix the thing", name: "new", argument: "Fix the thing" },
   { input: "title Better title", name: "title", argument: "Better title", prefix: "ti" },
@@ -87,10 +83,8 @@ const REQUIRED: readonly { input: string; name: string; argument: string; prefix
   { input: "lane later", name: "lane", argument: "later", prefix: "lan" },
   { input: "tag +bug -old", name: "tag", argument: "+bug -old", prefix: "ta" },
   { input: "delete", name: "delete", argument: "", prefix: "de" },
-  // P4: the catalogs
   { input: "lanes", name: "lanes", argument: "", prefix: "lanes" },
   { input: "tags", name: "tags", argument: "", prefix: "tags" },
-  // P9: themes and the dialog/form commands
   { input: "theme", name: "theme", argument: "", prefix: "th" },
   { input: "theme auto", name: "theme", argument: "auto" },
   // The spacing, saved like the theme (a terminal cannot set its font size)
@@ -100,7 +94,6 @@ const REQUIRED: readonly { input: string; name: string; argument: string; prefix
   { input: "write", name: "write", argument: "" },
   { input: "wq", name: "wq", argument: "", prefix: "wq" },
   { input: "x", name: "wq", argument: "" },
-  // P5: document modes, drafts, export and conflicts (Task 9)
   { input: "read", name: "read", argument: "", prefix: "rea" },
   { input: "r", name: "read", argument: "" },
   { input: "edit", name: "edit", argument: "", prefix: "ed" },
@@ -114,7 +107,6 @@ const REQUIRED: readonly { input: string; name: string; argument: string; prefix
   { input: "apply body", name: "apply", argument: "body" },
   { input: "keep", name: "keep", argument: "", prefix: "ke" },
   { input: "keep title", name: "keep", argument: "title" },
-  // P7/P10: the task panels, the update composer and maintenance (Task 11)
   { input: "activity", name: "activity", argument: "", prefix: "act" },
   { input: "related", name: "related", argument: "", prefix: "rel" },
   { input: "authors", name: "authors", argument: "", prefix: "au" },
@@ -122,31 +114,13 @@ const REQUIRED: readonly { input: string; name: string; argument: string; prefix
   { input: "post Shipped the fix", name: "post", argument: "Shipped the fix" },
   { input: "backup", name: "backup", argument: "", prefix: "bac" },
   { input: "resume", name: "resume", argument: "", prefix: "res" },
-  // P6: the reader, its links and code
   { input: "heading", name: "heading", argument: "", prefix: "hea" },
   { input: "heading plan-2", name: "heading", argument: "plan-2" },
   { input: "links", name: "links", argument: "", prefix: "li" },
   { input: "copy 2", name: "copy", argument: "2", prefix: "cop" },
   { input: "source", name: "source", argument: "", prefix: "so" },
-  // P8: notifications (Task 11)
   { input: "notifications", name: "notifications", argument: "", prefix: "no" },
 ];
-
-// FIXED per parity row (plan @400 P1-P10), deliberately NOT derived from the
-// registry: the commands each row's terminal workflow relies on. Keys cover
-// the rest (`/` search, motions, `i`, `c`, `]`/`[`), see KEY_ACTION_TARGETS.
-const PARITY_COMMANDS: Readonly<Record<string, readonly string[]>> = {
-  P1: ["filter", "clear", "set", "open"],
-  P2: ["open", "back", "forward", "links", "sort", "group"],
-  P3: ["new", "title", "status", "next", "priority", "lane", "delete"],
-  P4: ["lanes", "tags", "tag"],
-  P5: ["read", "edit", "split", "title", "set", "write", "write!", "wq", "apply", "keep"],
-  P6: ["heading", "links", "copy", "source", "back", "forward"],
-  P7: ["activity", "related", "authors", "post"],
-  P8: ["notifications", "messages"],
-  P9: ["help", "commands", "theme", "messages", "focus", "suspend", "quit", "quit!"],
-  P10: ["backup", "resume"],
-};
 
 // FIXED, deliberately NOT derived from keys.ts: what every key-table action
 // does. `{ command }` means the key is a shortcut for that registry command;
@@ -301,10 +275,10 @@ function makeSession(over: Partial<SessionOptions> = {}): TuiSession {
   return session;
 }
 
-describe("the fixed required command list (P1-P10)", () => {
+describe("command parsing, completion and help", () => {
   const session = () => makeSession();
 
-  for (const r of REQUIRED) {
+  for (const r of COMMAND_CASES) {
     test(`:${r.input} parses, completes and has help`, () => {
       const parsed = parseCommand(r.input, COMMANDS);
       expect(parsed.spec.name).toBe(r.name);
@@ -327,26 +301,6 @@ describe("the fixed required command list (P1-P10)", () => {
       expect(c.description.length).toBeGreaterThan(0);
     }
   });
-});
-
-describe("the P1-P10 parity rows", () => {
-  test("every row P1-P10 names its commands", () => {
-    expect(Object.keys(PARITY_COMMANDS)).toEqual(["P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8", "P9", "P10"]);
-  });
-
-  for (const [row, names] of Object.entries(PARITY_COMMANDS)) {
-    test(`${row}: ${names.map(n => `:${n}`).join(" ")} exist and have help`, () => {
-      const help = commandHelp(COMMANDS);
-      for (const name of names) {
-        const spec = findCommand(name, COMMANDS);
-        expect(spec?.name, `${row} needs :${name}`).toBe(name);
-        const entry = help.find(h => h.name === name);
-        expect(entry?.usage.startsWith(":"), `:${name} has a usage in help`).toBe(true);
-        expect((entry?.description.length ?? 0) > 0, `:${name} has a description in help`).toBe(true);
-        expect(searchCommands(COMMANDS, name).map(s => s.name)).toContain(name);
-      }
-    });
-  }
 });
 
 describe("every key-table action maps to a handled action or a command", () => {
@@ -856,7 +810,6 @@ const settle = () => new Promise(resolve => setTimeout(resolve, 0));
 const flush = async () => {
   for (let i = 0; i < 10; i++) await settle();
 };
-const anyId = expect.any(String);
 const plainText = (lines: string[]): string => lines.map(l => l.replace(/\x1b\[[0-9;]*m/g, "")).join("\n");
 const topDialog = (s: TuiSession): Dialog => s.dialog as unknown as Dialog;
 
@@ -1026,16 +979,14 @@ describe(":new (atomic create)", () => {
   test("without a title: ONE untitled create in the filtered lane (else now), deduplicated, then the new task is selected", async () => {
     const { s, daemon } = withDaemon();
     await s.execute("new");
-    expect(daemon.writes()).toEqual([
-      { name: "addTask", args: [{ untitled: true, lane: "now" }, { mutationId: anyId }] },
-    ]);
+    expect(daemon.writes()).toEqual([{ name: "addTask", args: [{ untitled: true, lane: "now" }, undefined] }]);
     expect(s.selectedTask()?.title).toBe("untitled-14");
     expect(s.status?.text).toMatch(/Created @14 untitled-14.*:title/);
     s.setFilter({ status: null, lane: "later", tags: [] });
     await s.execute("new Plan the launch");
     expect(daemon.writes()[1]).toEqual({
       name: "addTask",
-      args: [{ title: "Plan the launch", lane: "later" }, { mutationId: anyId }],
+      args: [{ title: "Plan the launch", lane: "later" }, undefined],
     });
     expect(s.selectedTask()?.title).toBe("Plan the launch");
     // Creating never touched the view choices.
@@ -1058,7 +1009,7 @@ describe(":status and :next (smart transition)", () => {
     const { s, daemon } = withDaemon();
     await s.execute("status review");
     expect(daemon.writes()).toEqual([
-      { name: "setStatus", args: [1, { status: "review" }, { expected: { status: "status-1" }, mutationId: anyId }] },
+      { name: "setStatus", args: [1, { status: "review" }, { expected: { status: "status-1" } }] },
     ]);
     const request = daemon.writes()[0]?.args[1] as Record<string, unknown>;
     expect(Object.keys(request)).toEqual(["status"]);
@@ -1093,7 +1044,7 @@ describe(":status and :next (smart transition)", () => {
       expect(daemon.writes()).toEqual([
         {
           name: "setStatus",
-          args: [1, { status: expected[from] }, { expected: { status: "status-1" }, mutationId: anyId }],
+          args: [1, { status: expected[from] }, { expected: { status: "status-1" } }],
         },
       ]);
     }
@@ -1132,7 +1083,7 @@ describe("the status picker (bare :status; ;m): every status in one list", () =>
   const keysOf = (d: Dialog) => d.visibleRows().map(r => r.key);
   const guarded = (id: number, status: TaskStatus) => ({
     name: "setStatus",
-    args: [id, { status }, { expected: { status: `status-${id}` }, mutationId: anyId }],
+    args: [id, { status }, { expected: { status: `status-${id}` } }],
   });
 
   test("every status as a radio row (the current one marked, with its letter); the next step is highlighted; Enter sets it and closes", async () => {
@@ -1408,9 +1359,9 @@ describe(":title, :priority and :lane", () => {
     await s.execute(`priority ${Number.MAX_SAFE_INTEGER}`);
     await s.execute("priority none");
     expect(daemon.writes().map(c => c.args)).toEqual([
-      [1, { priority: 7 }, { expected: { priority: "priority-1" }, mutationId: anyId }],
-      [1, { priority: Number.MAX_SAFE_INTEGER }, { expected: { priority: "priority-1" }, mutationId: anyId }],
-      [1, { priority: null }, { expected: { priority: "priority-1" }, mutationId: anyId }],
+      [1, { priority: 7 }, { expected: { priority: "priority-1" } }],
+      [1, { priority: Number.MAX_SAFE_INTEGER }, { expected: { priority: "priority-1" } }],
+      [1, { priority: null }, { expected: { priority: "priority-1" } }],
     ]);
     for (const bad of ["-1", "1.5", "9007199254740992", "high", ""]) {
       await s.execute(`priority ${bad}`);
@@ -1422,9 +1373,7 @@ describe(":title, :priority and :lane", () => {
   test(":lane moves the current task to an existing lane, guarded by the lane token; unknown lanes explain", async () => {
     const { s, daemon } = withDaemon();
     await s.execute("lane big ideas");
-    expect(daemon.writes()).toEqual([
-      { name: "moveTask", args: [1, "big ideas", { expected: { lane: "lane-1" }, mutationId: anyId }] },
-    ]);
+    expect(daemon.writes()).toEqual([{ name: "moveTask", args: [1, "big ideas", { expected: { lane: "lane-1" } }] }]);
     await s.execute("lane nowhere");
     expect(s.status?.text).toMatch(/No lane "nowhere".*:lanes/);
     await s.execute("lane big ideas");
@@ -1439,8 +1388,8 @@ describe(":tag membership deltas (P4)", () => {
     const { s, daemon } = withDaemon();
     await s.execute("tag +docs +#ui -bug");
     expect(daemon.writes()).toEqual([
-      { name: "changeTags", args: [1, { add: ["docs", "ui"] }, { mutationId: anyId }] },
-      { name: "changeTags", args: [1, { remove: ["bug"] }, { mutationId: anyId }] },
+      { name: "changeTags", args: [1, { add: ["docs", "ui"] }, undefined] },
+      { name: "changeTags", args: [1, { remove: ["bug"] }, undefined] },
     ]);
     expect(daemon.calls.some(c => c.name === "removeTag")).toBe(false);
     expect(s.selectedTask()?.tags).toEqual(["docs", "ui"]);
@@ -1475,13 +1424,13 @@ describe(":tag membership deltas (P4)", () => {
     expect(picker.highlighted()?.key).toBe("bug");
     type("\r");
     await flush();
-    expect(daemon.writes()[0]).toEqual({ name: "changeTags", args: [1, { remove: ["bug"] }, { mutationId: anyId }] });
+    expect(daemon.writes()[0]).toEqual({ name: "changeTags", args: [1, { remove: ["bug"] }, undefined] });
     expect(plainText(picker.render(70))).toMatch(/\[ \] #bug/);
     type("/", ..."launch", "\r");
     expect(plainText(picker.render(70))).toMatch(/\+ Create #launch/);
     type("\r");
     await flush();
-    expect(daemon.writes()[1]).toEqual({ name: "changeTags", args: [1, { add: ["launch"] }, { mutationId: anyId }] });
+    expect(daemon.writes()[1]).toEqual({ name: "changeTags", args: [1, { add: ["launch"] }, undefined] });
     type("q");
     expect(s.dialog).toBeNull();
   });
@@ -1500,9 +1449,7 @@ describe(":delete (y/n confirmation)", () => {
     await s.execute("delete");
     type("y");
     await flush();
-    expect(daemon.writes()).toEqual([
-      { name: "removeTask", args: [1, { expected: { entity: "entity-1" }, mutationId: anyId }] },
-    ]);
+    expect(daemon.writes()).toEqual([{ name: "removeTask", args: [1, { expected: { entity: "entity-1" } }] }]);
     expect(s.tasks.some(t => t.id === 1)).toBe(false);
     expect(s.status?.text).toMatch(/Deleted @1/);
   });
@@ -1544,7 +1491,7 @@ describe(":lanes (lane name/color/sort CRUD, P4)", () => {
     await flush();
     expect(daemon.writes()[0]).toEqual({
       name: "addLane",
-      args: [{ name: "someday", color: "#2563eb", sort: 3 }, { mutationId: anyId }],
+      args: [{ name: "someday", color: "#2563eb", sort: 3 }, undefined],
     });
     expect(s.dialog).toBe(lanes);
     // Enter edits: prefilled from the lane's state read; the guard carries its definition token.
@@ -1556,7 +1503,7 @@ describe(":lanes (lane name/color/sort CRUD, P4)", () => {
     await flush();
     expect(daemon.writes()[1]).toEqual({
       name: "editLane",
-      args: ["later", { sort: 5 }, { expected: { definition: "definition-later" }, mutationId: anyId }],
+      args: ["later", { sort: 5 }, { expected: { definition: "definition-later" } }],
     });
     expect(s.dialog).toBe(lanes);
   });
@@ -1571,11 +1518,7 @@ describe(":lanes (lane name/color/sort CRUD, P4)", () => {
     await flush();
     expect(daemon.writes()[0]).toEqual({
       name: "editLane",
-      args: [
-        "later",
-        { rename: "soon" },
-        { expected: { definition: "definition-later", entity: "entity-later" }, mutationId: anyId },
-      ],
+      args: ["later", { rename: "soon" }, { expected: { definition: "definition-later", entity: "entity-later" } }],
     });
     expect(s.filter.lane).toBe("soon");
   });
@@ -1593,7 +1536,7 @@ describe(":lanes (lane name/color/sort CRUD, P4)", () => {
     type("y");
     await flush();
     expect(daemon.writes()).toEqual([
-      { name: "removeLane", args: ["later", { expected: { entity: "entity-later" }, mutationId: anyId }] },
+      { name: "removeLane", args: ["later", { expected: { entity: "entity-later" } }] },
     ]);
   });
 
@@ -1624,7 +1567,7 @@ describe(":tags (tag definitions, P4)", () => {
     type("y");
     await flush();
     expect(daemon.writes()).toEqual([
-      { name: "removeTag", args: ["bug", { force: true }, { expected: { entity: "entity-bug" }, mutationId: anyId }] },
+      { name: "removeTag", args: ["bug", { force: true }, { expected: { entity: "entity-bug" } }] },
     ]);
   });
 
@@ -1654,7 +1597,7 @@ describe(":tags (tag definitions, P4)", () => {
       args: [
         "bug",
         { rename: "defect", color: "#dc2626" },
-        { expected: { definition: "definition-bug", entity: "entity-bug" }, mutationId: anyId },
+        { expected: { definition: "definition-bug", entity: "entity-bug" } },
       ],
     });
     expect(s.filter.tags).toEqual(["defect", UNTAGGED]);

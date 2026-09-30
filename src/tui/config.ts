@@ -1,5 +1,5 @@
-// tui.toml loader (plan @400 N15/N18/N22/N23). The file is user-authored and
-// read-only to cortex: it is only ever read, never created or rewritten.
+// tui.toml loader. The file is user-authored and read-only to cortex: it is
+// only ever read, never created or rewritten.
 //
 // Every section validates on its own: `leader`, `[keys.normal]`,
 // `[keys.leader]`, `[keys.insert]`, `[keys.visual]` (src/tui/keys.ts), and each top-level

@@ -18,9 +18,9 @@
  * the `--flag=-value` form for the KNOWN string-valued flags of the
  * detected subcommand. The `=`-attached form reaches mri as a plain value
  * (mri splits on the first `=`, everything after is literal, including
- * further dashes). This matches the behavior of Node-style parsers and
- * citty >= 0.2, which consume the next token as the value regardless of
- * its leading dash, without bumping the dependency.
+ * further dashes). citty 0.2.2 is not a drop-in fix: it strips `--no-*`
+ * tokens even as a string flag's value, keeps the `=` of `-b=value` and
+ * colours usage on a pipe, so cortex stays on 0.1.x with this shim.
  *
  * Scope guard: only tokens that EXACTLY equal a known flag name (long
  * camelCase, long kebab-case, or a single-char alias) are rewritten.

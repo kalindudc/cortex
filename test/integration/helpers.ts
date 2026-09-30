@@ -8,9 +8,8 @@ import crypto from "node:crypto";
 // Why this exists (Plan 15 root cause, still load-bearing):
 //   every normal command goes through daemon.ts withClient, which finds the
 //   daemon serving the CONFIGURED database (CORTEX_DB, else configDir()'s
-//   cortex.db; configDir() only honors XDG_CONFIG_HOME) and, before any
-//   writable fallback, probes an older binary's cortex.pid/cortex.url in the
-//   config dir. Before plan @400 Task 6 those two files alone routed every
+//   cortex.db; configDir() only honors XDG_CONFIG_HOME). Before the
+//   database-scoped daemon, an older binary's cortex.pid/cortex.url alone routed every
 //   mutation to whatever daemon they named, so a test that pinned CORTEX_DB
 //   but not XDG_CONFIG_HOME wrote into the user's real DB. A test that pins
 //   only some of these paths can still reach, or be blocked by, the

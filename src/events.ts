@@ -1,12 +1,10 @@
 /**
  * Change events. Writes publish through a daemon's EventPublisher, which
- * numbers them for the SSE stream; every event is also mirrored to the
- * process-wide legacy bus (`emit`/`subscribe`) for in-process observers.
- * No replay buffer: clients re-snapshot on (re)connect (plan @400 N12).
+ * numbers them for the SSE stream. No replay buffer: clients re-snapshot on
+ * (re)connect.
  *
- * Environment-neutral on purpose (EventTarget, CustomEvent and
- * crypto.randomUUID are web-standard globals), so clients may reuse the
- * cursor helpers.
+ * Environment-neutral on purpose (crypto.randomUUID is a web-standard
+ * global), so clients may reuse the cursor helpers.
  */
 
 /** Every event name the daemon publishes, in the order they were introduced. */
@@ -31,21 +29,6 @@ export type CortexEvent = {
   payload: unknown;
   ts: number;
 };
-
-export const bus: EventTarget = new EventTarget();
-
-export function emit(ev: CortexEvent): void {
-  bus.dispatchEvent(new CustomEvent("cortex", { detail: ev }));
-}
-
-export function subscribe(cb: (ev: CortexEvent) => void): () => void {
-  const handler = (e: Event): void => {
-    const ce = e as CustomEvent<CortexEvent>;
-    cb(ce.detail);
-  };
-  bus.addEventListener("cortex", handler);
-  return () => bus.removeEventListener("cortex", handler);
-}
 
 // ---------- cursors ----------
 
@@ -79,8 +62,8 @@ export interface EventPublisher {
   /** Cursor of the newest published event (`<epoch>:0` before the first). */
   cursor(): string;
   /**
-   * Number the event, deliver it to stream subscribers, then mirror it to the
-   * legacy bus. Call only AFTER the write committed, in the same synchronous
+   * Number the event and deliver it to stream subscribers. Call only AFTER
+   * the write committed, in the same synchronous
    * turn, so a snapshot's cursor covers exactly the writes it can see. A
    * failing subscriber is reported and skipped: the write already committed.
    */
@@ -106,7 +89,6 @@ export function createEventPublisher(epoch: string = crypto.randomUUID()): Event
           console.error(`cortex: event subscriber failed on ${kind}:`, err);
         }
       }
-      emit({ kind, payload, ts: event.ts });
       return event;
     },
     subscribe(listener) {

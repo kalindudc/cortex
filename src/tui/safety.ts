@@ -1,4 +1,4 @@
-// The ONE terminal rendering boundary for untrusted text (plan @400 N20).
+// The ONE terminal rendering boundary for untrusted text.
 //
 // Every title, body, update, catalog name, author and error string passes
 // through here before it reaches the terminal: C0/DEL (caret notation, e.g.

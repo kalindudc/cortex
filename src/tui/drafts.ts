@@ -1,5 +1,5 @@
-// Per-task title/body drafts (plan @400 N8/N16, Task 9): autosave on an
-// injected scheduler, with GUARDED writes.
+// Per-task title/body drafts: autosave on an injected scheduler, with GUARDED
+// writes.
 //
 // - Autosave: every change arms a 600 ms idle timer and, on the first change
 //   of a burst, a 3 s maximum, so a continuous typist still saves. Per field
@@ -11,7 +11,7 @@
 //   later change, or flush()), shown as "retrying".
 // - Writes are guarded: each sends the field's expected token (from the
 //   atomic TaskState the draft started from, then from every acknowledgement
-//   or adopted version) and no mutation receipt (N8: autosaves are not
+//   or adopted version) and no mutation receipt (autosaves are not
 //   receipted). A 412 reads the incoming version and keeps BOTH as a
 //   conflict, pausing that field's autosave. Apply adopts the incoming
 //   version; Keep rebases on the displayed incoming token and writes again,

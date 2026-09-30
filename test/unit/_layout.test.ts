@@ -5,21 +5,16 @@
  * AND to PREVENT TESTS FROM EVER WRITING TO THE DEVELOPER'S REAL CORTEX
  * CONFIG. It runs as a unit test (no binary spawn) and asserts:
  *
- *   1. SOURCE-MIRROR INVARIANT — every `src/**\/*.ts` (excluding
- *      `src/types.d.ts`, `src/commands/` and `src/extensions/`) has a
- *      matching `test/unit/<path>.test.ts`. Adding a new source file
- *      under `src/` without writing its unit test fails this guard.
+ *   1. UNIT NO-BINARY-SPAWN — no `test/unit/**\/*.test.ts` file may import
+ *      from the integration helpers or call `runCli`. Unit tests are pure
+ *      in-process by definition.
  *
- *   2. UNIT NO-BINARY-SPAWN — no `test/unit/**\/*.test.ts` file may import
- *      from the integration helpers or call `runCli` / `startServer`
- *      (`Bun.spawn` of other programs is allowed). Unit tests are pure in-process.
- *
- *   3. HERMETIC TEXT GUARD — no test file under `test/` may reference the
+ *   2. HERMETIC TEXT GUARD — no test file under `test/` may reference the
  *      developer's real `~/.config/cortex` path literally (with one
  *      allow-listed exception: `test/integration/isolation.test.ts`
  *      intentionally snapshots that path as part of its job).
  *
- *   4. HERMETIC RUNTIME GUARD — `~/.config/cortex/cortex.{db,pid,url}`
+ *   3. HERMETIC RUNTIME GUARD — `~/.config/cortex/cortex.{db,pid,url}`
  *      mtime+size are snapshotted at suite start and asserted unchanged
  *      at suite end. Catches regressions even when static text-scan
  *      misses them (e.g. an indirect helper writes to the real path).
@@ -31,52 +26,13 @@ import os from "node:os";
 import fs from "node:fs";
 
 const REPO_ROOT = path.resolve(import.meta.dir, "..", "..");
-const SRC_ROOT = path.join(REPO_ROOT, "src");
 const TEST_ROOT = path.join(REPO_ROOT, "test");
 
-// ---------- 1. SOURCE-MIRROR INVARIANT ----------
-//
-// `src/**/*.ts` files that warrant a dedicated unit test. Excludes:
-//   - `src/types.d.ts` — type declarations only, nothing to test
-//   - `src/extensions/**` — embedded blob (loaded as a `with { type: "file" }`
-//     string path; covered by `test/unit/extensions.test.ts`)
-//   - `src/commands/**` — each command is tested via an integration test
-//     under `test/integration/cli/<cmd>.test.ts` (or the round-trip
-//     `cli.test.ts`); enforcing per-command unit-test mirror would force
-//     refactoring CLI handlers for testability against the plan's
-//     "no production-code changes" rule.
-function listBackendSourceFiles(): string[] {
-  const out: string[] = [];
-  const walk = (dir: string): void => {
-    for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
-      const abs = path.join(dir, ent.name);
-      if (ent.isDirectory()) {
-        if (ent.name === "commands" || ent.name === "extensions") continue;
-        walk(abs);
-      } else if (ent.isFile() && ent.name.endsWith(".ts") && ent.name !== "types.d.ts") {
-        out.push(path.relative(SRC_ROOT, abs));
-      }
-    }
-  };
-  walk(SRC_ROOT);
-  return out.sort();
-}
-
-describe("layout: source-mirror invariant", () => {
-  for (const rel of listBackendSourceFiles()) {
-    const expected = path.join("test", "unit", rel.replace(/\.ts$/, ".test.ts"));
-    test(`src/${rel} has matching ${expected}`, () => {
-      const abs = path.join(REPO_ROOT, expected);
-      expect(fs.existsSync(abs), `expected ${expected} to exist for src/${rel}`).toBe(true);
-    });
-  }
-});
-
-// ---------- 2. UNIT NO-BINARY-SPAWN ----------
+// ---------- 1. UNIT NO-BINARY-SPAWN ----------
 //
 // Unit tests must be pure in-process. Importing `../helpers.ts` (the
-// integration-tier binary-spawn helper) or calling runCli/Bun.spawn/
-// startServer crosses the tier boundary and undermines the convention.
+// integration-tier binary-spawn helper) or calling runCli crosses the tier
+// boundary and undermines the convention.
 //
 // Allow-list: `_layout.test.ts` itself reads test files via fs (NOT a spawn).
 // We scan ALL `test/unit/**/*.test.ts` files.
@@ -96,7 +52,7 @@ function listUnitTestFiles(): string[] {
 describe("layout: unit tests do not spawn the cortex binary", () => {
   for (const abs of listUnitTestFiles()) {
     const rel = path.relative(REPO_ROOT, abs);
-    test(`${rel} does not import the integration helpers, call runCli, or call startServer`, () => {
+    test(`${rel} does not import the integration helpers or call runCli`, () => {
       // Layout guard itself contains regex source for these patterns; its
       // job is to scan files, not to spawn anything.
       if (rel.endsWith("_layout.test.ts")) return;
@@ -106,9 +62,6 @@ describe("layout: unit tests do not spawn the cortex binary", () => {
       // calling runCli, which only exists there) crosses that boundary.
       expect(txt, `${rel} imports the integration helpers`).not.toMatch(/from\s+["'][^"']*helpers\.ts["']/);
       expect(txt, `${rel} calls runCli`).not.toMatch(/\brunCli\s*\(/);
-      // startServer binds a real port, which is binary-spawn equivalent.
-      // Pure unit tests use `buildApp(store).fetch(req)` instead.
-      expect(txt, `${rel} calls startServer`).not.toMatch(/\bstartServer\s*\(/);
       // Note: `Bun.spawn(...)` is intentionally NOT forbidden — unit tests
       // legitimately spawn `["true"]` (e.g. client.test.ts dead-pid case)
       // or run a `Bun.serve({port:0})` recording fixture. The hard-line
@@ -118,7 +71,7 @@ describe("layout: unit tests do not spawn the cortex binary", () => {
   }
 });
 
-// ---------- 3. HERMETIC TEXT GUARD ----------
+// ---------- 2. HERMETIC TEXT GUARD ----------
 //
 // No test file may reference the developer's real `~/.config/cortex` path
 // literally. The one intentional exception is `test/integration/isolation.test.ts`,
@@ -199,7 +152,7 @@ describe("layout: hermetic text guard (no naive ~/.config/cortex references)", (
   }
 });
 
-// ---------- 4. HERMETIC RUNTIME GUARD ----------
+// ---------- 3. HERMETIC RUNTIME GUARD ----------
 //
 // Snapshot the real `~/.config/cortex/cortex.{db,pid,url}` mtime+size BEFORE
 // the suite runs (in beforeAll, which fires once per test file but executes

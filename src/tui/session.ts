@@ -1,5 +1,5 @@
-// One terminal UI session (plan @400 N12/N15/N17): the state ONE `cortex tui`
-// owns, with no process-wide singletons.
+// One terminal UI session: the state ONE `cortex tui` owns, with no
+// process-wide singletons.
 //
 // - Shared data (tasks, lanes, tags, notifications) comes only from the
 //   daemon: a workspace snapshot plus the live stream. Events after the
@@ -32,7 +32,7 @@
 //   Each runs against the database it was SUBMITTED against: every request
 //   goes through the client mutate hands it, refused before dispatch once
 //   that database was replaced (so no part of it reaches the replacement).
-// - Documents (Task 9): per task, ONE draft (src/tui/drafts.ts: autosave,
+// - Documents: per task, ONE draft (src/tui/drafts.ts: autosave,
 //   guarded writes, conflicts) started from an atomic TaskState, and ONE
 //   editor (src/tui/editor.ts), both kept across modes, panels and task
 //   switches and never replaced by a refresh. Editing waits for the baseline:
@@ -50,7 +50,7 @@
 //   body separately from autosave or :w. :q refuses while a draft is unsaved,
 //   failing or conflicted; :q! discards the drafts; a task deleted elsewhere
 //   keeps its dirty draft for :w <path> (a private file) instead of losing it.
-// - The reader (Task 10, src/tui/reader.ts) registers itself: while it has the
+// - The reader (src/tui/reader.ts) registers itself: while it has the
 //   focus (Read, or the Split preview half) `/` and n/N search the rendered
 //   document instead of the list; a jump (a task, a heading, `{`/`}`) records
 //   where the document was read, so :back/:forward return there; a heading
@@ -524,7 +524,7 @@ export class TuiSession {
   #databaseGen = 0;
   /** The required snapshot may have to cover frames this session never saw (a reconnect, resync, gap or epoch). */
   #missed = false;
-  // notifications: shared read state (plan @400 Task 11 part B)
+  // notifications: shared read state
   /** Generation of the newest notifications read (a re-read or a snapshot); older answers are obsolete. */
   #notifRead = 0;
   /** The re-read in flight (its generation), or null. */
@@ -593,7 +593,7 @@ export class TuiSession {
   #writing = 0;
   #reveal: { id: number; finish(shown: boolean): void } | null = null;
   #tagMemo: { catalog: TagWithCount[]; tasks: Task[]; value: TagWithCount[] } | null = null;
-  // documents (Task 9)
+  // documents
   #documents = new Map<number, DocumentEntry>();
   #preferredMode: DocumentMode;
   /** A mode shown for one task only: Edit after `i` from Read, Read after a heading jump from Edit. */
@@ -1016,7 +1016,7 @@ export class TuiSession {
 
   #apply(event: LiveEvent, at: Position): void {
     if (covers(this.#applied, at)) {
-      // The state already reflects it, apart from a post: a snapshot has no updates (review F9).
+      // The state already reflects it, apart from a post: a snapshot has no updates.
       if (event.kind === "update.posted" && this.#activity !== null) {
         this.#activity.covered(event);
         this.#changed();
@@ -1193,7 +1193,7 @@ export class TuiSession {
   }
 
   /**
-   * The list model (P1/P2): displayed rows, the active task and where it is.
+   * The list model: displayed rows, the active task and where it is.
    * Memoized per input; a selection change alone reuses the searched rows.
    */
   workspace(): WorkspaceSelection {
@@ -2237,7 +2237,7 @@ export class TuiSession {
     this.#options.onQuit?.(false);
   }
 
-  // ---------- documents: modes, drafts and editors (Task 9) ----------
+  // ---------- documents: modes, drafts and editors ----------
 
   /** The saved Read/Edit/Split preference. */
   get preferredMode(): DocumentMode {
@@ -2783,8 +2783,8 @@ export class TuiSession {
   /**
    * A transition took the INSERT target off the screen or the keyboard (Read, a
    * view, the list, the preview half, the document cursor leaving it): INSERT
-   * ends at once, so no later key edits what is not shown (review F14). A click
-   * in the target keeps typing there: it stays shown.
+   * ends at once, so no later key edits what is not shown. A click in the target
+   * keeps typing there: it stays shown.
    */
   #settleInsert(): void {
     if (this.#insert !== null && !this.#insertShown()) this.leaveInsert();
