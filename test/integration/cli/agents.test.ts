@@ -66,6 +66,10 @@ describe("cortex agents install", () => {
       expect(out.skipped).toEqual([]);
       for (const name of EXPECTED_SKILLS) expect(fs.existsSync(skillFile(skillRoot, name))).toBe(true);
       expect(fs.statSync(extFile(extRoot)).size).toBeGreaterThan(200);
+      // The memory status + /memory view, imported by index.ts as ./memory-view.ts.
+      const view = path.join(extRoot, "cortex", "memory-view.ts");
+      expect(fs.statSync(view).size).toBeGreaterThan(200);
+      expect(fs.readFileSync(view, "utf8")).toContain("export function memoryStatus");
       // No database: agents never opens it.
       expect(fs.existsSync(env.CORTEX_DB ?? "")).toBe(false);
     } finally {

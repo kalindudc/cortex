@@ -501,8 +501,12 @@ tracking, so `done` streams stay searchable memory. The protocol agents follow l
 - `cortex_recall`: `"@<id>"` loads one stream with its staleness report, `"@<id>#<section>"` one section;
   keywords search every lane with this repo's first. At most 3 calls per request (2 in a headless session), and a
   repeated query short-circuits.
-- `/memory` in pi shows the lane, the primer, the injected hits, spawn count, latency, injected characters,
-  the role, the focus streams, checkpoint and breadcrumb counts, and the last error.
+- The footer shows a quiet light-blue `○ memory` (nothing loaded yet) or `● memory` (memory in context) and
+  speaks up only when it matters: `◜ saving…` spinning (the automatic memory turn is running), `◐ @<id> stale`
+  (yellow: the agent is using a stream whose cited files changed since its last sync), `⊘ memory error` (red: a
+  memory call failed; details in `/memory`). `/memory` opens a panel: health, what the session is working on,
+  every stream in context with the reason it is there (session summary, matched your prompt, recalled by the
+  agent), and this session's totals; `r` re-reads memory on the next prompt.
 - Staleness is measured from the stream's last body edit: cited files changed or missing since then, or a sync
   older than 30 days, mark it stale before an agent relies on it. Status flips and updates never count as a sync.
   Cited files resolve in the current checkout whatever the lane; when most are absent there, the verdict is

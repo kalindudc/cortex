@@ -16,6 +16,7 @@ import {
   memoryPhrases,
   memorySections,
   memoryTerms,
+  primerRows,
   recencyIntent,
   renderHits,
   renderPrimer,
@@ -387,6 +388,36 @@ describe("rendering", () => {
     expect(MEMORY_LIMITS.elsewhereStreams).toBe(3);
     // Only other-lane streams still make a primer.
     expect(renderPrimer({ lane: "l", active: [], authored: [], elsewhere, now })).toContain("- [20] open \u00b7 infra");
+  });
+
+  test("primerRows are exactly the rows renderPrimer prints: deduped against touched, capped, the overflow counted", () => {
+    const cap = MEMORY_LIMITS.primerStreams;
+    const authored = Array.from({ length: cap + 2 }, (_, i) => row({ id: 100 + i, title: `t${i}`, activity: now }));
+    const active = [
+      row({ id: 100, title: "t0", activity: now }),
+      ...Array.from({ length: cap + 3 }, (_, i) => row({ id: 1 + i, title: `a${i}`, activity: now })),
+    ];
+    const elsewhere = [
+      row({ id: 101, lane: "infra", title: "t1", activity: now }),
+      ...Array.from({ length: 5 }, (_, i) => row({ id: 200 + i, lane: "infra", title: `e${i}`, activity: now })),
+    ];
+    const input = { lane: "l", active, authored, elsewhere, now };
+    const rows = primerRows(input);
+    expect(rows.touched.map(r => r.id)).toEqual(authored.slice(0, cap).map(r => r.id));
+    expect(rows.active.map(r => r.id)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(rows.more).toBe(3);
+    expect(rows.elsewhere.map(r => r.id)).toEqual([200, 201, 202]);
+    // renderPrimer prints exactly these rows, in this order, and the overflow line.
+    const text = renderPrimer(input);
+    const printed = [...text.matchAll(/^- \[(\d+)\]/gm)].map(m => Number(m[1]));
+    expect(printed).toEqual([...rows.touched, ...rows.active, ...rows.elsewhere].map(r => r.id));
+    expect(text).toContain("(+3 more: cortex ls -l l)");
+    expect(primerRows({ lane: "l", active: [], authored: [], now })).toEqual({
+      touched: [],
+      active: [],
+      elsewhere: [],
+      more: 0,
+    });
   });
 
   test("renderHits is empty without hits; the header names the query, each hit its own matched terms (validation F2)", () => {

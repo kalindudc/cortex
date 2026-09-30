@@ -39,6 +39,14 @@ import path from "node:path";
 // attribute) and by the on-disk-write tests in `test/skills.test.ts`.
 import piExtImport from "./extensions/pi.ts" with { type: "file" };
 const piExt = piExtImport as unknown as string;
+// The memory status + `/memory` panel view, installed beside index.ts under
+// its own name (index.ts imports `./memory-view.ts`, which also resolves in
+// this repo). Same cast as piExt; it is type-checked (no @ts-nocheck) and has
+// only named exports, so tsc needs telling that the file loader supplies the
+// default (the path).
+// @ts-expect-error TS1192: the `file` import attribute yields a default path export
+import piMemoryViewImport from "./extensions/memory-view.ts" with { type: "file" };
+const piMemoryView = piMemoryViewImport as unknown as string;
 
 export type ExtensionName = "pi";
 
@@ -49,6 +57,7 @@ type Manifest = Record<string /*relPath*/, string /*embeddedPath*/>;
 const EXTENSIONS: Record<ExtensionName, Manifest> = {
   pi: {
     "index.ts": piExt,
+    "memory-view.ts": piMemoryView,
   },
 };
 

@@ -18,7 +18,9 @@
  * next start (no `pi config` step).
  *
  * Responsibility: `cortex_update` + automatic cortex memory (primer, prompt
- * hits, `cortex_recall`, `/memory`).
+ * hits, `cortex_recall`, the footer status and `/memory`; both render only
+ * through the sibling `./memory-view.ts`, installed beside this file under
+ * the same name).
  *   - `cortex_update` wraps `cortex update` with auto-attribution from the
  *     active pi session (`pi-<full-uuidv7>`), resumable via `cortex resume`.
  *   - Every session starts with a frozen primer of the repo's memory streams
@@ -47,8 +49,12 @@
  *   - A hit is injected at most once per session.
  *   - `cortex_recall` answers at most 3 calls per user request and
  *     short-circuits a repeated query.
- *   - `/memory` shows exactly what was injected, the last latency and the
- *     injected characters.
+ *   - The footer status names only what needs attention (a failed memory
+ *     call, stale memory in use, the checkpoint turn) and is otherwise a
+ *     quiet marker. `/memory` shows every stream in context and why it is
+ *     there; it costs ONE `cortex ls --json` (titles), nothing else spawns
+ *     for the UI, and the only timer is the save spinner (one checkpoint
+ *     turn at most).
  *   - Tool failures THROW (on a non-zero exit OR a killed process): pi
  *     ignores a returned `isError`, and `pi.exec` resolves a timeout as
  *     `code: 0, killed: true`.
@@ -59,6 +65,7 @@
 
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { MemoryPanel, memoryStatus, memoryViewText } from "./memory-view.ts";
 
 const MEMORY_TIMEOUT_MS = 3000;
 const RECALL_TIMEOUT_MS = 5000;
@@ -71,6 +78,16 @@ const READER_HITS = 3;
 const READER_RECALL_BUDGET = 2;
 const ROLE_OVERRIDES = ["write", "read", "off"];
 const FOCUS_CAP = 5;
+/** The save spinner's frame interval (only while the checkpoint turn runs). */
+const SPINNER_MS = 150;
+/** Prompt characters kept as the reason a hit is in context. */
+const REASON_CHARS = 40;
+/** A successful bash edit of a stream's body re-syncs it (clears its stale flag). */
+const BODY_EDIT = /\bcortex\s+edit\s+(\d+)\b/g;
+/** `memory show`'s staleness line (src/memory.ts renderStream). */
+const STALENESS_LINE = /^staleness: (\w+).*$/m;
+/** A `memory search` result row (src/memory.ts streamLine). */
+const SEARCH_ROW = /^- \[(\d+)\]/gm;
 /** Commands that name a stream the session works on (`cortex add` ids come from its output). */
 const FOCUS_COMMAND = /\bcortex\s+(?:edit|update|mv|show|memory\s+show)\s+(\d+)\b/g;
 /** Bash commands that count as writing memory (the cortex_update tool counts too). */
@@ -205,6 +222,11 @@ function failureText(r, what: string): string {
   return r.killed ? `${what} timed out or was aborted` : `${what} failed`;
 }
 
+/** The changed/missing/old part of a `staleness: stale · synced … · …` line. */
+function staleDetail(line: string): string {
+  return line.split(" \u00b7 ").slice(2).join(" \u00b7 ") || "stale";
+}
+
 /** The `cortex memory context --json` shape, or null when the output is not it. */
 function parseContext(stdout: string) {
   let out: unknown;
@@ -219,6 +241,7 @@ function parseContext(stdout: string) {
     typeof out.lane === "string" &&
     typeof out.primer === "string" &&
     typeof out.hitsText === "string" &&
+    Array.isArray(out.primerIds) &&
     Array.isArray(out.hits);
   return ok ? out : null;
 }
@@ -230,11 +253,12 @@ function freshRequest() {
 function freshStats() {
   return {
     prompts: 0,
-    execs: 0,
+    lookups: 0,
     lastMs: 0,
-    injectedChars: 0,
+    /** Characters memory put into context: the primer (per fetch), injected hits and recall outputs. */
+    chars: 0,
+    /** The last memory call's failure; the next successful call clears it. */
     lastError: "",
-    lastHits: "",
     silentRuns: 0,
     checkpoints: 0,
     breadcrumbs: 0,
@@ -256,6 +280,63 @@ export default function (pi: ExtensionAPI): void {
   let focus: number[] = [];
   let request = freshRequest();
   let lastQuery = "";
+  // The /memory ledger: the FIRST reason each stream entered context (insertion = oldest first).
+  // Reset with `shown` on session_start and compaction; `shown` stays the --exclude source.
+  const inContext = new Map<number, { via: "summary" | "prompt" | "recall"; query?: string }>();
+  // A stale stream in use this request (from a recall's staleness line; no spawn).
+  let stale: { id: number; detail: string } | null = null;
+  // The checkpoint turn is running: the footer's arc spins (the only timer).
+  let saving = false;
+  let frame = 0;
+  let spinner: ReturnType<typeof setInterval> | null = null;
+
+  function enter(id: number, via: "summary" | "prompt" | "recall", query?: string) {
+    if (!Number.isInteger(id) || id <= 0 || inContext.has(id)) return;
+    inContext.set(id, query === undefined ? { via } : { via, query });
+  }
+
+  /** The plain state memory-view.ts renders (newest first). */
+  function viewState(ctx) {
+    return {
+      role: roleOf(ctx),
+      lane,
+      error: stats.lastError,
+      stale,
+      saving,
+      frame,
+      recallBudget: READER_RECALL_BUDGET,
+      focus: [...focus].reverse(),
+      inContext: [...inContext].reverse().map(([id, entry]) => ({ id, ...entry })),
+      stats: {
+        prompts: stats.prompts,
+        lookups: stats.lookups,
+        lastMs: stats.lastMs,
+        chars: stats.chars,
+        checkpoints: stats.checkpoints,
+        breadcrumbs: stats.breadcrumbs,
+        silentRuns: stats.silentRuns,
+      },
+    };
+  }
+
+  /** Recompute the footer after every memory event (a UI-less session has no footer). */
+  function showStatus(ctx) {
+    if (ctx.hasUI) ctx.ui.setStatus(STATUS_KEY, memoryStatus(viewState(ctx), ctx.ui.theme));
+  }
+
+  function startSpinner(ctx) {
+    if (spinner !== null || !ctx.hasUI) return;
+    spinner = setInterval(() => {
+      frame++;
+      showStatus(ctx);
+    }, SPINNER_MS);
+  }
+
+  function stopSpinner() {
+    if (spinner === null) return;
+    clearInterval(spinner);
+    spinner = null;
+  }
 
   function addFocus(ids: number[]) {
     for (const id of ids) {
@@ -275,7 +356,8 @@ export default function (pi: ExtensionAPI): void {
     return memoryRole(ctx);
   }
 
-  pi.on("session_start", () => {
+  pi.on("session_start", (_event, ctx) => {
+    stopSpinner();
     primer = null;
     lane = null;
     shown.clear();
@@ -287,6 +369,15 @@ export default function (pi: ExtensionAPI): void {
     focus = [];
     request = freshRequest();
     lastQuery = "";
+    inContext.clear();
+    stale = null;
+    saving = false;
+    frame = 0;
+    showStatus(ctx);
+  });
+
+  pi.on("session_shutdown", () => {
+    stopSpinner();
   });
 
   // pi's own compaction summary becomes a breadcrumb on the newest focus streams:
@@ -294,6 +385,8 @@ export default function (pi: ExtensionAPI): void {
   pi.on("session_compact", async (event, ctx) => {
     primer = null;
     shown.clear();
+    inContext.clear();
+    showStatus(ctx);
     const summary = event.compactionEntry?.summary ?? "";
     if (!summary.trim() || roleOf(ctx) !== "writer") return;
     try {
@@ -310,12 +403,17 @@ export default function (pi: ExtensionAPI): void {
           author,
         ];
         const r = await pi.exec("cortex", args, { cwd: ctx.cwd, timeout: MEMORY_TIMEOUT_MS });
-        if (failed(r)) stats.lastError = failureText(r, `cortex update ${id}`);
-        else stats.breadcrumbs++;
+        if (failed(r)) {
+          stats.lastError = failureText(r, `cortex update ${id}`);
+        } else {
+          stats.lastError = "";
+          stats.breadcrumbs++;
+        }
       }
     } catch (err) {
       stats.lastError = String(err?.message ?? err);
     }
+    showStatus(ctx);
   });
 
   // The RAW text, before `/skill:` and prompt-template expansion (before_agent_start
@@ -331,8 +429,11 @@ export default function (pi: ExtensionAPI): void {
     if (!sawPrompt) stats.silentRuns++;
   });
 
-  pi.on("agent_end", () => {
+  pi.on("agent_end", (_event, ctx) => {
     sawPrompt = false;
+    saving = false;
+    stopSpinner();
+    showStatus(ctx);
   });
 
   async function injectMemory(event, ctx, query: string, reader: boolean) {
@@ -344,7 +445,6 @@ export default function (pi: ExtensionAPI): void {
     const withQuery = cued && contentWords(query) >= 2;
     let ids: number[] = [];
     let hitsText = "";
-    let status: string | undefined;
 
     if (first || withQuery) {
       const args = [
@@ -358,7 +458,7 @@ export default function (pi: ExtensionAPI): void {
       if (withQuery) args.push(`--query=${query}`);
       if (shown.size > 0) args.push(`--exclude=${[...shown].join(",")}`);
       if (!first) args.push("--no-primer");
-      stats.execs++;
+      stats.lookups++;
       const started = Date.now();
       const r = await pi.exec("cortex", args, { cwd: ctx.cwd, timeout: MEMORY_TIMEOUT_MS });
       stats.lastMs = Date.now() - started;
@@ -369,12 +469,19 @@ export default function (pi: ExtensionAPI): void {
         stats.lastError = failed(r)
           ? failureText(r, "cortex memory context")
           : "cortex memory context printed unreadable JSON";
-        status = "memory: unavailable";
       } else {
-        if (first) primer = out.primer;
+        stats.lastError = "";
+        if (first) {
+          primer = out.primer;
+          stats.chars += out.primer.length;
+          for (const id of out.primerIds) enter(id, "summary");
+        }
         lane = out.lane;
         ids = out.hits.map(hit => hit.id);
-        for (const id of ids) shown.add(id);
+        for (const id of ids) {
+          shown.add(id);
+          enter(id, "prompt", query.slice(0, REASON_CHARS));
+        }
         hitsText = out.hitsText;
       }
     }
@@ -392,11 +499,8 @@ export default function (pi: ExtensionAPI): void {
     if (hitsText) {
       // Returned ONLY with new hits: every returned message is persisted.
       result.message = { customType: "cortex-memory", content: hitsText, display: false, details: { ids } };
-      stats.injectedChars += hitsText.length;
-      stats.lastHits = hitsText;
-      status = `memory: ${ids.length} new`;
+      stats.chars += hitsText.length;
     }
-    if (ctx.hasUI) ctx.ui.setStatus(STATUS_KEY, status);
     return result.systemPrompt !== undefined || result.message !== undefined ? result : undefined;
   }
 
@@ -409,6 +513,8 @@ export default function (pi: ExtensionAPI): void {
     request = freshRequest();
     request.query = query;
     if (contentWords(query) >= 2) lastQuery = query;
+    // Stale memory is flagged for the request that recalled it.
+    stale = null;
     const role = roleOf(ctx);
     if (role === "off") return undefined;
     try {
@@ -418,6 +524,8 @@ export default function (pi: ExtensionAPI): void {
       if (role === "writer") primer ??= "";
       stats.lastError = String(err?.message ?? err);
       return undefined;
+    } finally {
+      showStatus(ctx);
     }
   });
 
@@ -432,6 +540,10 @@ export default function (pi: ExtensionAPI): void {
       const output = (event.content ?? []).map(c => (c.type === "text" ? c.text : "")).join("\n");
       addFocus(focusFromBash(command, output));
       if (MEMORY_WRITE.test(command)) request.wroteMemory = true;
+      if (stale && [...command.matchAll(BODY_EDIT)].some(m => Number(m[1]) === stale.id)) {
+        stale = null;
+        showStatus(ctx);
+      }
     } else if (event.toolName === "cortex_update") {
       addFocus([Number(input.task_id)]);
       request.wroteMemory = true;
@@ -469,6 +581,7 @@ export default function (pi: ExtensionAPI): void {
           ? failureText(r, "cortex memory context")
           : "cortex memory context printed unreadable JSON";
       } else {
+        stats.lastError = "";
         candidates = out.hitsText;
       }
     }
@@ -482,7 +595,11 @@ export default function (pi: ExtensionAPI): void {
       candidates,
       author: `pi-${ctx.sessionManager.getSessionId()}`,
     });
-    if (ctx.hasUI) ctx.ui.setStatus(STATUS_KEY, "memory: checkpoint");
+    // The arc spins until the turn ends (agent_end).
+    saving = true;
+    frame = 0;
+    startSpinner(ctx);
+    showStatus(ctx);
     return {
       entries: [
         {
@@ -549,7 +666,13 @@ export default function (pi: ExtensionAPI): void {
         }
 
         const result = await pi.exec("cortex", args, { cwd: ctx.cwd, signal });
-        if (failed(result)) throw new Error(failureText(result, "cortex update"));
+        if (failed(result)) {
+          stats.lastError = failureText(result, "cortex update");
+          showStatus(ctx);
+          throw new Error(stats.lastError);
+        }
+        stats.lastError = "";
+        showStatus(ctx);
         return { content: [{ type: "text", text: result.stdout }], details: undefined };
       },
     }),
@@ -601,47 +724,86 @@ export default function (pi: ExtensionAPI): void {
         const r = await pi.exec("cortex", args, { cwd: ctx.cwd, timeout: RECALL_TIMEOUT_MS, signal });
         if (failed(r)) {
           recalled.delete(key);
-          throw new Error(failureText(r, `cortex ${args.slice(0, 2).join(" ")}`));
+          stats.lastError = failureText(r, `cortex ${args.slice(0, 2).join(" ")}`);
+          showStatus(ctx);
+          throw new Error(stats.lastError);
         }
+        stats.lastError = "";
+        stats.chars += r.stdout.length;
         if (byId) {
-          shown.add(Number(byId[1]));
-          addFocus([Number(byId[1])]);
+          const id = Number(byId[1]);
+          shown.add(id);
+          addFocus([id]);
+          enter(id, "recall");
+          const staleness = STALENESS_LINE.exec(r.stdout);
+          if (staleness?.[1] === "stale") stale = { id, detail: staleDetail(staleness[0]) };
+          else if (staleness && stale?.id === id) stale = null;
+        } else {
+          for (const m of r.stdout.matchAll(SEARCH_ROW)) enter(Number(m[1]), "recall");
         }
+        showStatus(ctx);
         return text(r.stdout);
       },
     }),
   );
 
+  /**
+   * Current title, status and lane of the listed streams from ONE `cortex ls
+   * --json` (bodiless, every lane and status); null when it fails (the view
+   * then shows ids only).
+   */
+  async function streamInfo(ctx, ids: Set<number>) {
+    const r = await pi.exec("cortex", ["ls", "--json"], { cwd: ctx.cwd, timeout: MEMORY_TIMEOUT_MS });
+    if (failed(r)) return null;
+    let rows: unknown;
+    try {
+      rows = JSON.parse(r.stdout);
+    } catch {
+      return null;
+    }
+    if (!Array.isArray(rows)) return null;
+    const info = new Map();
+    for (const row of rows) {
+      if (!ids.has(row?.id)) continue;
+      info.set(row.id, { title: String(row.title), status: String(row.status), lane: String(row.lane) });
+    }
+    return info;
+  }
+
   pi.registerCommand("memory", {
-    description: "show injected cortex memory; `/memory refresh` re-reads it",
+    description: "cortex memory: what your agent was given from memory and why; `/memory refresh` re-reads it",
     handler: async (args, ctx) => {
-      if (args.trim() === "refresh") {
+      const refresh = () => {
         primer = null;
         shown.clear();
+        inContext.clear();
+        showStatus(ctx);
+      };
+      if (args.trim() === "refresh") {
+        refresh();
         ctx.ui.notify("cortex memory: the primer and hits are re-read on the next prompt", "info");
         return;
       }
-      const focusText =
-        focus.length > 0
-          ? [...focus]
-              .reverse()
-              .map(id => `@${id}`)
-              .join(", ")
-          : "(none)";
-      const lines = [
-        `cortex memory — lane: ${lane ?? "(unknown)"}`,
-        `primer (${primer?.length ?? 0} chars):`,
-        primer || "(none)",
-        `shown streams: ${shown.size > 0 ? [...shown].map(id => `@${id}`).join(", ") : "(none)"}`,
-        "last injected hits:",
-        stats.lastHits || "(none)",
-        `prompts ${stats.prompts} · context spawns ${stats.execs} · last ${stats.lastMs} ms · ` +
-          `injected ${stats.injectedChars} chars · runs without memory ${stats.silentRuns}`,
-        `role: ${roleOf(ctx)} · focus streams: ${focusText} · files changed this request: ${request.edited.size}`,
-        `checkpoints: ${stats.checkpoints} · breadcrumbs: ${stats.breadcrumbs}`,
-        `last error: ${stats.lastError || "(none)"}`,
-      ];
-      ctx.ui.notify(lines.join("\n"), "info");
+      const ids = new Set([...focus, ...inContext.keys()]);
+      const info = ids.size > 0 ? await streamInfo(ctx, ids) : new Map();
+      const state = viewState(ctx);
+      if (ctx.mode === "tui" && ctx.hasUI) {
+        await ctx.ui.custom(
+          (_tui, theme, _keybindings, done) =>
+            new MemoryPanel(
+              state,
+              info,
+              theme,
+              () => done(undefined),
+              () => {
+                refresh();
+                ctx.ui.notify("cortex memory: re-read on the next prompt", "info");
+              },
+            ),
+        );
+        return;
+      }
+      ctx.ui.notify(memoryViewText(state, info), "info");
     },
   });
 }

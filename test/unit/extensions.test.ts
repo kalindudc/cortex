@@ -115,12 +115,19 @@ describe("writeExtension / writeAllExtensions — error + path-resolution branch
     await expect(writeExtension("not-real" as unknown as "pi", tmpDir)).rejects.toThrow(/unknown extension/);
   });
 
-  test("writeAllExtensions() with env set installs files at <env>/cortex/index.ts", async () => {
+  test("writeAllExtensions() with env set installs index.ts and its memory-view.ts at <env>/cortex/", async () => {
     process.env[ENV_KEY] = tmpDir;
     await writeAllExtensions();
-    const indexTs = path.join(tmpDir, "cortex", "index.ts");
-    expect(fs.existsSync(indexTs)).toBe(true);
-    expect(fs.statSync(indexTs).size).toBeGreaterThan(200);
+    for (const file of ["index.ts", "memory-view.ts"]) {
+      const installed = path.join(tmpDir, "cortex", file);
+      expect(fs.existsSync(installed)).toBe(true);
+      expect(fs.statSync(installed).size).toBeGreaterThan(200);
+    }
+    // index.ts imports its sibling by the installed name.
+    expect(fs.readFileSync(path.join(tmpDir, "cortex", "index.ts"), "utf8")).toContain('from "./memory-view.ts"');
+    expect(fs.readFileSync(path.join(tmpDir, "cortex", "memory-view.ts"), "utf8")).toContain(
+      "export class MemoryPanel",
+    );
   });
 
   test("writeExtension('pi') with explicit targetDir overrides env (writes only to explicit dir)", async () => {

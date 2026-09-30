@@ -19,7 +19,7 @@ cortex memory lane
 |---|---|---|
 | `search <query>` | `--lane` (a filter; default every lane), `--boost` (rank this lane higher), `--limit` (default 5, max 20) | ranked hits; `--json`: `{ terms, recent, hits }` |
 | `show <id>` | `--section` (only the sections whose heading slug contains it, in full) | staleness + body (section-first past 12,000 chars) + breadcrumb trail; `--json`: `{ task, synced, latest, trail, staleness }` plus `sections` with `--section` |
-| `context` | `--query`, `--author` (its streams lead the primer), `--exclude` (ids already shown, comma-separated), `--limit`, `--lane` (the primer's lane and the boosted lane; default: this checkout's), `--load-hint` (how the hits text says to load a hit), `--no-primer` (hits only) | primer + hits from every lane; `--json`: `{ lane, terms, recent, primer, hits, hitsText }` |
+| `context` | `--query`, `--author` (its streams lead the primer), `--exclude` (ids already shown, comma-separated), `--limit`, `--lane` (the primer's lane and the boosted lane; default: this checkout's), `--load-hint` (how the hits text says to load a hit), `--no-primer` (hits only) | primer + hits from every lane; `--json`: `{ lane, terms, recent, primer, primerIds, hits, hitsText }` (`primerIds`: the streams the primer lists) |
 | `lane` | none | this checkout's lane (git's common dir: `<repo>/.git` or `~/world/git` names its parent; worktrees share it) |
 
 - A hit or stream carries `activity` (the newest body edit or update, status changes excluded) and `latest`: the newest stream reached through same-lane `@id` links to later-created tasks (a handover chain), or null.

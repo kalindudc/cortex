@@ -1,8 +1,11 @@
-import { describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 
 // The embedded pi extension (`src/extensions/pi.ts`, @ts-nocheck) imports pi's
 // runtime packages, which cortex does not depend on. Mock both BEFORE the
-// dynamic import, then drive its handlers with a fake `pi` and `ctx`.
+// dynamic import, then drive its handlers with a fake `pi` and `ctx`. Its
+// sibling `./memory-view.ts` is the real view (the real pi-tui, a cortex
+// dependency). Never mock.module a path that does not exist: under Bun 1.4.2
+// that makes later files' mocks capture `?query` imports too.
 const schema =
   (kind: string) =>
   (...args: unknown[]) => ({ kind, args });
@@ -36,22 +39,70 @@ type Any = any;
 
 const ok = (stdout: string): ExecResult => ({ code: 0, killed: false, stdout, stderr: "" });
 const context = (over: Record<string, unknown> = {}): ExecResult =>
-  ok(JSON.stringify({ lane: "cortex", terms: [], primer: "PRIMER", hits: [], hitsText: "", ...over }));
+  ok(JSON.stringify({ lane: "cortex", terms: [], primer: "PRIMER", primerIds: [], hits: [], hitsText: "", ...over }));
+const nonZero = (stderr: string): ExecResult => ({ code: 1, killed: false, stdout: "", stderr });
+
+/** Colours as visible tags, so a status names the theme token of each piece. */
+const tags = {
+  fg: (color: string, text: string) => `<${color}>${text}</${color}>`,
+  bold: (text: string) => `<b>${text}</b>`,
+};
+const EMPTY = "<mdLink>\u25cb</mdLink> <dim>memory</dim>";
+const LOADED = "<mdLink>\u25cf</mdLink> <dim>memory</dim>";
+const saving = (symbol: string) =>
+  `<mdLink>${symbol}</mdLink> <dim>memory</dim> <dim>\u00b7</dim> <accent>saving\u2026</accent>`;
+const ERROR = "<error>\u2298 memory error</error> <dim>\u00b7 /memory</dim>";
+
+// The save spinner is the extension's only timer: record intervals instead of running them.
+type Interval = { fn: () => void; ms: number; cleared: boolean };
+let intervals: Interval[] = [];
+const realSetInterval = globalThis.setInterval;
+const realClearInterval = globalThis.clearInterval;
+beforeEach(() => {
+  intervals = [];
+  globalThis.setInterval = ((fn: () => void, ms: number) => {
+    intervals.push({ fn, ms, cleared: false });
+    return intervals.length;
+  }) as unknown as typeof setInterval;
+  globalThis.clearInterval = ((id: number) => {
+    const interval = intervals[id - 1];
+    if (interval) interval.cleared = true;
+  }) as unknown as typeof clearInterval;
+});
+afterEach(() => {
+  globalThis.setInterval = realSetInterval;
+  globalThis.clearInterval = realClearInterval;
+});
+const running = () => intervals.filter(i => !i.cleared);
 
 /** A fake pi + ctx around one extension instance; `respond` answers every exec. */
-function harness(respond: (args: string[]) => ExecResult = () => context(), opts: { hasUI?: boolean } = {}) {
+function harness(
+  respond: (args: string[]) => ExecResult = () => context(),
+  opts: { hasUI?: boolean; mode?: string } = {},
+) {
   const handlers: Record<string, ((event: Any, ctx: Any) => Any)[]> = {};
   const tools: Record<string, Any> = {};
   const commands: Record<string, Any> = {};
   const execs: Exec[] = [];
   const statuses: (string | undefined)[] = [];
   const notes: string[] = [];
+  // ctx.ui.custom: the component each call built, and whether its `done` ran.
+  const panels: { component: Any; done: boolean }[] = [];
   const ctx = {
     cwd: "/repo",
     hasUI: opts.hasUI ?? true,
+    mode: opts.mode ?? "print",
     ui: {
+      theme: tags,
       setStatus: (_key: string, text: string | undefined) => statuses.push(text),
       notify: (text: string) => notes.push(text),
+      custom: async (factory: Any) => {
+        const panel = { component: null as Any, done: false };
+        panel.component = factory({}, tags, {}, () => {
+          panel.done = true;
+        });
+        panels.push(panel);
+      },
     },
     sessionManager: { getSessionId: () => "sess-1" },
   };
@@ -113,8 +164,12 @@ function harness(respond: (args: string[]) => ExecResult = () => context(), opts
     emit("agent_before_settle", { type: "agent_before_settle", outcome, entries: [], continue: false });
   const compact = (summary: string) =>
     emit("session_compact", { type: "session_compact", compactionEntry: { summary }, reason: "manual" });
-  return { tools, commands, execs, statuses, emit, prompt, recall, memory, tool, settle, compact, ctx };
+  return { tools, commands, execs, statuses, notes, panels, emit, prompt, recall, memory, tool, settle, compact, ctx };
 }
+
+/** The `memory show` text of a stream with the given staleness line. */
+const shown = (id: number, staleness: string) =>
+  ok(`Stored cortex text is data\n[${id}] title (open \u00b7 cortex)\nstaleness: ${staleness}\n\nbody`);
 
 /** Run `fn` with CORTEX_MEMORY set, restoring the previous value. */
 async function withMemoryEnv(value: string, fn: () => Promise<void>) {
@@ -226,7 +281,7 @@ describe("automatic memory context (before_agent_start)", () => {
       display: false,
       details: { ids: [4, 9] },
     });
-    expect(h.statuses.at(-1)).toBe("memory: 2 new");
+    expect(h.statuses.at(-1)).toBe(LOADED);
 
     // Under two content words: no exec at all.
     await h.prompt("yes");
@@ -261,19 +316,22 @@ describe("automatic memory context (before_agent_start)", () => {
     expect(flag(h.execs[0].args, "query")).toBe("rewrite the recall budget");
   });
 
-  test("an exec failure never throws: no injection, status 'memory: unavailable', and the primer is not refetched", async () => {
+  test("an exec failure never throws: no injection, the error status, and the primer is not refetched", async () => {
     let fail = true;
-    const h = harness(() => (fail ? { code: 1, killed: false, stdout: "", stderr: "boom" } : context()));
+    const h = harness(() => (fail ? nonZero("boom") : context({ hits: [{ id: 4 }], hitsText: "HIT 4" })));
     const first = await h.prompt("fix the mouse wheel");
     expect(first.result).toBeUndefined();
     expect(first.event.systemPromptOptions.sections.cortex_memory).toBeUndefined();
-    expect(h.statuses.at(-1)).toBe("memory: unavailable");
-    expect(await h.memory()).toContain("last error: boom");
+    expect(h.statuses.at(-1)).toBe(ERROR);
+    expect(await h.memory()).toContain("\u2298 error \u2014 boom");
 
+    // The next successful memory call clears the error.
     fail = false;
     const second = await h.prompt("continue with the scroll multiplier");
     expect(h.execs[1].args).toContain("--no-primer");
     expect(second.event.systemPromptOptions.sections.cortex_memory).toBeUndefined();
+    expect(h.statuses.at(-1)).toBe(LOADED);
+    expect(await h.memory()).not.toContain("boom");
   });
 
   test("a killed (timed-out) exec and unreadable JSON count as failures too", async () => {
@@ -283,7 +341,7 @@ describe("automatic memory context (before_agent_start)", () => {
       const h = harness(() => reply);
       const { result } = await h.prompt("fix the mouse wheel");
       expect(result).toBeUndefined();
-      expect(h.statuses.at(-1)).toBe("memory: unavailable");
+      expect(h.statuses.at(-1)).toBe(ERROR);
     }
   });
 
@@ -301,27 +359,47 @@ describe("automatic memory context (before_agent_start)", () => {
     expect(h.execs[2].args).not.toContain("--no-primer");
 
     await h.emit("session_start", { type: "session_start", reason: "new" });
-    expect(await h.memory()).toContain("prompts 0 · context spawns 0");
+    const text = await h.memory();
+    expect(text).toContain("\u25cb ready \u2014 nothing loaded yet");
+    expect(text).not.toContain("This session");
   });
 
   test("an agent_start without a preceding before_agent_start counts as a silent run", async () => {
     const h = harness();
     await h.prompt("fix the mouse wheel");
-    expect(await h.memory()).toContain("runs without memory 0");
+    expect(await h.memory()).not.toContain("without memory");
     await h.emit("agent_start");
     await h.emit("agent_end", { type: "agent_end", messages: [] });
-    expect(await h.memory()).toContain("runs without memory 1");
+    expect(await h.memory()).toContain("1 prompt \u00b7 1 agent run without memory");
   });
 
-  test("/memory shows the lane, primer, injected hits and stats", async () => {
-    const h = harness(() => context({ hits: [{ id: 7 }], hitsText: "HIT SEVEN" }));
+  test("/memory lists each stream in context with its reason, never the raw primer or hit text", async () => {
+    const replies = [
+      context({ primer: "PRIMER TEXT", primerIds: [3, 5], hits: [{ id: 7 }], hitsText: "HIT SEVEN" }),
+      ok(
+        JSON.stringify([
+          { id: 3, title: "three", status: "open", lane: "cortex" },
+          { id: 5, title: "five", status: "review", lane: "infra" },
+          { id: 7, title: "seven", status: "done", lane: "cortex" },
+          { id: 8, title: "not listed", status: "open", lane: "cortex" },
+        ]),
+      ),
+    ];
+    const h = harness(() => replies.shift() ?? context());
     await h.prompt("fix the mouse wheel");
     const text = await h.memory();
-    expect(text).toContain("lane: cortex");
-    expect(text).toContain("PRIMER");
-    expect(text).toContain("shown streams: @7");
-    expect(text).toContain("HIT SEVEN");
-    expect(text).toContain(`injected ${"HIT SEVEN".length} chars`);
+    expect(text).toStartWith("\u25cf Memory \u2014 writer \u00b7 lane cortex\n");
+    expect(text).toContain("In context (3)");
+    expect(text).toContain("@7  done     seven \u00b7 matched \u201cfix the mouse wheel\u201d");
+    expect(text).toContain("@5  review   five \u00b7 infra \u00b7 session summary");
+    expect(text).toContain("@3  open     three \u00b7 session summary");
+    expect(text.indexOf("@7")).toBeLessThan(text.indexOf("@5"));
+    expect(text).toContain("working \u2014 1 lookup, last");
+    const tokens = Math.round(("PRIMER TEXT".length + "HIT SEVEN".length) / 4);
+    expect(text).toContain(`~${tokens} tokens of memory added`);
+    expect(text).not.toContain("PRIMER TEXT");
+    expect(text).not.toContain("HIT SEVEN");
+    expect(text).not.toContain("not listed");
   });
 });
 
@@ -447,11 +525,13 @@ describe("memory roles", () => {
   test("an unknown CORTEX_MEMORY keeps the default role and is reported as the last error", async () => {
     await withMemoryEnv("bogus", async () => {
       const h = harness();
+      await h.emit("session_start", { type: "session_start", reason: "startup" });
+      expect(h.statuses.at(-1)).toBe(ERROR);
+      const text = await h.memory();
+      expect(text).toContain("Memory \u2014 writer");
+      expect(text).toContain("error \u2014 CORTEX_MEMORY=bogus is not write|read|off; ignored");
       await h.prompt("fix the mouse wheel");
       expect(h.execs[0].args).not.toContain("--no-primer");
-      const text = await h.memory();
-      expect(text).toContain("role: writer");
-      expect(text).toContain("last error: CORTEX_MEMORY=bogus is not write|read|off; ignored");
     });
   });
 
@@ -484,8 +564,11 @@ describe("memory roles", () => {
       "Recall budget for this request is spent; continue the task with what you have.",
     );
     for (const path of ["a.ts", "b.ts", "c.ts"]) await h.tool("edit", { path });
-    expect(await h.memory()).toContain("role: reader");
-    expect(await h.memory()).toContain("files changed this request: 0");
+    const text = await h.memory();
+    expect(text).toContain("Memory \u2014 reader");
+    expect(text).toContain("read-only session (delegate): prompt hits and 2 recalls a request, never writes");
+    expect(text).not.toContain("Working on");
+    expect(h.statuses).toEqual([]);
     expect(await h.settle()).toBeUndefined();
     const before = h.execs.length;
     await h.compact("progress summary");
@@ -534,13 +617,15 @@ describe("writer tracking (tool_result)", () => {
   test("edit/write add their paths once; an error result is ignored; a new request resets them", async () => {
     const h = harness();
     await h.prompt("fix the mouse wheel");
+    await h.tool("bash", { command: "cortex show 5" });
     await h.tool("edit", { path: "a.ts" });
     await h.tool("write", { path: "b.ts" });
     await h.tool("write", { path: "a.ts" });
     await h.tool("edit", { path: "c.ts" }, { isError: true });
-    expect(await h.memory()).toContain("files changed this request: 2");
+    const r = await h.settle();
+    expect(r.entries[0].content).toContain("Files changed:\n- a.ts\n- b.ts\n\n");
     await h.prompt("now the scroll multiplier");
-    expect(await h.memory()).toContain("files changed this request: 0");
+    expect(await h.settle()).toBeUndefined();
   });
 
   test("bash `cortex edit` names a focus stream and counts as a memory write (no checkpoint)", async () => {
@@ -548,7 +633,7 @@ describe("writer tracking (tool_result)", () => {
     await h.prompt("fix the mouse wheel");
     await h.tool("edit", { path: "a.ts" });
     await h.tool("bash", { command: "cortex edit 12 --body-search 'old' --body-replace 'new'" });
-    expect(await h.memory()).toContain("focus streams: @12");
+    expect(await h.memory()).toContain("Working on\n    @12\n");
     expect(await h.settle()).toBeUndefined();
   });
 
@@ -557,7 +642,7 @@ describe("writer tracking (tool_result)", () => {
     await h.prompt("fix the mouse wheel");
     await h.tool("edit", { path: "a.ts" });
     await h.tool("bash", { command: 'cortex add "wheel" --lane cortex --body-file -' }, { output: "[34] wheel\n" });
-    expect(await h.memory()).toContain("focus streams: @34");
+    expect(await h.memory()).toContain("Working on\n    @34\n");
     expect(await h.settle()).toBeUndefined();
   });
 
@@ -574,9 +659,9 @@ describe("writer tracking (tool_result)", () => {
     await h.prompt("fix the mouse wheel");
     await h.tool("edit", { path: "a.ts" });
     await h.tool("cortex_update", { task_id: 4, message: "x" }, { isError: true });
-    expect(await h.memory()).toContain("focus streams: (none)");
+    expect(await h.memory()).toContain("Working on\n    none yet\n");
     await h.tool("cortex_update", { task_id: 3, message: "progress" });
-    expect(await h.memory()).toContain("focus streams: @3");
+    expect(await h.memory()).toContain("Working on\n    @3\n");
     expect(await h.settle()).toBeUndefined();
   });
 
@@ -586,9 +671,9 @@ describe("writer tracking (tool_result)", () => {
     for (const id of [1, 2, 3, 4, 5, 6]) await h.tool("bash", { command: `cortex show ${id}` });
     await h.prompt("now the scroll multiplier");
     await h.tool("bash", { command: "cortex show 3" });
-    expect(await h.memory()).toContain("focus streams: @3, @6, @5, @4, @2 \u00b7");
+    expect(await h.memory()).toContain("Working on\n    @3\n    @6\n    @5\n    @4\n    @2\n\n");
     await h.emit("session_start", { type: "session_start", reason: "new" });
-    expect(await h.memory()).toContain("focus streams: (none)");
+    expect(await h.memory()).toContain("Working on\n    none yet\n");
   });
 });
 
@@ -644,15 +729,16 @@ describe("memory checkpoint (agent_before_settle)", () => {
     expect(entry.content).toStartWith("Memory checkpoint (automatic, once per request)");
     expect(entry.content).toContain("- src/tui/mouse.ts");
     expect(entry.content).toContain("@5");
-    expect(h.statuses.at(-1)).toBe("memory: checkpoint");
+    expect(h.statuses.at(-1)).toBe(saving("\u25dc"));
 
     // The checkpoint turn continues the same run: agent_start/agent_end again, then settle.
     await h.emit("agent_start");
     await h.emit("agent_end", { type: "agent_end", messages: [] });
+    expect(h.statuses.at(-1)).toBe(LOADED);
     expect(await h.settle()).toBeUndefined();
     const text = await h.memory();
-    expect(text).toContain("checkpoints: 1");
-    expect(text).toContain("runs without memory 0");
+    expect(text).toContain("1 checkpoint");
+    expect(text).not.toContain("without memory");
 
     await h.prompt("now the dialog rows");
     expect(await h.settle()).toBeUndefined();
@@ -710,7 +796,7 @@ describe("memory checkpoint (agent_before_settle)", () => {
     const r = await h.settle();
     expect(r.continue).toBe(true);
     expect(r.entries[0].content).toContain("(none found)");
-    expect(await h.memory()).toContain("last error: daemon down");
+    expect(await h.memory()).toContain("error \u2014 daemon down");
   });
 });
 
@@ -730,7 +816,7 @@ describe("compaction breadcrumbs (session_compact)", () => {
       expect(e.args.slice(6)).toEqual(["--as", "pi-sess-1"]);
       expect(e.opts).toMatchObject({ cwd: "/repo", timeout: 3000 });
     }
-    expect(await h.memory()).toContain("breadcrumbs: 2");
+    expect(await h.memory()).toContain("2 compaction snapshots");
   });
 
   test("no focus or an empty summary: no exec; a failed update never throws and is reported", async () => {
@@ -746,8 +832,201 @@ describe("compaction breadcrumbs (session_compact)", () => {
     expect(h.execs).toHaveLength(before);
     await h.compact("progress summary");
     expect(h.execs).toHaveLength(before + 1);
+    expect(h.statuses.at(-1)).toBe(ERROR);
     const text = await h.memory();
-    expect(text).toContain("breadcrumbs: 0");
-    expect(text).toContain("last error: nope");
+    expect(text).not.toContain("compaction snapshot");
+    expect(text).toContain("error \u2014 nope");
+  });
+});
+
+describe("the memory status and /memory (plan @423)", () => {
+  const update = (h: ReturnType<typeof harness>, params: Record<string, unknown>) =>
+    h.tools.cortex_update.execute("call", params, undefined, undefined, h.ctx);
+  const STALE = "<warning>\u25d0</warning> <text>memory</text> <dim>\u00b7</dim> <warning>@421 stale</warning>";
+
+  test("session_start shows \u25cb, a prompt with hits \u25cf; compaction and /memory refresh go back to \u25cb", async () => {
+    const h = harness(() => context({ hits: [{ id: 4 }], hitsText: "HIT 4" }));
+    await h.emit("session_start", { type: "session_start", reason: "startup" });
+    expect(h.statuses).toEqual([EMPTY]);
+    await h.prompt("fix the mouse wheel");
+    expect(h.statuses.at(-1)).toBe(LOADED);
+    await h.compact("");
+    expect(h.statuses.at(-1)).toBe(EMPTY);
+    await h.prompt("continue the mouse wheel work");
+    expect(h.statuses.at(-1)).toBe(LOADED);
+    await h.memory("refresh");
+    expect(h.statuses.at(-1)).toBe(EMPTY);
+    expect(await h.memory()).toContain("In context (0)");
+  });
+
+  test("the primer's streams are the session summary, hits matched the prompt, recalls were recalled; the first reason wins", async () => {
+    const search = ok(
+      "header\n- [11] open \u00b7 infra \u00b7 active 2026-09-01 \u00b7 a\n- [12] open \u00b7 cortex \u00b7 active 2026-09-01 \u00b7 b",
+    );
+    const h = harness(args => {
+      if (args[1] === "show") return shown(Number(args[2]), "fresh \u00b7 synced 2026-09-01 (1d)");
+      if (args[1] === "search") return search;
+      return context({ primerIds: [3], hits: [{ id: 3 }, { id: 4 }], hitsText: "HITS" });
+    });
+    await h.prompt("fix the mouse wheel");
+    await h.recall("@9");
+    await h.recall("wheel notches");
+    await h.recall("@4");
+    const text = await h.memory();
+    // Rows below "In context" (the recalled @ids are also focus streams under "Working on").
+    const lines = text.slice(text.indexOf("  In context (5)\n")).split("\n");
+    const row = (id: number) => lines.find(line => line.startsWith(`    @${id} `)) ?? "";
+    const order = lines.filter(line => /^ {4}@\d/.test(line)).map(line => line.trim().split(" ")[0]);
+    expect(order).toEqual(["@12", "@11", "@9", "@4", "@3"]);
+    expect(text).toContain("  Working on\n    @4\n    @9\n");
+    expect(row(3)).toContain("session summary");
+    expect(row(4)).toContain("matched \u201cfix the mouse wheel\u201d");
+    for (const id of [9, 11, 12]) expect(row(id)).toContain("recalled by the agent");
+  });
+
+  test("a failed cortex_update or recall sets the error status before it throws; the next success clears it", async () => {
+    let fail = true;
+    const h = harness(args => {
+      if (args[0] === "update") return fail ? nonZero("error: task 3 not found") : ok("\u2713 update");
+      if (args[1] === "show") return fail ? nonZero("show failed") : shown(5, "fresh \u00b7 synced 2026-09-01 (1d)");
+      return context();
+    });
+    await h.emit("session_start", { type: "session_start", reason: "startup" });
+    await expect(update(h, { task_id: 3, message: "hi" })).rejects.toThrow("error: task 3 not found");
+    expect(h.statuses.at(-1)).toBe(ERROR);
+    expect(await h.memory()).toContain("\u2298 error \u2014 error: task 3 not found");
+    fail = false;
+    await update(h, { task_id: 3, message: "hi" });
+    expect(h.statuses.at(-1)).toBe(EMPTY);
+
+    fail = true;
+    await expect(h.recall("@5")).rejects.toThrow("show failed");
+    expect(h.statuses.at(-1)).toBe(ERROR);
+    fail = false;
+    await h.recall("@5");
+    expect(h.statuses.at(-1)).toBe(LOADED);
+  });
+
+  test("a stale recall flags @id stale until the next prompt, a fresh recall of it or a bash `cortex edit` of it", async () => {
+    let verdict = "stale \u00b7 synced 2026-09-01 (28d) \u00b7 changed: src/a.ts, src/b.ts \u00b7 missing: gone.ts";
+    const h = harness(args => (args[1] === "show" ? shown(Number(args[2]), verdict) : context()));
+    await h.prompt("fix the mouse wheel");
+    await h.recall("@421");
+    expect(h.statuses.at(-1)).toBe(STALE);
+    expect(await h.memory()).toContain("\u25d0 stale \u2014 @421: changed: src/a.ts, src/b.ts \u00b7 missing: gone.ts");
+    verdict = "fresh \u00b7 synced 2026-09-01 (1d)";
+    await h.recall("@7");
+    expect(h.statuses.at(-1)).toBe(STALE);
+    await h.recall("@421#next");
+    expect(h.statuses.at(-1)).toBe(LOADED);
+
+    verdict = "stale \u00b7 synced 2026-09-01 (40d) \u00b7 old";
+    await h.prompt("now the scroll multiplier");
+    await h.recall("@421");
+    expect(await h.memory()).toContain("@421: old");
+    await h.prompt("rename the helper");
+    expect(h.statuses.at(-1)).toBe(LOADED);
+
+    await h.recall("@421");
+    expect(h.statuses.at(-1)).toBe(STALE);
+    await h.tool("bash", { command: "cortex edit 42 --body-search a --body-replace b" });
+    await h.tool("bash", { command: "cortex edit 421 --body-search a --body-replace b" }, { isError: true });
+    expect(h.statuses.at(-1)).toBe(STALE);
+    await h.tool("bash", { command: "cortex edit 421 --body-search a --body-replace b" });
+    expect(h.statuses.at(-1)).toBe(LOADED);
+  });
+
+  test("a checkpoint starts ONE 150 ms spinner (\u25dc\u25dd\u25de\u25df); agent_end, session_start and session_shutdown stop it", async () => {
+    const h = harness(args => (args[1] === "show" ? ok("STREAM 5") : context()));
+    const checkpoint = async () => {
+      await h.prompt("continue the mouse wheel work");
+      await h.recall("@5");
+      await h.tool("edit", { path: "a.ts" });
+      expect((await h.settle()).continue).toBe(true);
+    };
+    await checkpoint();
+    expect(running()).toHaveLength(1);
+    expect(running()[0]?.ms).toBe(150);
+    expect(h.statuses.at(-1)).toBe(saving("\u25dc"));
+    for (const symbol of ["\u25dd", "\u25de", "\u25df", "\u25dc"]) {
+      running()[0]?.fn();
+      expect(h.statuses.at(-1)).toBe(saving(symbol));
+    }
+    await h.emit("agent_end", { type: "agent_end", messages: [] });
+    expect(running()).toHaveLength(0);
+    expect(h.statuses.at(-1)).toBe(LOADED);
+
+    await checkpoint();
+    expect(running()).toHaveLength(1);
+    await h.emit("session_start", { type: "session_start", reason: "new" });
+    expect(running()).toHaveLength(0);
+    expect(h.statuses.at(-1)).toBe(EMPTY);
+
+    await checkpoint();
+    await h.emit("session_shutdown", { type: "session_shutdown" });
+    expect(running()).toHaveLength(0);
+    expect(intervals).toHaveLength(3);
+  });
+
+  test("a headless writer checkpoints without a spinner or a status", async () => {
+    await withMemoryEnv("write", async () => {
+      const h = harness(args => (args[1] === "show" ? ok("STREAM 5") : context()), { hasUI: false });
+      await h.prompt("continue the mouse wheel work");
+      await h.recall("@5");
+      await h.tool("edit", { path: "a.ts" });
+      expect((await h.settle()).continue).toBe(true);
+      expect(intervals).toHaveLength(0);
+      expect(h.statuses).toEqual([]);
+    });
+  });
+
+  test("/memory in the TUI opens the panel after exactly ONE `cortex ls --json`; r re-reads on the next prompt", async () => {
+    const listed = ok(JSON.stringify([{ id: 4, title: "four", status: "open", lane: "cortex" }]));
+    const h = harness(args => (args[0] === "ls" ? listed : context({ hits: [{ id: 4 }], hitsText: "HIT 4" })), {
+      mode: "tui",
+    });
+    await h.prompt("fix the mouse wheel");
+    const before = h.execs.length;
+    await h.commands.memory.handler("", h.ctx);
+    const execs = h.execs.slice(before);
+    expect(execs.map(e => e.args)).toEqual([["ls", "--json"]]);
+    expect(execs[0]?.opts).toMatchObject({ cwd: "/repo", timeout: 3000 });
+    expect(h.notes).toEqual([]);
+    expect(h.panels).toHaveLength(1);
+    const panel = h.panels[0];
+    const lines: string[] = panel?.component.render(80) ?? [];
+    expect(lines.join("\n")).toContain("four");
+    expect(lines.join("\n")).toContain("<b>Memory</b>");
+
+    panel?.component.handleInput("r");
+    expect(panel?.done).toBe(true);
+    expect(h.notes).toEqual(["cortex memory: re-read on the next prompt"]);
+    expect(h.statuses.at(-1)).toBe(EMPTY);
+    await h.prompt("yes");
+    expect(contextExecs(h.execs).at(-1)?.args).not.toContain("--no-primer");
+
+    await h.commands.memory.handler("", h.ctx);
+    h.panels[1]?.component.handleInput("q");
+    expect(h.panels[1]?.done).toBe(true);
+    expect(h.notes).toHaveLength(1);
+  });
+
+  test("/memory outside the TUI notifies the plain text; nothing to list spawns nothing; a failed ls shows ids only", async () => {
+    for (const mode of ["rpc", "print"]) {
+      const h = harness(() => context(), { mode });
+      const text = await h.memory();
+      expect(h.execs).toHaveLength(0);
+      expect(h.panels).toHaveLength(0);
+      expect(text).toStartWith("\u25cb Memory \u2014 writer\n");
+      expect(text).not.toContain("\x1b");
+    }
+    const h = harness(args =>
+      args[0] === "ls" ? nonZero("daemon down") : context({ hits: [{ id: 4 }], hitsText: "H" }),
+    );
+    await h.prompt("fix the mouse wheel");
+    const text = await h.memory();
+    expect(text).toContain("    @4 \u00b7 matched \u201cfix the mouse wheel\u201d");
+    expect(text).toContain("titles unavailable: cortex ls --json failed");
+    expect(h.statuses.at(-1)).toBe(LOADED);
   });
 });

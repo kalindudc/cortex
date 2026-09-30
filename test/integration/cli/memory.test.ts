@@ -95,21 +95,24 @@ describe("cortex memory (compiled binary)", () => {
   test("memory context returns the primer and hits in one call; --no-primer returns hits only", async () => {
     expect((await cli(["add", "Archived mouse wheel notes", "-l", "myproj", "--status", "done"])).code).toBe(0);
     expect((await cli(["update", String(streamId), "-m", "touched", "--as", "t-1"])).code).toBe(0);
-    const ctx = await json<{ lane: string; primer: string; hits: { id: number }[]; hitsText: string }>([
-      "memory",
-      "context",
-      "--json",
-      "--query=mouse wheel",
-      "--author=t-1",
-    ]);
+    const ctx = await json<{
+      lane: string;
+      primer: string;
+      primerIds: number[];
+      hits: { id: number }[];
+      hitsText: string;
+    }>(["memory", "context", "--json", "--query=mouse wheel", "--author=t-1"]);
     expect(ctx.lane).toBe("myproj");
     expect(ctx.primer).toContain("your author tag t-1");
     expect(ctx.primer).toContain(`[${streamId}]`);
     expect(ctx.primer).not.toContain("Archived");
+    // primerIds: exactly the streams the primer lists, in its order.
+    expect(ctx.primerIds).toContain(streamId);
+    expect(ctx.primerIds).toEqual([...ctx.primer.matchAll(/^- \[(\d+)\]/gm)].map(m => Number(m[1])));
     expect(ctx.hitsText).toContain(`[${streamId}]`);
     expect(ctx.hitsText).toContain("(query: mouse, wheel)");
     expect(ctx.hitsText).toContain("(2/2: mouse, wheel)");
-    const hitsOnly = await json<{ primer: string; hits: unknown[] }>([
+    const hitsOnly = await json<{ primer: string; primerIds: number[]; hits: unknown[] }>([
       "memory",
       "context",
       "--json",
@@ -117,6 +120,7 @@ describe("cortex memory (compiled binary)", () => {
       "--query=mouse wheel",
     ]);
     expect(hitsOnly.primer).toBe("");
+    expect(hitsOnly.primerIds).toEqual([]);
     expect(hitsOnly.hits.length).toBeGreaterThan(0);
   });
 

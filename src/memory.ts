@@ -378,42 +378,67 @@ export function renderHits(
   return lines.join("\n");
 }
 
-/**
- * The session primer: streams the caller touched, then the lane's active
- * streams, then streams recently active in OTHER lanes (work spans repos),
- * never repeating a touched stream. Each section is capped
- * (MEMORY_LIMITS.primerStreams, elsewhereStreams). "" when all are empty.
- */
-export function renderPrimer(input: {
+/** The primer's input: the lane's active streams, the caller's touched streams and other lanes' active streams. */
+export type PrimerInput = {
   lane: string;
   author?: string;
   active: readonly MemoryStreamRow[];
   authored: readonly MemoryStreamRow[];
   elsewhere?: readonly MemoryStreamRow[];
   now?: number;
-}): string {
-  const now = input.now ?? Date.now();
+};
+
+/**
+ * The streams the primer lists, per section (the single source for
+ * renderPrimer and `memory context --json`'s `primerIds`): touched streams
+ * first, then the lane's active streams and other lanes' streams, neither
+ * repeating a touched one; each section capped (MEMORY_LIMITS.primerStreams,
+ * elsewhereStreams), `more` counting the active overflow.
+ */
+export function primerRows(input: PrimerInput): {
+  touched: MemoryStreamRow[];
+  active: MemoryStreamRow[];
+  elsewhere: MemoryStreamRow[];
+  more: number;
+} {
+  const cap = MEMORY_LIMITS.primerStreams;
   const touched = new Set(input.authored.map(row => row.id));
   const active = input.active.filter(row => !touched.has(row.id));
   const elsewhere = (input.elsewhere ?? []).filter(row => !touched.has(row.id));
-  if (input.authored.length === 0 && active.length === 0 && elsewhere.length === 0) return "";
-  const cap = MEMORY_LIMITS.primerStreams;
+  return {
+    touched: input.authored.slice(0, cap),
+    active: active.slice(0, cap),
+    elsewhere: elsewhere.slice(0, MEMORY_LIMITS.elsewhereStreams),
+    more: Math.max(0, active.length - cap),
+  };
+}
+
+/**
+ * The session primer: streams the caller touched, then the lane's active
+ * streams, then streams recently active in OTHER lanes (work spans repos),
+ * never repeating a touched stream (rows from primerRows). "" when all are
+ * empty.
+ */
+export function renderPrimer(input: PrimerInput): string {
+  const now = input.now ?? Date.now();
+  const rows = primerRows(input);
+  if (rows.touched.length === 0 && rows.active.length === 0 && rows.elsewhere.length === 0) return "";
   const header = input.author
     ? `Cortex memory \u2014 lane ${input.lane} \u00b7 your author tag ${input.author}`
     : `Cortex memory \u2014 lane ${input.lane}`;
   const lines = [MEMORY_PREAMBLE, header];
-  if (input.authored.length > 0) {
+  if (rows.touched.length > 0) {
     lines.push("Streams you touched:");
-    for (const row of input.authored.slice(0, cap)) lines.push(streamLine(row, now));
+    for (const row of rows.touched) lines.push(streamLine(row, now));
   }
-  if (active.length > 0) {
+  if (rows.active.length > 0) {
     lines.push("Active streams (newest activity first):");
-    for (const row of active.slice(0, cap)) lines.push(streamLine(row, now));
-    if (active.length > cap) lines.push(`(+${active.length - cap} more: cortex ls -l ${input.lane})`);
+    for (const row of rows.active) lines.push(streamLine(row, now));
+    if (rows.more > 0) lines.push(`(+${rows.more} more: cortex ls -l ${input.lane})`);
   }
-  if (elsewhere.length > 0) {
+  if (rows.elsewhere.length > 0) {
     lines.push("Recently active in other lanes:");
-    for (const row of elsewhere.slice(0, MEMORY_LIMITS.elsewhereStreams)) lines.push(streamLine(row, now));
+    for (const row of rows.elsewhere) lines.push(streamLine(row, now));
   }
   return lines.join("\n");
 }

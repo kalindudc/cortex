@@ -8,6 +8,7 @@ import {
   MEMORY_LIMITS,
   matchingSections,
   memoryLane,
+  primerRows,
   renderHits,
   renderPrimer,
   renderStream,
@@ -196,10 +197,14 @@ const context = defineCommand({
     } catch (err) {
       emitError(json, err);
     }
-    const primer = args.primer ? renderPrimer({ lane, author, active, authored, elsewhere }) : "";
+    const input = { lane, author, active, authored, elsewhere };
+    const primer = args.primer ? renderPrimer(input) : "";
     const hitsText = renderHits(found.terms, found.hits, Date.now(), { recent: found.recent, loadHint });
     if (json) {
-      printJson({ lane, terms: found.terms, recent: found.recent, primer, hits: found.hits, hitsText });
+      // The ids of exactly the streams the primer lists (the pi extension's /memory ledger).
+      const rows = args.primer ? primerRows(input) : null;
+      const primerIds = rows ? [...rows.touched, ...rows.active, ...rows.elsewhere].map(row => row.id) : [];
+      printJson({ lane, terms: found.terms, recent: found.recent, primer, primerIds, hits: found.hits, hitsText });
       return;
     }
     console.log([primer, hitsText].filter(Boolean).join("\n\n") || `(no memory in lane ${lane})`);
