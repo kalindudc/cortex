@@ -5,7 +5,7 @@ import path from "node:path";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import type { CortexClient, DaemonIdentity, WorkspaceSnapshot } from "../../../src/contracts.ts";
 import type { Lane, Task } from "../../../src/store.ts";
-import { UNTAGGED } from "../../../src/ui/lib/taskView.ts";
+import { UNTAGGED } from "../../../src/lib/taskView.ts";
 import { DEFAULT_CONFIG } from "../../../src/tui/config.ts";
 import { DEFAULT_KEYS } from "../../../src/tui/keys.ts";
 import { openPreferences } from "../../../src/tui/preferences.ts";
@@ -26,12 +26,10 @@ import {
   type WorkspaceView,
 } from "../../../src/tui/workspace.ts";
 
-// Plan @400 Task 8 (P1/P2): the terminal workspace list reuses the browser's
-// PURE search/filter logic (src/ui/lib/fuzzy.ts, src/ui/lib/taskView.ts)
-// with no signals or DOM. Cases are ported from test/unit/lib/fuzzy.test.ts,
-// test/unit/state/computed.test.ts and test/unit/state/selection.test.ts.
-// The terminal's own list order (:sort, :group; ascending id by default)
-// replaces the web's natural-title order; a search still ranks by relevance.
+// Plan @400 Task 8 (P1/P2): the terminal workspace list reuses the shared
+// PURE search/filter logic (src/lib/fuzzy.ts, src/lib/taskView.ts). The list
+// order is :sort and :group (ascending id by default); a search still ranks
+// by relevance.
 
 const task = (id: number, over: Partial<Task> = {}): Task => ({
   id,

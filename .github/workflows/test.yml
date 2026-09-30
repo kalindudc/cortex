@@ -23,16 +23,7 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: agents.md drift check
         run: pnpm run agents:check
-      # tsc needs the gitignored src/ui/mermaid-manifest.generated.ts, which only a build writes.
       - name: style
-        run: pnpm run gen:mermaid-manifest && pnpm run style:check
-      - name: bun:test (build + backend + UI unit)
+        run: pnpm run style:check
+      - name: bun:test (build + unit + integration)
         run: pnpm test
-      - name: playwright (e2e cardinal flows)
-        run: pnpm run test:e2e
-      - name: upload playwright report on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-report-${{ matrix.os }}
-          path: tmp/playwright-report

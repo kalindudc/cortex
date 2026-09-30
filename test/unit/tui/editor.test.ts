@@ -109,7 +109,7 @@ describe("indentation (web parity: indentMore / indentLess)", () => {
     expect(e.text()).toBe("  \tcode");
   });
 
-  test("Enter inserts a newline, continuing Markdown list markup like the web editor", () => {
+  test("Enter inserts a newline, continuing Markdown list markup (CodeMirror's insertNewlineContinueMarkup)", () => {
     const list = make("- item", 6);
     list.editor.editKey("enter");
     expect(list.text()).toBe("- item\n- ");
@@ -168,7 +168,7 @@ describe("undo and redo (CodeMirror history StateCommands)", () => {
 describe("Unicode: graphemes and display cells", () => {
   const source = "a👍🏽e\u0301東x";
 
-  test("motions never split a grapheme cluster; deletions follow the web editor (CodeMirror)", () => {
+  test("motions never split a grapheme cluster; deletions follow CodeMirror's commands", () => {
     const e = make(source, 0);
     const heads: number[] = [];
     for (let i = 0; i < 5; i++) {

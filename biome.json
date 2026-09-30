@@ -13,7 +13,6 @@
       "**/*.js",
       "**/*.json",
       "!**/node_modules",
-      "!out",
       "!bin",
       "!tmp",
       "!skills/**/*.md",
@@ -38,12 +37,6 @@
     "enabled": true,
     "rules": {
       "recommended": true,
-      "a11y": {
-        "useButtonType": "off",
-        "useKeyWithClickEvents": "off",
-        "noStaticElementInteractions": "off",
-        "noAutofocus": "off"
-      },
       "suspicious": {
         "noExplicitAny": "error",
         "noArrayIndexKey": "off",

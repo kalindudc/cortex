@@ -21,8 +21,8 @@ import { canonicalDatabasePath } from "../../../src/ownership.ts";
 // ---------- CLI integration: database-scoped `cortex serve` / `cortex stop` ----------
 //
 // Plan @400 Task 6 (N4/N5, gate G1). The daemon owns ONE canonical database:
-// it holds the ownership lease for its lifetime, listens on a private Unix
-// socket (plus the loopback dashboard), publishes `<db>.daemon.json` only
+// it holds the ownership lease for its lifetime, listens ONLY on a private
+// Unix socket (no TCP listener), publishes `<db>.daemon.json` only
 // once it is ready, and removes its own metadata/socket before releasing the
 // lease. `cortex stop` is instance-bound: it discovers THIS database's daemon
 // through that metadata and asks it to shut down over its socket. There is no
@@ -36,7 +36,6 @@ import { canonicalDatabasePath } from "../../../src/ownership.ts";
 
 const REAL_PID = path.join(os.homedir(), ".config", "cortex", "cortex.pid");
 const REAL_URL = path.join(os.homedir(), ".config", "cortex", "cortex.url");
-const REAL_BROWSER_URL = path.join(os.homedir(), ".config", "cortex", "cortex.browser-url");
 const REAL_METADATA = path.join(os.homedir(), ".config", "cortex", "cortex.db.daemon.json");
 
 type Snap = { mtimeMs: number; size: number } | null;
@@ -58,7 +57,7 @@ const realBefore = new Map<string, Snap>();
 const sandboxes: (() => void)[] = [];
 
 beforeAll(() => {
-  for (const p of [REAL_PID, REAL_URL, REAL_BROWSER_URL, REAL_METADATA]) realBefore.set(p, snap(p));
+  for (const p of [REAL_PID, REAL_URL, REAL_METADATA]) realBefore.set(p, snap(p));
 });
 
 afterEach(async () => {
@@ -77,7 +76,7 @@ function sandbox(label: string): ReturnType<typeof mkTmpEnv> {
 }
 
 function legacyFiles(tmpDir: string): string[] {
-  return ["cortex.pid", "cortex.url", "cortex.browser-url"].filter(f => fs.existsSync(path.join(tmpDir, "cortex", f)));
+  return ["cortex.pid", "cortex.url"].filter(f => fs.existsSync(path.join(tmpDir, "cortex", f)));
 }
 
 describe("cortex serve / stop are scoped to one database", () => {
@@ -90,7 +89,8 @@ describe("cortex serve / stop are scoped to one database", () => {
     expect(identity).toMatchObject({ protocol: 1, databasePath: db, pid: daemon.proc.pid });
     expect(identity.instanceId).toMatch(/^[0-9a-f-]{36}$/);
     expect(identity.databaseId).toMatch(/^[0-9a-f-]{36}$/);
-    expect(identity.capabilities).toEqual(["control.shutdown", "control.web", "control.preview"]);
+    expect(identity.capabilities).toEqual(["control.shutdown"]);
+    expect(Object.keys(identity)).not.toContain("webUrl");
     expect(identity.endpoint.kind).toBe("unix");
     const socketPath = identity.endpoint.kind === "unix" ? identity.endpoint.socketPath : "";
     expect(path.dirname(socketPath)).toBe(runtimeDir);
@@ -98,13 +98,10 @@ describe("cortex serve / stop are scoped to one database", () => {
     expect(fs.statSync(daemon.metadataFile).mode & 0o777).toBe(0o600);
     expect(daemon.metadataFile).toBe(`${db}.daemon.json`);
 
-    // Both listeners answer as this instance; the metadata's dashboard is the printed host.
-    const port = new URL(identity.webUrl ?? "http://x").port;
-    expect(identity.webUrl).toBe(`http://cortex.localhost:${port}`);
-    expect(daemon.stdout()).toContain(`cortex listening on http://cortex.localhost:${port}`);
+    // The socket is the only listener: the success line names it, and it answers as this instance.
+    expect(daemon.stdout()).toContain(`cortex listening on ${socketPath}`);
+    expect(daemon.stdout()).not.toContain("http://");
     expect((await socketHealth(identity)).identity).toEqual(identity);
-    const loopback = (await (await fetch(`http://127.0.0.1:${port}/api/health`)).json()) as { identity: unknown };
-    expect(loopback.identity).toEqual(identity);
     expect(leaseIsFree(db)).toBe(false);
     // Old-style daemon files are no longer written.
     expect(legacyFiles(tmpDir)).toEqual([]);
@@ -171,13 +168,13 @@ describe("cortex serve / stop are scoped to one database", () => {
     const viaLink = { ...env, CORTEX_DB: path.join(link, "cortex.db") };
     const daemon = await startForeground(env);
 
-    const second = await runBounded(["serve", "--foreground", "--no-open", "--port", "0"], viaLink);
+    const second = await runBounded(["serve", "--foreground"], viaLink);
     expect(second.code).toBe(1);
     expect(second.stderr).toContain(`already serving ${canonicalDatabasePath(env.CORTEX_DB ?? "")}`);
     expect(second.stderr).toContain(`pid ${daemon.proc.pid}`);
 
     // Background serve attaches to it instead of starting another.
-    const attach = await runBounded(["serve", "--port", "0"], viaLink);
+    const attach = await runBounded(["serve"], viaLink);
     expect(attach.code).toBe(0);
     expect(attach.stdout).toContain(`(pid ${daemon.proc.pid})`);
 
@@ -229,10 +226,7 @@ describe("cortex serve / stop are scoped to one database", () => {
       fs.writeFileSync(path.join(tmpDir, "cortex", "cortex.url"), `http://127.0.0.1:${legacy.port}`);
       expect(leaseIsFree(db)).toBe(true);
 
-      for (const args of [
-        ["serve", "--foreground", "--no-open", "--port", "0"],
-        ["serve", "--port", "0"],
-      ]) {
+      for (const args of [["serve", "--foreground"], ["serve"]]) {
         const r = await runBounded(args, env);
         expect(r.code).toBe(1);
         expect(r.stderr).toContain("older cortex binary");
@@ -256,19 +250,21 @@ describe("cortex serve / stop are scoped to one database", () => {
   test("background serve prints its success line only once the daemon is ready, and attaches on a second run", async () => {
     const { env } = sandbox("serve-background");
     const metadataFile = metadataFileFor(env.CORTEX_DB ?? "");
-    const started = await runBounded(["serve", "--port", "0"], env);
+    const started = await runBounded(["serve"], env);
     // The metadata already existed when the parent printed and exited.
     const identity = readIdentity(metadataFile);
     if (identity === null) throw new Error(`no daemon metadata after serve: ${started.stderr}`);
     trackBackground(identity);
     expect(started.code).toBe(0);
-    const m = started.stdout.match(/✓ cortex serving at http:\/\/cortex\.localhost:(\d+) \(pid (\d+)\)/);
-    expect(m).not.toBeNull();
-    expect(identity.pid).toBe(Number(m?.[2]));
-    expect(identity.webUrl).toBe(`http://cortex.localhost:${m?.[1]}`);
+    // The success line names the private socket, never a URL.
+    expect(identity.endpoint.kind).toBe("unix");
+    const socketPath = identity.endpoint.kind === "unix" ? identity.endpoint.socketPath : "";
+    expect(started.stdout.trim()).toBe(`✓ cortex serving at ${socketPath} (pid ${identity.pid})`);
+    expect(started.stdout).not.toContain("http://");
     expect((await socketHealth(identity)).identity?.instanceId).toBe(identity.instanceId);
 
-    const again = await runBounded(["serve", "--port", "0"], env);
+    // A second run attaches; the removed web flags are ignored, not errors (plan @417 N6).
+    const again = await runBounded(["serve", "--port", "0", "--no-open", "--no-web", "--host", "h"], env);
     expect(again.code).toBe(0);
     expect(again.stdout).toContain(`(pid ${identity.pid})`);
 

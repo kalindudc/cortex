@@ -1,22 +1,21 @@
 // The terminal workspace list (plan @400 Task 8: P1/P2, N19).
 //
-// - selectWorkspace is the PURE list model: the browser's own search/filter/
-//   fallback functions (src/ui/lib/fuzzy.ts, src/ui/lib/taskView.ts)
-//   applied to one session's view, with no signals or DOM:
+// - selectWorkspace is the PURE list model: the shared search/filter/
+//   fallback functions (src/lib/fuzzy.ts, src/lib/taskView.ts) applied to
+//   one session's view:
 //     P1  full-pool title/body/tag AND-word search; @id, @title and exact
 //         #tag before any substring fallback; slots AND together, tags OR
 //         (plus untagged); a done status filter shows done tasks anyway.
-//     P2  relevance order with a query (one flat list, like the web); an
+//     P2  relevance order with a query (one flat list); an
 //         explicit selection survives the filters that exclude it; without
 //         one, the first non-done task in server order.
-//   Without a query the terminal's OWN order applies (the browser keeps its
-//   natural-title order): `:sort` (ascending id by default; ties always by
-//   ascending id) and `:group` (a header row per lane, in lane-catalog
+//   Without a query the list follows `:sort` (ascending id by default; ties
+//   always by ascending id) and `:group` (a header row per lane, in lane-catalog
 //   order, or per status, draft to done). Headers are not rows: motions
 //   step over tasks only.
 // - filterCounts: the filter picker's per-choice counts, each slot over the
 //   search and the OTHER slots; filterChips: the header's compact filters.
-// - The view reducers encode the web's navigation rules: :clear keeps
+// - The view reducers encode the navigation rules: :clear keeps
 //   include-done, @id refs clear every filter, #tag refs replace the tag
 //   slot, header tag labels append to it.
 // - createWorkspace renders the list pane: a header with the count (its
@@ -32,8 +31,8 @@
 
 import { type Component, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { Lane, Task, TaskStatus } from "../store.ts";
-import { STATUS, STATUS_LABEL } from "../ui/lib/constants.ts";
-import type { TaskSearchResult } from "../ui/lib/fuzzy.ts";
+import { STATUS, STATUS_LABEL } from "../lib/constants.ts";
+import type { TaskSearchResult } from "../lib/fuzzy.ts";
 import {
   UNTAGGED,
   filterTasks,
@@ -42,7 +41,7 @@ import {
   orderTasks,
   pickActiveTask,
   searchPool,
-} from "../ui/lib/taskView.ts";
+} from "../lib/taskView.ts";
 import type { TaskFilter, TaskGroup, TaskSort } from "./preferences.ts";
 import { actionKeyLabels } from "./keys.ts";
 import { displayWidth, escapeTerminalText, fitWidth } from "./safety.ts";
@@ -105,7 +104,7 @@ export function selectWorkspace(
   view: WorkspaceView,
   lanes: readonly Lane[] = [],
 ): WorkspaceSelection {
-  // The shared browser helpers are typed over mutable arrays; none mutates.
+  // The shared src/lib helpers are typed over mutable arrays; none mutates.
   const pool = tasks as Task[];
   const results = searchPool(pool, view.query);
   const { status, lane, tags } = view.filter;
@@ -114,7 +113,7 @@ export function selectWorkspace(
   const gated = gateDone(filtered, includeDone);
   const base = { results, filtered, active: null, activeIndex: -1, includeDone };
   if (results !== null) {
-    // A search keeps the web's relevance ranking (P1/P2 parity), in one flat list.
+    // A search keeps the relevance ranking (P1/P2), in one flat list.
     const rows = orderTasks(gated, results);
     return withSelection({ ...base, rows, order: "relevance", group: "none", groups: [] }, pool, view.selectedId);
   }
@@ -139,7 +138,7 @@ function compareLanes(a: string, b: string, rank: LaneRank): number {
 }
 
 const statusRank = (status: TaskStatus): number => (STATUS as readonly TaskStatus[]).indexOf(status);
-// The web's natural title collation (numeric-aware: task-2 before task-12).
+// Natural title collation (numeric-aware: task-2 before task-12).
 const compareTitles = (a: Task, b: Task): number =>
   a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: "base" });
 

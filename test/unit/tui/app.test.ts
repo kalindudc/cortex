@@ -24,7 +24,7 @@ import { TuiSession } from "../../../src/tui/session.ts";
 
 // Plan @400 Tasks 7-8 (N13, N17-N20, N22-N23, P1/P2/P9): the terminal shell.
 // A status line (mode, focus, save/connection state, messages), a hint line
-// from the configured keys, the task list (one flat list in the web's order,
+// from the configured keys, the task list (one flat list in the shared order,
 // status markers), and the document pane (Task 10: Read and the Split
 // preview are the reader, src/tui/reader.ts). The `:` line completes from the
 // one command registry. The theme resolves before the first content frame;
@@ -1325,7 +1325,7 @@ describe("--heading, the reader keys and the mouse", () => {
     expect(last.endsWith("┃")).toBe(true);
   });
 
-  test("the requested heading (the web's slugger: setext headings and repeats count) opens at the top, once", async () => {
+  test("the requested heading (the shared slugger: setext headings and repeats count) opens at the top, once", async () => {
     const h = await started({
       tasks: [task(7, { title: "long doc", body })],
       initialTask: 7,

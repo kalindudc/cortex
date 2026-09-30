@@ -15,7 +15,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { LinkedStream, MemoryHit, MemoryStream, MemoryStreamRow, Update } from "./store.ts";
-import { slugify } from "./ui/lib/slug.ts";
+import { slugify } from "./lib/slug.ts";
 
 /** Output and query budgets for agent memory (the single source). */
 export const MEMORY_LIMITS = {
@@ -449,7 +449,7 @@ export type HeadingSection = { heading: string | null; slug: string; level: numb
 /**
  * A body split at its Markdown headings (never by size; fenced code is not
  * scanned for headings). Each section's text starts with its heading line;
- * slugs are the TUI's and the web's anchors (src/ui/lib/slug.ts), repeats
+ * slugs are the TUI's anchors (src/lib/slug.ts), repeats
  * numbered `-2`, `-3` like the reader. Leading text without content is
  * dropped.
  */

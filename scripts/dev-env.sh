@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# dev-env.sh — sourced by the dev scripts (dev-cli.sh, dev.sh); defines
+# dev-env.sh — sourced by the dev script (dev-cli.sh); defines
 # dev_env_setup <repo-root>.
 #
 # By default, development runs use a sandbox under tmp/dev/ (gitignored), not

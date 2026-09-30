@@ -11,7 +11,7 @@ CRITICAL: before using this skill, load the `cortex` skill to ensure the CLI is 
 
 This skill fills the workflow gap between plan creation and PR generation. It takes a plan stored as the body of a cortex task and executes every Low-Level Task systematically -- producing working code on the first pass.
 
-The plan body is read once at the start and is NEVER mutated during execution. Per-task progress, blockers, and the final review handoff are reported as cortex updates so a human supervising several agents can watch the dashboard and react. Completion is signalled by transitioning the task's status, not by editing the body.
+The plan body is read once at the start and is NEVER mutated during execution. Per-task progress, blockers, and the final review handoff are reported as cortex updates so a human supervising several agents can watch the TUI and react. Completion is signalled by transitioning the task's status, not by editing the body.
 
 ---
 
@@ -35,7 +35,7 @@ The plan source and per-task progress markers live in cortex — not as files. T
     ```bash
     cortex update <id> --as "$SESSION_ID" -m "task <N>: <one-line summary>"
     ```
-    ONE update per task — NOT per file edit, NOT per retry. The dashboard shows updates chronologically.
+    ONE update per task — NOT per file edit, NOT per retry. `cortex show` and the TUI's Activity panel list updates chronologically.
 
 STATUS TRANSITIONS (every command also passes `--as "$SESSION_ID"`):
 
@@ -45,7 +45,7 @@ STATUS TRANSITIONS (every command also passes `--as "$SESSION_ID"`):
 | 3-retry exhaustion (per Retry Protocol) | `cortex update <id> -s blocked --as "$SESSION_ID" -m "<error>" -b "<attempts + theory>"` |
 | Human confirms merge | `cortex update <id> -s done --as "$SESSION_ID" -m "merged"` |
 
-`blocked` is the ONE transition that fires a browser notification — use it deliberately. `done` is reserved for human-confirmed merges.
+`blocked` is the one transition the TUI signals — use it deliberately. `done` is reserved for human-confirmed merges.
 
 MULTI-AGENT COORDINATION: cortex enforces NO locks; an `open` status is approval, not an exclusive implementation lock. Before starting, inspect `cortex show <id> --json | jq '.updates'`, including each update's `summary`, `body`, `author`, and `created`.
 
@@ -198,7 +198,7 @@ Proposed next: <what would help>"
 ```
 - Wait for user confirmation before continuing
 
-`blocked` is the ONE status transition that fires a browser notification on the cortex dashboard -- use it ONLY on genuine 3-retry exhaustion or a missing prerequisite.
+`blocked` is the one status transition the TUI signals -- use it ONLY on genuine 3-retry exhaustion or a missing prerequisite.
 
 Critical: NEVER silently retry -- state what changed and why. NEVER modify tests blindly -- verify they're correct first. NEVER modify the plan to fit broken code.
 

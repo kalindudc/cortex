@@ -1,8 +1,8 @@
 // The task panels and the update composer (plan @400 Task 11 part A: P7,
 // P10, N9, N16, N17).
 //
-// - The panels are the web's Document/Activity/Related/Authors tabs
-//   (TaskDocument + InboxPane) as one per-session choice (session.panel):
+// - The panels (Document/Activity/Related/Authors) are one per-session
+//   choice (session.panel):
 //   `[`/`]` step through them and :activity/:related/:authors show one. A
 //   panel replaces the document body in any Read/Edit/Split mode and at any
 //   width; it never changes the saved mode preference.
@@ -31,9 +31,8 @@
 //   identical retry reuses the mutation id (the daemon then posts once even
 //   when an answer was lost), the 4096 limit has a visible count, failures
 //   are kept beside newer typing, and the draft clears only when the post of
-//   its exact revision is acknowledged. The post is a human's, like the web
-//   composer's: an author (the daemon's /api/me default unless changed) and
-//   no notify or status.
+//   its exact revision is acknowledged. The post is a human's: an author
+//   (the daemon's /api/me default unless changed) and no notify or status.
 // - Every untrusted string (authors, summaries, bodies, titles, errors)
 //   crosses src/tui/safety.ts before style().
 
@@ -50,7 +49,7 @@ import {
 import { newMutationId, TransportError } from "../api.ts";
 import type { LiveEvent, PostUpdateResult } from "../contracts.ts";
 import type { RelatedTasks, Severity, Task, TaskStatus, Update } from "../store.ts";
-import { fmtTime } from "../ui/lib/format.ts";
+import { fmtTime } from "../lib/format.ts";
 import { type CommandLine, createCommandLine } from "./commandline.ts";
 import { CommandError } from "./commands.ts";
 import { DIALOG_MARGIN, DIALOG_WIDTH } from "./dialogs.ts";
@@ -62,9 +61,9 @@ import type { OverlayHost, SessionDialog, TaskPanel, TuiSession } from "./sessio
 import { type ContrastPair, paint, type ResolvedTheme, type Seg, seg, style } from "./theme.ts";
 import { STATUS_MARK, statusPair } from "./workspace.ts";
 
-/** The web composer's limit (the updates table checks the same 4096). */
+/** The composer's limit (the updates table checks the same 4096). */
 export const MAX_SUMMARY = 4096;
-/** The count warns from here, as the web's counter does. */
+/** The count warns from here. */
 const WARN_SUMMARY = 4000;
 /** Summary lines a collapsed card shows. */
 const COLLAPSED_LINES = 3;
@@ -74,7 +73,7 @@ const DIALOG_MIN_WIDTH = 40;
 /** Invalidations inside this window share ONE Related re-read: a busy stream re-reads it at most this often. */
 export const RELATED_COALESCE_MS = 250;
 
-/** Severity as the status whose marker and color it borrows (the web's dot: blocked, review, else open). */
+/** Severity as the status whose marker and color it borrows (blocked, review, else open). */
 const SEVERITY_STATUS: Readonly<Record<Severity, TaskStatus>> = {
   progress: "open",
   review: "review",
@@ -191,7 +190,7 @@ function isUpdate(value: unknown): value is Update {
   );
 }
 
-/** The web's per-task author rollup: posts per author and the latest post, latest first. */
+/** The per-task author rollup: posts per author and the latest post, latest first. */
 function rollupAuthors(updates: readonly Update[]): AuthorRollup[] {
   const by = new Map<string, { lastSeen: number; posts: number }>();
   for (const u of updates) {
@@ -1052,7 +1051,7 @@ export class Activity implements Component {
         mutationId: same && previous !== null ? previous.mutationId : newMutationId(),
       };
       draft.attempt = attempt;
-      // A human's post, exactly as the web composer's: an author, no notify, no status (N9).
+      // A human's post: an author, no notify, no status (N9).
       const result = await session.mutate(
         client => client.versioned.postUpdate(taskId, { author, summary }, { mutationId: attempt.mutationId }),
         database,

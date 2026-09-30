@@ -1,60 +1,37 @@
 # Unit tests (`test/unit/`)
 
-Component + state unit tests that run under `bun:test` with a happy-dom DOM.
+Fast, isolated, in-process tests under plain `bun:test`: no DOM and no
+spawned `bin/cortex`.
 
-Run: `pnpm run test:unit` (or `pnpm test` for the full backend + UI suite).
+Run: `pnpm run test:unit` (or `pnpm test` for the full unit + integration suite).
 
-## Preact event-name gotchas
+## File layout: one mirror test per source
 
-Preact does NOT use React's synthetic event names. Tests copied straight from
-React-Testing-Library docs will silently misfire on Preact components.
-
-- Typing into an `<input>` / `<textarea>`: Preact dispatches `onInput`, NOT `onChange`.
-  Use `fireEvent.input(el, { target: { value: "x" } })`.
-- Double-click: Preact dispatches `onDblClick`, NOT `onDoubleClick`.
-  Use `fireEvent.dblClick(el)`.
-- Before submitting a test PR, `grep -nE "fireEvent\.(change|doubleClick)"`
-  inside `test/unit/` and convert any matches.
-
-## File layout
-
-`test/unit/components/<feature>/<Component>.test.tsx` mirrors
-`src/ui/components/<feature>/<Component>.tsx`. State / lib helpers live
-under `test/unit/state/` and `test/unit/lib/` respectively.
-
-Tests live under `test/` (not co-located with sources) because the bundler
-entrypoint is `src/ui/index.tsx` — Bun would happily pull `*.test.tsx`
-files into the production bundle if they sat under `src/ui/`.
-
-## Backend tests
-
-Every `src/<file>.ts` (excluding `src/ui/`, `src/commands/`, `src/extensions/`,
-and `src/types.d.ts`) has a matching `test/unit/<file>.test.ts`:
+Every `src/**/*.ts` (excluding `src/commands/`, `src/extensions/` and
+`src/types.d.ts`) has a matching `test/unit/<same path>.test.ts`:
 
 | Source                     | Unit test                          |
 | -------------------------- | ---------------------------------- |
 | `src/store.ts`             | `test/unit/store.test.ts`          |
 | `src/server.ts`            | `test/unit/server.test.ts`         |
 | `src/client.ts`            | `test/unit/client.test.ts`         |
-| `src/events.ts`            | `test/unit/events.test.ts`         |
-| `src/paths.ts`             | `test/unit/paths.test.ts`          |
-| `src/skills.ts`            | `test/unit/skills.test.ts`         |
-| `src/extensions.ts`        | `test/unit/extensions.test.ts`     |
-| `src/cli.ts`               | `test/unit/cli.test.ts`            |
+| `src/lib/fuzzy.ts`         | `test/unit/lib/fuzzy.test.ts`      |
+| `src/tui/reader.ts`        | `test/unit/tui/reader.test.ts`     |
 
-Plus focused unit files for cross-cutting validators that don't have a
-dedicated source file:
+Commands are covered by integration tests under `test/integration/cli/`
+(or the round-trip `test/integration/cli.test.ts`). Focused unit files for
+cross-cutting validators may sit beside the mirrors, for example
+`test/unit/author.test.ts` (`validateAuthorTag`, exported from `src/store.ts`).
 
-- `test/unit/author.test.ts` — `validateAuthorTag` (exported from
-  `src/store.ts`).
+## Conventions
 
-### Conventions
-
-Backend unit tests are PURE in-process by definition:
+Unit tests are PURE in-process by definition:
 
 - Use `Store.open(":memory:")` for store-touching tests — no tmp dirs.
 - Use `buildApp(store).fetch(new Request(...))` for HTTP route tests —
   no port binding, no `startServer`.
+- Never spawn the cortex binary: that is the integration tier's job
+  (`test/integration/helpers.ts`, `runCli`).
 - Pin `process.env.XDG_CONFIG_HOME` (and `CORTEX_DB`,
   `CORTEX_PI_EXTENSION_DIR`, `CORTEX_SKILL_DIR` as relevant) to a
   `fs.mkdtempSync()` directory BEFORE calling any function that reads
@@ -65,19 +42,5 @@ Backend unit tests are PURE in-process by definition:
 
 The layout invariants (mirror, no-binary-spawn, hermetic) are enforced by
 `test/unit/_layout.test.ts` — a guard test that scans every test file in
-the tree and fails CI on drift. Adding a new backend `src/*.ts` without
-its matching unit test fails this guard.
-
-## API mocking
-
-Mock the typed API client at module level:
-
-```ts
-import { mock } from "bun:test";
-mock.module("../../../../src/ui/api/client.ts", () => ({
-  api: {
-    editTask: mock(() => Promise.resolve({})),
-    // ...
-  },
-}));
-```
+the tree and fails CI on drift. Adding a new `src/` file without its
+matching unit test fails this guard.

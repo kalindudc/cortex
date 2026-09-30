@@ -5,7 +5,6 @@ import {
   dbPath,
   pidPath,
   urlPath,
-  browserUrlPath,
   ensureConfigDir,
   runtimeDir,
   ensureRuntimeDir,
@@ -104,16 +103,6 @@ describe("paths", () => {
   test("urlPath() resolves under configDir()", () => {
     expect(urlPath()).toBe(path.join(tmpDir, "cortex", "cortex.url"));
     expect(urlPath()).toBe(path.join(configDir(), "cortex.url"));
-  });
-
-  test("browserUrlPath() resolves under configDir() and is distinct from urlPath()", () => {
-    expect(browserUrlPath()).toBe(path.join(tmpDir, "cortex", "cortex.browser-url"));
-    expect(browserUrlPath()).toBe(path.join(configDir(), "cortex.browser-url"));
-    // Distinct files an OLDER binary's daemon wrote: its loopback API URL and
-    // the friendly dashboard URL. This cortex only reads them (plan @400 N4):
-    // the legacy-daemon fence probes cortex.url and `cortex open` falls back to
-    // them; it never writes them.
-    expect(browserUrlPath()).not.toBe(urlPath());
   });
 
   test("the pid-file daemon helpers are gone: nothing reads a pid to signal or route (plan @400 N4-N6)", () => {
@@ -286,7 +275,7 @@ describe("paths: runtime dir, daemon socket, metadata and owner lock", () => {
     const meta = daemonMetadataPath(db);
     expect(path.dirname(lock)).toBe("/data");
     expect(path.dirname(meta)).toBe("/data");
-    const others = [db, `${db}-wal`, `${db}-shm`, `${db}-journal`, pidPath(), urlPath(), browserUrlPath()];
+    const others = [db, `${db}-wal`, `${db}-shm`, `${db}-journal`, pidPath(), urlPath()];
     for (const p of [lock, meta]) expect(others).not.toContain(p);
     expect(lock).not.toBe(meta);
   });

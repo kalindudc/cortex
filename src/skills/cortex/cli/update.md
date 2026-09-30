@@ -49,7 +49,7 @@ cortex update 42 -m "Need a Stripe test key from ops; pausing here." \
   --as implementer-1c0ed4a8
 ```
 
-The dashboard fires a browser notification ONLY for the second example, because the transition is into `blocked`.
+The TUI flashes ONLY for the second example, because the transition is into `blocked`.
 
 ## Pitfalls
 

@@ -5,8 +5,8 @@
 //   src/tui/safety.ts, and never emit raw SGR.
 // - Values are `#rrggbb`, `ansi:0`..`ansi:15` (the terminal's palette) or
 //   `default` (the terminal's own foreground/background, SGR 39/49).
-// - Bundled: cortex-dark/cortex-light (from src/ui/styles/tokens.css, adjusted
-//   where a contrast gate fails; see test/unit/tui/theme.test.ts),
+// - Bundled: cortex-dark/cortex-light (cortex's own palette, adjusted where a
+//   contrast gate fails; see test/unit/tui/theme.test.ts),
 //   high-contrast-dark/-light and ansi. Every bundled hex theme passes every
 //   pair in truecolor AND after 256-color mapping.
 // - Custom `themesDir()/<name>.toml` themes must resolve every token and may
@@ -149,8 +149,8 @@ export function requiredContrast(theme: { readonly highContrast: boolean }, pair
 
 // ---------- bundled themes ----------
 
-// Status and role colors mirror the web (chips.css): draft=info, open=text-3,
-// review=warn, blocked=err, done=ok. Values that failed a gate are adjusted;
+// Status and role colors: draft=info, open=text-3, review=warn, blocked=err,
+// done=ok. Values that failed a gate are adjusted;
 // test/unit/tui/theme.test.ts records each adjustment.
 const CORTEX_DARK: ThemeColors = {
   bg: "#1d1f24",
@@ -176,7 +176,7 @@ const CORTEX_DARK: ThemeColors = {
   "mode.insert": "#7eaa6c",
   "mode.command": "#7e9cb6",
   "mode.search": "#d8a558",
-  // Headings stand apart from body text (the web sizes them; a terminal can only color them).
+  // Headings stand apart from body text (a terminal can only color them, not size them).
   "md.heading": "#94b8e0",
   "md.link": "#f5a47e",
   "md.code": "#f5a47e",

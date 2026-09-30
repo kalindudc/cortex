@@ -51,10 +51,10 @@ export type Tag = {
 };
 
 /**
- * Server-persisted notification row backing the dashboard's bell drawer.
- * `status` reuses the `TaskStatus` union so the UI can render the dot via
- * the existing `dot-status-${status}` CSS class family — no bespoke
- * notification colors. The value is a SNAPSHOT of the task's status at
+ * Server-persisted notification row backing the TUI's :notifications list.
+ * `status` reuses the `TaskStatus` union so a client renders it with the
+ * status marker and color — no bespoke notification colors. The value is a
+ * SNAPSHOT of the task's status at
  * the moment the notification fired; later transitions on the task do NOT
  * mutate historical rows. `read` is converted from SQLite's INTEGER 0/1
  * to a JS boolean at the rowToNotification() boundary (SQLite has no
@@ -161,11 +161,11 @@ export const TAG_NAME_RE = /^[a-z0-9_@-]{1,32}$/;
  * and from matching markdown headings (`# Heading` — the space after `#`
  * is not in the tag character class so length-1 match fails).
  *
- * Shared by the server's `Store.relatedTasks` scan and the UI parsers in
- * `src/ui/lib/refs.ts` / `refsExtension.ts`. Each UI consumer holds its
- * own `RegExp` instance because `MatchDecorator` mutates `lastIndex`;
- * this server-side instance is standalone so the module has zero UI
- * imports. The tag character class is intentionally identical to
+ * Used by the server's `Store.relatedTasks` scan; the terminal reader
+ * parses the same grammar through `src/lib/refGrammar.ts`. Each consumer
+ * holds its own `RegExp` instance because the `g` flag mutates
+ * `lastIndex`; this server-side instance is standalone so the module has
+ * zero client imports. The tag character class is intentionally identical to
  * `TAG_NAME_RE`'s body so an in-text ref cannot validate but fail to
  * match a real tag.
  */
@@ -188,7 +188,7 @@ type AddTaskFields = {
   /** Attribution (`cortex add --as`): records the first `created` update by this author in the same transaction. */
   author?: string;
   /**
-   * Also persist the bell-drawer `created` notification (attributed to
+   * Also persist the `created` notification (attributed to
    * `author`) in the insert's transaction, as the daemon's create route does.
    */
   notification?: { author: string | null };
@@ -366,9 +366,9 @@ export type StatusOptions = {
   /** Attribution stamp for the `status → x` audit row (default "system"). */
   author?: string | null;
   /**
-   * Persist the bell-drawer transition notification in the same transaction,
+   * Persist the transition notification in the same transaction,
    * only when the status actually changes. Callers set it for attributed agent
-   * writes; a human's own click stays silent (plan @400 N9).
+   * writes; a human's own change stays silent (plan @400 N9).
    */
   notify?: boolean;
 };
@@ -445,12 +445,6 @@ export function validateAuthorTag(s: string): AuthorTag {
   }
   return s.trim();
 }
-
-export type AuthorRow = {
-  author: string;
-  last_seen: number;
-  posts: number;
-};
 
 export type AddLaneInput = {
   name: string;
@@ -684,7 +678,7 @@ export class Store {
           PRIMARY KEY(task_id, tag_name)
         );
       `);
-      // Notifications: server-persisted bell-drawer feed. New table,
+      // Notifications: server-persisted notification feed. New table,
       // follows the `tags`/`task_tags` precedent — a `CREATE TABLE IF NOT
       // EXISTS` block, no entry in pendingMigrations()/applyMigrations()
       // (those are for schema TRANSFORMS on existing tables).
@@ -1849,8 +1843,8 @@ export class Store {
    * become inbox history (chronological), not silent overwrites.
    *
    * `opts.author` is the attribution stamp for the audit row. The CLI passes
-   * the validated `--as` value; the dashboard route passes the server-side
-   * cascade (`resolveAuthor()`). See transitionStatus for `notify`/guards.
+   * the validated `--as` value; an unattributed HTTP change (the TUI) passes
+   * the server-side cascade (`resolveAuthor()`). See transitionStatus for `notify`/guards.
    */
   setStatus(id: number, status: TaskStatus, opts: StatusOptions = {}, guard?: WriteGuard): Task {
     return this.transitionStatus(id, status, opts, guard).task;
@@ -1980,7 +1974,7 @@ export class Store {
 
   /**
    * List every tag with the count of tasks currently carrying it. Powers
-   * `cortex tag ls` and the dashboard's tag picker. Sorted alphabetically.
+   * `cortex tag ls` and the TUI's tag picker. Sorted alphabetically.
    */
   listTags(): (Tag & { task_count: number })[] {
     return this.db
@@ -2210,26 +2204,6 @@ export class Store {
     return this.db
       .query<Update, [number]>(`SELECT * FROM updates WHERE task_id = ? ORDER BY created ASC, id ASC;`)
       .all(taskId);
-  }
-
-  /**
-   * Distinct authors seen on `updates` in the last 24 hours, with their most
-   * recent post timestamp and total post count. Powers the dashboard's
-   * Authors tab — a derived view, no new schema, no new column.
-   */
-  listAuthorsLast24h(): AuthorRow[] {
-    return this.db
-      .query<AuthorRow, []>(
-        `SELECT author,
-                MAX(created) AS last_seen,
-                COUNT(*)     AS posts
-           FROM updates
-          WHERE author IS NOT NULL
-            AND created > strftime('%s','now','-24 hours') * 1000
-          GROUP BY author
-          ORDER BY last_seen DESC;`,
-      )
-      .all();
   }
 
   // ---------- memory index (plan @414: derived; lazily created; reconciled on every search) ----------
@@ -2623,7 +2597,7 @@ export class Store {
     return this.rowToNotification(row);
   }
 
-  /** Newest-first listing for the bell drawer. The composite ORDER BY
+  /** Newest-first listing for the notification feed. The composite ORDER BY
    *  (created DESC, id DESC) tie-breaks rows that share a millisecond
    *  timestamp by insertion order, so test ordering is deterministic. */
   listNotifications(): Notification[] {
@@ -2639,8 +2613,8 @@ export class Store {
   }
 
   /** Flip a previously-read notification back to unread. Pairs with
-   *  markNotificationRead so a user who clicked through too quickly can
-   *  re-pin the row to the top of the drawer (the merged feed sorts
+   *  markNotificationRead so a user who read one too quickly can
+   *  re-pin the row to the top of the list (the merged feed sorts
    *  unread-first). */
   markNotificationUnread(id: number): boolean {
     return this.db.run(`UPDATE notifications SET read = 0 WHERE id = ? AND read = 1;`, [id]).changes > 0;

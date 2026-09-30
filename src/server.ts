@@ -21,12 +21,10 @@ import {
 import { backupNotificationInput, createBackup, defaultBackupPath } from "./backup.ts";
 import { createEventPublisher, type EventKind, type EventPublisher } from "./events.ts";
 import { CONTROL_PATHS, INSTANCE_HEADER, PREFER_VERSIONED } from "./api.ts";
-import { createPreviewStore, type PreviewStore, registerPreviewRoutes } from "./preview.ts";
 import { memoryPhrases, memoryTerms, recencyIntent } from "./memory.ts";
 import type {
   BlockedTransition,
   DaemonIdentity,
-  EnableWebRequest,
   HealthResponse,
   LaneStateSnapshot,
   MemorySearchResult,
@@ -42,41 +40,6 @@ import type {
   WriteGuard,
 } from "./contracts.ts";
 import pkg from "../package.json" with { type: "json" };
-// `with { type: "file" }` returns a string PATH (not file contents) that
-// `bun build --compile` rewrites to point at the embedded blob. Read the
-// contents at request time via Bun.file(...).text() (or .bytes() for
-// non-text). The UI is shipped as a single bundle.js + bundle.css produced
-// by `pnpm run ui:build` (Bun bundler over src/ui/index.tsx). Source still
-// lives in modular files under src/ui/; the bundler is what fuses them.
-//
-// Build order is enforced by scripts/build.sh: it runs `pnpm run ui:build`
-// FIRST so out/bundle.{js,css} exist on disk before this server file is
-// embedded by `bun build --compile`. If the bundler outputs are missing at
-// server-build time, `bun build --compile` fails loudly with a missing-file
-// error — which is the desired behavior (it surfaces a broken build).
-import indexHtmlPath from "./ui/index.html" with { type: "file" };
-import bundleJsPath from "../out/bundle.js" with { type: "file" };
-import bundleCssPath from "../out/bundle.css" with { type: "file" };
-// Mermaid is shipped as 217 dynamically-imported chunks (mermaid 11's diagram
-// renderers self-register via async `import()`). Bun's bundler drops chunks
-// it can't see; bundling the npm package via `bun build` produces a broken
-// artifact where most diagram types throw `K.render is not a function` at
-// runtime. Fix: ship mermaid's pre-built `dist/` tree verbatim, one
-// `with { type: "file" }` import per chunk so `bun build --compile` embeds
-// each into the binary. The import list + route map is codegen'd by
-// `scripts/gen-mermaid-manifest.ts` from `node_modules/mermaid/dist/`.
-import { MERMAID_ASSETS } from "./ui/mermaid-manifest.generated.ts";
-
-// Map browser route -> embedded file path + content type. Each entry is
-// served with Cache-Control: no-store so dev edits never sit invisible behind
-// a stale cache, and so any shipped fix is picked up on the next reload.
-const UI_ASSETS: Record<string, { path: string; type: string }> = {
-  "/bundle.js": { path: bundleJsPath, type: "application/javascript; charset=utf-8" },
-  "/bundle.css": { path: bundleCssPath, type: "text/css; charset=utf-8" },
-  // /mermaid/mermaid.esm.min.mjs + 216 chunk files under /mermaid/chunks/.
-  // Spread so the same serve loop below handles them with the same headers.
-  ...MERMAID_ASSETS,
-};
 
 /**
  * Resolve a sensible default author for posted updates.
@@ -125,59 +88,32 @@ const isStatus = (v: string): v is TaskStatus =>
 // ---------- daemon runtime (plan @400 N11/N12) ----------
 
 /**
- * Which trusted listener serves an app: the private Unix socket ("ipc") or
- * the loopback TCP listener the browser uses. Set by the code that bound the
- * listener, never derived from a request (no header can change it). Only IPC
- * apps get the control routes; an app built without a runtime is
- * "loopback", the least-trusted kind.
- */
-export type ListenerKind = "ipc" | "loopback";
-
-/**
- * What the IPC control routes may do to the daemon hosting this app
- * (`cortex serve` supplies it; in-process apps have none).
+ * What the control routes may do to the daemon hosting this app. Only
+ * `cortex serve` supplies it, for the app on its private Unix socket;
+ * in-process apps (withClient, startServer) have none, so they have no
+ * control routes.
  */
 export interface DaemonControl {
   /** Begin the daemon's graceful shutdown (called after the 202 has been sent). */
   shutdown(): void;
-  /** Start the loopback dashboard listener, or report the running one; resolves with the updated identity. */
-  enableWeb(request: EnableWebRequest): Promise<DaemonIdentity>;
 }
 
 /** Delay between answering a shutdown request and starting it, so the 202 leaves before listeners close. */
 const SHUTDOWN_DELAY_MS = 25;
 
-/**
- * RFC 1123 label-or-FQDN shape for a printed dashboard hostname: ASCII
- * letters, digits, dots and hyphens, starting and ending alphanumeric, at
- * most 253 characters. No scheme, port, path or whitespace.
- */
-export function isValidHostname(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    value.length > 0 &&
-    value.length <= 253 &&
-    /^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/.test(value)
-  );
-}
-
 /** Per-connection SSE bounds: past either queue bound a client gets one `resync` instead of more frames. */
 export type StreamLimits = { maxQueuedFrames: number; maxQueuedChars: number; heartbeatMs: number };
 
 /**
- * Everything a daemon's apps share beyond the Store: its published identity
- * (null until published, or for in-process use; it may gain webUrl later, so
- * it is read per request), the ONE event publisher every listener's app
- * publishes to and streams from, the ONE rich-preview store (created over
- * IPC, read on loopback: src/preview.ts), and this app's listener kind.
+ * Everything a daemon's app shares beyond the Store: its published identity
+ * (null for in-process use; read per request) and the ONE event publisher
+ * it publishes to and streams from.
  */
 export interface DaemonRuntime {
   identity: DaemonIdentity | null;
   readonly events: EventPublisher;
-  readonly previews: PreviewStore;
-  readonly listener: ListenerKind;
   readonly stream: StreamLimits;
-  /** Control over the hosting daemon; only an "ipc" app exposes it (as the control routes). */
+  /** Control over the hosting daemon (exposed as the control routes); null for in-process apps. */
   readonly control: DaemonControl | null;
 }
 
@@ -193,8 +129,6 @@ export function createRuntime(
   options: {
     identity?: DaemonIdentity | null;
     events?: EventPublisher;
-    previews?: PreviewStore;
-    listener?: ListenerKind;
     stream?: Partial<StreamLimits>;
     control?: DaemonControl | null;
   } = {},
@@ -202,8 +136,6 @@ export function createRuntime(
   return {
     identity: options.identity ?? null,
     events: options.events ?? createEventPublisher(),
-    previews: options.previews ?? createPreviewStore(),
-    listener: options.listener ?? "loopback",
     stream: { ...DEFAULT_STREAM_LIMITS, ...options.stream },
     control: options.control ?? null,
   };
@@ -227,38 +159,6 @@ function splitGuard<T extends Record<string, unknown>>(body: T): { guard: unknow
 
 export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime()): Hono {
   const app = new Hono();
-
-  // Shared by GET / and GET /task/:id — the SPA owns its own routing in the
-  // browser, but the server must return the same shell for any URL the user
-  // might land on directly (refresh, bookmark, copy-link). Headers identical
-  // to the original handler; test/integration/ui-bundle.test.ts asserts
-  // no-store survives on every shell route.
-  const serveShell = async (c: Context) => {
-    // Local single-user app served from a Bun.embed bundle. We never want the
-    // browser to cache the HTML; otherwise dev edits (and shipped fixes) sit
-    // invisible behind a stale page until the user discovers Cmd-Shift-R.
-    c.header("Cache-Control", "no-store, must-revalidate");
-    // bun-types declares `*.html` imports as HTMLBundle, but the `with { type: "file" }`
-    // attribute we use makes Bun resolve this to a string path at runtime. Cast at
-    // the boundary rather than augmenting bun-types.
-    return c.html(await Bun.file(indexHtmlPath as unknown as string).text());
-  };
-  app.get("/", serveShell);
-  app.get("/task/:id", serveShell);
-  // The rich draft preview page (src/ui/components/Preview.tsx) boots from the
-  // same shell; the page reads /api/preview/:token itself (src/preview.ts).
-  app.get("/preview/:token", serveShell);
-
-  // Static UI modules — CSS + ESM JS modules. Same no-store policy so the
-  // browser always picks up the latest module graph after a reload. We use
-  // c.body() with raw bytes so non-ASCII chars survive without re-encoding.
-  for (const [route, { path, type }] of Object.entries(UI_ASSETS)) {
-    app.get(route, async c => {
-      c.header("Cache-Control", "no-store, must-revalidate");
-      c.header("Content-Type", type);
-      return c.body(await Bun.file(path).bytes());
-    });
-  }
 
   const events = runtime.events;
   const publish = (kind: EventKind, payload: unknown): void => {
@@ -367,7 +267,7 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
   };
 
   // Bind requests to the instance a native client verified (N11). A request
-  // without the header is unbound (browser, legacy CLI).
+  // without the header is unbound (a legacy CLI).
   const checkInstance: MiddlewareHandler = async (c, next) => {
     const expected = c.req.header(INSTANCE_HEADER);
     if (expected !== undefined && expected !== runtime.identity?.instanceId) {
@@ -392,13 +292,14 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
     return c.json(health);
   });
 
-  // ---------- control (plan @400 N5/N11): IPC listener only ----------
-  // Registered only when the code that bound this app's listener said it is
-  // the private socket AND supplied control; a loopback app never has these
-  // routes, whatever a request's headers claim. checkInstance (above) already
-  // rejects a different instance; control additionally requires the header,
-  // so a request can never stop or reconfigure an instance it did not verify.
-  if (runtime.listener === "ipc" && runtime.control !== null) {
+  // ---------- control (plan @400 N5/N11): the daemon's socket app only ----------
+  // Registered only when the code that bound this app's listener supplied
+  // control (`cortex serve`, for its private socket); an in-process app never
+  // has these routes, whatever a request's headers claim. checkInstance
+  // (above) already rejects a different instance; control additionally
+  // requires the header, so a request can never stop an instance it did not
+  // verify.
+  if (runtime.control !== null) {
     const control = runtime.control;
     const requireInstance: MiddlewareHandler = async (c, next) => {
       if (c.req.header(INSTANCE_HEADER) === undefined) {
@@ -414,43 +315,9 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
       setTimeout(() => control.shutdown(), SHUTDOWN_DELAY_MS);
       return c.json({ ok: true, instanceId: runtime.identity?.instanceId ?? null }, 202);
     });
-
-    app.post(CONTROL_PATHS.web, requireInstance, async c => {
-      const text = await c.req.text();
-      let body: unknown = {};
-      if (text.trim() !== "") {
-        try {
-          body = JSON.parse(text);
-        } catch {
-          return c.json({ error: "enable-web body must be JSON such as { port, host }" }, 400);
-        }
-      }
-      if (!isRecord(body)) return c.json({ error: "enable-web body must be a JSON object" }, 400);
-      const request: EnableWebRequest = {};
-      if (body.port !== undefined) {
-        if (typeof body.port !== "number" || !Number.isInteger(body.port) || body.port < 0 || body.port > 65535) {
-          return c.json({ error: "port must be an integer 0-65535" }, 400);
-        }
-        request.port = body.port;
-      }
-      if (body.host !== undefined) {
-        if (!isValidHostname(body.host)) {
-          return c.json({ error: "host must be a valid hostname (RFC 1123 form, no port, no scheme)" }, 400);
-        }
-        request.host = body.host;
-      }
-      try {
-        return c.json({ identity: await control.enableWeb(request) });
-      } catch (err) {
-        return c.json({ error: (err as Error).message, code: "web_unavailable" }, 409);
-      }
-    });
   }
 
-  // ---------- rich draft previews (plan @400 N21): create over IPC only, read by exact token ----------
-  registerPreviewRoutes(app, runtime);
-
-  // UI bootstraps the default author for the post-update form from this.
+  // The TUI's update composer takes its default author from this.
   app.get("/api/me", c => c.json({ author: resolveAuthor() }));
 
   // UI checks for pending migrations on boot so it can show a banner.
@@ -558,7 +425,7 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
       ? { ...fields, untitled: true, author }
       : { ...fields, title: title as string, author };
     try {
-      // The bell-drawer `created` row commits with the task (N9); its author
+      // The `created` notification row commits with the task (N9); its author
       // stays the server-side default, as before. Resolved outside the
       // transaction: the first call may spawn `git config`.
       const notification = { author: resolveAuthor() };
@@ -661,11 +528,11 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
       return c.json({ error: "invalid status" }, 400);
     }
     // Author attribution for the audit-trail row. HTTP path is OPTIONAL: the
-    // dashboard never sends an author (the human is the supervisor, the
-    // click IS the attribution), only attributed CLI calls do (every
-    // `cortex update` requires --as <session-id>). That same flag decides
-    // whether the transition persists a bell-drawer notification: no point
-    // pinging the supervisor about a change they just clicked themselves.
+    // TUI never sends an author for a status change (the human is the
+    // supervisor, the keypress IS the attribution), only attributed CLI calls
+    // do (every `cortex update` requires --as <session-id>). That same flag
+    // decides whether the transition persists a notification: no point
+    // pinging the supervisor about a change they just made themselves.
     const isAttributed = body.author !== undefined;
     let author: string;
     if (isAttributed) {
@@ -805,7 +672,7 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
       return c.json({ error: "author and summary are required" }, 400);
     }
     // Early HTTP rejection: validate the author tag here so a malformed
-    // dashboard payload never reaches the Store (which would also throw, but
+    // payload never reaches the Store (which would also throw, but
     // a 400 from the route is the user-facing contract).
     let author: string;
     try {
@@ -854,7 +721,7 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
   });
 
   // ---------- backup ----------
-  // On-demand dashboard backup. Runs inside the daemon process against a
+  // On-demand backup (the TUI's :backup). Runs inside the daemon process against a
   // separate read-only SQLite connection, so it is safe while the daemon is
   // serving writes. Restore remains CLI-only because it refuses a live daemon.
   app.post("/api/backup", async c => {
@@ -874,11 +741,6 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
       return c.json({ error: (err as Error).message }, 500);
     }
   });
-
-  // ---------- authors (derived view from updates table) ----------
-  // Powers the dashboard's Authors tab. No new schema, no new column — just
-  // a GROUP BY over the last 24h of updates. See Store.listAuthorsLast24h.
-  app.get("/api/authors", c => c.json(store.listAuthorsLast24h()));
 
   // ---------- memory ----------
   // Agent memory (plan @414): ranked recall over the derived FTS5 index and
@@ -948,7 +810,7 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
   });
 
   // ---------- notifications ----------
-  // Persisted bell-drawer feed. Read endpoint returns rows newest-first.
+  // Persisted notification feed. Read endpoint returns rows newest-first.
   // Mutation endpoints validate :id as a number and return 400 on NaN;
   // none of these accept a request body. An acknowledgement that changed a
   // row publishes a `notification.changed` invalidation (N12) so every
@@ -1064,8 +926,8 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
 
   // ---------- tags ----------
   // Mirrors /api/lanes: GET list, POST add, PATCH edit, DELETE remove.
-  // Every write publishes `tag.changed`; the dashboard's refresh() re-fetches
-  // /api/tags on every event. Renames/forced removals cascade into tasks.
+  // Every write publishes `tag.changed`; clients re-read /api/tags on it.
+  // Renames/forced removals cascade into tasks.
   app.get("/api/tags", c => c.json(store.listTags()));
 
   // A tag, its member count (a delete's impact) and versions from one read (TUI :tags).
@@ -1138,74 +1000,6 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
       return c.json({ error: (err as Error).message }, 400);
     }
   });
-
-  // ---------- dev-only live-reload ----------
-  // Gated by CORTEX_DEV=1 (set by scripts/dev.sh). The route is simply not
-  // registered when the env var is missing, so production `cortex serve`
-  // returns 404 for /api/dev-reload — no "is dev?" check leaks into the
-  // hot path. We watch out/bundle.js with node:fs.watch on macOS (FSEvents
-  // under the hood; reliable for a single file). Debounce ~100ms so a
-  // single bun-build write doesn't fan out into 3 reloads. The CSS slice
-  // pipeline rewrites bundle.css, which doesn't trigger this watcher —
-  // but build-css.sh re-touches bundle.js? No: it doesn't. So we ALSO
-  // watch out/bundle.css and reload on either. The browser's full reload
-  // pulls both fresh anyway.
-  if (process.env.CORTEX_DEV === "1") {
-    console.log("[cortex] dev-reload enabled — GET /api/dev-reload (CORTEX_DEV=1)");
-    const listeners = new Set<() => void>();
-    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-    const fanout = (): void => {
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        debounceTimer = null;
-        for (const fn of listeners) {
-          try {
-            fn();
-          } catch {
-            /* listener already gone — cleaned up on stream abort */
-          }
-        }
-      }, 100);
-    };
-    const watchOne = (p: string): void => {
-      try {
-        // recursive:false on a single file path; fs.watch tolerates the
-        // file going away briefly during atomic rewrites.
-        fs.watch(p, () => fanout());
-      } catch (e) {
-        console.warn(`[cortex] dev-reload: cannot watch ${p}: ${(e as Error).message}`);
-      }
-    };
-    const bundleJsAbs = path.resolve(import.meta.dir, "..", "out", "bundle.js");
-    const bundleCssAbs = path.resolve(import.meta.dir, "..", "out", "bundle.css");
-    watchOne(bundleJsAbs);
-    watchOne(bundleCssAbs);
-    // No watch for mermaid: its files live in node_modules/mermaid/dist/ now
-    // (read-only, only changes on `pnpm install`). Reload-on-edit during dev
-    // is unnecessary.
-
-    app.get("/api/dev-reload", c =>
-      streamSSE(c, async stream => {
-        const onChange = (): void => {
-          void stream.writeSSE({
-            event: "reload",
-            data: JSON.stringify({ mtime: Date.now() }),
-          });
-        };
-        listeners.add(onChange);
-        stream.onAbort(() => {
-          listeners.delete(onChange);
-        });
-        // Initial hello so the client can confirm the channel is live.
-        await stream.writeSSE({ event: "hello", data: String(Date.now()) });
-        while (!stream.aborted) {
-          await stream.sleep(25000);
-          if (stream.aborted) break;
-          await stream.writeSSE({ event: "ping", data: String(Date.now()) });
-        }
-      }),
-    );
-  }
 
   // ---------- SSE ----------
   // Subscribe FIRST, then send `ready` carrying the cursor at subscription:
@@ -1302,23 +1096,16 @@ export type ServerHandle = {
   port: number;
   /** Loopback URL of the listener. */
   url: string;
-  /** User-facing URL (friendly host) for a browser. */
-  browserUrl: string;
   stop(): Promise<void>;
 };
 
-export function startServer({
-  port,
-  host = "cortex.localhost",
-  store,
-}: {
-  port: number;
-  host?: string;
-  store: Store;
-}): ServerHandle {
-  // A bare loopback listener with no published identity and no IPC control
-  // routes (in-process tests use it); `cortex serve` hosts the real daemon.
-  const app = buildApp(store, createRuntime({ listener: "loopback" }));
+/**
+ * The in-process integration-test listener: a bare loopback app with no
+ * published identity and no control routes. `cortex serve` hosts the real
+ * daemon, on its private socket only.
+ */
+export function startServer({ port, store }: { port: number; store: Store }): ServerHandle {
+  const app = buildApp(store, createRuntime());
   const server = Bun.serve({
     port,
     hostname: "127.0.0.1",
@@ -1328,7 +1115,6 @@ export function startServer({
   return {
     port: resolvedPort,
     url: `http://127.0.0.1:${resolvedPort}`,
-    browserUrl: `http://${host}:${resolvedPort}`,
     async stop() {
       server.stop(true);
     },

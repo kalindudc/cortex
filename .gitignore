@@ -9,10 +9,4 @@ bin/
 # transient body buffers used by edit/show flows
 .cortex-body-*.tmp
 
-# UI bundler output (produced by `pnpm run ui:build`)
-out/
 *.tsbuildinfo
-
-# Mermaid asset manifest (produced by `pnpm run gen:mermaid-manifest`,
-# regenerated on every `pnpm run ui:build` from node_modules/mermaid/dist).
-src/ui/mermaid-manifest.generated.ts

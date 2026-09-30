@@ -1,28 +1,19 @@
 // The TUI's bridges to other programs (plan @400 Task 10 B, N5/N20/N21):
-// `:preview` (the exact current draft in the browser, through the SAME
-// daemon's loopback dashboard) and the terminal handoff for external
-// programs. Every seam is a fake: no daemon, no browser, no process.
+// the terminal handoff for external programs and `:resume`. Every seam is a
+// fake: no daemon, no process.
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { HttpError } from "../../../src/api.ts";
-import type {
-  CortexClient,
-  DaemonIdentity,
-  PreviewCreated,
-  PreviewRequest,
-  WorkspaceSnapshot,
-} from "../../../src/contracts.ts";
+import type { CortexClient, DaemonIdentity, WorkspaceSnapshot } from "../../../src/contracts.ts";
 import type { Task, Update } from "../../../src/store.ts";
-import { type BridgeDeps, openRichPreview, resumeTask, withExternalProgram } from "../../../src/tui/bridge.ts";
+import { resumeTask, withExternalProgram } from "../../../src/tui/bridge.ts";
 import { CommandError, COMMANDS, parseCommand } from "../../../src/tui/commands.ts";
 import { DEFAULT_KEYS } from "../../../src/tui/keys.ts";
 import { openPreferences } from "../../../src/tui/preferences.ts";
 import { TuiSession } from "../../../src/tui/session.ts";
 
-const TOKEN = "0123456789abcdef0123456789abcdef";
 const IDENTITY: DaemonIdentity = {
   protocol: 1,
   instanceId: "inst-bridge",
@@ -30,7 +21,7 @@ const IDENTITY: DaemonIdentity = {
   databasePath: "/tmp/bridge.db",
   endpoint: { kind: "unix", socketPath: "/tmp/bridge.sock" },
   pid: 4242,
-  capabilities: ["control.shutdown", "control.web", "control.preview"],
+  capabilities: ["control.shutdown"],
 };
 
 const task = (id: number, over: Partial<Task> = {}): Task => ({
@@ -75,7 +66,7 @@ function harness(identity: DaemonIdentity = IDENTITY, tasks: Task[] = [task(1), 
           (_target, name) =>
           async (...args: unknown[]) => {
             writes.push({ name, args });
-            throw new Error("a preview must never write");
+            throw new Error("a bridge must never write");
           },
       },
     ),
@@ -91,41 +82,6 @@ function harness(identity: DaemonIdentity = IDENTITY, tasks: Task[] = [task(1), 
   return { session, writes };
 }
 
-type Calls = {
-  enable: string[];
-  create: { identity: DaemonIdentity; request: PreviewRequest }[];
-  launched: (readonly string[])[];
-};
-
-function fakes(over: Partial<BridgeDeps> = {}): { deps: Partial<BridgeDeps>; calls: Calls } {
-  const calls: Calls = { enable: [], create: [], launched: [] };
-  const deps: Partial<BridgeDeps> = {
-    enableWeb: async identity => {
-      calls.enable.push(identity.instanceId);
-      return { ...identity, webUrl: "http://cortex.localhost:7777" };
-    },
-    createPreview: async (identity, request) => {
-      calls.create.push({ identity, request });
-      const created: PreviewCreated = {
-        token: TOKEN,
-        path: `/preview/${TOKEN}`,
-        expiresAt: new Date(Date.UTC(2026, 0, 2, 3, 14)).toISOString(),
-        bytes: 42,
-      };
-      return created;
-    },
-    browserCommand: url => ({ argv: ["open", url] }),
-    launch: argv => {
-      calls.launched.push(argv);
-      return { exited: Promise.resolve(0) };
-    },
-    ...over,
-  };
-  return { deps, calls };
-}
-
-const lastMessage = (session: TuiSession): string => session.messages.at(-1)?.text ?? "";
-
 async function rejection(promise: Promise<unknown>): Promise<Error> {
   try {
     await promise;
@@ -134,155 +90,6 @@ async function rejection(promise: Promise<unknown>): Promise<Error> {
   }
   throw new Error("expected a rejection");
 }
-
-describe("openRichPreview (:preview)", () => {
-  test("enables the SAME daemon's dashboard, sends the EXACT unsaved draft, opens the browser by argv", async () => {
-    const { session, writes } = harness();
-    session.select(1);
-    const doc = await session.openDocument(1);
-    const unsaved = "# Unsaved\r\n\n\ttyped but not saved \u{1F600}\n```mermaid\ngraph TD; A-->B;\n```\n";
-    doc?.draft?.set("body", unsaved);
-    doc?.draft?.set("title", "Retitled, unsaved");
-    const { deps, calls } = fakes();
-    await openRichPreview(session, deps);
-    expect(calls.enable).toEqual([IDENTITY.instanceId]);
-    expect(calls.create).toHaveLength(1);
-    expect(calls.create[0]?.identity.instanceId).toBe(IDENTITY.instanceId);
-    expect(calls.create[0]?.request).toEqual({
-      taskId: 1,
-      title: "Retitled, unsaved",
-      source: unsaved,
-      unsaved: true,
-    });
-    const url = `http://cortex.localhost:7777/preview/${TOKEN}`;
-    expect(calls.launched).toEqual([["open", url]]);
-    // The URL is in :messages (the browser may not open), with what was sent.
-    const reported = session.messages.map(m => m.text).join("\n");
-    expect(reported).toContain(url);
-    expect(reported).toContain("@1");
-    expect(reported).toContain("unsaved");
-    // A preview never writes: no versioned write was attempted.
-    expect(writes).toEqual([]);
-    expect(session.documentOf(1)?.draft?.text("body")).toBe(unsaved);
-  });
-
-  test("a running dashboard is reused (no enable-web request); saved text is sent as saved", async () => {
-    const { session } = harness({ ...IDENTITY, webUrl: "http://cortex.localhost:7788" });
-    session.select(2);
-    const { deps, calls } = fakes();
-    await openRichPreview(session, deps);
-    expect(calls.enable).toEqual([]);
-    expect(calls.create[0]?.request).toEqual({ taskId: 2, title: "Task 2", source: "saved body 2", unsaved: false });
-    expect(calls.launched).toEqual([["open", `http://cortex.localhost:7788/preview/${TOKEN}`]]);
-    expect(session.messages.map(m => m.text).join("\n")).toContain("saved text");
-  });
-
-  test("an empty body previews as an empty source", async () => {
-    const { session } = harness(IDENTITY, [task(1, { body: null })]);
-    session.select(1);
-    const { deps, calls } = fakes();
-    await openRichPreview(session, deps);
-    expect(calls.create[0]?.request.source).toBe("");
-  });
-
-  test("no selected task: an explicit error and nothing is sent", async () => {
-    const { session } = harness(IDENTITY, []);
-    const { deps, calls } = fakes();
-    const err = await rejection(openRichPreview(session, deps));
-    expect(err).toBeInstanceOf(CommandError);
-    expect(err.message).toContain("No task selected");
-    expect(calls).toEqual({ enable: [], create: [], launched: [] });
-  });
-
-  test("a daemon without the preview capability is named before any request", async () => {
-    const { session } = harness({ ...IDENTITY, capabilities: ["control.shutdown", "control.web"] });
-    session.select(1);
-    const { deps, calls } = fakes();
-    const err = await rejection(openRichPreview(session, deps));
-    expect(err).toBeInstanceOf(CommandError);
-    expect(err.message).toContain("pid 4242");
-    expect(err.message).toContain("restart");
-    expect(calls).toEqual({ enable: [], create: [], launched: [] });
-  });
-
-  test("the daemon's limit error is explicit and nothing is opened", async () => {
-    const { session } = harness();
-    session.select(1);
-    const { deps, calls } = fakes({
-      createPreview: async () => {
-        throw new HttpError(
-          413,
-          "The preview is 1.5 MiB; one preview may hold at most 1 MiB (its title and source together)",
-          "preview_too_large",
-        );
-      },
-    });
-    const err = await rejection(openRichPreview(session, deps));
-    expect(err).toBeInstanceOf(CommandError);
-    expect(err.message).toContain("at most 1 MiB");
-    expect(calls.launched).toEqual([]);
-  });
-
-  test("a dashboard that cannot start is explicit and nothing is created", async () => {
-    const { session } = harness();
-    session.select(1);
-    const { deps, calls } = fakes({
-      enableWeb: async () => {
-        throw new HttpError(409, "port 7777 is in use", "web_unavailable");
-      },
-    });
-    const err = await rejection(openRichPreview(session, deps));
-    expect(err).toBeInstanceOf(CommandError);
-    expect(err.message).toContain("port 7777 is in use");
-    expect(calls.create).toEqual([]);
-  });
-
-  test("an unsafe dashboard URL is never launched", async () => {
-    for (const webUrl of ["file:///tmp", "javascript:alert(1)", "http://cortex.localhost:7777\u001b]8;;x\u0007"]) {
-      const { session } = harness({ ...IDENTITY, webUrl });
-      session.select(1);
-      const { deps, calls } = fakes();
-      const err = await rejection(openRichPreview(session, deps));
-      expect(err).toBeInstanceOf(CommandError);
-      expect(calls.launched).toEqual([]);
-    }
-  });
-
-  test("a browser that cannot open is reported; the URL stays in :messages", async () => {
-    const { session } = harness();
-    session.select(1);
-    const url = `http://cortex.localhost:7777/preview/${TOKEN}`;
-    const missing = fakes({ browserCommand: () => ({ problem: "xdg-open not on PATH" }) });
-    await openRichPreview(session, missing.deps);
-    expect(missing.calls.launched).toEqual([]);
-    expect(lastMessage(session)).toContain("xdg-open not on PATH");
-    expect(session.messages.map(m => m.text).join("\n")).toContain(url);
-
-    let exit: (code: number) => void = () => {};
-    const failing = fakes({
-      launch: argv => {
-        failing.calls.launched.push(argv);
-        return { exited: new Promise<number>(resolve => (exit = resolve)) };
-      },
-    });
-    await openRichPreview(session, failing.deps);
-    exit(1);
-    await Bun.sleep(0);
-    expect(lastMessage(session)).toContain("exited with 1");
-    expect(lastMessage(session)).toContain(url);
-  });
-
-  test(":preview is a registered command without arguments, and the reader's Mermaid hint names it", async () => {
-    const parsed = parseCommand("preview", COMMANDS);
-    expect(parsed.spec.name).toBe("preview");
-    expect(parsed.spec.description).toContain("10 minutes");
-    const { session } = harness();
-    session.select(1);
-    await expect(async () => parsed.spec.run(session, "now")).toThrow(":preview takes no argument");
-    const reader = fs.readFileSync(path.join(import.meta.dir, "../../../src/tui/reader.ts"), "utf8");
-    expect(reader).toContain('"rich preview: :preview"');
-  });
-});
 
 describe("withExternalProgram (terminal handoff)", () => {
   test("hands the terminal over, runs the argv, takes it back and returns the exit code", async () => {

@@ -27,4 +27,4 @@ After this the CLI is ready to use. Run `cortex agents install` so AI agents rea
 
 - `init` no longer writes skills or the pi extension. Upgrading the binary and re-running `init` does NOT refresh them: run [`cortex agents install`](agents.md) (or `cortex agents reset` to also drop stale files).
 - `init` IS the migration path for an existing DB. When the schema changes (e.g. the summary `CHECK` cap went 200 → 1024 → 4096), every command warns `database migrations pending (...)`, [`cortex doctor`](doctor.md) lists them, and `init` applies them safely: it backs the DB up (`VACUUM INTO`), rebuilds the affected table, validates row counts + integrity, and only then drops the old table. Data is kept; `✓ migration applied: <name>` is printed per migration. Do NOT use [`cortex reset`](reset.md) for this — it wipes everything.
-- `init` does NOT start the daemon. Run [`cortex serve`](serve.md) afterwards to bring up the dashboard.
+- `init` does NOT start the daemon. Run [`cortex serve`](serve.md) (or just `cortex`) to start the daemon.

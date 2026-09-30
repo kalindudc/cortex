@@ -368,25 +368,6 @@ describe("subscribeChanges (scripted server)", () => {
 
 // ---------- real transports: a Unix socket and loopback HTTP ----------
 
-// happy-dom (bunfig preload) swaps TransformStream/WritableStream for Node
-// stream classes that lack getWriter(), which Hono's streamSSE needs. The
-// server below runs in this process, so restore the web-stream natives for
-// this block (same technique as test/unit/server.test.ts).
-const swapped: { TransformStream?: unknown; WritableStream?: unknown } = {};
-
-async function nativeStreams(): Promise<void> {
-  const web = await import("node:stream/web");
-  swapped.TransformStream = globalThis.TransformStream;
-  swapped.WritableStream = globalThis.WritableStream;
-  (globalThis as { TransformStream: unknown }).TransformStream = web.TransformStream;
-  (globalThis as { WritableStream: unknown }).WritableStream = web.WritableStream;
-}
-
-function restoreStreams(): void {
-  (globalThis as { TransformStream: unknown }).TransformStream = swapped.TransformStream;
-  (globalThis as { WritableStream: unknown }).WritableStream = swapped.WritableStream;
-}
-
 async function waitFor(check: () => boolean, label: string, timeoutMs = 3000): Promise<void> {
   const deadline = performance.now() + timeoutMs;
   while (!check()) {
@@ -398,8 +379,7 @@ async function waitFor(check: () => boolean, label: string, timeoutMs = 3000): P
 describe("subscribeChanges over real transports", () => {
   let socketDir: string;
 
-  beforeAll(async () => {
-    await nativeStreams();
+  beforeAll(() => {
     // Prefer the (sandboxed) runtime dir: the tmp/impl gate pins it under the
     // repo; fall back to the system temp dir elsewhere. Bun 1.4.2 refuses to
     // bind an existing socket path (EADDRINUSE), so every test gets a fresh one.
@@ -411,7 +391,6 @@ describe("subscribeChanges over real transports", () => {
   });
 
   afterAll(() => {
-    restoreStreams();
     fs.rmSync(socketDir, { recursive: true, force: true });
   });
 

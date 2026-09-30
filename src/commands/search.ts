@@ -1,15 +1,15 @@
 import { defineCommand } from "citty";
 import { withClient } from "../daemon.ts";
 import type { Task } from "../store.ts";
-import { searchTasks } from "../ui/lib/fuzzy.ts";
+import { searchTasks } from "../lib/fuzzy.ts";
 import { renderTagsTruncated, STATUS_BADGE, STATUS_COLOR } from "./ls.ts";
 import { readTaskOrExit, renderTaskView } from "./show.ts";
 
 // cortex search — interactive fuzzy task finder.
 //
-// Ranks tasks with the SAME scorer as the dashboard command palette
-// (src/ui/lib/fuzzy.ts) so `@123` (exact id), `@text` (title-only) and
-// `#tag` (tag) prefixes behave identically in both surfaces, then hands the
+// Ranks tasks with the SAME scorer as the TUI's search (src/lib/fuzzy.ts)
+// so `@123` (exact id), `@text` (title-only) and `#tag` (tag) prefixes
+// behave identically in both surfaces, then hands the
 // ranked list to fzf for further interactive narrowing. Selecting a row
 // copies the task id to the system clipboard and prints the task exactly
 // like `cortex show <id>` (shared renderTaskView). `--json` skips fzf and

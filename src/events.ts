@@ -5,7 +5,7 @@
  * No replay buffer: clients re-snapshot on (re)connect (plan @400 N12).
  *
  * Environment-neutral on purpose (EventTarget, CustomEvent and
- * crypto.randomUUID exist in Bun and in browsers), so clients may reuse the
+ * crypto.randomUUID are web-standard globals), so clients may reuse the
  * cursor helpers.
  */
 

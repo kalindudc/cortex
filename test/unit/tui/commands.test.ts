@@ -13,8 +13,8 @@ import type {
   WorkspaceSnapshot,
 } from "../../../src/contracts.ts";
 import type { Lane, Task, TaskStatus } from "../../../src/store.ts";
-import { nextStatusFor, STATUS } from "../../../src/ui/lib/constants.ts";
-import { UNTAGGED } from "../../../src/ui/lib/taskView.ts";
+import { nextStatusFor, STATUS } from "../../../src/lib/constants.ts";
+import { UNTAGGED } from "../../../src/lib/taskView.ts";
 import {
   COMMANDS,
   CommandError,
@@ -122,13 +122,12 @@ const REQUIRED: readonly { input: string; name: string; argument: string; prefix
   { input: "post Shipped the fix", name: "post", argument: "Shipped the fix" },
   { input: "backup", name: "backup", argument: "", prefix: "bac" },
   { input: "resume", name: "resume", argument: "", prefix: "res" },
-  // P6: the reader, its links and code, and the explicit rich preview (Task 10)
+  // P6: the reader, its links and code
   { input: "heading", name: "heading", argument: "", prefix: "hea" },
   { input: "heading plan-2", name: "heading", argument: "plan-2" },
   { input: "links", name: "links", argument: "", prefix: "li" },
   { input: "copy 2", name: "copy", argument: "2", prefix: "cop" },
   { input: "source", name: "source", argument: "", prefix: "so" },
-  { input: "preview", name: "preview", argument: "", prefix: "pre" },
   // P8: notifications (Task 11)
   { input: "notifications", name: "notifications", argument: "", prefix: "no" },
 ];
@@ -142,7 +141,7 @@ const PARITY_COMMANDS: Readonly<Record<string, readonly string[]>> = {
   P3: ["new", "title", "status", "next", "priority", "lane", "delete"],
   P4: ["lanes", "tags", "tag"],
   P5: ["read", "edit", "split", "title", "set", "write", "write!", "wq", "apply", "keep"],
-  P6: ["heading", "links", "copy", "source", "preview", "back", "forward"],
+  P6: ["heading", "links", "copy", "source", "back", "forward"],
   P7: ["activity", "related", "authors", "post"],
   P8: ["notifications", "messages"],
   P9: ["help", "commands", "theme", "messages", "focus", "suspend", "quit", "quit!"],
@@ -1078,7 +1077,7 @@ describe(":status and :next (smart transition)", () => {
     expect(daemon.writes()).toEqual([]);
   });
 
-  test(":next is the web's nextStatusFor: draft→open, open→review, review→done, blocked→open, done→open", async () => {
+  test(":next is nextStatusFor: draft→open, open→review, review→done, blocked→open, done→open", async () => {
     const expected: Record<TaskStatus, TaskStatus> = {
       draft: "open",
       open: "review",
@@ -1129,7 +1128,7 @@ describe(":status and :next (smart transition)", () => {
   });
 });
 
-describe("the status picker (bare :status; ;m): the web's status buttons in one list", () => {
+describe("the status picker (bare :status; ;m): every status in one list", () => {
   const keysOf = (d: Dialog) => d.visibleRows().map(r => r.key);
   const guarded = (id: number, status: TaskStatus) => ({
     name: "setStatus",
@@ -1149,7 +1148,7 @@ describe("the status picker (bare :status; ;m): the web's status buttons in one 
     expect(text).toMatch(/\(\u2022\) ● open +o · current/);
     expect(text).toMatch(/◐ review +r · next step/);
     expect(text).toMatch(/✓ done +x/);
-    expect(picker.highlighted()?.key).toBe("review"); // Enter is the web's next-step button
+    expect(picker.highlighted()?.key).toBe("review"); // Enter takes the next step, as :next does
     expect(picker.hints()).toMatch(/Enter sets it.*d o r b x set one/);
     type("\r");
     await flush();

@@ -4,25 +4,23 @@
 // draft when there is one, else the saved body; the preview follows every
 // keystroke without touching the editor) as safe GFM: headings, lists and
 // task checkboxes, tables, code blocks (numbered for :copy), block quotes,
-// rules and links. It ports the browser's tested reading semantics
-// (src/ui/components/active/MarkdownView.tsx, src/ui/lib/refs.ts).
+// rules and links.
 //
-// - Parsing uses the SAME Markdown parser and options as the web (marked,
-//   gfm, no breaks; src/ui/lib/markdown.ts) on a private instance. It is a
+// - Parsing uses marked (gfm, no breaks) on a private instance. It is a
 //   renderer, NOT a security boundary: every untrusted string (text, code,
 //   link text and destinations, table cells, raw HTML) crosses
 //   src/tui/safety.ts before theme.ts styles it, raw HTML is shown as text,
 //   images are never fetched, and only destinations safeUrl() accepts become
 //   OSC 8 hyperlinks (built by safety.ts hyperlink() around escaped text).
-// - Headings get the web's anchors: `task-<id>-<slug>` from the same slugger
-//   over the heading's textContent, `-2`, `-3` for repeats, in document order
+// - Headings get anchors: `task-<id>-<slug>` from the shared slugger
+//   (src/lib/slug.ts) over the heading's text content, `-2`, `-3` for repeats, in document order
 //   (setext and nested headings included). :heading, `{`/`}`, the outline,
 //   heading links and `cortex tui <id> --heading <slug>` all use them.
 // - @id / #tag references are recognized in PROSE only (never inside code,
-//   link text, images or raw HTML), with the web's grammar
-//   (src/ui/lib/refGrammar.ts). Following @id clears every filter and the
+//   link text, images or raw HTML), with the shared grammar
+//   (src/lib/refGrammar.ts). Following @id clears every filter and the
 //   search and selects the task; #tag replaces the tag filter; a heading link
-//   (`#task-<id>-<slug>` as in the web, or a bare `#<slug>`) jumps.
+//   (`#task-<id>-<slug>`, or a bare `#<slug>`) jumps.
 // - `/` (while the reader has the focus) searches the RENDERED text of each
 //   paragraph, cell or code line, so a phrase broken by a soft wrap still
 //   matches; n/N step with wrap-around. Matches use the theme's search pair
@@ -33,7 +31,7 @@
 //   :source keeps the place. `{`/`}` and heading jumps are recorded in the
 //   session's :back/:forward history.
 // - :source shows the raw source (escaped) instead. Mermaid blocks show their
-//   source with a rich-preview hint (this is NOT diagram parity). Copying is
+//   source (diagrams are not rendered). Copying is
 //   an explicit :copy (OSC 52 through the session), never a rendering effect.
 // - VISUAL (the shell's vi `v`/`V`) selects the RENDERED rows: `V` whole
 //   rows, `v` grapheme clusters of their visible text (decoration included,
@@ -59,27 +57,27 @@
 
 import type { Component, TuiMouseEvent, TuiMouseEventResult } from "@earendil-works/pi-tui";
 import { Marked, type MarkedToken, type Token, type Tokens } from "marked";
-import { parseRefs } from "../ui/lib/refGrammar.ts";
-import { slugify } from "../ui/lib/slug.ts";
+import { parseRefs } from "../lib/refGrammar.ts";
+import { slugify } from "../lib/slug.ts";
 import { type ClusterLines, gutterWidth, type VisualKind, wordAt, wordEnd, wordNext, wordPrev } from "./editor.ts";
 import { displayWidth, escapeTerminalLines, escapeTerminalText, hyperlink, type SafeUrl, safeUrl } from "./safety.ts";
 import type { ScrollPosition } from "./scrollbar.ts";
 import type { DocumentPlace, TuiSession } from "./session.ts";
 import { type ContrastPair, type ResolvedTheme, type Seg, type StyleAttributes, seg, style } from "./theme.ts";
 
-// ---------- the web's slugger ----------
+// ---------- the heading slugger ----------
 
-/** The web's heading anchor slug, shared with MarkdownView and memory (src/ui/lib/slug.ts). */
+/** The heading anchor slug, shared with memory section loads (src/lib/slug.ts). */
 export { slugify };
 
 // ---------- the parsed document ----------
 
 export interface ReaderHeading {
-  /** The web's anchor (MarkdownView): `task-<id>-<slug>`. */
+  /** The heading's anchor: `task-<id>-<slug>`. */
   readonly id: string;
   /** The anchor without its `task-<id>-` prefix, with the repeat number (`steps-2`). */
   readonly slug: string;
-  /** The heading's text as the web's textContent (raw: escape it before rendering). */
+  /** The heading's text content (raw: escape it before rendering). */
   readonly text: string;
   readonly level: number;
   /** The top-level block that holds it. */
@@ -106,7 +104,7 @@ export interface ReaderCodeBlock {
   readonly index: number;
   /** A validated language label, or null. */
   readonly language: string | null;
-  /** What :copy copies: the code as the web's copy button copies it (text plus a final newline). */
+  /** What :copy copies: the code text plus a final newline. */
   readonly text: string;
   readonly mermaid: boolean;
 }
@@ -193,14 +191,14 @@ export interface ParsedDocument {
   readonly lineCount: number;
 }
 
-// The web's configuration (src/ui/lib/markdown.ts), on a private instance: never the global one.
+// GFM without soft breaks, on a private instance: never the global one.
 const markdown = new Marked({ gfm: true, breaks: false });
 
 const BULLETS = ["•", "◦", "▪"] as const;
-// Fence info the web shows as a caption (MarkdownView); anything else is "code".
+// Fence info shown as a code block's caption; anything else is "code".
 const LANGUAGE = /^[a-z0-9_+#.-]{1,24}$/i;
 
-// ---------- HTML entities (the browser decodes them in prose; code stays literal) ----------
+// ---------- HTML entities (decoded in prose; code stays literal) ----------
 
 const NAMED_ENTITIES: Readonly<Record<string, string>> = {
   amp: "&",
@@ -312,7 +310,7 @@ function codePoint(code: number): string {
   return String.fromCodePoint(code);
 }
 
-/** Decode the character references the browser would (decoded text is escaped afterwards, never before). */
+/** Decode HTML character references (decoded text is escaped afterwards, never before). */
 function decodeEntities(text: string): string {
   if (!text.includes("&")) return text;
   return text.replace(
@@ -324,7 +322,7 @@ function decodeEntities(text: string): string {
   );
 }
 
-/** The web's textContent of inline tokens: text (entities decoded) and code; no image alt, tags or breaks. */
+/** The text content of inline tokens: text (entities decoded) and code; no image alt, tags or breaks. */
 function textContent(tokens: readonly Token[] | undefined): string {
   let out = "";
   for (const token of tokens ?? []) {
@@ -362,7 +360,7 @@ function ownText(token: Token): string {
   return typeof text === "string" ? text : typeof raw === "string" ? raw : "";
 }
 
-/** Headings in document order with the web's anchors (MarkdownView processHost). */
+/** Headings in document order with their anchors (`task-<id>-<slug>`, `-2`, `-3` for repeats). */
 function collectHeadings(tokens: readonly Token[], taskId: number): ReaderHeading[] {
   const out: ReaderHeading[] = [];
   const seen = new Map<string, number>();
@@ -386,7 +384,7 @@ function collectHeadings(tokens: readonly Token[], taskId: number): ReaderHeadin
 }
 
 /**
- * A heading of the document by the bare slug (`steps-2`), the web anchor
+ * A heading of the document by the bare slug (`steps-2`), the full anchor
  * (`task-<id>-steps-2`) or either as a `#fragment`, case-insensitively; null
  * when there is none.
  */
@@ -642,9 +640,7 @@ class Parser {
     this.codeBlocks.push({ index: code + 1, language, text: `${token.text.replace(/\n$/, "")}\n`, mermaid });
     // The caption heads the code panel: the language (or what the block is) and its :copy number.
     const caption: Run[] = [
-      ...(mermaid
-        ? [ui("mermaid source", "muted@raised"), ui(" · ", "dim@raised"), ui("rich preview: :preview", "info@raised")]
-        : [ui(language ?? "code", "muted@raised")]),
+      ...(mermaid ? [ui("mermaid source", "muted@raised")] : [ui(language ?? "code", "muted@raised")]),
       ui(" · ", "dim@raised"),
       ui(`:copy ${code + 1}`, "dim@raised"),
     ];

@@ -1,12 +1,12 @@
 // The document editor (plan @400 N14/N19, Task 9): a thin terminal
-// Component/Focusable over the web editor's own CodeMirror STATE, never an
+// Component/Focusable over a CodeMirror STATE, never an
 // EditorView and never the toolkit's prompt Editor (which turns tabs into
 // spaces and has no redo).
 //
 // - The state is an EditorState with CodeMirror history and the Markdown
-//   language (the web editor's extensions, with its defaults: tab size 4,
-//   two-space indent unit). Edits are transactions and StateCommands:
-//   typing joins undo groups like the web editor, a bracketed paste is ONE
+//   language (with CodeMirror's defaults: tab size 4, two-space indent
+//   unit). Edits are transactions and StateCommands: typing joins undo
+//   groups as CodeMirror's history does, a bracketed paste is ONE
 //   undoable edit and is never read as keys, Tab/Shift-Tab are indentMore /
 //   indentLess, Enter continues Markdown list markup (insertNewlineContinue
 //   Markup, else insertNewlineAndIndent) and Backspace removes list markup
@@ -72,7 +72,7 @@ import { displayWidth, escapeTerminalText } from "./safety.ts";
 import type { ScrollPosition } from "./scrollbar.ts";
 import { type ContrastPair, type ResolvedTheme, type StyleAttributes, style } from "./theme.ts";
 
-// The web editor's state extensions (MdEditor: history() + markdown()); both are reusable values.
+// The editor's state extensions (history() + markdown()); both are reusable values.
 const EXTENSIONS: readonly Extension[] = [history(), markdown()];
 const CRLF_SEPARATOR = EditorState.lineSeparator.of("\r\n");
 
@@ -81,7 +81,7 @@ function crlfOnly(text: string): boolean {
   return text.includes("\r\n") && !/\r(?!\n)|(?<!\r)\n/.test(text);
 }
 
-/** A fresh editor state for `text`: the web editor's extensions, the cursor at `cursor` (clamped). */
+/** A fresh editor state for `text`: the editor's extensions, the cursor at `cursor` (clamped). */
 export function createEditorState(text: string, options: { cursor?: number } = {}): EditorState {
   const extensions = crlfOnly(text) ? [...EXTENSIONS, CRLF_SEPARATOR] : [...EXTENSIONS];
   const first = EditorState.create({ doc: text, extensions });
@@ -136,7 +136,7 @@ export interface MoveOptions {
   count?: number;
   /** Extend the selection instead of moving the cursor. */
   extend?: boolean;
-  /** left/right cross line ends (INSERT arrows, the web editor); false keeps them in the line (NORMAL h/l). */
+  /** left/right cross line ends (INSERT arrows); false keeps them in the line (NORMAL h/l). */
   wrap?: boolean;
 }
 
@@ -152,7 +152,7 @@ export interface DocumentEditor extends Component, Focusable {
   /** Apply a CodeMirror StateCommand; false when it did not apply. */
   run(command: StateCommand): boolean;
   move(motion: EditorMotion, options?: MoveOptions): void;
-  /** Typed text (joins the current undo group like typing in the web editor). */
+  /** Typed text (joins the current undo group, as CodeMirror's history groups typing). */
   insert(text: string): void;
   /** A bracketed paste: ONE undoable edit, inserted as text (line breaks become the document's). */
   paste(text: string): void;
@@ -402,7 +402,7 @@ interface Look {
 const PLAIN: Look = { pair: "text@bg", attrs: {} };
 
 /**
- * The web editor's cues (MdEditor's HighlightStyle) as theme pairs, with an
+ * The editor's Markdown highlight cues as theme pairs, with an
  * attribute beside every color so no cue is tint alone: headings and strong
  * text bold, emphasis and quotes italic, links underlined, code and list
  * marks in their roles.

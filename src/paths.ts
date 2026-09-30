@@ -22,11 +22,11 @@ export function dbPath(): string {
 
 // ---------- legacy daemon files (read, never written) ----------
 //
-// A `cortex serve` from an OLDER binary recorded itself in these three files
-// under the config dir. This cortex never writes them and never signals the
-// pid in them (plan @400 N4): the legacy-daemon fence (daemon.ts
-// findLegacyDaemon) probes cortex.url to refuse writable work beside such a
-// daemon, and `cortex open` falls back to the URLs.
+// A `cortex serve` from an OLDER binary recorded itself in these files under
+// the config dir. This cortex never writes them and never signals the pid in
+// them (plan @400 N4): only the legacy-daemon fence (daemon.ts
+// findLegacyDaemon) reads them, probing cortex.url to refuse writable work
+// beside such a daemon.
 
 /** An older binary's daemon PID file. */
 export function pidPath(): string {
@@ -36,15 +36,6 @@ export function pidPath(): string {
 /** An older binary's daemon loopback API URL file. */
 export function urlPath(): string {
   return path.join(configDir(), "cortex.url");
-}
-
-/**
- * An older binary's daemon BROWSER URL file: the user-facing dashboard URL
- * with the friendly hostname (e.g. `cortex.localhost`), distinct from
- * `urlPath()`'s loopback URL.
- */
-export function browserUrlPath(): string {
-  return path.join(configDir(), "cortex.browser-url");
 }
 
 /**

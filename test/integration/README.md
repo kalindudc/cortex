@@ -1,8 +1,7 @@
 # Integration tests (`test/integration/`)
 
-End-to-end tests that exercise built artifacts: the `bin/cortex` binary,
-the in-process Hono server bound to a real TCP port, and the full
-embedded UI bundle.
+End-to-end tests that exercise built artifacts: the `bin/cortex` binary and
+the in-process Hono server bound to a real TCP port.
 
 Run: `pnpm run test:integration` (or `pnpm test` for the full unit + integration suite).
 
@@ -15,7 +14,6 @@ test/integration/
 ├── isolation.test.ts           ← Plan-15 hermetic-env canary (snapshots ~/.config/cortex)
 ├── ownership.test.ts           ← multi-process database ownership (one owner per canonical DB)
 ├── related.test.ts             ← GET /api/tasks/:id/related over real HTTP
-├── ui-bundle.test.ts           ← /, /bundle.js, /bundle.css, /api/me + src/ui/** lint guards
 ├── tui.test.ts                 ← the TUI in a real PTY: render, resize, modes, :q guards, signals, suspend, termios restore
 ├── tui-concurrency.test.ts     ← three TUIs + CLI writers on one daemon: convergence, conflicts, dedupe, restart
 ├── tui-safety.test.ts          ← hostile ESC/C0/C1/OSC/DCS/APC text in every TUI surface; OSC 52/8 rules; Unicode width
@@ -31,7 +29,6 @@ test/integration/
     ├── lane.test.ts            ← lane add/ls/edit/rm
     ├── resume.test.ts          ← resume input validation + dispatch arms
     ├── rm.test.ts              ← rm prompt arms (y/n/Y/empty/--force/bad id)
-    ├── host-flag.test.ts       ← --host printed URL vs loopback bind; --no-web + IPC-only control routes
     ├── serve-stop.test.ts      ← database-scoped serve/stop: metadata, instance-bound stop, legacy fence
     ├── tag.test.ts             ← tag add/ls/edit
     └── update.test.ts          ← audit-trail status rows (-s flag)
@@ -73,12 +70,12 @@ Two patterns exist:
    store.close();
    ```
 
-   Used by `concurrency.test.ts` and `ui-bundle.test.ts`.
+   Used by `concurrency.test.ts` and `related.test.ts`.
 
 2. Spawned daemon (when the test must validate the daemon-detect arm of
    write commands or the serve/stop lifecycle): use `fixtures/daemon.ts`.
 
-   - `startForeground(env, args)` spawns `BIN serve --foreground --no-open`
+   - `startForeground(env, args)` spawns `BIN serve --foreground`
      with the hermetic env from `mkTmpEnv()` and resolves once the daemon
      printed its success line, which it does only after publishing
      `<db>.daemon.json` (its identity: socket endpoint, instance, pid).

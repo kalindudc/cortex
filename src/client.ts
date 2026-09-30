@@ -12,7 +12,7 @@
 import { type ApiOptions, createApi, HttpError, type RequestSender } from "./api.ts";
 import type { CortexClient, Endpoint } from "./contracts.ts";
 
-// One error class for every client (native and browser).
+// One error class for every client.
 export { HttpError };
 
 /** Default deadline for native requests, so a hung daemon fails instead of hanging the CLI/TUI. */
@@ -20,7 +20,7 @@ export const DEFAULT_TIMEOUT_MS = 30_000;
 
 /**
  * The native typed client for a daemon endpoint: its private Unix socket or
- * an absolute loopback URL, over createApi (typed errors, versioned guarded
+ * an absolute URL (the legacy probe and in-process test listeners), over createApi (typed errors, versioned guarded
  * writes, instance binding). `timeoutMs` defaults to DEFAULT_TIMEOUT_MS.
  */
 export function createClient(endpoint: Endpoint, options: ApiOptions = {}): CortexClient {

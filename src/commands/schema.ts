@@ -38,9 +38,8 @@ const COMMANDS: { name: string; summary: string }[] = [
   },
   {
     name: "serve",
-    summary: "run this database's daemon: private socket + localhost dashboard (headless unless --open)",
+    summary: "run this database's daemon on its private socket (the TUI starts one when needed)",
   },
-  { name: "open", summary: "open this database's dashboard in a browser (enables it on a headless daemon)" },
   { name: "stop", summary: "stop the daemon serving this database (others keep running)" },
   { name: "resume", summary: "re-open the harness session that posted updates on a task" },
   { name: "backup", summary: "write a data-only backup zip" },

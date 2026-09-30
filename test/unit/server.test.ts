@@ -370,14 +370,6 @@ describe("server: updates", () => {
   });
 });
 
-describe("server: authors", () => {
-  test("GET /api/authors returns an array", async () => {
-    const { status, json } = await fetchJson(req("GET", "/api/authors"));
-    expect(status).toBe(200);
-    expect(Array.isArray(json)).toBe(true);
-  });
-});
-
 describe("server: memory", () => {
   test("GET /api/memory/search validates q, limit and exclude", async () => {
     expect((await fetchJson(req("GET", "/api/memory/search"))).status).toBe(400);
@@ -537,26 +529,11 @@ describe("server: tags", () => {
 
 describe("server: events (SSE)", () => {
   test("GET /events returns text/event-stream with status 200", async () => {
-    // happy-dom (preloaded by bunfig.toml) shadows globalThis.TransformStream
-    // and WritableStream with Node's Transform/Writable, which lack the
-    // getWriter() that Hono's streamSSE helper calls. Restore the native
-    // Web Streams classes from node:stream/web for this test only, then
-    // put happy-dom's versions back so the rest of the suite is unaffected.
-    const sw = await import("node:stream/web");
-    const prevTS = globalThis.TransformStream;
-    const prevWS = globalThis.WritableStream;
-    (globalThis as { TransformStream: unknown }).TransformStream = sw.TransformStream;
-    (globalThis as { WritableStream: unknown }).WritableStream = sw.WritableStream;
-    try {
-      const res = await app.fetch(req("GET", "/events"));
-      expect(res.status).toBe(200);
-      expect(res.headers.get("content-type")?.startsWith("text/event-stream")).toBe(true);
-      // Cancel the stream so the test doesn't leak the never-closing reader.
-      await res.body?.cancel();
-    } finally {
-      (globalThis as { TransformStream: unknown }).TransformStream = prevTS;
-      (globalThis as { WritableStream: unknown }).WritableStream = prevWS;
-    }
+    const res = await app.fetch(req("GET", "/events"));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")?.startsWith("text/event-stream")).toBe(true);
+    // Cancel the stream so the test doesn't leak the never-closing reader.
+    await res.body?.cancel();
   });
 });
 
@@ -599,9 +576,9 @@ describe("server: notifications", () => {
     expect(list[1]?.message).toBe("created");
   });
 
-  test("PATCH /api/tasks/:id/status open→blocked WITHOUT author (dashboard click) does NOT insert a transition notification", async () => {
-    // The dashboard's setStat() sends `{ status }` only — no author. That
-    // signals "the supervisor clicked this themselves", so the bell-drawer
+  test("PATCH /api/tasks/:id/status open→blocked WITHOUT author (a human change) does NOT insert a transition notification", async () => {
+    // A human status change (the TUI) sends `{ status }` only — no author. That
+    // signals "the supervisor changed this themselves", so the transition
     // notification is suppressed (the row is already visibly updated
     // in-app via the task.updated SSE event). Only the original create
     // notification persists.
@@ -772,7 +749,7 @@ function recordEvents(runtime: DaemonRuntime): PublishedEvent[] {
 }
 
 describe("server: workspace snapshot and task state (N11)", () => {
-  test("GET /api/workspace returns every list the dashboard reads, plus the stream cursor", async () => {
+  test("GET /api/workspace returns every list a client reads, plus the stream cursor", async () => {
     const runtime = createRuntime();
     const a = buildApp(store, runtime);
     await call(a, "POST", "/api/tasks", { title: "a", tags: ["x"] });
@@ -798,7 +775,7 @@ describe("server: workspace snapshot and task state (N11)", () => {
       endpoint: { kind: "unix", socketPath: "/tmp/x.sock" },
       pid: process.pid,
     };
-    const a = buildApp(store, createRuntime({ identity, listener: "ipc" }));
+    const a = buildApp(store, createRuntime({ identity }));
     expect(((await call(a, "GET", "/api/workspace")).json as WorkspaceSnapshot).identity).toEqual(identity);
   });
 
@@ -1626,46 +1603,41 @@ describe("server: IPC-only control routes (N11)", () => {
     databasePath: ":memory:",
     endpoint: { kind: "unix", socketPath: "/tmp/ctl.sock" },
     pid: process.pid,
-    capabilities: ["control.shutdown", "control.web"],
+    capabilities: ["control.shutdown"],
   });
 
-  function recordingControl(identity: DaemonIdentity): { calls: string[]; control: DaemonControl } {
+  function recordingControl(): { calls: string[]; control: DaemonControl } {
     const calls: string[] = [];
     const control: DaemonControl = {
       shutdown: () => {
         calls.push("shutdown");
       },
-      enableWeb: async request => {
-        calls.push(`web ${JSON.stringify(request)}`);
-        return { ...identity, webUrl: `http://${request.host ?? "cortex.localhost"}:${request.port ?? 7777}` };
-      },
     };
     return { calls, control };
   }
 
-  test("only an IPC app with control registers them; a loopback app never trusts a transport header", async () => {
+  test("a runtime without control has no control routes, whatever a request's headers claim", async () => {
     const identity = controlIdentity();
-    const { calls, control } = recordingControl(identity);
-    const loopback = buildApp(store, createRuntime({ identity, listener: "loopback", control }));
-    const bare = buildApp(store, createRuntime({ identity, listener: "ipc" }));
+    const bare = buildApp(store, createRuntime({ identity }));
     const spoofed = {
       [INSTANCE_HEADER]: identity.instanceId,
       "x-cortex-listener": "ipc",
       forwarded: "for=unix",
       "x-forwarded-for": "127.0.0.1",
     };
-    for (const route of [CONTROL_PATHS.shutdown, CONTROL_PATHS.web]) {
-      expect((await send(loopback, "POST", route, {}, spoofed)).status).toBe(404);
-      expect((await send(bare, "POST", route, {}, spoofed)).status).toBe(404);
+    expect((await send(bare, "POST", CONTROL_PATHS.shutdown, {}, spoofed)).status).toBe(404);
+    // The removed control routes (control.web, control.preview) are gone from every app.
+    const { control } = recordingControl();
+    const ipc = buildApp(store, createRuntime({ identity, control }));
+    for (const route of ["/api/control/web", "/api/control/preview"]) {
+      expect((await send(ipc, "POST", route, {}, spoofed)).status).toBe(404);
     }
-    await Bun.sleep(40);
-    expect(calls).toEqual([]);
   });
 
   test("shutdown is bound to the verified instance and answers before it shuts down", async () => {
     const identity = controlIdentity();
-    const { calls, control } = recordingControl(identity);
-    const ipc = buildApp(store, createRuntime({ identity, listener: "ipc", control }));
+    const { calls, control } = recordingControl();
+    const ipc = buildApp(store, createRuntime({ identity, control }));
     const missing = await call(ipc, "POST", CONTROL_PATHS.shutdown, {});
     expect(missing.status).toBe(400);
     expect(missing.json).toMatchObject({ code: "instance_required" });
@@ -1685,53 +1657,10 @@ describe("server: IPC-only control routes (N11)", () => {
     expect(calls).toEqual(["shutdown"]);
   });
 
-  test("enable-web validates the request and returns the updated identity; a failed bind is 409", async () => {
-    const identity = controlIdentity();
-    const { calls, control } = recordingControl(identity);
-    const ipc = buildApp(store, createRuntime({ identity, listener: "ipc", control }));
-    const bound = { [INSTANCE_HEADER]: identity.instanceId };
-    const enabled = await call(ipc, "POST", CONTROL_PATHS.web, { port: 7788, host: "cortex.example" }, bound);
-    expect(enabled.status).toBe(200);
-    expect((enabled.json as { identity: DaemonIdentity }).identity.webUrl).toBe("http://cortex.example:7788");
-    expect((await call(ipc, "POST", CONTROL_PATHS.web, undefined, bound)).status).toBe(200);
-    expect(calls).toEqual(['web {"port":7788,"host":"cortex.example"}', "web {}"]);
-    for (const bad of [
-      { port: -1 },
-      { port: 70000 },
-      { port: "80" },
-      { port: 1.5 },
-      { host: "" },
-      { host: "bad host" },
-    ]) {
-      const res = await call(ipc, "POST", CONTROL_PATHS.web, bad, bound);
-      expect(res.status, JSON.stringify(bad)).toBe(400);
-    }
-    expect((await call(ipc, "POST", CONTROL_PATHS.web, { port: 1 })).status).toBe(400); // no instance
-    expect(calls.length).toBe(2);
-
-    const failing: DaemonControl = {
-      ...control,
-      enableWeb: async () => {
-        throw new Error("127.0.0.1:7788 is in use");
-      },
-    };
-    const busy = await call(
-      buildApp(store, createRuntime({ identity, listener: "ipc", control: failing })),
-      "POST",
-      CONTROL_PATHS.web,
-      { port: 7788 },
-      bound,
-    );
-    expect(busy.status).toBe(409);
-    expect(busy.json).toMatchObject({ code: "web_unavailable", error: "127.0.0.1:7788 is in use" });
-  });
-
   test("GET /api/health carries the published identity; an unpublished app answers without one", async () => {
     expect((await call(app, "GET", "/api/health")).json).not.toHaveProperty("identity");
     const identity = controlIdentity();
-    for (const listener of ["ipc", "loopback"] as const) {
-      const a = buildApp(store, createRuntime({ identity, listener }));
-      expect((await call(a, "GET", "/api/health")).json).toMatchObject({ ok: true, identity });
-    }
+    const a = buildApp(store, createRuntime({ identity }));
+    expect((await call(a, "GET", "/api/health")).json).toMatchObject({ ok: true, identity });
   });
 });

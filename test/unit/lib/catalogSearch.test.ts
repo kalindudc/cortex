@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { searchCatalog, catalogSearchHint } from "../../../src/ui/lib/catalogSearch.ts";
+import { searchCatalog } from "../../../src/lib/catalogSearch.ts";
 
 const catalog = Array.from({ length: 5000 }, (_, index) => ({
   name: `team-${String(index).padStart(4, "0")}-platform`,
@@ -10,7 +10,7 @@ describe("optional catalog search", () => {
       const result = searchCatalog(catalog, query, item => item.name);
       expect(result.items).toEqual(catalog);
       expect(result.matched).toBe(5000);
-      expect(catalogSearchHint(result)).toBe("5000 of 5000 entries");
+      expect(result.total).toBe(5000);
     }
   });
   test("searches the full catalog with case-insensitive AND keywords", () => {
@@ -27,6 +27,7 @@ describe("optional catalog search", () => {
   test("matching treats punctuation literally and reports empty results", () => {
     const result = searchCatalog(catalog, ".*", item => item.name);
     expect(result.items).toEqual([]);
-    expect(catalogSearchHint(result)).toBe("0 of 5000 entries");
+    expect(result.matched).toBe(0);
+    expect(result.total).toBe(5000);
   });
 });

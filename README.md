@@ -3,8 +3,9 @@
 > AI coding agents working on this repo: start with [AGENTS.md](./AGENTS.md). Run `pnpm run agents:check` before pushing.
 
 Personal task tracker for engineers supervising parallel AI coding agents.
-Single self-contained binary at `home/bin/cortex` with a complete CLI, REST + SSE
-API on `127.0.0.1`, and a SQLite WAL store at `~/.config/cortex/cortex.db`.
+Single self-contained binary at `home/bin/cortex` with a complete CLI, a terminal
+workspace (TUI) and a daemon on a private Unix socket, over a SQLite WAL store at
+`~/.config/cortex/cortex.db`.
 
 ## Quick start
 
@@ -13,10 +14,9 @@ pnpm run build                       # compile to bin/cortex
 cortex init                          # create ~/.config/cortex/cortex.db
 cortex agents install                # skills + pi extension (when pi is installed)
 cortex add "ship plan 1" -p 0
-cortex                               # the terminal workspace (starts a headless daemon if none runs)
+cortex                               # the terminal workspace (starts this database's daemon if none runs)
 cortex ls
-cortex serve                         # run the daemon with the dashboard on http://cortex.localhost:7777
-cortex open                          # open the dashboard in your browser
+cortex serve                         # run this database's daemon in the background (socket only)
 cortex stop                          # stop this database's daemon
 ```
 
@@ -29,11 +29,10 @@ pnpm run dev -- ls --json            # any CLI command from source
 
 ### Dev data sandbox
 
-`pnpm run dev` and `pnpm run serve:dev` point cortex at `tmp/dev/` (config, database, skills and pi extension)
-instead of your real `~/.config/cortex`, so unreleased code never migrates the database your installed `cortex`
-uses. An installed daemon from an older binary also blocks new-binary commands against the same config, so dev
-runs against real data would fail while it is up. Both dev commands share the sandbox, so the TUI from
-`pnpm run dev` and the dashboard from `pnpm run serve:dev` talk to the same dev daemon.
+`pnpm run dev` points cortex at `tmp/dev/` (config, database, skills and pi extension) instead of your real
+`~/.config/cortex`, so unreleased code never migrates the database your installed `cortex` uses. An installed
+daemon from an older binary also blocks new-binary commands against the same config, so dev runs against real
+data would fail while it is up.
 
 ```bash
 pnpm run dev -- init && pnpm run dev -- agents install  # optional: seed the sandbox (database, skills, pi extension) once
@@ -42,40 +41,17 @@ CORTEX_DEV_REAL=1 pnpm run dev       # your real config and database (stop the i
 pnpm run dev -- stop                 # stop the sandbox's daemon
 ```
 
-`pnpm run dev` builds the dashboard bundle (`out/`) once if it is missing, because the source server embeds it.
-
-### Live UI dev loop
-
-```bash
-pnpm run serve:dev                   # bun --watch, port 7788, --no-open
-PORT=7799 pnpm run serve:dev
-```
-
-- HTML edits to `src/ui/index.html` are picked up immediately — the
-  server reads the file fresh on every request via `Bun.file().text()`. Just
-  refresh the browser; no restart, no reload script.
-- TypeScript edits to `src/cli.ts`/`src/server.ts`/`src/store.ts`/etc. trigger a
-  `bun --watch` restart within ~1 s. The browser stays connected because
-  the SSE `EventSource` reconnects automatically; refresh once to repopulate.
-- It uses the dev data sandbox (`tmp/dev/`, see above) unless you opt out, and
-  first stops the daemon serving that SAME database so it can own it; `cortex stop`
-  is instance-bound, so daemons of other databases (like your installed one) keep
-  running.
-- It defaults to port 7788 so it never collides with a `cortex serve` on 7777;
-  pick another with `PORT=<n>`.
-
 ## TUI
 
 The terminal workspace is the normal way to use cortex. In an interactive terminal, plain `cortex` opens it (the
 same as `cortex tui`); without a terminal (a pipe, a script) plain `cortex` prints the usage as before. It talks to
-this database's daemon over the private socket, starting a headless one (socket only: no browser, no web listener)
-when none runs, and quitting leaves that daemon running for the CLI, agents and other clients. The browser
-dashboard stays supported as the fallback (`cortex open`, or `:preview` for one task).
+this database's daemon over the private socket, starting one when none runs, and quitting leaves that daemon
+running for the CLI, agents and other clients.
 
 ```bash
 cortex                               # the TUI (same as `cortex tui`)
 cortex tui 42                        # open task 42
-cortex tui 42 --heading plan         # ... at a heading (its web anchor slug, or task-42-plan)
+cortex tui 42 --heading plan         # ... at a heading (its anchor slug, or task-42-plan)
 cortex tui --theme cortex-light      # a theme for this session only
 cortex tui --profile work            # a separate view state (selection, filters, mode, saved theme)
 pnpm run dev                         # the TUI from source, in the tmp/dev sandbox
@@ -100,7 +76,7 @@ It needs at least 80×24 cells. `TERM=dumb` is refused (use the CLI there), and 
   shown as plain text (reading never edits). `Esc`, or the same key again, returns to NORMAL.
 - COMMAND (`:`): a one-line command. Tab completes commands and their arguments, Up/Down recall history, Enter
   runs it, Esc cancels. `:<id>` (for example `:42`) jumps to a task.
-- SEARCH (`/`): filters the task list with the dashboard's search (`@id`, `@title`, `#tag`, then AND words over
+- SEARCH (`/`): filters the task list with cortex's task search (`@id`, `@title`, `#tag`, then AND words over
   titles, bodies and tags), or searches the rendered document while it has the focus, or the help while it is
   open (`n`/`N` step).
 
@@ -124,7 +100,7 @@ close the picker, so the filters stay. `F` clears the search and every filter (d
 were). The active filters are always on the list header as chips (`status:review lane:cortex #ui`). `;d` shows
 or hides the done tasks in one key (`+done` on the list header while they are shown). `;m` sets the selected
 task's status: a picker with the same letters (`d` `o` `r` `b` `x`, so `;m x` marks it done) whose highlight
-starts on the next step, so Enter does what the web's next-step button does (open → review → done).
+starts on the next step, so Enter does what `:next` does (open → review → done).
 
 `?` or `:help` lists the modes, every command and the keys as configured (long descriptions wrap under their
 column); `/` searches it while it is open, highlighting every match, and `n`/`N` step through them (`Esc`
@@ -181,7 +157,7 @@ Every command, as `:help` shows it (Tab completes names and arguments):
 | `:new [title]` | | Create a task in the filtered lane (else now) and select it; without a title it is named untitled-\<id> (:title renames it) |
 | `:title [text]` | | Rename the current task; without text, edit its full title in place (Enter or Esc saves) |
 | `:status [draft\|open\|review\|blocked\|done]` | | Set the current task's status (a human change, never attributed to an agent); bare picks it in a list: d o r b x set one, Enter the next step |
-| `:next` | | Move the current task one step on, like the web's next-step button: draft→open, open→review, review→done, blocked→open, done→open |
+| `:next` | | Move the current task one step on: draft→open, open→review, review→done, blocked→open, done→open |
 | `:priority <n\|none>` | | Set the current task's priority: any whole number from 0 (the highest) up, or none |
 | `:lane <name>` | | Move the current task to another lane (:lanes manages the lanes) |
 | `:tag [+name -name]` | | Add (+name, or a bare name) and remove (-name) the current task's tags; without names, pick them in a list |
@@ -201,16 +177,15 @@ Every command, as `:help` shows it (Tab completes names and arguments):
 | `:read` | `:r` | Read mode: the rendered document (saved as your preferred mode) |
 | `:edit` | `:e` | Edit mode: the document editor, i types in it (saved as your preferred mode) |
 | `:split` | `:sp` | Split mode: the editor beside a preview; a narrow terminal shows one half at a time, Tab switches (saved as your preferred mode) |
-| `:heading [slug]` | | Jump to a heading of this document by its web anchor slug (Tab completes; repeats are slug-2, slug-3); without one, pick it from the outline |
+| `:heading [slug]` | | Jump to a heading of this document by its anchor slug (Tab completes; repeats are slug-2, slug-3); without one, pick it from the outline |
 | `:links` | | The links and @id/#tag references of this document: Enter follows one (@id jumps and clears the filters, #tag filters, a heading link jumps, a web link is copied) |
 | `:copy [n]` | | Copy code block n (its caption shows the number; without one, the block in view) with OSC 52; terminals never confirm it |
 | `:source` | | Show the raw Markdown source in Read and the preview (escaped), or the rendered document again; in the Activity panel, the highlighted update's source |
-| `:preview` | | Open this task's current text (unsaved edits included) in the browser, rendered in full: the dashboard's sanitizer and Mermaid diagrams. Starts this daemon's dashboard if needed; the private link (also in the message log) expires in 10 minutes and nothing is saved |
 | `:activity` | | The Activity panel: this task's updates, newest first; Enter expands one (its body; :source shows its Markdown); c posts an update. Retries a failed read |
 | `:related` | | The Related panel: the tasks that reference this one, that it references and that share its tags; Enter opens one (the list filters clear). Retries a failed read |
 | `:authors` | | The Authors panel: who posted on this task, latest first, with their post counts |
 | `:post [text]` | | Post an update to this task as yourself: without text, open its composer (also c: :w posts it, closing it keeps the draft); with text, post it now |
-| `:backup` | | Write a data-only backup now through the daemon (the dashboard's backup button) and report its path and counts; cortex restore restores one |
+| `:backup` | | Write a data-only backup now through the daemon and report its path and counts; cortex restore restores one |
 | `:resume` | | Resume the pi session that posted on this task (cortex resume, which asks when there are several): it gets the terminal until it exits; the daemon keeps running |
 | `:w [[@id] path]` | `:write` | Save every unsaved title/body draft now (a failed save is retried); in a form, save the form; with a path, export to a new private file this task's body draft if it has unsaved changes, else the one kept draft (of a deleted task or a replaced database; with several, give its @id), else this task's body; with @id, @id's kept draft, else task @id's |
 | `:w! [@id] <path>` | `:write!` | Export like :w [@id] <path>, replacing the file if it exists |
@@ -350,8 +325,8 @@ profile and wins over tui.toml's `density`, which applies only while the profile
 
 | Bundled theme | Appearance |
 | --- | --- |
-| `cortex-dark` | dark (the dashboard's dark palette) |
-| `cortex-light` | light (the dashboard's light palette) |
+| `cortex-dark` | dark |
+| `cortex-light` | light |
 | `high-contrast-dark` | dark, 7:1 text contrast |
 | `high-contrast-light` | light, 7:1 text contrast |
 | `ansi` | the terminal's own 16-color palette and default colors |
@@ -402,7 +377,7 @@ status.blocked = "#ff7b72"
 
 ### Multiple clients
 
-One daemon serves a database; any number of TUIs, CLI commands, agents and browser tabs share it and converge
+One daemon serves a database; any number of TUIs, CLI commands and agents share it and converge
 live over its event stream. Title and body saves are guarded per field, so a stale save of the same field
 reports a conflict instead of overwriting (different fields never conflict); CLI and API writes stay
 last-writer-wins by design. Each TUI keeps its own selection, filters and drafts. Quitting a TUI never stops
@@ -427,23 +402,27 @@ command of this binary, reads included, refuses to run beside it until it stops.
    `cortex serve` on the machine).
 2. Back up: `cortex backup` with the old binary (or copy the database files while nothing runs).
 3. Deploy the new binary (`pnpm run deploy` copies `bin/cortex` to `~/bin/cortex`).
-4. Start it: `cortex serve`, or just `cortex` (headless). `cortex doctor` shows the state; run `cortex init` if
+4. Start it: `cortex serve`, or just `cortex`. `cortex doctor` shows the state; run `cortex init` if
    it lists pending migrations, and `cortex agents install` to refresh the agent skills and pi extension.
 
 To roll back, stop the new daemon, back up, and redeploy the previous binary. Never run an old binary's
 commands while a new daemon owns the database: old binaries write the file directly, bypassing it.
 
+The browser dashboard has been removed: the TUI is cortex's only interface besides the CLI. `cortex open` and
+the TUI's `:preview` are gone, and `cortex serve` ignores the old `--port`, `--host`, `--open`, `--no-open` and
+`--no-web` flags (the daemon listens only on its private socket). A daemon started by the previous binary keeps
+serving its dashboard until you `cortex stop` it; the next `cortex` or `cortex serve` starts a socket-only one.
+Re-run `cortex agents install` to refresh the skills, and delete a stale `~/.agents/skills/cortex/cli/open.md`
+(the installer never prunes files).
+
 ### Limits and recovery
 
 - The terminal renders Markdown itself: GFM tables, task lists, code blocks (`:copy`), quotes, headings and
   validated links (their text; `:links` lists each destination). Mermaid diagrams and images are NOT rendered in
-  the terminal (diagrams show as source); use `:preview` for the full rendering. Clipboard (OSC 52), hyperlinks (OSC 8), the Kitty keyboard protocol
+  the terminal: diagrams show as source and are never rendered. Clipboard (OSC 52), hyperlinks (OSC 8), the Kitty keyboard protocol
   and appearance reports depend on the terminal and on tmux/SSH passthrough; nothing depends on them alone.
 - Keyboard-only operation and never color-only status are design goals, but the TUI has NOT been validated with
-  screen readers; the dashboard remains the accessible fallback.
-- `:preview` opens the current text (unsaved edits included) in the browser through this daemon's dashboard,
-  which it enables if needed. The private link expires after 10 minutes; previews are limited to 1 MiB each
-  and 8 MiB in total, kept in the daemon's memory, and never saved.
+  screen readers.
 - Each event-stream client may lag by 1024 events or 8 MiB before it is told to reload its snapshot; the
   stream sends a heartbeat every 5 s.
 - Drafts live in the TUI's memory until saved. `:w` saves; `:w <path>` exports the body draft to a new private
@@ -463,7 +442,7 @@ commands while a new daemon owns the database: old binaries write the file direc
 | `add <title> [-l lane] [-p int] [-b body]` | create a task (auto-creates `lane` if missing) |
 | `ls [-l lane] [-s status] [--json]` | list tasks, grouped by lane, sorted by id (`s` = `open\|review\|blocked\|done`) |
 | `show <id> [--json]` | show one task with its updates |
-| `search [text] [--json]` | fuzzy-search tasks (same scorer + `@id`/`@title`/`#tag` prefixes as the dashboard palette) in an fzf picker with a `show` preview; enter copies the task id to the clipboard and prints the task like `show`; `--json` emits ranked matches without fzf |
+| `search [text] [--json]` | fuzzy-search tasks (same scorer and `@id`/`@title`/`#tag` prefixes as the TUI's `/` search) in an fzf picker with a `show` preview; enter copies the task id to the clipboard and prints the task like `show`; `--json` emits ranked matches without fzf |
 | `memory search\|show\|context\|lane [--json]` | agent memory: ranked recall across every lane (`search --boost=<lane>` ranks one lane higher, `--lane` filters), one task's staleness (since its last body edit), its latest linked stream, its body (section-first when long; `show --section=<text>` loads matching sections) and the breadcrumb trail since then, the one-call agent context (primer + hits), and this checkout's lane |
 | `update <id> -m <msg> [-s status] [-b body]` | post an update; `status` = `open\|review\|blocked\|done` |
 | `edit <id> [-t title] [-b body] [-p int]` | edit task fields |
@@ -471,9 +450,8 @@ commands while a new daemon owns the database: old binaries write the file direc
 | `rm <id> [-f]` | remove a task (prompts unless `-f`) |
 | `lane add\|ls\|edit\|rm` | manage lanes |
 | `doctor [--json]` | report version, DB path, daemon state, pending migrations and counts; read-only (never starts a daemon or migrates) |
-| `tui [id] [--heading slug] [--profile name] [--theme name]` | open the terminal workspace (plain `cortex` does the same in an interactive terminal); starts a headless daemon over the private socket if none runs, and leaves it running on quit |
-| `serve [-p port] [--foreground] [--open\|--no-open] [--no-web] [--host name]` | run the daemon for this database (`CORTEX_DB`): a private socket every command goes through, plus the dashboard at `/` on `127.0.0.1` (`--no-web`: socket only). Headless unless `--open`. Prints `http://cortex.localhost:<port>` once ready (server still binds `127.0.0.1`); a second `serve` attaches to it. |
-| `open` | open this database's dashboard in your default browser (enabling it on a headless daemon); never starts one |
+| `tui [id] [--heading slug] [--profile name] [--theme name]` | open the terminal workspace (plain `cortex` does the same in an interactive terminal); starts this database's daemon (private socket) if none runs, and leaves it running on quit |
+| `serve [--foreground]` | run this database's daemon (`CORTEX_DB`) on its private Unix socket (every command goes through it); prints the socket once ready; a second `serve` attaches |
 | `reset` | stop this database's daemon (if running), wipe the DB + WAL sidecars (keeping the `<db>.owner.lock` file), then re-init an empty DB. Requires typing `RESET` to confirm. Datastore only (agent tools: `agents reset`). |
 | `stop` | stop the daemon serving this database; daemons of other databases keep running |
 | `backup [-o path] [--rotate N]` | export cortex's row data as a single JSON document inside a `.zip` (default `~/.config/cortex/backups/cortex-<host>-<ISO>.zip`). Safe to run while the daemon is up. Refuses a missing database (it never creates one, writes no archive and rotates nothing). |
@@ -569,7 +547,7 @@ For every flag that takes a fixed enum (`--status`, `--severity`), `cortex
 
 ## Backup & restore
 
-`cortex backup` writes a single `.zip` containing `cortex-backup.json` — a flat data-only dump of cortex rows (lanes, tags, tasks, updates, task_tags, and notifications). The backup is taken inside a deferred SQLite read transaction so it is safe to run while the daemon is writing. The dashboard's sidebar system bar also has a `Back up now` button that writes the same default backup through the daemon.
+`cortex backup` writes a single `.zip` containing `cortex-backup.json` — a flat data-only dump of cortex rows (lanes, tags, tasks, updates, task_tags, and notifications). The backup is taken inside a deferred SQLite read transaction so it is safe to run while the daemon is writing. In the TUI, `:backup` writes the same default backup through the daemon.
 
 `cortex restore <file>` re-inserts backup rows into the live DB inside one transaction:
 
@@ -580,13 +558,13 @@ For every flag that takes a fixed enum (`--status`, `--severity`), `cortex
 
 Restoring the same backup twice will duplicate tasks (each with a different id). Use `cortex restore <file> --dry-run` to preview the counts before committing. Restore refuses while `cortex serve` is running; stop the daemon first so the CLI is the only writer (`--dry-run` works beside it: it only reads). Skills, extensions, and daemon/lock files are NOT backed up — skills and extensions are reinstalled by `cortex agents install`.
 
-## API surface
+## Daemon API
 
-Bound to `127.0.0.1` only.
+Served ONLY on the daemon's private Unix socket (`endpoint.socketPath` in `<db>.daemon.json`, mode `0600`) for
+the CLI and the TUI; there is no TCP listener.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| GET | `/` | the cortex dashboard (single-page Preact UI) |
 | GET | `/api/health` | `{ ok: true, version }` |
 | GET | `/api/me` | resolved author identity (`gh` username → `git config user.name` → `os.hostname()` → `"me"`) |
 | POST | `/api/backup` | write an on-demand data-only backup using the default backup path |
@@ -609,146 +587,3 @@ Bound to `127.0.0.1` only.
 | GET | `/events` | SSE stream of `task.added`, `task.updated`, `task.removed`, `update.posted`, `lane.changed` |
 
 SSE clients receive a `heartbeat` event every 5 s (below Bun's 10 s idle timeout, which would otherwise close an idle stream).
-
-## Dashboard
-
-The daemon serves a document-first single-page dashboard at
-`http://127.0.0.1:7777/` (`cortex open` opens it; two columns on desktop; a
-navigation drawer at ≤ 900 px):
-
-- **Navigation** (left, 280 px) — a workspace identity and ONE filter surface:
-  a search box (`@id`, `@title-only`, `#tag`, body/title text), status and
-  lane selectors, `Filter by tags` (multi-select, OR semantics, plus an
-  `untagged` sentinel), an include-done toggle and `Clear all`.
-  Status, lane and tags open matching **attached sidebar panels**, not
-  browser-native dropdowns or a centered filtering dialog. Panels align to
-  the sidebar, highlight their trigger, and stay within the available
-  viewport. Lane and tag dropdowns have optional keyword search: an empty
-  query shows every entry, and typing filters the full catalog using
-  case-insensitive AND matching (for example, `platform api` matches both
-  words anywhere in the name). There is no result cap or forced narrowing.
-  The task-header lane/tag pickers use the same search behavior. Typing
-  does not change a filter or task membership until you choose an entry.
-  Tag selection stays open for batch picking, even when the
-  filtered list's fallback task changes. Selected tags render as removable tokens. Search runs against
-  the full task pool first, then intersects with the structured filters, so
-  `#tag` still resolves exactly even when matching tasks live in another
-  lane. The **Tasks** section lists the filtered tasks (status dot, title,
-  `Pn` chip, task ID and status) with a `+` for a new untitled task.
-  Theme, `Manage lanes`, `Manage tags` and `Back up now` stay at the foot of
-  the sidebar. Filters govern the list
-  only — the explicitly selected task never changes under you; if it falls
-  outside the filters the workspace says so and offers `Clear filters`.
-  `Manage lanes` / `Manage tags` are explicit modes (rename, color, sort,
-  delete with safety: cannot delete `now` or non-empty lanes; tag deletion
-  shows the cascade count) with a `Back to tasks` affordance; entering them
-  never changes filters.
-- **Document** (center) — tasks open in your saved Read/Edit/Split mode
-  (Read is the default for a new browser). The header
-  shows `[id]` once and a large wrapping title—click it (or focus it and
-  press Enter/Space) to edit in place. Enter/Escape finish editing and return
-  focus to the title; blur flushes without stealing focus. The quiet property
-  row has `Lane: …`, `Priority: Pn` / `Set priority` (integer or blank to
-  clear), removable tag pills, and a single `+` button to add tags. Each
-  rounded pill is compact at rest and smoothly expands its `×` control on
-  hover or keyboard focus—no reserved empty remove-button space. Touch
-  devices keep the remove target visible. Clicking (or keyboard-activating) a
-  tag pill's label appends that tag to the sidebar tag filter (idempotent,
-  never toggles it off); the `×` instead detaches the tag from this task, not
-  the tag definition. Tag additions
-  and removals use the API's delta modes rather than replacing a stale tag list. The workspace toolbar keeps the smart next-status action
-  (`Move to review` / `Mark done` / `Unblock` / `Reopen`), status popup,
-  `Focus reading` / `Show navigation`, and a `⋯` task-actions menu holding
-  `Delete task` (confirmed). The title and prose share an inset reading column.
-  One tablist — **Document / Activity / Related / Authors** — and, on the
-  Document tab, a **Read / Edit / Split** switch. Your choice is saved in
-  browser localStorage and reused across task switches, reloads and new tabs;
-  only the preference enum is stored, never raw task drafts. Heading links
-  temporarily reveal Read without changing the saved preference. Read renders sanitized
-  Markdown (GFM tables, task lists, code with copy controls, Mermaid
-  diagrams, clickable `@id`/`#tag` refs) with an outline rail; Edit and
-  Split use the same CodeMirror instance, which stays mounted (cursor, undo
-  and pending edits survive switching modes or tabs). Edits autosave
-  (600 ms idle / 3 s max; `Cmd/Ctrl + S` flushes), external changes to a
-  dirty field show Apply / Keep my changes, and unsaved drafts are kept in
-  memory per task while you navigate.
-- **Activity** (a Document tab, not a third column) — the task's updates as
-  newest-first expandable cards (summary, author, time, severity, rendered
-  body + Markdown source). A collapsed `+ Post update` composer sits after
-  the thread; drafts are kept per task. **Related** shows referenced-by /
-  references / shared-tag buckets with an explicit loading, error + retry
-  and confirmed-empty state; **Authors** is the per-task rollup.
-
-Rendering is a single sanitized boundary: Markdown → `marked` → DOMPurify
-(HTML profile: no scripts, styles, forms, iframes, raw SVG/MathML,
-`javascript:`/`data:` URLs) and Mermaid → `mermaid.render` in an inert
-staging element → DOMPurify (SVG profile) → the reader. Documents without
-diagrams never load the Mermaid chunk.
-
-Motion is deliberately short: 90 ms for control feedback, 140 ms for menus
-and content, and 180 ms for drawers. State and focus changes never wait for
-animation; dismissal removes the live surface immediately. Reduced-motion
-preferences disable decorative animations and transitions, including when
-changed while a surface is open. Metadata/SSE refreshes don't replay the
-unchanged document's reveal animation. Tag remove controls use a localized
-140 ms width/fade reveal; this does not animate document/editor dimensions.
-
-### Keyboard
-
-No single-key hotkeys (they hijack typing in inputs). Globals:
-
-- `Cmd/Ctrl + P` or `Cmd/Ctrl + K` — command palette (command / search mode)
-- `Cmd/Ctrl + /` — reveal Activity, expand the composer and focus it
-- `Cmd/Ctrl + Enter` — post the update (while focused in the composer)
-- `Cmd/Ctrl + S` — flush the description/title autosave now (inside the editor)
-- `Esc` — close palette → modal → popovers / drawer / drag tray
-
-Quick body-mode shortcuts follow the controls' left-to-right order:
-
-| Mode | Mac | Windows / Linux |
-| --- | --- | --- |
-| Read | `Cmd + Option + 1` | `Ctrl + Alt + 1` |
-| Edit | `Cmd + Option + 2` | `Ctrl + Alt + 2` |
-| Split | `Cmd + Option + 3` | `Ctrl + Alt + 3` |
-
-Use the number row and **left Alt** on Windows/Linux; AltGr character input
-is left untouched. The shortcuts work from CodeMirror, focus the selected
-surface, and save your mode preference. They are suspended while dialogs,
-menus or navigation own the keyboard, and ignore IME/handled events and
-held-key repeats. The mode control shows the chord modifier once as a
-"super key" (⌘⌥ / Ctrl+Alt) with a per-button digit (1/2/3); full hints
-stay in tooltips and palette commands.
-
-These avoid the common browser tab-selection (`Cmd/Ctrl + 1–9`), reload,
-search and save shortcuts listed by [Chrome](https://support.google.com/chrome/answer/157179),
-[Safari](https://support.apple.com/guide/safari/keyboard-and-other-shortcuts-cpsh003/mac)
-and [Edge](https://support.microsoft.com/en-us/microsoft-edge/keyboard-shortcuts-in-microsoft-edge-50d3edab-30d9-c7e4-21ce-37fe2713cfad).
-Custom OS/extension mappings can still intercept them. Alt-key handling follows
-[the documented platform differences](https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/getModifierState).
-
-Inside the Document tablist: `←`/`→`/`Home`/`End` move focus between tabs,
-`Enter`/`Space` activate the focused tab. Sidebar filter panels are nonmodal:
-`↑`/`↓`/`Home`/`End` navigate choices, `Enter`/`Space` choose, and `Esc` closes
-the panel and returns focus to its trigger. Outside clicks dismiss without
-stealing focus. The palette's `Filter by tags…` command reveals this same
-sidebar panel, including on phones and from focus reading.
-
-Dialogs (palette, lane/tag editors, confirmations, the mobile navigation
-drawer) remain native modal dialogs: Tab is trapped, the background is inert,
-and focus returns to the opener on close. Opening a filter inside mobile
-navigation does not open another dialog or dismiss the drawer.
-
-The command palette is the primary interface for everything: new task,
-switch task (global search — selecting a result keeps your filters), Read
-document / Edit description / Split / Edit title, Post an update, change
-status / priority / tags, lane filter / edit / delete, Manage lanes /
-Manage tags, theme. Type to filter, `↑`/`↓` to navigate, `Enter` to execute.
-
-### Drag & drop
-
-Start dragging a task row and a transient **Move to lane** tray appears at
-the bottom of the navigation column; drop the task on a lane to move it.
-The tray is not a filter list and disappears when the drag ends (or on
-`Esc`). The `Lane:` control in the header is the click/keyboard/touch
-alternative.
-

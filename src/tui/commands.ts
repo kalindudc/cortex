@@ -23,8 +23,8 @@
 //   through the client mutate hands it (refused once that database was
 //   replaced), and a command that reads or asks first passes mutate the
 //   database generation it captured when it was submitted.
-// - Human status changes send no author, exactly as the web does, so they
-//   never pose as attributed agent changes (N9).
+// - Human status changes send no author, so they never pose as attributed
+//   agent changes (N9).
 // - Tag membership changes are atomic add/remove deltas, never a whole-list
 //   replace; removing a tag from a task never deletes its definition.
 // - Documents (Task 9): :read/:edit/:split change the saved preferred mode
@@ -55,12 +55,12 @@ import type {
   Versions,
 } from "../contracts.ts";
 import type { Task, TaskStatus } from "../store.ts";
-import { searchCatalog } from "../ui/lib/catalogSearch.ts";
-import { isValidTagName, nextStatusFor, STATUS, STATUS_LABEL } from "../ui/lib/constants.ts";
-import { searchTasks } from "../ui/lib/fuzzy.ts";
-import { UNTAGGED } from "../ui/lib/taskView.ts";
+import { searchCatalog } from "../lib/catalogSearch.ts";
+import { isValidTagName, nextStatusFor, STATUS, STATUS_LABEL } from "../lib/constants.ts";
+import { searchTasks } from "../lib/fuzzy.ts";
+import { UNTAGGED } from "../lib/taskView.ts";
 import type { Activity } from "./activity.ts";
-import { openRichPreview, resumeTask } from "./bridge.ts";
+import { resumeTask } from "./bridge.ts";
 import { DENSITIES, type Density, isDensity } from "./config.ts";
 import { type Dialog, type DialogRow, showDialog } from "./dialogs.ts";
 import { TASK_GROUPS, TASK_SORTS, type TaskFilter, type TaskGroup, type TaskSort } from "./preferences.ts";
@@ -307,7 +307,7 @@ const STATUS_KEYS: Readonly<Record<TaskStatus, string>> = {
   done: "x",
 };
 
-/** One press of a status: the status slot becomes it, or is cleared when it already is (one slot, like the web). */
+/** One press of a status: the status slot becomes it, or is cleared when it already is (one slot). */
 function toggleStatus(session: TuiSession, status: TaskStatus): void {
   const f = session.filter;
   session.setFilter({ ...f, status: f.status === status ? null : status });
@@ -736,7 +736,7 @@ async function writeStatus(
     session.notify("info", `@${shown.id} is already ${STATUS_LABEL[status]}`);
     return;
   }
-  // No author: a human change, exactly as the web's status buttons (N9).
+  // No author: a human change (N9).
   await writeField(client, shown, "status", attempt, expected =>
     client.versioned.setStatus(shown.id, { status }, { expected, mutationId: newMutationId() }),
   );
@@ -744,10 +744,10 @@ async function writeStatus(
 }
 
 /**
- * The status picker (bare :status, ;m): the web's status buttons as one
- * list. Each status is a radio row (the current one marked) with the filter
- * picker's letter (d o r b x), which sets it at once; the highlight starts on
- * the next step (the web's next-step button), so Enter takes it. Any pick
+ * The status picker (bare :status, ;m): every status as one list. Each
+ * status is a radio row (the current one marked) with the filter picker's
+ * letter (d o r b x), which sets it at once; the highlight starts on the
+ * next step (as :next takes it), so Enter takes it. Any pick
  * closes the picker and writes the task it was opened for, on the database
  * it was opened for (a task deleted meanwhile is an error, nothing written).
  */
@@ -867,7 +867,7 @@ async function changeTags(
   session.notify("info", [...done, ...skipped].join(" · "));
 }
 
-/** The current task's tag picker (the web's TagPicker): Enter toggles one membership; `/` filters; a new valid name can be created. */
+/** The current task's tag picker: Enter toggles one membership; `/` filters; a new valid name can be created. */
 function openTagPicker(session: TuiSession, task: Task): void {
   const id = task.id;
   const database = session.databaseGeneration; // each toggle writes to the database it was opened for
@@ -1077,7 +1077,7 @@ function openLaneForm(
           throw writeFailure(err, `save lane ${was}`);
         }
       }, database);
-      // The web's LaneEditModal: a lane filter follows the rename.
+      // A lane filter follows the rename.
       if (fields.rename !== undefined && session.filter.lane === was) {
         session.setFilter({ ...session.filter, lane: fields.rename });
       }
@@ -1238,7 +1238,7 @@ function openTagForm(session: TuiSession, state: TagStateSnapshot | null, databa
           throw writeFailure(err, `save #${was}`);
         }
       }, database);
-      // The web's TagEditModal: a tag filter follows the rename.
+      // A tag filter follows the rename.
       const rename = fields.rename;
       if (rename !== undefined && session.filter.tags.includes(was)) {
         session.setFilter({ ...session.filter, tags: session.filter.tags.map(n => (n === was ? rename : n)) });
@@ -1409,7 +1409,7 @@ function requireReader(session: TuiSession): Reader {
 /** Sessions with a :backup in flight (one at a time: a backup is never sent twice by accident). */
 const backingUp = new WeakSet<TuiSession>();
 
-/** :backup: ONE data-only backup through the daemon (the dashboard's button); never retried. */
+/** :backup: ONE data-only backup through the daemon; never retried. */
 async function runBackup(session: TuiSession): Promise<void> {
   if (backingUp.has(session)) throw new CommandError("A backup is already being written: wait for its result");
   backingUp.add(session);
@@ -1435,8 +1435,8 @@ async function runBackup(session: TuiSession): Promise<void> {
 }
 
 /**
- * The dashboard's startup migration check, for the terminal: pending database
- * migrations become a persistent warning in :messages (a failed check is a
+ * The startup migration check: pending database migrations become a
+ * persistent warning in :messages (a failed check is a
  * warning too; nothing else changes).
  */
 export async function reportPendingMigrations(session: TuiSession): Promise<void> {
@@ -1718,8 +1718,7 @@ export const COMMANDS: readonly CommandSpec[] = [
     name: "next",
     aliases: [],
     usage: ":next",
-    description:
-      "Move the current task one step on, like the web's next-step button: draft→open, open→review, review→done, blocked→open, done→open",
+    description: "Move the current task one step on: draft→open, open→review, review→done, blocked→open, done→open",
     run: (session, argument) => {
       noArgument("next", argument);
       return setStatus(session, "next", ":next");
@@ -1990,7 +1989,7 @@ export const COMMANDS: readonly CommandSpec[] = [
     aliases: [],
     usage: ":heading [slug]",
     description:
-      "Jump to a heading of this document by its web anchor slug (Tab completes; repeats are slug-2, slug-3); without one, pick it from the outline",
+      "Jump to a heading of this document by its anchor slug (Tab completes; repeats are slug-2, slug-3); without one, pick it from the outline",
     complete: (prefix, session) => {
       const wanted = prefix.toLowerCase();
       return (session.reader?.headings() ?? []).map(h => h.slug).filter(slug => slug.startsWith(wanted));
@@ -2079,17 +2078,6 @@ export const COMMANDS: readonly CommandSpec[] = [
     },
   },
   {
-    name: "preview",
-    aliases: [],
-    usage: ":preview",
-    description:
-      "Open this task's current text (unsaved edits included) in the browser, rendered in full: the dashboard's sanitizer and Mermaid diagrams. Starts this daemon's dashboard if needed; the private link (also in the message log) expires in 10 minutes and nothing is saved",
-    run: async (session, argument) => {
-      noArgument("preview", argument);
-      await openRichPreview(session);
-    },
-  },
-  {
     name: "activity",
     aliases: [],
     usage: ":activity",
@@ -2139,7 +2127,7 @@ export const COMMANDS: readonly CommandSpec[] = [
     aliases: [],
     usage: ":backup",
     description:
-      "Write a data-only backup now through the daemon (the dashboard's backup button) and report its path and counts; cortex restore restores one",
+      "Write a data-only backup now through the daemon and report its path and counts; cortex restore restores one",
     run: async (session, argument) => {
       noArgument("backup", argument);
       await runBackup(session);

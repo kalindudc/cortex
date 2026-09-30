@@ -27,7 +27,6 @@ const EXPECTED_SUBCOMMANDS = [
   "tag",
   "tui",
   "serve",
-  "open",
   "stop",
   "reset",
   "resume",
@@ -157,7 +156,7 @@ describe("cortex tui argument checks (run before the alternate screen)", () => {
     expect(await reason({ id: "3", heading: "#" })).toMatch(/--heading/);
   });
 
-  test("--heading takes a bare slug, the web anchor, or the web URL's #fragment as written", async () => {
+  test("--heading takes a bare slug, the full anchor, or the anchor as a #fragment", async () => {
     for (const [heading, expected] of [
       ["plan-2", "plan-2"],
       ["task-3-plan", "task-3-plan"],

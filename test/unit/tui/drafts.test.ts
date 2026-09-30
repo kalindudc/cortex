@@ -15,16 +15,21 @@ import type {
   WriteGuard,
 } from "../../../src/contracts.ts";
 import type { Lane, Task } from "../../../src/store.ts";
-import type { Scheduler } from "../../../src/ui/lib/autosave.ts";
 import { DEFAULT_CONFIG } from "../../../src/tui/config.ts";
-import { createTaskDraft, type DraftField, IDLE_MS, MAX_MS, type TaskDraft } from "../../../src/tui/drafts.ts";
+import {
+  createTaskDraft,
+  type DraftField,
+  IDLE_MS,
+  MAX_MS,
+  type Scheduler,
+  type TaskDraft,
+} from "../../../src/tui/drafts.ts";
 import { DEFAULT_KEYS } from "../../../src/tui/keys.ts";
 import { openPreferences } from "../../../src/tui/preferences.ts";
 import { type OverlayHost, TuiSession } from "../../../src/tui/session.ts";
 import { resolveTheme } from "../../../src/tui/theme.ts";
 
-// Plan @400 N8/N16 (Task 9): the per-task draft controller, ported from the
-// browser's tested useAutosave/useTaskDraft semantics with an injected
+// Plan @400 N8/N16 (Task 9): the per-task draft controller, with an injected
 // scheduler and GUARDED writes:
 //   - 600 ms idle / 3 s maximum timers; per field ONE write in flight and ONE
 //     trailing write carrying the latest text;

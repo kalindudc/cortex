@@ -93,15 +93,12 @@ export async function socketHealth(identity: DaemonIdentity): Promise<{ ok: bool
 export type ForegroundDaemon = Running & { identity: DaemonIdentity; metadataFile: string };
 
 /**
- * `cortex serve --foreground --no-open <args>` with `env`; resolves once it
+ * `cortex serve --foreground <args>` with `env`; resolves once it
  * printed its success line, which it does only after publishing metadata
  * that names its own pid.
  */
-export async function startForeground(
-  env: Record<string, string>,
-  args: string[] = ["--port", "0"],
-): Promise<ForegroundDaemon> {
-  const running = spawnTracked([BIN, "serve", "--foreground", "--no-open", ...args], env);
+export async function startForeground(env: Record<string, string>, args: string[] = []): Promise<ForegroundDaemon> {
+  const running = spawnTracked([BIN, "serve", "--foreground", ...args], env);
   const metadataFile = metadataFileFor(env.CORTEX_DB ?? "");
   await waitFor(
     "the daemon's success line",

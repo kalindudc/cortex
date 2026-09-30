@@ -1,38 +1,33 @@
 // Notifications for one terminal session (plan @400 Task 11 part B: P8, N12,
-// N15): the web's bell drawer (src/ui/state/notifications.ts and
-// src/ui/components/notifications/NotificationDrawer.tsx) as a
-// keyboard-complete list dialog.
+// N15), as a keyboard-complete list dialog.
 //
 // - The feed merges the daemon's persisted notifications (the session's
 //   workspace snapshot, `notification.added` rows, and one coalesced re-read
 //   after `notification.changed`) with this session's own errors (every error
-//   message; kept only here, like the web's local error toasts, because they
-//   are often about the daemon being unreachable). Unread first, then newest
-//   first inside each group: the web's order.
+//   message; kept only here, because they are often about the daemon being
+//   unreachable). Unread first, then newest first inside each group.
 // - Read state is SHARED: read, unread, all read, dismiss and clear go to the
 //   daemon through session.acknowledgeNotifications (shown at once; a re-read
 //   that predates the write never undoes it; a failure is reported and
 //   re-read), and every other client converges on `notification.changed`.
 //   Local errors, the highlighted row and the dialog belong to the session.
 // - :notifications opens the dialog: Enter opens the row's task (the explicit
-//   selection plus a :back entry; the list filters are untouched, as the
-//   web's drawer only sets the selection) and marks it read; r read, u
-//   unread, a all read, x dismiss, X clear all (the web's row and footer
-//   controls). The status line counts the unread rows with a text marker.
+//   selection plus a :back entry; the list filters are untouched) and marks
+//   it read; r read, u unread, a all read, x dismiss, X clear all. The status
+//   line counts the unread rows with a text marker.
 // - Attention ONLY for the daemon's explicit blocked-transition frame
 //   (`task.blocked`, which the session hands over as it arrives): never a
 //   snapshot, a reconnect, a replay or a task.updated copy of a task that is
-//   (still) blocked. By default it flashes the status line, as the web raises
-//   a desktop alert for that frame; tui.toml `bell = true` also rings the
-//   terminal bell and `flash = false` silences the flash. The browser's
-//   desktop alert is unchanged.
+//   (still) blocked. By default it flashes the status line; tui.toml
+//   `bell = true` also rings the terminal bell and `flash = false` silences
+//   the flash.
 // - Every untrusted string (titles, messages, authors, errors) is escaped by
 //   the dialog (src/tui/safety.ts) or the status line before style().
 
 import type { BlockedTransition } from "../contracts.ts";
 import type { Notification } from "../store.ts";
-import { STATUS_LABEL } from "../ui/lib/constants.ts";
-import { fmtTime } from "../ui/lib/format.ts";
+import { STATUS_LABEL } from "../lib/constants.ts";
+import { fmtTime } from "../lib/format.ts";
 import { CommandError } from "./commands.ts";
 import { type DialogRow, showDialog } from "./dialogs.ts";
 import type { SessionMessage, TuiSession } from "./session.ts";
@@ -50,7 +45,7 @@ export interface LocalError {
 export type FeedRow = { kind: "notif"; row: Notification } | { kind: "error"; row: LocalError };
 
 export interface NotificationOptions {
-  /** Flash the status line when a task becomes blocked (tui.toml `flash`; default true, as the web alerts). */
+  /** Flash the status line when a task becomes blocked (tui.toml `flash`; default true). */
   readonly flash?: boolean;
   /** Also ring the terminal bell (tui.toml `bell`; default false: opt-in). */
   readonly bell?: boolean;
@@ -66,7 +61,7 @@ const ERROR_KEY = "e:";
 
 const time = (r: FeedRow): number => (r.kind === "notif" ? r.row.created : r.row.at);
 
-/** The web's `merged`: unread before read, then newest first inside each group. */
+/** The feed order: unread before read, then newest first inside each group. */
 export function mergeFeed(notifications: readonly Notification[], errors: readonly LocalError[]): FeedRow[] {
   const rows: FeedRow[] = [
     ...notifications.map(row => ({ kind: "notif" as const, row })),
@@ -75,7 +70,7 @@ export function mergeFeed(notifications: readonly Notification[], errors: readon
   return rows.sort((a, b) => Number(a.row.read) - Number(b.row.read) || time(b) - time(a));
 }
 
-/** The web's badge count: unread rows of both sources. */
+/** The unread count: unread rows of both sources. */
 export function countUnread(rows: readonly FeedRow[]): number {
   return rows.reduce((n, r) => n + (r.row.read ? 0 : 1), 0);
 }
@@ -141,7 +136,7 @@ export class Notifications {
     if (this.#bell) this.#write?.(BEL);
   }
 
-  // ---------- the web's controls ----------
+  // ---------- the row and footer controls ----------
 
   markRead(id: number): void {
     if (id < 0) {

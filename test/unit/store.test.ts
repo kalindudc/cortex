@@ -567,11 +567,10 @@ describe("validateTagName", () => {
   });
 });
 
-// ---------- listUpdates / listAuthorsLast24h: read-side gap-closers ----------
+// ---------- listUpdates: read-side gap-closer ----------
 //
-// Both queries are exercised end-to-end by integration tests, but the SHAPE
-// (column projection + ordering direction) is fast to pin in-process via
-// Store.open(":memory:"). 24h cutoff is timing-dependent and integration-only.
+// Exercised end-to-end by integration tests, but the ordering direction is
+// fast to pin in-process via Store.open(":memory:").
 describe("Store: listUpdates ordering", () => {
   test("returns rows ordered by created ASC (chronological)", async () => {
     const s = open();
@@ -596,46 +595,6 @@ describe("Store: listUpdates ordering", () => {
     const t = s.addTask({ title: "x" });
     expect(s.listUpdates(t.id)).toEqual([]);
     expect(s.listUpdates(9999)).toEqual([]);
-    s.close();
-  });
-});
-
-describe("Store: listAuthorsLast24h", () => {
-  test("returns one row per distinct author with MAX(created) and COUNT(*) shape", async () => {
-    const s = open();
-    const t = s.addTask({ title: "x" });
-    s.addUpdate({ task_id: t.id, author: "alice", summary: "a1" });
-    await Bun.sleep(2);
-    s.addUpdate({ task_id: t.id, author: "bob", summary: "b1" });
-    await Bun.sleep(2);
-    s.addUpdate({ task_id: t.id, author: "alice", summary: "a2" });
-    const rows = s.listAuthorsLast24h();
-    expect(rows.length).toBe(2);
-    const alice = rows.find(r => r.author === "alice");
-    const bob = rows.find(r => r.author === "bob");
-    expect(alice?.posts).toBe(2);
-    expect(bob?.posts).toBe(1);
-    expect(alice?.last_seen).toBeGreaterThan(bob?.last_seen ?? 0);
-    s.close();
-  });
-
-  test("orders by last_seen DESC (most recent author first)", async () => {
-    const s = open();
-    const t = s.addTask({ title: "x" });
-    s.addUpdate({ task_id: t.id, author: "first-poster", summary: "x" });
-    await Bun.sleep(2);
-    s.addUpdate({ task_id: t.id, author: "second-poster", summary: "y" });
-    await Bun.sleep(2);
-    s.addUpdate({ task_id: t.id, author: "third-poster", summary: "z" });
-    const rows = s.listAuthorsLast24h();
-    // ORDER BY last_seen DESC: third → second → first
-    expect(rows.map(r => r.author)).toEqual(["third-poster", "second-poster", "first-poster"]);
-    s.close();
-  });
-
-  test("returns [] when no updates exist", () => {
-    const s = open();
-    expect(s.listAuthorsLast24h()).toEqual([]);
     s.close();
   });
 });

@@ -1,15 +1,14 @@
 /**
  * Shared, environment-neutral wire contracts (plan @400 N7, N8, N11, N12).
  *
- * TYPE-ONLY by design: the daemon, the native client and the retained browser
- * all import this module, so it must never pull a runtime dependency (Store /
- * bun:sqlite, node:*, DOM or state modules) into any bundle. Every import is
+ * TYPE-ONLY by design: the daemon, the native client and the environment-
+ * neutral src/api.ts all import this module, so it must never pull a runtime
+ * dependency (Store / bun:sqlite, node:*) into any of them. Every import is
  * `import type`; test/unit/contracts.test.ts enforces that and pins the shapes.
  */
 
 import type { EventKind } from "./events.ts";
 import type {
-  AuthorRow,
   Lane,
   MemoryHit,
   MemoryStream,
@@ -56,15 +55,14 @@ export interface TaskState {
   versions: Versions;
 }
 
-/** Where a daemon listens: its private Unix socket, or an explicit loopback HTTP URL. */
+/** Where a daemon listens: its private Unix socket, or an explicit HTTP URL (an older binary's daemon, probed by the legacy fence). */
 export type Endpoint = { kind: "unix"; socketPath: string } | { kind: "http"; url: string };
 
 /**
  * Published daemon metadata (`<db>.daemon.json`, plan @400 N4) and what a
  * daemon answers in `GET /api/health`; clients attach only when every
  * identity field matches. `databasePath` is canonical; `pid` is informative
- * and never signalled; `webUrl` is the printed-host dashboard URL while the
- * loopback listener runs.
+ * and never signalled.
  */
 export interface DaemonIdentity {
   protocol: 1;
@@ -73,8 +71,7 @@ export interface DaemonIdentity {
   databasePath: string;
   endpoint: Endpoint;
   pid: number;
-  webUrl?: string;
-  /** Optional protocol-1 features (`control.shutdown`, `control.web`); always present in published metadata. */
+  /** Optional protocol-1 features (`control.shutdown`); always present in published metadata. */
   capabilities?: string[];
 }
 
@@ -83,52 +80,6 @@ export interface HealthResponse {
   ok: boolean;
   version: string;
   identity?: DaemonIdentity;
-}
-
-/** `POST /api/control/web` (IPC listener only): start the loopback dashboard, or report the running one. */
-export interface EnableWebRequest {
-  /** Exact port; omitted means the documented default 7777, or a free port when 7777 is taken. */
-  port?: number;
-  /** Printed hostname for `webUrl` (RFC 1123); the listener always binds 127.0.0.1. */
-  host?: string;
-}
-
-/**
- * `POST /api/control/preview` (IPC listener only, plan @400 N21): hold one
- * task's EXACT current text (unsaved edits included) for the rich browser
- * preview. It is kept in the daemon's memory only and never written to the
- * task.
- */
-export interface PreviewRequest {
-  taskId: number;
-  title: string;
-  source: string;
-  /** The text holds edits that are not saved. */
-  unsaved?: boolean;
-  /** A shorter lifetime in milliseconds (1 to the 10-minute TTL); omitted means the full TTL. */
-  ttlMs?: number;
-}
-
-/** The create answer (201): the private random token, its page path and when it expires. */
-export interface PreviewCreated {
-  token: string;
-  /** `/preview/<token>` on the loopback dashboard. */
-  path: string;
-  /** ISO 8601. */
-  expiresAt: string;
-  /** UTF-8 bytes of the title and source. */
-  bytes: number;
-}
-
-/** `GET /api/preview/:token`: the held text, read-only (exact token only). */
-export interface PreviewSnapshot {
-  taskId: number;
-  title: string;
-  source: string;
-  unsaved: boolean;
-  createdAt: string;
-  expiresAt: string;
-  bytes: number;
 }
 
 /** One live-stream frame: an existing event kind or the stream's own ready/resync markers. */
@@ -223,12 +174,8 @@ export interface RemoveResult {
 /**
  * Machine-readable `code` values of API error bodies. The two anchor codes
  * (409) predate this plan; `version_conflict` is a 412, `invalid_guard` a
- * 400, `mutation_reused` a 409 and `instance_mismatch` a 421. The IPC-only
- * control routes add `instance_required` (400: control must name the
- * instance) and `web_unavailable` (409: the loopback listener could not bind).
- * Rich previews add `invalid_preview` (400), `preview_not_found` (404),
- * `preview_expired` (410), `preview_too_large` (413) and
- * `preview_storage_full` (507).
+ * 400, `mutation_reused` a 409 and `instance_mismatch` a 421. The control
+ * routes add `instance_required` (400: control must name the instance).
  */
 export type ApiErrorCode =
   | "body_search_not_found"
@@ -237,13 +184,7 @@ export type ApiErrorCode =
   | "invalid_guard"
   | "mutation_reused"
   | "instance_mismatch"
-  | "instance_required"
-  | "web_unavailable"
-  | "invalid_preview"
-  | "preview_not_found"
-  | "preview_expired"
-  | "preview_too_large"
-  | "preview_storage_full";
+  | "instance_required";
 
 /** The structured part of a 412 body: nothing was written; `current` holds every scope's token at rejection. */
 export interface VersionConflict {
@@ -419,7 +360,7 @@ export interface BackupResult {
 // ---------- clients ----------
 
 /**
- * The dashboard's client surface with its request types corrected to what
+ * The legacy client surface with its request types corrected to what
  * the server accepts (for example, posts require an author). Legacy
  * requests and response shapes; no guards.
  */
@@ -452,8 +393,6 @@ export interface ApiClient {
   markAllNotifRead(): Promise<void>;
   delNotif(id: number): Promise<void>;
   clearNotifs(): Promise<void>;
-  /** A rich draft preview by its exact token (the loopback `/preview/<token>` page). */
-  preview(token: string): Promise<PreviewSnapshot>;
 }
 
 /** Writes that opt into versioned results (`Prefer: cortex-versioned`) and may carry a WriteGuard. */
@@ -473,11 +412,10 @@ export interface VersionedWrites {
   removeTag(name: string, options?: { force?: boolean }, guard?: WriteGuard): Promise<RemoveResult>;
 }
 
-/** The full typed client (native TUI/CLI and upgraded browser): ApiClient plus snapshots and versioned writes. */
+/** The full typed client (TUI and CLI): ApiClient plus snapshots and versioned writes. */
 export interface CortexClient extends ApiClient {
   health(): Promise<HealthResponse>;
   me(): Promise<{ author: string }>;
-  authors(): Promise<AuthorRow[]>;
   task(id: number): Promise<Task>;
   workspace(): Promise<WorkspaceSnapshot>;
   taskState(id: number): Promise<TaskStateSnapshot>;

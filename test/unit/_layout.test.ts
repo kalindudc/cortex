@@ -5,9 +5,9 @@
  * AND to PREVENT TESTS FROM EVER WRITING TO THE DEVELOPER'S REAL CORTEX
  * CONFIG. It runs as a unit test (no binary spawn) and asserts:
  *
- *   1. SOURCE-MIRROR INVARIANT — every backend `src/*.ts` (top-level,
- *      excluding `src/ui/`, `src/types.d.ts`, and `src/extensions/`) has a
- *      matching `test/unit/<basename>.test.ts`. Adding a new backend file
+ *   1. SOURCE-MIRROR INVARIANT — every `src/**\/*.ts` (excluding
+ *      `src/types.d.ts`, `src/commands/` and `src/extensions/`) has a
+ *      matching `test/unit/<path>.test.ts`. Adding a new source file
  *      under `src/` without writing its unit test fails this guard.
  *
  *   2. UNIT NO-BINARY-SPAWN — no `test/unit/**\/*.test.ts` file may import
@@ -36,8 +36,7 @@ const TEST_ROOT = path.join(REPO_ROOT, "test");
 
 // ---------- 1. SOURCE-MIRROR INVARIANT ----------
 //
-// Backend `src/*.ts` files that warrant a dedicated unit test. Excludes:
-//   - `src/ui/**` — tested under `test/unit/components/`, `state/`, `lib/`
+// `src/**/*.ts` files that warrant a dedicated unit test. Excludes:
 //   - `src/types.d.ts` — type declarations only, nothing to test
 //   - `src/extensions/**` — embedded blob (loaded as a `with { type: "file" }`
 //     string path; covered by `test/unit/extensions.test.ts`)
@@ -52,7 +51,7 @@ function listBackendSourceFiles(): string[] {
     for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
       const abs = path.join(dir, ent.name);
       if (ent.isDirectory()) {
-        if (ent.name === "ui" || ent.name === "commands" || ent.name === "extensions") continue;
+        if (ent.name === "commands" || ent.name === "extensions") continue;
         walk(abs);
       } else if (ent.isFile() && ent.name.endsWith(".ts") && ent.name !== "types.d.ts") {
         out.push(path.relative(SRC_ROOT, abs));
@@ -79,16 +78,15 @@ describe("layout: source-mirror invariant", () => {
 // integration-tier binary-spawn helper) or calling runCli/Bun.spawn/
 // startServer crosses the tier boundary and undermines the convention.
 //
-// Allow-list: `_layout.test.ts` itself reads test files via fs (NOT a spawn),
-// and component tests under `test/unit/components/` are TSX/Preact and never
-// touch these helpers. We scan ALL `test/unit/**/*.test.{ts,tsx}` files.
+// Allow-list: `_layout.test.ts` itself reads test files via fs (NOT a spawn).
+// We scan ALL `test/unit/**/*.test.ts` files.
 function listUnitTestFiles(): string[] {
   const out: string[] = [];
   const walk = (dir: string): void => {
     for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
       const abs = path.join(dir, ent.name);
       if (ent.isDirectory()) walk(abs);
-      else if (ent.isFile() && /\.test\.tsx?$/.test(ent.name)) out.push(abs);
+      else if (ent.isFile() && ent.name.endsWith(".test.ts")) out.push(abs);
     }
   };
   walk(path.join(TEST_ROOT, "unit"));
@@ -131,11 +129,9 @@ function listEveryTestFile(): string[] {
   const walk = (dir: string): void => {
     for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
       const abs = path.join(dir, ent.name);
-      // Skip the playwright e2e/ tree — different harness, different rules.
       if (ent.isDirectory()) {
-        if (ent.name === "e2e") continue;
         walk(abs);
-      } else if (ent.isFile() && /\.test\.tsx?$/.test(ent.name)) {
+      } else if (ent.isFile() && ent.name.endsWith(".test.ts")) {
         out.push(abs);
       }
     }

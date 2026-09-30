@@ -66,7 +66,7 @@ export interface ViewPreferences {
 export interface TaskFilter {
   readonly status: TaskStatus | null;
   readonly lane: string | null;
-  /** OR-composed tag names (the web's untagged sentinel is just a string). */
+  /** OR-composed tag names (the untagged sentinel, src/lib/taskView.ts UNTAGGED, is just a string). */
   readonly tags: readonly string[];
 }
 
@@ -115,7 +115,7 @@ const STATUSES: readonly TaskStatus[] = ["draft", "open", "review", "blocked", "
 const PANELS: readonly TaskPanel[] = ["document", "activity", "related", "authors"];
 const MODES: readonly DocumentMode[] = ["read", "edit", "split"];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-// Matches the web's cap on a restored query (src/ui/state/workspace.ts).
+// The cap on a restored query.
 const MAX_QUERY = 4096;
 const MAX_NAME = 256;
 const MAX_TAGS = 1000;

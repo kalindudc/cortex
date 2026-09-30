@@ -28,8 +28,8 @@ export interface TuiTerminal {
   term: string | undefined;
 }
 
-// Heading anchors are the web's slugified ASCII ids (src/ui/state/url.ts): the reader resolves them with
-// the web's slugger (src/tui/reader.ts), as a bare slug (`plan`, `plan-2`) or the full `task-<id>-plan`.
+// Heading anchors are slugified ASCII ids (src/lib/slug.ts): the reader resolves them (src/tui/reader.ts)
+// as a bare slug (`plan`, `plan-2`) or the full `task-<id>-plan`.
 const HEADING_SLUG = /^[a-z0-9-]{1,256}$/i;
 
 const CLI_GUIDANCE = "use the CLI instead (cortex ls, cortex show <id>, cortex --help)";

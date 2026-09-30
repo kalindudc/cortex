@@ -40,14 +40,7 @@ import {
   TransportError,
 } from "./api.ts";
 import { createClient, endpointSender } from "./client.ts";
-import type {
-  CortexClient,
-  DaemonIdentity,
-  EnableWebRequest,
-  Endpoint,
-  PreviewCreated,
-  PreviewRequest,
-} from "./contracts.ts";
+import type { CortexClient, DaemonIdentity, Endpoint } from "./contracts.ts";
 import { canonicalDatabasePath, type OwnerLease, tryAcquireOwnership } from "./ownership.ts";
 import {
   configDir,
@@ -64,12 +57,8 @@ import {
 
 /** The wire/metadata protocol this cortex speaks. */
 export const DAEMON_PROTOCOL = 1 as const;
-/**
- * Optional protocol-1 features every daemon of this version offers (published
- * in its identity). `control.preview`: the IPC-only rich draft preview route
- * (src/preview.ts); an older daemon without it cannot serve `:preview`.
- */
-export const DAEMON_CAPABILITIES: readonly string[] = ["control.shutdown", "control.web", "control.preview"];
+/** Optional protocol-1 features every daemon of this version offers (published in its identity). */
+export const DAEMON_CAPABILITIES: readonly string[] = ["control.shutdown"];
 
 /** How long one identity probe may take before its endpoint counts as not answering. */
 const PROBE_TIMEOUT_MS = 2_000;
@@ -144,15 +133,14 @@ const nonEmpty = (value: unknown): value is string => typeof value === "string" 
 function parseIdentity(value: unknown): DaemonIdentity | null {
   if (!isRecord(value) || value.protocol !== DAEMON_PROTOCOL) return null;
   const endpoint = parseEndpoint(value.endpoint);
-  const { instanceId, databaseId, databasePath, pid, webUrl, capabilities } = value;
+  // Fields are copied one by one: members an older daemon published that this version no longer reads are ignored.
+  const { instanceId, databaseId, databasePath, pid, capabilities } = value;
   if (endpoint === null || !nonEmpty(instanceId) || !nonEmpty(databaseId) || !nonEmpty(databasePath)) return null;
   if (typeof pid !== "number" || !Number.isSafeInteger(pid) || pid <= 0) return null;
-  if (webUrl !== undefined && !nonEmpty(webUrl)) return null;
   if (capabilities !== undefined && !(Array.isArray(capabilities) && capabilities.every(c => typeof c === "string"))) {
     return null;
   }
   const identity: DaemonIdentity = { protocol: DAEMON_PROTOCOL, instanceId, databaseId, databasePath, endpoint, pid };
-  if (webUrl !== undefined) identity.webUrl = webUrl;
   if (capabilities !== undefined) identity.capabilities = [...capabilities];
   return identity;
 }
@@ -510,46 +498,6 @@ async function control(identity: DaemonIdentity, route: string, body: unknown): 
   }
 }
 
-/** Start (or report) the loopback dashboard on the SAME verified instance; resolves with its updated identity. */
-export async function enableWeb(identity: DaemonIdentity, request: EnableWebRequest = {}): Promise<DaemonIdentity> {
-  const answer = await control(identity, CONTROL_PATHS.web, request);
-  const updated = isRecord(answer) ? parseIdentity(answer.identity) : null;
-  if (updated === null || updated.instanceId !== identity.instanceId || updated.webUrl === undefined) {
-    throw new TransportError(
-      "protocol",
-      "POST",
-      CONTROL_PATHS.web,
-      "enable-web did not answer with this daemon's dashboard",
-    );
-  }
-  return updated;
-}
-
-/**
- * Hold one draft for the rich browser preview on the SAME verified instance
- * (its IPC-only control route); resolves with the private token and page
- * path. Limit/validation failures reject with the daemon's explicit HttpError.
- */
-export async function createPreview(identity: DaemonIdentity, request: PreviewRequest): Promise<PreviewCreated> {
-  const answer = await control(identity, CONTROL_PATHS.preview, request);
-  if (
-    !isRecord(answer) ||
-    typeof answer.token !== "string" ||
-    !/^[0-9a-f]{32}$/.test(answer.token) ||
-    answer.path !== `/preview/${answer.token}` ||
-    typeof answer.expiresAt !== "string" ||
-    typeof answer.bytes !== "number"
-  ) {
-    throw new TransportError(
-      "protocol",
-      "POST",
-      CONTROL_PATHS.preview,
-      "the daemon did not answer with a preview token",
-    );
-  }
-  return { token: answer.token, path: answer.path, expiresAt: answer.expiresAt, bytes: answer.bytes };
-}
-
 /** Existence probe (signal 0 delivers nothing) for a pid a verified daemon reported about itself. */
 function processExists(pid: number): boolean {
   try {
@@ -597,11 +545,6 @@ export async function stopDaemon(identity: DaemonIdentity, options: { timeoutMs?
 
 export interface EnsureDaemonOptions extends ClaimOptions {
   databasePath: string;
-  /** Require the loopback dashboard (enabled on an attached daemon if it lacks one). */
-  web: boolean;
-  /** Dashboard port and printed host for a started daemon or enable-web (default 7777 / cortex.localhost). */
-  port?: number;
-  host?: string;
   /** Overall deadline for a busy database plus the started daemon's readiness. */
   timeoutMs?: number;
   /** argv that runs this cortex CLI (default: this binary, or bun + this entry script from source). */
@@ -614,20 +557,6 @@ export function selfCommand(): string[] {
   return entry === undefined || entry.startsWith("/$bunfs/") ? [process.execPath] : [process.execPath, entry];
 }
 
-/** The source checkout this module runs from (unused by a compiled binary). */
-const SOURCE_ROOT = path.resolve(import.meta.dir, "..");
-
-/**
- * Running from source (`bun index.ts`, `pnpm run dev`), the daemon this CLI
- * starts imports the dashboard bundle that `pnpm run ui:build` writes to
- * `out/` (server.ts embeds it in a compiled binary): the bundle files that
- * are missing under `root`. Empty for a compiled binary (`/$bunfs/` entry).
- */
-export function missingSourceAssets(entry: string | undefined, root: string = SOURCE_ROOT): string[] {
-  if (entry === undefined || entry.startsWith("/$bunfs/")) return [];
-  return ["bundle.js", "bundle.css"].map(name => path.join(root, "out", name)).filter(file => !fs.existsSync(file));
-}
-
 function logTail(canonical: string): string {
   const text = readIfPresent(daemonLogPath(canonical));
   return text === null ? "" : text.trim().split("\n").slice(-20).join("\n");
@@ -638,21 +567,8 @@ function hasExited(child: Subprocess): boolean {
 }
 
 function spawnDaemon(canonical: string, options: EnsureDaemonOptions): Subprocess {
-  if (options.command === undefined) {
-    const missing = missingSourceAssets(process.argv[1]);
-    if (missing.length > 0) {
-      throw new DaemonError(
-        "start-failed",
-        `cortex is running from source and cannot start its daemon: the dashboard bundle is missing ` +
-          `(${missing.join(", ")}). Build it first with \`pnpm run ui:build\` (or \`pnpm run build\`), then retry`,
-      );
-    }
-  }
   ensureRuntimeDir();
   const args = ["serve", "--foreground"];
-  if (!options.web) args.push("--no-web");
-  if (options.web && options.port !== undefined) args.push("--port", String(options.port));
-  if (options.web && options.host !== undefined) args.push("--host", options.host);
   const log = fs.openSync(daemonLogPath(canonical), "w", 0o600);
   try {
     const child = Bun.spawn([...(options.command ?? selfCommand()), ...args], {
@@ -669,10 +585,9 @@ function spawnDaemon(canonical: string, options: EnsureDaemonOptions): Subproces
 }
 
 /**
- * The verified daemon for `databasePath`, started in the background (headless,
- * detached, its output in the runtime dir's log) when none runs; with
- * `web`, its loopback dashboard is enabled on that same instance if needed.
- * Resolves only once the daemon has published its metadata.
+ * The verified daemon for `databasePath`, started in the background
+ * (detached, its output in the runtime dir's log) when none runs. Resolves
+ * only once the daemon has published its metadata.
  */
 export async function ensureDaemon(options: EnsureDaemonOptions): Promise<DaemonIdentity> {
   ensureConfigDir();
@@ -680,24 +595,19 @@ export async function ensureDaemon(options: EnsureDaemonOptions): Promise<Daemon
   const probeTimeoutMs = options.probeTimeoutMs ?? PROBE_TIMEOUT_MS;
   const timeoutMs = options.timeoutMs ?? START_TIMEOUT_MS;
   const deadline = Date.now() + timeoutMs;
-  const webRequest: EnableWebRequest = {};
-  if (options.port !== undefined) webRequest.port = options.port;
-  if (options.host !== undefined) webRequest.host = options.host;
-  const ready = (identity: DaemonIdentity): Promise<DaemonIdentity> =>
-    options.web && identity.webUrl === undefined ? enableWeb(identity, webRequest) : Promise.resolve(identity);
 
   const claim = await claimOrAttach(canonical, { probeTimeoutMs, busyTimeoutMs: options.busyTimeoutMs ?? timeoutMs });
-  if (claim.identity !== undefined) return ready(claim.identity);
+  if (claim.identity !== undefined) return claim.identity;
   // Owned and recovered: hand the database to the daemon we start (it claims it again itself).
   claim.lease.release();
   const child = spawnDaemon(canonical, options);
   for (;;) {
     const found = await inspect(canonical, probeTimeoutMs);
-    if (found.kind === "attach") return ready(found.identity);
+    if (found.kind === "attach") return found.identity;
     if (hasExited(child)) {
       // It may have lost a start race to another daemon, which is just as good.
       const again = await inspect(canonical, probeTimeoutMs);
-      if (again.kind === "attach") return ready(again.identity);
+      if (again.kind === "attach") return again.identity;
       const tail = logTail(canonical);
       throw new DaemonError(
         "start-failed",

@@ -67,7 +67,7 @@ test("CLI round-trip: init → add → ls → update → edit → mv → rm", as
 
   // update with status change.
   // Plan 3: --as is REQUIRED on `cortex update` (single source of truth
-  // for author attribution; the dashboard cascade does not apply to CLI).
+  // for author attribution; the server-side author cascade does not apply to CLI).
   r = await run("update", "1", "-m", "in review now", "-s", "review", "--as", "cli-roundtrip");
   expect(r.code).toBe(0);
   expect(r.stdout).toContain("update");

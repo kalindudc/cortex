@@ -5,7 +5,7 @@
 //   (j/k, arrows, g/G, half pages) move, Enter (or Space) picks (the pick
 //   learns which: a picker may toggle on Space and close on Enter), `/`
 //   filters with the literal, case-insensitive AND-keyword catalog search,
-//   which is never capped (src/ui/lib/catalogSearch.ts; only the visible
+//   which is never capped (src/lib/catalogSearch.ts; only the visible
 //   WINDOW is limited; `fixed` rows are never filtered; a `live` list
 //   filters as you type), q/Esc close, and a list may add its own letter
 //   keys, section headers (never selectable) and a live summary line.
@@ -36,7 +36,7 @@ import {
   type TuiMouseEventResult,
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-import { searchCatalog } from "../ui/lib/catalogSearch.ts";
+import { searchCatalog } from "../lib/catalogSearch.ts";
 import { type CommandLine, createCommandLine } from "./commandline.ts";
 import { actionKeyLabels, type KeyEvent, type KeyMode, type NormalAction, printableKey } from "./keys.ts";
 import { displayWidth, escapeTerminalText, fitWidth } from "./safety.ts";

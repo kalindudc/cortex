@@ -23,24 +23,10 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 pnpm install --frozen-lockfile
 
-# Wipe stale build outputs BEFORE rebuilding. Two cases this protects against:
-#
-#   1. `pnpm run serve:dev` (or `pnpm run ui:watch`) leaves a NON-MINIFIED
-#      out/bundle.{js,css} on disk. If we don't clean, the next `bun build
-#      --compile` can end up embedding (or referencing) the dev-mode asset
-#      instead of the just-rebuilt minified one — symptom: features added
-#      after the last dev session are missing from the deployed binary even
-#      though they're present in source.
-#   2. Old bin/cortex from a previous build is reused by tools (or by `pnpm
-#      run deploy`'s cp) when a fresh build silently fails partway through.
-#
-# Both directories are .gitignored and fully regenerated below, so removing
-# them is always safe.
-rm -rf "$ROOT/out" "$ROOT/bin"
-
-# UI bundle MUST exist before the server build embeds it via
-# `with { type: "file" }` imports of out/bundle.{js,css}.
-pnpm run ui:build
+# Wipe the old binary BEFORE rebuilding, so a build that silently fails
+# partway through never leaves a stale bin/cortex for tools (or `pnpm run
+# deploy`'s cp) to reuse. bin/ is .gitignored and fully regenerated below.
+rm -rf "$ROOT/bin"
 
 TARGET="bun-$(uname | tr '[:upper:]' '[:lower:]')-$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/')"
 

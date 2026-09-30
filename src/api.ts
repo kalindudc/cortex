@@ -2,9 +2,9 @@
  * Environment-neutral typed client for the daemon's JSON API (plan @400 N11).
  *
  * `createApi(send)` takes the transport as a RequestSender: the native client
- * (src/client.ts) sends over the Unix socket or an absolute URL, the browser
- * over relative fetch. This module therefore imports nothing at runtime and
- * touches no Bun/node/DOM/state globals; test/unit/api.test.ts enforces it.
+ * (src/client.ts) sends over the Unix socket or an absolute URL. This module
+ * therefore imports nothing at runtime and touches no Bun/node globals;
+ * test/unit/api.test.ts enforces it.
  *
  * Errors are centralized here: an HTTP error status becomes an HttpError
  * (status + server code, and the structured conflict for a 412), and a
@@ -44,17 +44,12 @@ export const INSTANCE_HEADER = "Cortex-Instance";
 
 /**
  * Daemon control routes (plan @400 N5/N11). Registered ONLY on the daemon's
- * private IPC (Unix socket) app, never on the loopback listener, and every
+ * private IPC (Unix socket) app, never on an in-process app, and every
  * request must carry INSTANCE_HEADER naming the verified instance.
  *   shutdown: POST, no body -> 202 `{ ok, instanceId }`, then the daemon stops.
- *   web:      POST EnableWebRequest -> 200 `{ identity }` (with `webUrl`).
- *   preview:  POST PreviewRequest -> 201 PreviewCreated (src/preview.ts); the
- *             loopback page `/preview/<token>` reads it by the exact token.
  */
 export const CONTROL_PATHS = {
   shutdown: "/api/control/shutdown",
-  web: "/api/control/web",
-  preview: "/api/control/preview",
 } as const;
 
 /**
@@ -268,7 +263,6 @@ export function createApi(send: RequestSender, options: ApiOptions = {}): Cortex
     // ---- reads ----
     health: () => request("GET", "/api/health"),
     me: () => request("GET", "/api/me"),
-    authors: () => request("GET", "/api/authors"),
     migrations: () => request("GET", "/api/migrations"),
     tasks: query => request("GET", `/api/tasks${taskQueryString(query)}`),
     task: id => request("GET", `/api/tasks/${id}`),
@@ -281,7 +275,6 @@ export function createApi(send: RequestSender, options: ApiOptions = {}): Cortex
     taskState: id => request("GET", `/api/tasks/${id}/state`),
     laneState: name => request("GET", `/api/lanes/${enc(name)}/state`),
     tagState: name => request("GET", `/api/tags/${enc(name)}/state`),
-    preview: token => request("GET", `/api/preview/${enc(token)}`),
     memorySearch: (query: MemorySearchQuery) => request("GET", `/api/memory/search${queryString({ ...query })}`),
     memoryStreams: (query?: MemoryStreamsQuery) => request("GET", `/api/memory/streams${queryString({ ...query })}`),
     memoryStream: id => request("GET", `/api/memory/streams/${id}`),

@@ -1,6 +1,5 @@
-// Per-task title/body drafts (plan @400 N8/N16, Task 9): the browser's
-// tested autosave semantics (src/ui/lib/autosave.ts, useTaskDraft.ts),
-// ported to an injected scheduler, with GUARDED writes and no browser hooks.
+// Per-task title/body drafts (plan @400 N8/N16, Task 9): autosave on an
+// injected scheduler, with GUARDED writes.
 //
 // - Autosave: every change arms a 600 ms idle timer and, on the first change
 //   of a burst, a 3 s maximum, so a continuous typist still saves. Per field
@@ -36,15 +35,20 @@ import { randomBytes } from "node:crypto";
 import { HttpError, TransportError } from "../api.ts";
 import type { CortexClient, TaskState, Versions } from "../contracts.ts";
 import type { Task } from "../store.ts";
-import type { Scheduler } from "../ui/lib/autosave.ts";
 
 export type DraftField = "title" | "body";
 export type FieldState = "saved" | "pending" | "saving" | "failed" | "retrying" | "conflict";
 
 export const DRAFT_FIELDS: readonly DraftField[] = ["title", "body"];
-/** The browser's autosave timings (useAutosave). */
+/** The autosave timings: save after this much idle time, and at the latest after MAX_MS of edits. */
 export const IDLE_MS = 600;
 export const MAX_MS = 3000;
+
+/** The timers a draft's autosave runs on; tests inject one they fire by hand. */
+export interface Scheduler {
+  schedule: (fn: () => void, ms: number) => unknown;
+  clear: (id: unknown) => void;
+}
 
 export interface DraftHooks {
   /** Anything a draft shows changed. */

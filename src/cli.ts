@@ -27,7 +27,6 @@ const subCommands = {
   tag: () => import("./commands/tag.ts").then(m => m.default),
   tui: () => import("./commands/tui.ts").then(m => m.default),
   serve: () => import("./commands/serve.ts").then(m => m.default),
-  open: () => import("./commands/open.ts").then(m => m.default),
   stop: () => import("./commands/stop.ts").then(m => m.default),
   reset: () => import("./commands/reset.ts").then(m => m.default),
   resume: () => import("./commands/resume.ts").then(m => m.default),

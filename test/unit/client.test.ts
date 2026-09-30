@@ -107,7 +107,7 @@ describe("createClient", () => {
     expect(err).toMatchObject({ kind: "network", uncertain: false });
   });
 
-  test("HttpError is the shared api class, so one instanceof covers native and browser clients", () => {
+  test("HttpError is the shared api class, so one instanceof covers every client", () => {
     expect(HttpError).toBe(ApiHttpError);
   });
 });

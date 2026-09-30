@@ -9,8 +9,6 @@ import { printJson } from "../output.ts";
 type DaemonReport = {
   /** A verified daemon serves this database. */
   running: boolean;
-  /** Its dashboard URL (printed host); null when headless or not running. */
-  url: string | null;
   pid?: number;
   /** Its private socket. */
   socket?: string;
@@ -24,14 +22,14 @@ async function daemonReport(databasePath: string): Promise<DaemonReport> {
   try {
     const identity = await discoverDaemon(databasePath);
     if (identity !== null) {
-      const report: DaemonReport = { running: true, url: identity.webUrl ?? null, pid: identity.pid };
+      const report: DaemonReport = { running: true, pid: identity.pid };
       if (identity.endpoint.kind === "unix") report.socket = identity.endpoint.socketPath;
       return report;
     }
     const legacy = await findLegacyDaemon();
-    return legacy === null ? { running: false, url: null } : { running: true, url: legacy.url, legacy };
+    return legacy === null ? { running: false } : { running: true, legacy };
   } catch (err) {
-    return { running: false, url: null, error: (err as Error).message };
+    return { running: false, error: (err as Error).message };
   }
 }
 
@@ -41,7 +39,7 @@ function describeDaemon(daemon: DaemonReport): string {
     return `legacy daemon from an older cortex (pid ${daemon.legacy.pid}, ${daemon.legacy.url}); stop it, then restart with this cortex`;
   }
   if (!daemon.running) return "not running";
-  return `running (pid ${daemon.pid}, ${daemon.url ?? daemon.socket ?? "private socket"})`;
+  return `running (pid ${daemon.pid}, ${daemon.socket ?? "private socket"})`;
 }
 
 /**

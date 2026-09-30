@@ -45,7 +45,7 @@ export interface TuiConfig {
    * hint lines; `"compact"` leaves them out.
    */
   readonly density: Density;
-  /** Flash the status line when a task becomes blocked (the web raises a desktop alert then). */
+  /** Flash the status line when a task becomes blocked. */
   readonly flash: boolean;
   /** Also ring the terminal bell when a task becomes blocked (opt-in). */
   readonly bell: boolean;

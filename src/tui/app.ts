@@ -100,7 +100,7 @@ import { createClient } from "../client.ts";
 import { ensureDaemon } from "../daemon.ts";
 import { dbPath, tuiConfigPath, tuiStatePath } from "../paths.ts";
 import { subscribeChanges } from "../subscription.ts";
-import { STATUS_LABEL } from "../ui/lib/constants.ts";
+import { STATUS_LABEL } from "../lib/constants.ts";
 import { type Activity, createActivity } from "./activity.ts";
 import { createNotifications, type Notifications, UNREAD_MARK } from "./notifications.ts";
 import { CommandError, commandHelp, reportPendingMigrations } from "./commands.ts";
@@ -1055,7 +1055,7 @@ export class Shell {
       else void s.execute(tab.view);
       return;
     }
-    // A tag label in the header widens the tag filter (the web's header pills).
+    // A tag label in the header widens the tag filter.
     const tag = layout.tagHits.find(hit => onHit(hit, event.x, event.y));
     if (tag !== undefined) s.appendTagFilter(tag.tag);
     s.setFocus("document");
@@ -1758,7 +1758,7 @@ export class Shell {
       if (titleEdit !== null && titleEdit.taskId === task.id) {
         out.push(...this.#titleEditRows(theme, titleEdit.line, width, titleCap, markable));
       } else {
-        // The document cursor on the title shows it in full (the web's reveal), marked, never tint alone.
+        // The document cursor on the title shows it in full, marked, never tint alone.
         const targeted = focused && s.documentTarget === "title";
         const title = wrapTextWithAnsi(esc(draft?.text("title") ?? task.title), inner);
         const limit = targeted ? titleCap : TITLE_LINES;
@@ -2340,7 +2340,7 @@ export class Shell {
     const unread = this.#notifications.unread();
     const right: Seg[] = [];
     const targets: ("notifications" | "messages")[] = [];
-    // The web's bell badge: a glyph, the count and a word (never color alone). A click opens the list.
+    // The unread badge: a glyph, the count and a word (never color alone). A click opens the list.
     if (unread > 0) {
       right.push(seg("info@panel", ` ${UNREAD_MARK} ${unread} unread `, { bold: true }));
       targets.push("notifications");
@@ -2629,7 +2629,7 @@ const SIGNAL_EXIT_CODES = { SIGHUP: 129, SIGINT: 130, SIGTERM: 143 } as const;
 export async function runTui(options: RunTuiOptions = {}): Promise<number> {
   const { config, problems: configProblems } = loadConfig(tuiConfigPath());
   const preferences = openPreferences(tuiStatePath(options.profile ?? DEFAULT_PROFILE));
-  const identity = await ensureDaemon({ databasePath: dbPath(), web: false });
+  const identity = await ensureDaemon({ databasePath: dbPath() });
   const client = createClient(identity.endpoint, { instanceId: identity.instanceId });
   const snapshot = await client.workspace();
   if (options.taskId !== undefined && !snapshot.tasks.some(t => t.id === options.taskId)) {
@@ -2715,7 +2715,7 @@ export async function runTui(options: RunTuiOptions = {}): Promise<number> {
   process.stdout.on("error", ignoreStreamError);
   try {
     await active.start();
-    // The dashboard's migration banner, as a persistent warning in :messages.
+    // Pending migrations become a persistent warning in :messages.
     void reportPendingMigrations(session);
     subscribeChanges(
       identity.endpoint,

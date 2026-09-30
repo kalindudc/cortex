@@ -22,7 +22,7 @@ cortex doctor --json   # machine-readable report
 }
 ```
 
-With a daemon serving the database, `daemon` is `{ "running": true, "url": "<dashboard URL, or null when headless>", "pid": 41218, "socket": "<private socket>" }`. A daemon the terminal workspace (`cortex tui`) started is headless: `url` stays `null` until `cortex open` (or the TUI's `:preview`) enables its dashboard. A daemon from an older cortex binary shows up as `"legacy": { "pid", "url" }` (stop it and restart with this binary: every other command refuses to run beside it), and a discovery problem as `"error"`.
+With a daemon serving the database, `daemon` is `{ "running": true, "pid": 41218, "socket": "<private socket>" }`; without one it is `{ "running": false }`. A daemon from an older cortex binary shows up as `{ "running": true, "legacy": { "pid", "url" } }` (stop it and restart with this binary: every other command refuses to run beside it), and a discovery problem as `{ "running": false, "error": "<message>" }`.
 
 ## When to use
 

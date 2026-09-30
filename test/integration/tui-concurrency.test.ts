@@ -310,7 +310,7 @@ describe("three TUI sessions and CLI writers on one daemon", () => {
     // Written while no daemon runs (the CLI's in-process fallback): the sessions cannot see it yet.
     await cli("edit", "3", "--title", "gamma edited while the daemon was down");
     marks = [a, b, c].map(p => p.mark());
-    await cli("serve", "--no-web");
+    await cli("serve");
     expect(daemon().instanceId).not.toBe(was);
     await Promise.all(
       [a, b, c].map((p, i) => expectPlain(p, "Reconnected to the restarted cortex daemon", marks[i], 20_000)),

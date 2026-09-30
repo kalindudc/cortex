@@ -7,22 +7,18 @@ import type { Subprocess } from "bun";
 
 type Server = ReturnType<typeof Bun.serve>;
 import {
-  createPreview,
   DAEMON_CAPABILITIES,
   DaemonError,
   discoverDaemon,
-  enableWeb,
   ensureDaemon,
   findLegacyDaemon,
-  missingSourceAssets,
   publishDaemonMetadata,
   recoverStaleDaemonState,
   removeDaemonMetadata,
   stopDaemon,
   withClient,
 } from "../../src/daemon.ts";
-import { HttpError, INSTANCE_HEADER } from "../../src/api.ts";
-import { createClient } from "../../src/client.ts";
+import { INSTANCE_HEADER } from "../../src/api.ts";
 import type { DaemonIdentity } from "../../src/contracts.ts";
 import { canonicalDatabasePath, type OwnerLease, tryAcquireOwnership } from "../../src/ownership.ts";
 import { daemonMetadataPath, daemonSocketPath, ownerLockPath, pidPath, urlPath } from "../../src/paths.ts";
@@ -150,14 +146,8 @@ async function startFakeDaemon(
       fake.controlCalls.push("shutdown");
       if (!options.ignoreShutdown) void fake.stop();
     },
-    enableWeb: async request => {
-      fake.controlCalls.push(`web ${JSON.stringify(request)}`);
-      identity.webUrl = `http://${request.host ?? "cortex.localhost"}:${request.port ?? 7777}`;
-      publishDaemonMetadata(identity);
-      return identity;
-    },
   };
-  const app = buildApp(store, createRuntime({ identity, listener: "ipc", control }));
+  const app = buildApp(store, createRuntime({ identity, control }));
   server = Bun.serve({
     unix: socketPath,
     fetch: req => {
@@ -441,7 +431,7 @@ describe("withClient ownership and recovery (N4/N6)", () => {
       expect((err as Error).message).toMatch(/older cortex/);
       expect((err as Error).message).toMatch(/stop/i);
       expect((err as Error).message).toContain(String(dummy.pid));
-      expect(await rejection(ensureDaemon({ databasePath: db, web: false }))).toMatchObject({
+      expect(await rejection(ensureDaemon({ databasePath: db }))).toMatchObject({
         code: "legacy-daemon",
       });
       expect(kill).not.toHaveBeenCalled();
@@ -531,23 +521,18 @@ describe("withClient paths (N6)", () => {
   });
 });
 
-// ---------- ensure / stop / enable-web ----------
+// ---------- ensure / stop ----------
 
-describe("ensureDaemon, enableWeb and stopDaemon", () => {
-  test("ensureDaemon attaches to a verified daemon and enables its web listener only when asked", async () => {
+describe("ensureDaemon and stopDaemon", () => {
+  test("ensureDaemon attaches to a verified daemon: nothing is started and no control request is sent", async () => {
     const dummy = spawnDummy();
     const fake = await startFakeDaemon(db, { pid: dummy.pid });
     const marker = path.join(root, "spawned");
     const command = [process.execPath, "-e", `require("fs").writeFileSync(${JSON.stringify(marker)}, "x")`];
-    expect(await ensureDaemon({ databasePath: db, web: false, command })).toEqual(fake.identity);
+    expect(await ensureDaemon({ databasePath: db, command })).toEqual(fake.identity);
+    expect(await ensureDaemon({ databasePath: db, command })).toEqual(fake.identity);
     expect(fake.controlCalls).toEqual([]);
-    const withWeb = await ensureDaemon({ databasePath: db, web: true, port: 7788, host: "cortex.example", command });
-    expect(withWeb.webUrl).toBe("http://cortex.example:7788");
-    expect(fake.controlCalls).toEqual([`web ${JSON.stringify({ port: 7788, host: "cortex.example" })}`]);
     expect(fs.existsSync(marker)).toBe(false);
-    // Already enabled: no second control request.
-    await ensureDaemon({ databasePath: db, web: true, command });
-    expect(fake.controlCalls.length).toBe(1);
   });
 
   test("ensureDaemon never starts a daemon while another process owns the database", async () => {
@@ -555,48 +540,18 @@ describe("ensureDaemon, enableWeb and stopDaemon", () => {
     cleanups.push(() => holder?.release());
     const marker = path.join(root, "spawned");
     const command = [process.execPath, "-e", `require("fs").writeFileSync(${JSON.stringify(marker)}, "x")`];
-    const err = await rejection(ensureDaemon({ databasePath: db, web: false, command, timeoutMs: 200 }));
+    const err = await rejection(ensureDaemon({ databasePath: db, command, timeoutMs: 200 }));
     expect(err).toMatchObject({ code: "busy" });
     expect(fs.existsSync(marker)).toBe(false);
   });
 
   test("ensureDaemon reports a daemon that exits before it is ready, with its output", async () => {
     const command = [process.execPath, "-e", "console.error('boom: address in use'); process.exit(3)"];
-    const err = await rejection(ensureDaemon({ databasePath: db, web: false, command, timeoutMs: 5000 }));
+    const err = await rejection(ensureDaemon({ databasePath: db, command, timeoutMs: 5000 }));
     expect(err).toBeInstanceOf(DaemonError);
     expect(err).toMatchObject({ code: "start-failed" });
     expect((err as Error).message).toContain("boom: address in use");
     expect(leaseIsFree(db)).toBe(true);
-  });
-
-  test("enableWeb goes to the same verified instance", async () => {
-    const dummy = spawnDummy();
-    const fake = await startFakeDaemon(db, { pid: dummy.pid });
-    const updated = await enableWeb(fake.identity, {});
-    expect(updated.instanceId).toBe(fake.identity.instanceId);
-    expect(updated.webUrl).toBe("http://cortex.localhost:7777");
-    expect(fake.seen).toContain(`POST /api/control/web ${fake.identity.instanceId}`);
-    expect((await discoverDaemon(db))?.webUrl).toBe("http://cortex.localhost:7777");
-  });
-
-  test("createPreview holds a draft on the SAME verified instance over its socket (plan @400 N21)", async () => {
-    expect(DAEMON_CAPABILITIES).toContain("control.preview");
-    const dummy = spawnDummy();
-    const fake = await startFakeDaemon(db, { pid: dummy.pid });
-    const source = "# exact\r\n\n\tunsaved \u{1F600}\n";
-    const created = await createPreview(fake.identity, { taskId: 3, title: "T", source, unsaved: true });
-    expect(created.token).toMatch(/^[0-9a-f]{32}$/);
-    expect(created.path).toBe(`/preview/${created.token}`);
-    expect(fake.seen).toContain(`POST /api/control/preview ${fake.identity.instanceId}`);
-    // The exact token reads it back (the loopback page does the same over TCP).
-    const client = createClient(fake.identity.endpoint, { instanceId: fake.identity.instanceId });
-    expect(await client.preview(created.token)).toMatchObject({ taskId: 3, title: "T", source, unsaved: true });
-    // Limits stay explicit errors.
-    const err = await rejection(
-      createPreview(fake.identity, { taskId: 3, title: "", source: "a".repeat(1024 * 1024 + 1) }),
-    );
-    expect(err).toBeInstanceOf(HttpError);
-    expect(err).toMatchObject({ status: 413, code: "preview_too_large" });
   });
 
   test("stopDaemon shuts down exactly the verified instance and waits for the lease", async () => {
@@ -647,7 +602,7 @@ describe("ensureDaemon, enableWeb and stopDaemon", () => {
 
 describe("daemon metadata", () => {
   test("publish writes the complete identity atomically (0600); removal only removes its own instance", () => {
-    const identity = identityFor(db, { webUrl: "http://cortex.localhost:7777" });
+    const identity = identityFor(db);
     publishDaemonMetadata(identity);
     const file = daemonMetadataPath(db);
     expect(JSON.parse(fs.readFileSync(file, "utf8"))).toEqual(identity);
@@ -659,32 +614,19 @@ describe("daemon metadata", () => {
     expect(fs.existsSync(file)).toBe(false);
     expect(removeDaemonMetadata(identity)).toBe(false);
   });
-});
 
-describe("starting a daemon from source (N24)", () => {
-  // `bun index.ts` (pnpm run dev) re-runs its own entry to start `serve`,
-  // which imports the dashboard bundle out/bundle.{js,css}: a source checkout
-  // without that build must fail with a clear message, not a module error.
-  test("a compiled binary embeds its assets: nothing to check", () => {
-    expect(missingSourceAssets("/$bunfs/root/cortex", "/nonexistent")).toEqual([]);
-    expect(missingSourceAssets(undefined, "/nonexistent")).toEqual([]);
-  });
-
-  test("a source run lists the missing dashboard bundle files, and nothing once they are built", () => {
-    const repo = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-src-"));
-    try {
-      const entry = path.join(repo, "index.ts");
-      expect(missingSourceAssets(entry, repo)).toEqual([
-        path.join(repo, "out", "bundle.js"),
-        path.join(repo, "out", "bundle.css"),
-      ]);
-      fs.mkdirSync(path.join(repo, "out"));
-      fs.writeFileSync(path.join(repo, "out", "bundle.js"), "");
-      expect(missingSourceAssets(entry, repo)).toEqual([path.join(repo, "out", "bundle.css")]);
-      fs.writeFileSync(path.join(repo, "out", "bundle.css"), "");
-      expect(missingSourceAssets(entry, repo)).toEqual([]);
-    } finally {
-      fs.rmSync(repo, { recursive: true, force: true });
-    }
+  test("an older daemon's extra `webUrl` is ignored, not rejected: it is still discovered and attached (plan @417 N6)", async () => {
+    const dummy = spawnDummy();
+    const fake = await startFakeDaemon(db, { pid: dummy.pid });
+    const current = { ...fake.identity };
+    // An older binary published (and answers with) an extra URL member.
+    Object.assign(fake.identity, { webUrl: "http://cortex.localhost:7777" });
+    publishDaemonMetadata(fake.identity);
+    expect(JSON.parse(fs.readFileSync(daemonMetadataPath(db), "utf8")).webUrl).toBe("http://cortex.localhost:7777");
+    const found = await discoverDaemon(db);
+    expect(found).toEqual(current);
+    expect(found).not.toHaveProperty("webUrl");
+    const attached = await withClient(async (_client, target) => target.daemon, { databasePath: db });
+    expect(attached?.instanceId).toBe(fake.identity.instanceId);
   });
 });

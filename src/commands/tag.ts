@@ -36,7 +36,7 @@ const add = defineCommand({
       type: "string",
       alias: "c",
       valueHint: "#hex",
-      description: "display color hex (e.g. #fe8019); used by the dashboard",
+      description: "display color hex (e.g. #fe8019)",
     },
     json: jsonArg,
   },

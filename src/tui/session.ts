@@ -1,5 +1,5 @@
 // One terminal UI session (plan @400 N12/N15/N17): the state ONE `cortex tui`
-// owns, with no browser singletons, localStorage or DOM.
+// owns, with no process-wide singletons.
 //
 // - Shared data (tasks, lanes, tags, notifications) comes only from the
 //   daemon: a workspace snapshot plus the live stream. Events after the
@@ -54,8 +54,8 @@
 //   focus (Read, or the Split preview half) `/` and n/N search the rendered
 //   document instead of the list; a jump (a task, a heading, `{`/`}`) records
 //   where the document was read, so :back/:forward return there; a heading
-//   jump from Edit shows Read for that task only (the web's heading links do
-//   the same), and the launch --heading belongs to its task until another is
+//   jump from Edit shows Read for that task only (the saved mode stays), and
+//   the launch --heading belongs to its task until another is
 //   selected. @id references clear the filters and jump; #tag references set
 //   the tag filter. Copies are explicit OSC 52 writes to the shell's terminal.
 
@@ -75,8 +75,7 @@ import type {
 } from "../contracts.ts";
 import { parseCursor } from "../events.ts";
 import type { Lane, Notification, Task } from "../store.ts";
-import type { Scheduler } from "../ui/lib/autosave.ts";
-import { stepSelection } from "../ui/lib/taskView.ts";
+import { stepSelection } from "../lib/taskView.ts";
 import { type CommandLine, type CommandLineKind, createCommandLine } from "./commandline.ts";
 import {
   COMMANDS,
@@ -94,6 +93,7 @@ import {
   type DraftField,
   type FieldState,
   resolveDraftPath,
+  type Scheduler,
   type TaskDraft,
   writeDraftFile,
 } from "./drafts.ts";
@@ -127,7 +127,7 @@ import {
 } from "./workspace.ts";
 
 export type Focus = "tasks" | "document";
-/** The task panels (the web's Document/Activity/Related/Authors tabs), in `[`/`]` order. */
+/** The task panels (Document/Activity/Related/Authors), in `[`/`]` order. */
 export const TASK_PANELS = ["document", "activity", "related", "authors"] as const;
 export type TaskPanel = (typeof TASK_PANELS)[number];
 export type SessionView = "workspace" | "help" | "messages" | "commands";
@@ -1250,7 +1250,7 @@ export class TuiSession {
       if (this.#temporary?.taskId !== id) this.#temporary = null;
       this.#docTarget = "body";
     }
-    // A launch --heading belongs to its task only (the web retires a heading fragment the same way).
+    // A launch --heading belongs to its task only.
     if (this.#heading !== null && this.#heading.taskId !== id) this.#heading = null;
     this.#selectedId = id;
     this.#selectionSeeded = true;
@@ -1328,7 +1328,7 @@ export class TuiSession {
     this.#future = [];
   }
 
-  /** An @id reference (the web's navigateRef): clear every filter and the search, then jump to the task. */
+  /** An @id reference: clear every filter and the search, then jump to the task. */
   followTaskRef(id: number): void {
     const next = followTaskRef(this.listView, this.#tasks, id);
     if (next === null) throw new CommandError(`No task @${id}`);
@@ -1778,7 +1778,7 @@ export class TuiSession {
   /**
    * Show the current task's rendered document with the keyboard on it (a
    * heading jump): from Edit, Read for this task only (the saved preference
-   * stays, as the web's heading links do); in Split, the preview half.
+   * stays); in Split, the preview half.
    */
   revealReader(): void {
     const task = this.selectedTask();
@@ -2875,7 +2875,7 @@ export class TuiSession {
     this.#messages.push(message);
     if (this.#messages.length > MAX_MESSAGES) this.#messages.splice(0, this.#messages.length - MAX_MESSAGES);
     this.#status = message;
-    // Errors are also this session's local notification rows (the web's local error toasts).
+    // Errors are also this session's local notification rows.
     if (level === "error") this.#notificationFeed?.localError(message);
     this.#changed();
   }

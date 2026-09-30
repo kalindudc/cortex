@@ -21,10 +21,8 @@ import {
 import { TuiSession } from "../../../src/tui/session.ts";
 import { type ResolvedTheme, resolveTheme, type ThemeToken } from "../../../src/tui/theme.ts";
 
-// Plan @400 Task 10 part A (P6, N17, N19-N22): the terminal reader. It ports
-// the TESTED browser reading semantics (src/ui/components/active/MarkdownView.tsx,
-// src/ui/lib/refs.ts and test/unit/components/active/MarkdownView.test.tsx):
-// the web's heading slugger and duplicate numbering, prose-only @id/#tag
+// Plan @400 Task 10 part A (P6, N17, N19-N22): the terminal reader: the
+// shared heading slugger (src/lib/slug.ts) and duplicate numbering, prose-only @id/#tag
 // references, code copy, and heading links; plus the terminal's own search,
 // heading steps, per-task position and jump history. The Markdown parser is a
 // renderer, NOT a security boundary: every untrusted string crosses
@@ -160,9 +158,9 @@ function frame(h: Harness, width = 80, height = 30): string[] {
 
 const settle = () => new Promise(resolve => setTimeout(resolve, 0));
 
-// ---------- headings: the web's slugger and anchors ----------
+// ---------- headings: the shared slugger and anchors ----------
 
-describe("headings use the web's slugger, anchors and duplicate numbering (MarkdownView parity)", () => {
+describe("headings use the shared slugger, anchors and duplicate numbering", () => {
   test("slugify: lowercase ASCII words joined by '-', else 'section'", () => {
     expect(slugify("Final Notes!")).toBe("final-notes");
     expect(slugify("  Hello,   World  ")).toBe("hello-world");
@@ -191,7 +189,7 @@ describe("headings use the web's slugger, anchors and duplicate numbering (Markd
     ]);
   });
 
-  test("heading text is the web's textContent: setext and nested headings count, entities decode, code stays literal, images vanish", () => {
+  test("heading text is its text content: setext and nested headings count, entities decode, code stays literal, images vanish", () => {
     const doc = parseDocument(
       [
         "Intro",
@@ -221,7 +219,7 @@ describe("headings use the web's slugger, anchors and duplicate numbering (Markd
     ]);
   });
 
-  test("findHeading resolves the bare slug, the web anchor or a #fragment; a missing heading is null", () => {
+  test("findHeading resolves the bare slug, the full anchor or a #fragment; a missing heading is null", () => {
     const doc = parseDocument("## Steps\n\n## Steps\n", 9);
     expect(findHeading(doc, "steps")?.id).toBe("task-9-steps");
     expect(findHeading(doc, "steps-2")?.id).toBe("task-9-steps-2");
@@ -490,9 +488,10 @@ describe("safe GFM rendering", () => {
     expect(inert).not.toContain("§");
   });
 
-  test("Mermaid shows its source with a rich-preview hint (not diagram parity)", () => {
+  test("Mermaid shows its source (diagrams are not rendered)", () => {
     const out = text(render("```mermaid\ngraph TD; A-->B;\n```"));
-    expect(out).toContain("rich preview: :preview");
+    expect(out).toContain("mermaid source");
+    expect(out).not.toContain(":preview");
     expect(out).toContain("graph TD; A-->B;");
   });
 
@@ -782,7 +781,7 @@ describe("the reader component: scroll, headings, search and history", () => {
     expect(plain(frame(h, 30, 10))[0]).toContain("Middle");
   });
 
-  test(":heading jumps (duplicate slugs follow the web's numbering) and :back/:forward include heading jumps", async () => {
+  test(":heading jumps (duplicate slugs are numbered -2, -3) and :back/:forward include heading jumps", async () => {
     const h = harness([task(1, { body: long }), task(2, { body: "two" })], { initialTask: 1 });
     frame(h, 80, 10);
     await h.session.execute("heading risks-2");
@@ -891,7 +890,7 @@ describe("the reader component: scroll, headings, search and history", () => {
     expect(out).not.toContain("# Plan");
   });
 
-  test("the launch --heading opens at that heading with the web slugger; a missing one warns once", () => {
+  test("the launch --heading opens at that heading with the shared slugger; a missing one warns once", () => {
     const body = [
       "Intro",
       "=====",
@@ -927,7 +926,7 @@ describe("the reader component: scroll, headings, search and history", () => {
 // ---------- copy (explicit, OSC 52) ----------
 
 describe("copy is an explicit command (OSC 52) and never a rendering effect", () => {
-  test(":copy <n> writes the code block (as the web copies it) and reports the result as unconfirmed", async () => {
+  test(":copy <n> writes the code block (its text plus a final newline) and reports the result as unconfirmed", async () => {
     const h = harness([task(1, { body: "```sh\necho one\n```\n\n```\ntwo\n```" })], { initialTask: 1 });
     frame(h);
     expect(h.clipboard).toEqual([]); // rendering never writes the clipboard

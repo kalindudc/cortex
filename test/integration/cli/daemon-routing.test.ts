@@ -89,12 +89,11 @@ async function holdLease(env: Record<string, string>, db: string): Promise<{ rel
 type Frame = { event: string; data: string };
 
 /**
- * Subscribe to a daemon's /events over its loopback listener; frames
- * accumulate as they arrive. Closed by cancelling the reader: the unit
- * preload's happy-dom AbortSignal is not one Bun's fetch accepts.
+ * Subscribe to a daemon's /events over its private socket; frames
+ * accumulate as they arrive. Closed by cancelling the reader.
  */
-async function subscribe(port: string): Promise<{ frames: Frame[]; close(): void }> {
-  const res = await fetch(`http://127.0.0.1:${port}/events`);
+async function subscribe(socketPath: string): Promise<{ frames: Frame[]; close(): void }> {
+  const res = await fetch("http://localhost/events", { unix: socketPath });
   const body = res.body;
   if (body === null) throw new Error("no event stream");
   const frames: Frame[] = [];
@@ -232,8 +231,9 @@ describe("a verified daemon serves every command", () => {
     const { env } = sandbox("route-daemon");
     const db = env.CORTEX_DB ?? "";
     const daemon = await startForeground(env);
-    const port = new URL(daemon.identity.webUrl ?? "http://x").port;
-    const stream = await subscribe(port);
+    const { endpoint } = daemon.identity;
+    if (endpoint.kind !== "unix") throw new Error("expected a unix endpoint");
+    const stream = await subscribe(endpoint.socketPath);
     try {
       await waitFor("the stream to be ready", () => (stream.frames.some(f => f.event === "ready") ? true : null));
 
@@ -304,7 +304,8 @@ describe("doctor reports; it never starts a daemon or takes the lease", () => {
     let r = await runBounded(["doctor", "--json"], env);
     expect(r.code, r.stderr).toBe(0);
     let report = JSON.parse(r.stdout);
-    expect(report).toMatchObject({ initialized: false, daemon: { running: false, url: null } });
+    expect(report).toMatchObject({ initialized: false });
+    expect(report.daemon).toEqual({ running: false });
     expect(report.counts).toEqual({ tasks: 0, lanes: 0, tags: 0 });
     expect(fs.existsSync(db)).toBe(false);
     expect(fs.existsSync(`${db}.owner.lock`)).toBe(false);
@@ -314,7 +315,8 @@ describe("doctor reports; it never starts a daemon or takes the lease", () => {
     await ok(env, "add", "counted", "-t", "x");
     r = await runBounded(["doctor", "--json"], env);
     report = JSON.parse(r.stdout);
-    expect(report).toMatchObject({ initialized: true, daemon: { running: false, url: null }, pendingMigrations: [] });
+    expect(report).toMatchObject({ initialized: true, pendingMigrations: [] });
+    expect(report.daemon).toEqual({ running: false });
     expect(report.counts).toEqual({ tasks: 1, lanes: 1, tags: 1 });
     expect(fs.existsSync(metadataFileFor(db))).toBe(false);
     expect(fs.readdirSync(runtimeDir)).toEqual([]);
@@ -324,10 +326,11 @@ describe("doctor reports; it never starts a daemon or takes the lease", () => {
     r = await runBounded(["doctor", "--json"], env);
     expect(Date.now() - startedAt).toBeLessThan(5_000);
     report = JSON.parse(r.stdout);
-    expect(report.daemon).toMatchObject({ running: true, pid: daemon.proc.pid, url: daemon.identity.webUrl });
+    const socket = daemon.identity.endpoint.kind === "unix" ? daemon.identity.endpoint.socketPath : "";
+    expect(report.daemon).toEqual({ running: true, pid: daemon.proc.pid, socket });
     expect(report.counts).toEqual({ tasks: 1, lanes: 1, tags: 1 });
     const human = await ok(env, "doctor");
-    expect(human).toContain(`running (pid ${daemon.proc.pid}`);
+    expect(human).toContain(`running (pid ${daemon.proc.pid}, ${socket})`);
     expect(leaseIsFree(db)).toBe(false);
     expect(isRunning(daemon)).toBe(true);
   }, 30_000);

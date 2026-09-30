@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import type { CortexClient, DaemonIdentity, LiveEvent, TaskState, WorkspaceSnapshot } from "../../../src/contracts.ts";
 import type { Lane, Task } from "../../../src/store.ts";
-import { UNTAGGED } from "../../../src/ui/lib/taskView.ts";
+import { UNTAGGED } from "../../../src/lib/taskView.ts";
 import { COMMANDS, type CommandSpec } from "../../../src/tui/commands.ts";
 import { DEFAULT_KEYS } from "../../../src/tui/keys.ts";
 import {
@@ -21,7 +21,7 @@ import { type SessionDialog, TuiSession, type SessionOptions } from "../../../sr
 // and resnapshotting on ready/resync/epoch. Selection, focus, the list view
 // (search, filter slots, include-done), the jump history, scroll, the prompt
 // and its histories, messages and the connection state belong to the
-// session. No browser signals, localStorage or DOM.
+// session. No process-wide singletons.
 
 const DB = "0b6a2f4e-0c1d-4e5f-8a9b-1c2d3e4f5a6b";
 const OTHER_DB = "9f8e7d6c-5b4a-4938-8271-605f4e3d2c1b";

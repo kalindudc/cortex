@@ -1,8 +1,8 @@
 // fuzzy.ts — lightweight client-side task fuzzy scorer.
 
 import { describe, test, expect } from "bun:test";
-import { searchTasks } from "../../../src/ui/lib/fuzzy.ts";
-import type { Task } from "../../../src/ui/api/types.ts";
+import { searchTasks } from "../../../src/lib/fuzzy.ts";
+import type { Task } from "../../../src/store.ts";
 
 function task(over: Partial<Task> = {}): Task {
   return {

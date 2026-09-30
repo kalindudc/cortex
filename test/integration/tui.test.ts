@@ -580,7 +580,7 @@ describe("metadata and catalog commands in a real terminal (plan @400 Task 8 par
     expect(await pty.exited()).toEqual({ code: 0, signal: null });
     const created = await show(box.env, 2);
     expect(created.task).toMatchObject({ title: "Ship the TUI", status: "review" });
-    // The status audit row carries the dashboard's human default author (GET /api/me), as a browser click does.
+    // The status audit row carries the human default author (GET /api/me): an unattributed change.
     const identity = readIdentity(metadataFileFor(box.env.CORTEX_DB ?? ""));
     if (identity?.endpoint.kind !== "unix") throw new Error("no daemon metadata");
     const me = (await (await fetch("http://localhost/api/me", { unix: identity.endpoint.socketPath })).json()) as {
@@ -607,7 +607,7 @@ describe("metadata and catalog commands in a real terminal (plan @400 Task 8 par
     expect(await pty.exited()).toEqual({ code: 0, signal: null });
     const done = await show(box.env, 1);
     expect(done.task.status).toBe("done");
-    // The audit row carries the dashboard's human default author, as :status does.
+    // The audit row carries the human default author, as :status does.
     const identity = readIdentity(metadataFileFor(box.env.CORTEX_DB ?? ""));
     if (identity?.endpoint.kind !== "unix") throw new Error("no daemon metadata");
     const me = (await (await fetch("http://localhost/api/me", { unix: identity.endpoint.socketPath })).json()) as {
@@ -1029,7 +1029,7 @@ describe("the terminal reader in a real terminal (plan @400 Task 10)", () => {
     "second risks",
   ].join("\n");
 
-  test("--heading opens at that heading (the web's slugger and repeat numbering); { } step headings; Ctrl-o returns", async () => {
+  test("--heading opens at that heading (the shared slugger and repeat numbering); { } step headings; Ctrl-o returns", async () => {
     const box = sandbox("tui-reader-heading");
     await seedTasks(box.env, ["long doc", "-b", LONG]);
     const pty = spawnPty([BIN, "tui", "1", "--heading", "#task-1-risks-2"], { env: box.tuiEnv, cols: 110, rows: 32 });

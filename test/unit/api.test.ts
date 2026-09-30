@@ -16,8 +16,8 @@ import { buildApp, createRuntime } from "../../src/server.ts";
 import { Store } from "../../src/store.ts";
 
 // src/api.ts is the environment-neutral typed client (plan @400 N11): the
-// native client wraps it with socket/absolute-URL fetch and the retained
-// browser with relative fetch, so it may import nothing but contract types.
+// native client wraps it with socket/absolute-URL fetch, and it may import
+// nothing but contract types.
 
 const SOURCE = fs.readFileSync(path.resolve(import.meta.dir, "../../src/api.ts"), "utf8");
 
@@ -80,7 +80,7 @@ async function caught(p: Promise<unknown>): Promise<unknown> {
   throw new Error("expected the call to reject");
 }
 
-describe("api: legacy methods keep the browser client's routes and bodies", () => {
+describe("api: legacy methods keep their routes and bodies", () => {
   const cases: [string, (api: CortexClient) => Promise<unknown>, string, string, unknown][] = [
     ["tasks", a => a.tasks(), "GET", "/api/tasks", null],
     ["tasks({})", a => a.tasks({}), "GET", "/api/tasks", null],
@@ -128,7 +128,6 @@ describe("api: legacy methods keep the browser client's routes and bodies", () =
     ["clearNotifs", a => a.clearNotifs(), "DELETE", "/api/notifications", null],
     ["health", a => a.health(), "GET", "/api/health", null],
     ["me", a => a.me(), "GET", "/api/me", null],
-    ["authors", a => a.authors(), "GET", "/api/authors", null],
     ["task", a => a.task(5), "GET", "/api/tasks/5", null],
     ["workspace", a => a.workspace(), "GET", "/api/workspace", null],
     ["taskState", a => a.taskState(5), "GET", "/api/tasks/5/state", null],

@@ -24,11 +24,9 @@ import { openPreferences } from "../../../src/tui/preferences.ts";
 import { type OverlayHost, TuiSession } from "../../../src/tui/session.ts";
 import { resolveTheme } from "../../../src/tui/theme.ts";
 
-// Plan @400 Task 11 part B (P8, N12, N15): the web's bell drawer
-// (src/ui/state/notifications.ts, NotificationDrawer.tsx) for one terminal
+// Plan @400 Task 11 part B (P8, N12, N15): notifications for one terminal
 // session. The feed merges the daemon's persisted notifications with this
-// session's own errors, unread first and newest first inside each group (the
-// web's order). Read state is SHARED (read, unread, all read, dismiss and
+// session's own errors, unread first and newest first inside each group. Read state is SHARED (read, unread, all read, dismiss and
 // clear go to the daemon and every client re-reads on notification.changed);
 // errors and the highlighted row are the session's. Attention (a status flash
 // by default, the terminal bell when enabled) follows ONLY the daemon's
@@ -195,7 +193,7 @@ const blocked = (t: Task, author = "pi-agent"): BlockedTransition => ({
   author,
 });
 
-describe("the merged feed (the web's order and count)", () => {
+describe("the merged feed (its order and unread count)", () => {
   const err = (id: number, at: number, read = false): LocalError => ({ id, text: `error ${id}`, at, read });
 
   test("unread first, then newest first inside each group, across persisted rows and local errors", () => {

@@ -192,13 +192,13 @@ describe("CONTRAST_PAIRS", () => {
   }
 });
 
-// cortex-dark / cortex-light start from src/ui/styles/tokens.css (statuses per
-// chips.css: draft=--info, open=--text-3, review=--warn, blocked=--err,
-// done=--ok). Tokens that pass keep the web value; every web value that fails
-// a gate is adjusted to the nearest passing color (CIELAB), and each
-// adjustment is recorded here beside its test.
-describe("web palette derivation", () => {
-  test("surfaces, body text and passing roles keep the web values", () => {
+// cortex-dark / cortex-light start from cortex's base palette (statuses:
+// draft=info, open=text-3, review=warn, blocked=err, done=ok). Tokens that
+// pass keep the base value; every base value that fails a gate is adjusted to
+// the nearest passing color (CIELAB), and each adjustment is recorded here
+// beside its test.
+describe("base palette derivation", () => {
+  test("surfaces, body text and passing roles keep the base values", () => {
     const d = BUNDLED_THEMES["cortex-dark"].colors;
     expect([d.bg, d.panel, d.raised, d.border, d.text]).toEqual([
       "#1d1f24",

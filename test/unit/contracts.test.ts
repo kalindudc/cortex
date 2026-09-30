@@ -29,9 +29,9 @@ import type { EventKind } from "../../src/events.ts";
 import type { Lane, Notification, Store, Tag, Task, TaskStatus, Update } from "../../src/store.ts";
 
 // src/contracts.ts is the shared wire vocabulary (plan @400 N7/N11): the
-// daemon, the native client and the retained browser all import it, so it
-// must stay TYPE-ONLY. A runtime import (bun:sqlite via store.ts, node:*, a
-// DOM helper) would leak into the browser bundle; these tests pin that and
+// daemon, the native client and the environment-neutral src/api.ts all
+// import it, so it must stay TYPE-ONLY. A runtime import (bun:sqlite via
+// store.ts, node:*) would leak into all of them; these tests pin that and
 // the exact shapes the plan specifies. The expectTypeOf/@ts-expect-error
 // checks are enforced by `tsc --noEmit` (pnpm run style:check).
 
@@ -94,7 +94,10 @@ describe("contracts: shapes (compile-time, checked by tsc)", () => {
     expectTypeOf<DaemonIdentity["protocol"]>().toEqualTypeOf<1>();
     expectTypeOf<DaemonIdentity["databaseId"]>().toEqualTypeOf<string>();
     expectTypeOf<DaemonIdentity["endpoint"]>().toEqualTypeOf<Endpoint>();
-    expectTypeOf<DaemonIdentity["webUrl"]>().toEqualTypeOf<string | undefined>();
+    // A socket-only daemon publishes no web URL (plan @417 N5).
+    expectTypeOf<keyof DaemonIdentity>().toEqualTypeOf<
+      "protocol" | "instanceId" | "databaseId" | "databasePath" | "endpoint" | "pid" | "capabilities"
+    >();
     const identity: DaemonIdentity = {
       protocol: 1,
       instanceId: "i",

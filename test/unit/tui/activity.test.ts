@@ -31,7 +31,7 @@ import { resolveTheme } from "../../../src/tui/theme.ts";
 // submit, one request is in flight, an identical retry reuses its mutation id,
 // the 4096 limit has a visible count, failures and newer typing are kept, the
 // draft clears only when the post of its exact revision is acknowledged, and
-// the post is a human's (an author, no notify, no status), as the web's.
+// the post is a human's (an author, no notify, no status).
 
 const DB = "0b6a2f4e-0c1d-4e5f-8a9b-1c2d3e4f5a6b";
 const IDENTITY: DaemonIdentity = {

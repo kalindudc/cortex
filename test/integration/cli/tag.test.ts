@@ -82,7 +82,7 @@ describe("tag ls", () => {
     expect(Array.isArray(tags)).toBe(true);
     for (const t of tags) {
       expect(typeof t.name).toBe("string");
-      // color is nullable but the key MUST exist for dashboard rendering.
+      // color is nullable but the key MUST exist for clients rendering it.
       expect(t).toHaveProperty("color");
     }
     const names = tags.map(t => t.name);

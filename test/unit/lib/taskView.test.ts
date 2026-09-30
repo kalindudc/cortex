@@ -1,9 +1,8 @@
-// lib/taskView.ts — the PURE task-list derivations shared by the browser's
-// state/computed.ts + state/selection.ts and the terminal workspace
-// (src/tui/workspace.ts). Every function maps inputs to a result: no signals.
+// lib/taskView.ts — the PURE task-list derivations behind the terminal
+// workspace (src/tui/workspace.ts). Every function maps inputs to a result.
 
 import { describe, test, expect } from "bun:test";
-import type { Task } from "../../../src/ui/api/types.ts";
+import type { Task } from "../../../src/store.ts";
 import {
   UNTAGGED,
   filterTasks,
@@ -14,7 +13,7 @@ import {
   searchPool,
   stepSelection,
   type TaskFilters,
-} from "../../../src/ui/lib/taskView.ts";
+} from "../../../src/lib/taskView.ts";
 
 const mk = (id: number, over: Partial<Task> = {}): Task => ({
   id,
