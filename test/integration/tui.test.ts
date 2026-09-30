@@ -473,7 +473,12 @@ describe("the command line and the task list in a real terminal (plan @400 Task 
     await expectPlain(pty, "Outside the current list filters", mark);
     mark = pty.mark();
     await keys(pty, ":", ..."filter", "\r");
-    await expectPlain(pty, "Filters: /alpha", mark);
+    // A bare :filter opens the filter picker, its summary naming the search; Enter closes it (the search stays).
+    await expectPlain(pty, "FILTERS", mark);
+    await expectPlain(pty, /tasks? shown · \/alpha/, mark);
+    mark = pty.mark();
+    await keys(pty, "\r");
+    await expectPlain(pty, /NORMAL\s+│/, mark);
     // Ctrl-o goes back to the task shown before the jump.
     mark = pty.mark();
     await keys(pty, "\x0f");

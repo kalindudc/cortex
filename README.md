@@ -109,13 +109,15 @@ bar, code on a tinted panel (`:copy N`), tables and rules. Links show their text
 the terminal supports it); `Enter` or `:links` lists every destination. In Split the preview follows the editor:
 the block under the cursor sits beside the cursor's row; scrolling the preview (Tab to it, then `j`/`k`) leaves
 it where you put it until the cursor moves again. `:set number` adds a gutter with each block's source line (and
-every line of a code block), kept with your other view settings.
+every line of a code block), kept with your other view settings. A body taller than its pane shows a scrollbar
+thumb (`┃`) in the pane's right-most column (Read, Edit and each Split half): its length is the share on screen,
+and it leaves the top row clear while there is more above and the bottom row clear while there is more below.
 
 The task list is in ascending id order by default; `:sort` changes the order and `:group lane` or `:group status`
 adds a header row (with its count) per group, which `j`/`k` step over; `;o` picks both. The selected row shows its
 whole title (on up to four lines); the other rows are cut to one line, with their lane at the right when the whole
 title fits beside it. A search always ranks by
-relevance in one list, and the list header says which order is shown. `f` opens the filter picker: Status, Lane
+relevance in one list, and the list header says which order is shown. `f` (or a bare `:filter`) opens the filter picker: Status, Lane
 and Tags with live counts, one key per status (`d` `o` `r` `b` `x`), `u` for untagged, `a` for done tasks, Space
 on any row, and `/` to search the lanes and tags as you type. Every toggle applies at once; Enter and Esc only
 close the picker, so the filters stay. `F` clears the search and every filter (done tasks stay shown if they
@@ -171,7 +173,7 @@ Every command, as `:help` shows it (Tab completes names and arguments):
 | Command | Also | Description |
 | --- | --- | --- |
 | `:open <id\|query>` | | Jump to a task by id (also :\<id>) or to the best search match; the list filters stay |
-| `:filter [status\|lane\|tags] <value>` | | Narrow the task list: :filter status review, :filter lane later, :filter tags bug untagged (+tag adds, -tag removes); a bare slot clears it |
+| `:filter [status\|lane\|tags] <value>` | | Narrow the task list: :filter status review, :filter lane later, :filter tags bug untagged (+tag adds, -tag removes); a bare slot clears it; bare opens the filter picker (f) |
 | `:clear` | | Clear the search and every filter (include-done is kept) |
 | `:sort [order]` | | Order the task list: id (the default), -id, title, -title, lane, status, priority, updated or -updated (- reverses; ties by id; a search ranks by relevance); bare opens the sort and group picker |
 | `:group [none\|lane\|status]` | | Group the task list under a header per lane or status, each with its count (j/k skip the headers); bare opens the sort and group picker |

@@ -63,6 +63,7 @@ import { parseRefs } from "../ui/lib/refGrammar.ts";
 import { slugify } from "../ui/lib/slug.ts";
 import { type ClusterLines, gutterWidth, type VisualKind, wordAt, wordEnd, wordNext, wordPrev } from "./editor.ts";
 import { displayWidth, escapeTerminalLines, escapeTerminalText, hyperlink, type SafeUrl, safeUrl } from "./safety.ts";
+import type { ScrollPosition } from "./scrollbar.ts";
 import type { DocumentPlace, TuiSession } from "./session.ts";
 import { type ContrastPair, type ResolvedTheme, type Seg, type StyleAttributes, seg, style } from "./theme.ts";
 
@@ -1661,6 +1662,8 @@ export class Reader implements Component {
   #hitDoc: ParsedDocument | null = null;
   #selection: ReaderSelection | null = null;
   #clusters = new WeakMap<Row, readonly string[]>();
+  /** The last render's scroll position (the shell paints the body's scrollbar from it). */
+  #position: ScrollPosition = { top: 0, total: 0 };
 
   constructor(session: TuiSession) {
     this.#session = session;
@@ -1675,6 +1678,7 @@ export class Reader implements Component {
     const theme = s.theme;
     const height = Math.max(0, Math.floor(this.height));
     this.#hits = [];
+    this.#position = { top: 0, total: 0 };
     if (theme === null) return Array.from({ length: height }, () => "");
     const blank = (): string => style(theme, "text@bg", " ".repeat(Math.max(0, width)));
     const task = s.selectedTask();
@@ -1687,6 +1691,7 @@ export class Reader implements Component {
     this.#settle(view, layout, height);
     if (follow !== null) this.#follow(task.id, layout, follow, height);
     const top = s.docScroll(task.id);
+    this.#position = { top, total: layout.rows.length };
     const { byUnit } = this.#matches(layout);
     const current = this.#currentMatch(task.id, layout);
     const marked = current === null ? -1 : matchRow(layout, current);
@@ -1708,6 +1713,11 @@ export class Reader implements Component {
       out.push(painted.text);
     }
     return out;
+  }
+
+  /** The last render's first row and the rendered document's rows ({0, 0} without a task). */
+  scrollPosition(): ScrollPosition {
+    return this.#position;
   }
 
   /** A click on a link or reference follows it; anything else is the caller's (coordinates relative to the pane). */

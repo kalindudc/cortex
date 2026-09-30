@@ -310,17 +310,6 @@ export function filterChips(view: WorkspaceView): string[] {
   return chips;
 }
 
-/** Human names of the active filters, in slot order (raw text: escape before rendering). */
-export function describeFilters(view: WorkspaceView): string[] {
-  const parts: string[] = [];
-  const q = view.query.trim();
-  if (q !== "") parts.push(`/${q}`);
-  if (view.filter.status !== null) parts.push(`status ${view.filter.status}`);
-  if (view.filter.lane !== null) parts.push(`lane ${view.filter.lane}`);
-  if (view.filter.tags.length > 0) parts.push(view.filter.tags.map(tagLabel).join(" "));
-  return parts;
-}
-
 /** A tag-slot entry as written: `#name`, or `untagged` for the sentinel. */
 export function tagLabel(name: string): string {
   return name === UNTAGGED ? "untagged" : `#${name}`;

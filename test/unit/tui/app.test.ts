@@ -1271,6 +1271,59 @@ describe("--heading, the reader keys and the mouse", () => {
     const gap = h.session.density === "comfortable" ? 1 : 0;
     return lines.slice(divider + 1 + gap).map(l => l.slice(l.indexOf("│") + 1));
   };
+  /**
+   * The frame and the document pane's first and last body rows: the row under
+   * the divider named `label` (+1 under comfortable) to the row above the
+   * comfortable spacer, the status and the hint.
+   */
+  const bodySpan = (h: Harness, label: string) => {
+    const lines = plain(h.shell.frame());
+    const gap = h.session.density === "comfortable" ? 1 : 0;
+    const first = lines.findIndex(l => l.includes(label)) + 1 + gap;
+    const last = lines.length - 4;
+    const thumb = lines.flatMap((l, i) => (l.endsWith("┃") ? [i] : []));
+    return { lines, first, last, thumb };
+  };
+
+  test("Read shows a ┃ thumb in the document's right-most column while more is above or below; none when it fits", async () => {
+    const h = await started({
+      tasks: [task(7, { title: "long doc", body }), task(8, { title: "short", body: "one line" })],
+      initialTask: 7,
+    });
+    type(h, "\t");
+    let span = bodySpan(h, "READ");
+    expect(span.thumb.length).toBeGreaterThan(0);
+    expect(span.thumb[0]).toBe(span.first);
+    expect(span.thumb.every((y, i) => i === 0 || y === (span.thumb[i - 1] ?? 0) + 1)).toBe(true);
+    expect(span.thumb).not.toContain(span.last);
+    type(h, "G");
+    span = bodySpan(h, "READ");
+    expect(span.thumb).toContain(span.last);
+    expect(span.thumb).not.toContain(span.first);
+    h.session.select(8);
+    expect(bodySpan(h, "READ").thumb).toEqual([]);
+  });
+
+  test("Edit and both wide Split halves show the same scrollbar", async () => {
+    const h = await started({ tasks: [task(7, { title: "long doc", body })], initialTask: 7 });
+    h.session.setFocus("document");
+    h.session.setDocumentMode("edit");
+    await settle();
+    let span = bodySpan(h, "EDIT");
+    expect(span.lines[span.first]?.endsWith("┃")).toBe(true);
+    h.session.documentOf(7)?.editor?.move("doc-end");
+    span = bodySpan(h, "EDIT");
+    expect(span.lines[span.last]?.endsWith("┃")).toBe(true);
+    expect(span.lines[span.first]?.endsWith("┃")).toBe(false);
+    // 120 columns: a wide Split; the editor half's bar sits left of the halves' rule, the preview's at the edge.
+    h.session.setDocumentMode("split");
+    span = bodySpan(h, "PREVIEW");
+    const last = span.lines[span.last] ?? "";
+    const rule = last.indexOf("│", 39 + 1);
+    expect(rule).toBeGreaterThan(40);
+    expect(last[rule - 1]).toBe("┃");
+    expect(last.endsWith("┃")).toBe(true);
+  });
 
   test("the requested heading (the web's slugger: setext headings and repeats count) opens at the top, once", async () => {
     const h = await started({

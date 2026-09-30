@@ -301,6 +301,29 @@ describe("the cursor marker (IME) and scrolling", () => {
     expect([w.head(), markerAt(wrapped)?.[0]]).toEqual([21, 0]);
   });
 
+  test("scrollPosition counts visual rows at the last render's width (wrapped rows count)", () => {
+    const wheel = (e: ReturnType<typeof make>) =>
+      e.editor.handleMouse({ type: "wheel", button: "none", x: 0, y: 0, wheelDelta: 1 } as never);
+    const lines = Array.from({ length: 50 }, (_, i) => `line ${i + 1}`).join("\n");
+    const e = make(lines, 0, { height: 5 });
+    e.render();
+    expect(e.editor.scrollPosition()).toEqual({ top: 0, total: 50 });
+    e.editor.move("doc-end");
+    e.render();
+    expect(e.editor.scrollPosition()).toEqual({ top: 45, total: 50 });
+    // An edit that adds a line: the memo follows the new document.
+    e.editor.dispatch({ changes: { from: 0, insert: "new\n" } });
+    e.render();
+    expect(e.editor.scrollPosition().total).toBe(51);
+    // Width 12: gutter 4, 7 text cells a row, so 36 characters make 6 rows, plus `next`.
+    const w = make("abcdefghijklmnopqrstuvwxyz0123456789\nnext", 0, { width: 12, height: 3 });
+    w.render();
+    expect(w.editor.scrollPosition()).toEqual({ top: 0, total: 7 });
+    wheel(w);
+    w.render();
+    expect(w.editor.scrollPosition()).toEqual({ top: 3, total: 7 });
+  });
+
   test("cursorRow reports the cursor's row in the last render (focused or not), for Split's preview", () => {
     const lines = Array.from({ length: 50 }, (_, i) => `line ${i + 1}`).join("\n");
     const e = make(lines, 0, { height: 5, width: 12 });

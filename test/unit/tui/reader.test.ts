@@ -748,6 +748,27 @@ describe("the reader component: scroll, headings, search and history", () => {
     expect(h.session.status?.text).toMatch(/No previous heading/);
   });
 
+  test("scrollPosition reports the last render's top row and the document's rows (the shell's scrollbar)", () => {
+    const h = harness([task(1, { body: long })], { initialTask: 1 });
+    expect(h.reader.scrollPosition()).toEqual({ top: 0, total: 0 }); // never rendered
+    frame(h, 80, 10);
+    const first = h.reader.scrollPosition();
+    expect(first.top).toBe(0);
+    expect(first.total).toBeGreaterThan(10);
+    h.reader.stepHeading(1);
+    frame(h, 80, 10);
+    const moved = h.reader.scrollPosition();
+    expect(moved.top).toBe(h.session.docScroll(1));
+    expect(moved.top).toBeGreaterThan(0);
+    expect(moved.total).toBe(first.total);
+    const short = harness([task(1, { body: "one line" })], { initialTask: 1 });
+    frame(short, 80, 10);
+    expect(short.reader.scrollPosition().total).toBeLessThanOrEqual(10);
+    const empty = harness([]);
+    frame(empty, 80, 10);
+    expect(empty.reader.scrollPosition()).toEqual({ top: 0, total: 0 });
+  });
+
   test("the scroll position is kept per task and anchored to its heading across a re-wrap", () => {
     const h = harness([task(1, { body: long }), task(2, { body: "other" })], { initialTask: 1 });
     frame(h, 80, 10);

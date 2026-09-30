@@ -103,12 +103,13 @@ import { subscribeChanges } from "../subscription.ts";
 import { STATUS_LABEL } from "../ui/lib/constants.ts";
 import { type Activity, createActivity } from "./activity.ts";
 import { createNotifications, type Notifications, UNREAD_MARK } from "./notifications.ts";
-import { CommandError, commandHelp, openFilterPicker, reportPendingMigrations } from "./commands.ts";
+import { CommandError, commandHelp, reportPendingMigrations } from "./commands.ts";
 import type { CommandLine } from "./commandline.ts";
 import { DRAFT_FIELDS, type FieldState } from "./drafts.ts";
 import type { DocumentEditor, EditorMotion, Register, VisualKind } from "./editor.ts";
 import { createHelp, type Help, type HelpLine } from "./help.ts";
 import { createReader, type EditorCursor, type Reader, type ReaderPoint, type SelectionMotion } from "./reader.ts";
+import { withScrollbar } from "./scrollbar.ts";
 import { type ConfigProblem, loadConfig, type TuiConfig } from "./config.ts";
 import {
   actionKeyLabels,
@@ -1405,9 +1406,9 @@ export class Shell {
         void s.execute("sort");
         break;
       case "filters":
+        // f (and a click on the list header's filter chips) is a bare :filter: the filter picker.
         s.closeView();
-        if (!s.loaded) s.notify("info", "The workspace is still loading");
-        else openFilterPicker(s);
+        void s.execute("filter");
         break;
       case "clear_filters":
         s.closeView();
@@ -1987,7 +1988,7 @@ export class Shell {
     return paint(theme, segs, width, fill);
   }
 
-  /** The editor's rows at `width` x `height`; `focused` puts its cursor (and the marker) on screen. */
+  /** The editor's rows at `width` x `height`; `focused` puts its cursor (and the marker) on screen; the last column is its scrollbar. */
   #editorRows(
     theme: ResolvedTheme,
     editor: DocumentEditor,
@@ -2002,10 +2003,12 @@ export class Shell {
     editor.height = height;
     editor.focused = focused;
     this.#layout.editor = { taskId, x, y, width, height };
-    return editor.render(Math.max(1, width));
+    // The last column is the body's scrollbar (src/tui/scrollbar.ts); the mouse area keeps it (the wheel scrolls).
+    const lines = editor.render(Math.max(1, width - 1));
+    return withScrollbar(theme, lines, editor.scrollPosition());
   }
 
-  /** The reader's rows (Read, or the Split preview following `cursor`) at `width` x `height`, placed at x/y for the mouse. */
+  /** The reader's rows (Read, or the Split preview following `cursor`) at `width` x `height`, placed at x/y for the mouse; the last column is its scrollbar. */
   #readerRows(
     width: number,
     height: number,
@@ -2017,7 +2020,9 @@ export class Shell {
     this.#reader.height = height;
     this.#reader.editorCursor = cursor;
     this.#layout.reader = { x, y, width, height, preview };
-    return this.#reader.render(width);
+    const lines = this.#reader.render(Math.max(1, width - 1));
+    const theme = this.session.theme; // the pane's (withPaneTheme), as the reader paints with
+    return theme === null ? lines : withScrollbar(theme, lines, this.#reader.scrollPosition());
   }
 
   /** Divider labels after READ/PREVIEW: the raw-source view, the section in view, the document search. */
@@ -2198,7 +2203,7 @@ export class Shell {
     );
     entry(
       "list header",
-      "The filter chips open the filter picker; the sort label, the sort and group picker (bare :sort)",
+      "The filter chips open the filter picker (bare :filter); the sort label, the sort and group picker (bare :sort)",
     );
     entry("status line", "The unread count opens :notifications; the problems, :messages");
     entry("drag", "Select from the press to the pointer: VISUAL in the editor or the rendered document (then y, d, c)");

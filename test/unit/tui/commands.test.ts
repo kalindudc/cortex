@@ -201,7 +201,7 @@ const KEY_ACTION_TARGETS: Readonly<
   tags: { command: "tag" },
   status: { command: "status" },
   sort: { command: "sort" },
-  filters: "handled",
+  filters: { command: "filter" },
   clear_filters: { command: "clear" },
   save: { command: "write" },
   yank: "handled",
@@ -507,9 +507,6 @@ describe("running the navigation commands", () => {
       expect(s.status?.text).toMatch(message);
     }
     expect(s.filter).toEqual({ status: null, lane: null, tags: ["ui"] });
-    await s.execute("filter");
-    expect(s.status?.level).toBe("info");
-    expect(s.status?.text).toContain("#ui");
   });
 
   test(":clear clears the search and the slots but keeps include-done", async () => {
@@ -924,6 +921,17 @@ describe(":sort and :group (the terminal's list order; ;o opens the picker)", ()
 
 describe("the filter picker (f): one-key toggles, live counts, type-to-search, F clears", () => {
   const keysOf = (d: Dialog) => d.visibleRows().map(r => r.key);
+
+  test("a bare :filter opens the same picker; its summary names the active filters; Enter closes it and keeps them", async () => {
+    const { s, type } = withDaemon();
+    s.setFilter({ status: null, lane: null, tags: ["bug"] });
+    await s.execute("filter");
+    expect(topDialog(s).label).toBe("filters");
+    expect(plainText(topDialog(s).render(96))).toContain("shown \u00b7 #bug");
+    type("\r");
+    expect(s.dialog).toBeNull();
+    expect(s.filter.tags).toEqual(["bug"]);
+  });
 
   test("letters toggle a status (again clears it; statuses are one slot), untagged and include-done; the list follows", () => {
     const { s, type } = withDaemon();

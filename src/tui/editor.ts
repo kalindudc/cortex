@@ -69,6 +69,7 @@ import {
   type TuiMouseEventResult,
 } from "@earendil-works/pi-tui";
 import { displayWidth, escapeTerminalText } from "./safety.ts";
+import type { ScrollPosition } from "./scrollbar.ts";
 import { type ContrastPair, type ResolvedTheme, type StyleAttributes, style } from "./theme.ts";
 
 // The web editor's state extensions (MdEditor: history() + markdown()); both are reusable values.
@@ -180,6 +181,8 @@ export interface DocumentEditor extends Component, Focusable {
   put(register: Register, options: { before: boolean; count?: number }): boolean;
   /** The cursor's row among the rows the last render drew (Split's preview lines up with it), or -1. */
   cursorRow(): number;
+  /** The last render's first visual row and the document's visual rows at its width (wrapped rows count). */
+  scrollPosition(): ScrollPosition;
   /**
    * The document offset shown at cell (x, y) of the last render (relative to
    * the editor, the gutter included); a cell above or below the rows on
@@ -473,6 +476,8 @@ class Editor implements DocumentEditor {
   #layouts = new Map<string, Row[]>();
   #visible: VisibleRow[] = [];
   #cursorRow = -1;
+  /** scrollPosition's memo: each line's first visual row (the total last) for one document at one width. */
+  #rowStarts: { doc: Text; width: number; starts: number[] } | null = null;
   /** VISUAL: the fixed end, the moving end (the vi cursor) and the shape; null outside VISUAL. */
   #visual: { kind: VisualKind; anchor: number; cursor: number } | null = null;
 
@@ -1016,6 +1021,19 @@ class Editor implements DocumentEditor {
 
   cursorRow(): number {
     return this.#cursorRow;
+  }
+
+  scrollPosition(): ScrollPosition {
+    const doc = this.#state.doc;
+    let memo = this.#rowStarts;
+    if (memo === null || memo.doc !== doc || memo.width !== this.#width) {
+      const starts = [0];
+      for (let n = 1; n <= doc.lines; n++) starts[n] = starts[n - 1] + this.#rows(doc.line(n).text).length;
+      memo = { doc, width: this.#width, starts };
+      this.#rowStarts = memo;
+    }
+    const line = Math.min(this.#top.line, doc.lines);
+    return { top: memo.starts[line - 1] + this.#top.row, total: memo.starts[doc.lines] };
   }
 
   render(width: number): string[] {

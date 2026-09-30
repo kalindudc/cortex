@@ -67,7 +67,7 @@ import { TASK_GROUPS, TASK_SORTS, type TaskFilter, type TaskGroup, type TaskSort
 import type { Reader, ReaderCodeBlock, ReaderLink } from "./reader.ts";
 import type { TaskPanel, ThemeControl, TuiSession } from "./session.ts";
 import { BUNDLED_THEME_NAMES, type ResolvedTheme, type ThemeSource } from "./theme.ts";
-import { describeFilters, filterChips, filterCounts, STATUS_MARK, tagLabel } from "./workspace.ts";
+import { filterChips, filterCounts, STATUS_MARK, tagLabel } from "./workspace.ts";
 
 /** Input the user must correct: shown as an error message, nothing changes. */
 export class CommandError extends Error {}
@@ -240,15 +240,11 @@ function completeFilter(prefix: string, session: TuiSession): string[] {
   }
 }
 
+/** :filter <slot> [value] sets or clears one slot; bare opens the filter picker (f is a bare :filter). */
 function runFilter(session: TuiSession, argument: string): void {
   if (argument === "") {
-    const parts = describeFilters(session.listView);
-    session.notify(
-      "info",
-      parts.length > 0
-        ? `Filters: ${parts.join(" · ")} (:clear clears them)`
-        : "No filters: :filter status|lane|tags <value> narrows the list, / searches it",
-    );
+    if (!session.loaded) session.notify("info", "The workspace is still loading");
+    else openFilterPicker(session);
     return;
   }
   const match = SPLIT.exec(argument);
@@ -1600,7 +1596,7 @@ export const COMMANDS: readonly CommandSpec[] = [
     aliases: [],
     usage: ":filter [status|lane|tags] <value>",
     description:
-      "Narrow the task list: :filter status review, :filter lane later, :filter tags bug untagged (+tag adds, -tag removes); a bare slot clears it",
+      "Narrow the task list: :filter status review, :filter lane later, :filter tags bug untagged (+tag adds, -tag removes); a bare slot clears it; bare opens the filter picker (f)",
     complete: completeFilter,
     run: runFilter,
   },
