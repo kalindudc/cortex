@@ -110,7 +110,7 @@ import type { DocumentEditor, EditorMotion, Register, VisualKind } from "./edito
 import { createHelp, type Help, type HelpLine } from "./help.ts";
 import { createReader, type EditorCursor, type Reader, type ReaderPoint, type SelectionMotion } from "./reader.ts";
 import { withScrollbar } from "./scrollbar.ts";
-import { type ConfigProblem, loadConfig, type TuiConfig } from "./config.ts";
+import { type ConfigProblem, loadConfig, SETTING_HELP, type TuiConfig } from "./config.ts";
 import {
   actionKeyLabels,
   INSERT_ACTIONS,
@@ -134,6 +134,7 @@ import { openPreferences, type PreferenceProblem } from "./preferences.ts";
 import { displayWidth, escapeTerminalText, fitWidth } from "./safety.ts";
 import { type MessageLevel, type Problem, type ThemeChoice, TuiSession } from "./session.ts";
 import {
+  BUNDLED_THEME_NAMES,
   type ColorEnvironment,
   type ContrastPair,
   inactiveTheme,
@@ -144,6 +145,7 @@ import {
   type Seg,
   seg,
   style,
+  THEME_TOKENS,
   type ThemeProblem,
 } from "./theme.ts";
 import { createWorkspace, STATUS_MARK, statusPair, type WorkspaceComponent } from "./workspace.ts";
@@ -2256,6 +2258,18 @@ export class Shell {
     entry("Enter", "A new line (continuing a Markdown list); in the title, save it");
     entry("Shift-arrows", "Select; typing or a paste replaces the selection");
     entry("Esc", "Back to NORMAL (the body saves by autosave or :w; the title saves now)");
+    blank();
+    heading("SETTINGS \u00b7 tui.toml (read at start; an invalid entry keeps its default and is listed in :messages)");
+    for (const s of SETTING_HELP) entry(s.key, `default ${s.default ?? "unset"} \u00b7 ${s.meaning}`);
+    entry(
+      "[keys.<mode>]",
+      'normal, leader, insert, visual: action = ["key", ...] with the action names above; one invalid entry keeps every default of that table',
+    );
+    entry(
+      "themes/<name>.toml",
+      `A custom theme: every token, or extends = one of ${BUNDLED_THEME_NAMES.join(" ")} and some tokens; values "#rrggbb", "ansi:0" to "ansi:15" or "default"`,
+    );
+    entry("theme tokens", THEME_TOKENS.join(" "));
     blank();
     const later = NORMAL_ACTIONS.some(action => !AVAILABLE_ACTIONS.has(action));
     out.push({ segs: [seg("dim@bg", `${later ? "(later): not in this build yet. " : ""}Keys are set in tui.toml.`)] });

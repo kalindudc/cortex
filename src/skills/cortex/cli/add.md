@@ -55,7 +55,7 @@ $ generate_plan | cortex add "Plan: X" --body-file - --json
 
 ## Pitfalls
 
-- **Author attribution is per-update, not per-task.** `cortex add` does NOT take an `--as` / `--author` flag. Tasks are created anonymously; the audit trail starts only when someone posts the first `cortex update --as <id>`. If you want to record who created the task, immediately follow `add` with an `update` carrying your session id (see [session-id recipe](../recipes/session-id.md)).
+- **Attribution is opt-in.** Without `--as`, `cortex add` is anonymous and the audit trail starts at the first `cortex update --as <id>`; `--as <id>` records the first `created` update in the same call (see [session-id recipe](../recipes/session-id.md)).
 - **Do NOT auto-set `--priority` without an explicit user signal.** Most tasks are opt-in metadata containers (plans, research notes, archives). Priority is an urgency annotation; only set it when the user asked you to.
 - `--priority` rejects negatives, decimals, and non-numeric strings. `-p 1.5` or `-p high` exit 1.
 - A title-only task is fine; `--body` is for context that `cortex ls` hides until you open the task (`cortex show`, or the TUI).

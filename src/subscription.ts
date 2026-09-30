@@ -155,7 +155,7 @@ export interface SubscribeOptions {
 
 const DEFAULT_RETRY_MS = 250;
 const DEFAULT_MAX_RETRY_MS = 5000;
-/** The daemon heartbeats every 15s; three missed beats means the peer is gone. */
+/** Silence across several daemon heartbeats (server.ts DEFAULT_STREAM_LIMITS.heartbeatMs) means the peer is gone. */
 const DEFAULT_IDLE_TIMEOUT_MS = 45_000;
 
 const KNOWN_KINDS: ReadonlySet<string> = new Set(EVENT_KINDS);

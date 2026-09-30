@@ -2,7 +2,7 @@ import { test, expect, describe, beforeEach, afterEach } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { DEFAULT_CONFIG, loadConfig } from "../../../src/tui/config.ts";
+import { DEFAULT_CONFIG, loadConfig, SETTING_HELP } from "../../../src/tui/config.ts";
 import { DEFAULT_KEYS } from "../../../src/tui/keys.ts";
 
 // Plan @400 N15/N18/N22/N23: tui.toml is user-authored and read-only to
@@ -217,5 +217,38 @@ tags = ["g"]
   test("a UTF-8 byte-order mark is tolerated", () => {
     write(`\ufeffmouse = false\n`);
     expect(loadConfig(file)).toMatchObject({ config: { mouse: false }, problems: [] });
+  });
+});
+
+describe("SETTING_HELP: the tui.toml settings :help lists", () => {
+  test("it lists exactly the loader's known top-level settings, leader first, each once", () => {
+    // The loader names every known top-level setting when it rejects an unknown one.
+    write("not_a_setting = 1\n");
+    const unknown = loadConfig(file).problems.find(p => p.keyPath === "not_a_setting");
+    const known = /\(known: ([^)]*)\)/.exec(unknown?.reason ?? "")?.[1]?.split(", ") ?? [];
+    expect(known.length).toBeGreaterThan(0);
+    const keys = SETTING_HELP.map(s => s.key);
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(keys[0]).toBe("leader");
+    expect([...keys].sort()).toEqual(known.filter(k => k !== "keys").sort()); // [keys.*] are the key tables
+  });
+
+  test("every meaning is non-empty and only the theme settings are unset by default", () => {
+    for (const s of SETTING_HELP) expect(s.meaning.trim().length, s.key).toBeGreaterThan(0);
+    expect(SETTING_HELP.filter(s => s.default === null).map(s => s.key)).toEqual([
+      "theme",
+      "theme_dark",
+      "theme_light",
+    ]);
+  });
+
+  test("each listed default loads without a problem and IS the default", () => {
+    for (const { key, default: fallback } of SETTING_HELP) {
+      if (fallback === null) continue; // unset by default
+      write(`${key} = ${fallback}\n`);
+      const loaded = loadConfig(file);
+      expect(loaded.problems, `${key} = ${fallback}`).toEqual([]);
+      expect(loaded.config, `${key} = ${fallback} is not the default`).toEqual(DEFAULT_CONFIG);
+    }
   });
 });

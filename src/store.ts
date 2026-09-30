@@ -2210,7 +2210,7 @@ export class Store {
 
   /**
    * Create the derived FTS5 index on first use, never in migrate(): a SQLite
-   * built without FTS5 then breaks only memory search, loudly. Both tables
+   * built without FTS5 then breaks only memory search, loudly. The derived tables
    * are private (not in backup.ts TABLES), so backups never export them.
    *
    * The index unit is a SECTION (src/memory.ts memorySections), not a whole

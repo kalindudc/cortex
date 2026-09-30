@@ -21,8 +21,8 @@ jobs:
       - uses: pnpm/action-setup@v4
       - name: install dependencies
         run: pnpm install --frozen-lockfile
-      - name: agents.md drift check
-        run: pnpm run agents:check
+      - name: docs drift check
+        run: pnpm run docs:check
       - name: style
         run: pnpm run style:check
       - name: bun:test (build + unit + integration)

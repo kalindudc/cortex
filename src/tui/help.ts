@@ -1,5 +1,6 @@
 // The help view (`?`, :help): the shell's lines (src/tui/app.ts #helpLines,
-// built from the COMMANDS registry, the key table and the fixed keys, so
+// built from the COMMANDS registry, the key table, the fixed keys and the
+// tui.toml settings (config.ts SETTING_HELP), so
 // help keeps its single sources) wrapped to the pane and searchable.
 //
 // - wrapHelp: rows of the pane's width in display cells, broken at spaces

@@ -15,12 +15,13 @@ import {
   type ShellOptions,
 } from "../../../src/tui/app.ts";
 import { withExternalProgram } from "../../../src/tui/bridge.ts";
-import { DEFAULT_CONFIG, type TuiConfig } from "../../../src/tui/config.ts";
+import { DEFAULT_CONFIG, SETTING_HELP, type TuiConfig } from "../../../src/tui/config.ts";
 import { Dialog } from "../../../src/tui/dialogs.ts";
 import { parseKeys } from "../../../src/tui/keys.ts";
 import { MOUSE_OFF, MOUSE_ON, WHEEL_NOTCH_MS } from "../../../src/tui/mouse.ts";
 import { openPreferences, readPreferences } from "../../../src/tui/preferences.ts";
 import { TuiSession } from "../../../src/tui/session.ts";
+import { BUNDLED_THEME_NAMES, THEME_TOKENS } from "../../../src/tui/theme.ts";
 
 // Plan @400 Tasks 7-8 (N13, N17-N20, N22-N23, P1/P2/P9): the terminal shell.
 // A status line (mode, focus, save/connection state, messages), a hint line
@@ -818,7 +819,7 @@ describe("keys (N17/N18)", () => {
     h.terminal.rows = 40;
     type(h, "G");
     expect(h.session.viewScroll).toBeGreaterThan(0);
-    expect(screen(h)).toContain(";h");
+    expect(screen(h)).toContain("theme tokens"); // the last help section: the tui.toml settings
     type(h, "q");
     expect(h.session.view).toBe("workspace");
     type(h, ":", ..."help", "\r", "\x1b");
@@ -899,6 +900,23 @@ describe("keys (N17/N18)", () => {
     // No row is cut short any more.
     expect(rows.slice(0, -2).some(row => row.includes("\u2026"))).toBe(false);
     for (const row of rows) expect(visibleWidth(row)).toBeLessThanOrEqual(80);
+  });
+
+  test("the help lists every tui.toml setting with its default and meaning, the custom theme format and the tokens", async () => {
+    const h = await started();
+    type(h, "?");
+    h.terminal.rows = 600; // the whole help on one screen
+    const rows = plain(h.shell.frame());
+    expect(rows.some(row => row.includes("SETTINGS \u00b7 tui.toml"))).toBe(true);
+    for (const s of SETTING_HELP) {
+      const row = rows.find(r => new RegExp(`^\\s+${s.key}\\s`).test(r));
+      expect(row, s.key).toBeDefined();
+      expect(row, s.key).toContain(`default ${s.default ?? "unset"}`);
+    }
+    const all = rows.join(" ");
+    for (const name of BUNDLED_THEME_NAMES) expect(all, name).toContain(name);
+    for (const token of THEME_TOKENS) expect(all, token).toContain(token);
+    expect(rows.slice(0, -2).some(row => row.includes("\u2026"))).toBe(false);
   });
 
   test("no view ever hints a function key", async () => {

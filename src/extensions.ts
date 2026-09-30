@@ -10,8 +10,7 @@
  * `with { type: "file" }`, which `bun build --compile` rewrites to a
  * `/$bunfs/...` virtual path; we read the bytes via `Bun.file(path)`.
  *
- * Identical idiom to SKILLS in `src/skills.ts` and UI_ASSETS in
- * `src/server.ts` — same single-binary discipline.
+ * Identical idiom to SKILLS in `src/skills.ts` — same single-binary discipline.
  *
  * Idempotency: `writeExtension()` / `writeAllExtensions()` always
  * overwrite. Extensions are machine-generated; documenting that here is
@@ -36,7 +35,7 @@ import path from "node:path";
 // `string` because at runtime under Bun the value IS the embedded path,
 // not the function. The runtime contract is enforced by the build script
 // (`scripts/build.sh` runs `bun build --compile` which honors the import
-// attribute) and by the on-disk-write tests in `test/skills.test.ts`.
+// attribute) and by the on-disk-write tests in `test/unit/extensions.test.ts`.
 import piExtImport from "./extensions/pi.ts" with { type: "file" };
 const piExt = piExtImport as unknown as string;
 // The memory status + `/memory` panel view, installed beside index.ts under

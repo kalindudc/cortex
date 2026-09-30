@@ -4,13 +4,11 @@
  * (and wiped+rewritten by `cortex agents reset`).
  *
  * Why embedded: the CLI binary ships everything an agent needs to learn
- * cortex — the base vocabulary skill plus the two methodology skills
- * (cortex-planner, cortex-implementer) — without a separate install step
+ * cortex — the base vocabulary skill plus the three methodology skills
+ * (cortex-planner, cortex-implementer, cortex-research) — without a separate install step
  * or external download. Each markdown file is imported with
  * `with { type: "file" }`, which `bun build --compile` rewrites to a
  * `/$bunfs/...` virtual path; we read the bytes via `Bun.file(path)`.
- *
- * Identical idiom to UI_ASSETS in server.ts — same single-binary discipline.
  *
  * Idempotency: writeSkill() / writeAllSkills() always overwrite. Skills are
  * machine-generated; documenting that in cli/agents.md is the load-bearing

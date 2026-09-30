@@ -11,7 +11,7 @@
 // syntax errors are reported without a line.
 
 import fs from "node:fs";
-import { DEFAULT_KEYS, parseKeys, type KeyConfig } from "./keys.ts";
+import { DEFAULT_KEYS, DEFAULT_LEADER, parseKeys, type KeyConfig } from "./keys.ts";
 
 export type Appearance = "system" | "dark" | "light";
 export type ColorSetting = "auto" | "truecolor" | "256" | "16" | "none";
@@ -83,11 +83,20 @@ const MAX_CONFIG_BYTES = 1024 * 1024;
 
 const quoteAll = (values: readonly string[]): string => values.map(v => JSON.stringify(v)).join(", ");
 
-type Setting = { key: string; apply(value: unknown, out: Mutable<TuiConfig>): string | null };
+/** A tui.toml top-level setting as :help lists it: `default` is its TOML literal (null = unset). */
+export interface SettingHelp {
+  readonly key: string;
+  readonly default: string | null;
+  readonly meaning: string;
+}
+/** A top-level setting: its help (key, default, meaning) and its validator. */
+type Setting = SettingHelp & { apply(value: unknown, out: Mutable<TuiConfig>): string | null };
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
-const themeSetting = (key: string, field: "theme" | "themeDark" | "themeLight"): Setting => ({
+const themeSetting = (key: string, field: "theme" | "themeDark" | "themeLight", meaning: string): Setting => ({
   key,
+  default: null,
+  meaning,
   apply(value, out) {
     if (!isThemeName(value)) return "must be a theme name: lowercase letters, digits, '-' or '_'";
     out[field] = value;
@@ -95,8 +104,14 @@ const themeSetting = (key: string, field: "theme" | "themeDark" | "themeLight"):
   },
 });
 
-const booleanSetting = (key: string, field: "mouse" | "transparentBackground" | "flash" | "bell"): Setting => ({
+const booleanSetting = (
+  key: string,
+  field: "mouse" | "transparentBackground" | "flash" | "bell",
+  meaning: string,
+): Setting => ({
   key,
+  default: JSON.stringify(DEFAULT_CONFIG[field]),
+  meaning,
   apply(value, out) {
     if (typeof value !== "boolean") return "must be true or false";
     out[field] = value;
@@ -106,12 +121,22 @@ const booleanSetting = (key: string, field: "mouse" | "transparentBackground" | 
 
 // Top-level settings besides `leader` and `keys` (validated by parseKeys).
 const SETTINGS: readonly Setting[] = [
-  booleanSetting("mouse", "mouse"),
-  themeSetting("theme", "theme"),
-  themeSetting("theme_dark", "themeDark"),
-  themeSetting("theme_light", "themeLight"),
+  booleanSetting(
+    "mouse",
+    "mouse",
+    "The mouse: clicks, drags, the wheel and the view tabs (every action also has a key or command)",
+  ),
+  themeSetting("theme", "theme", "Pin a theme (bundled or custom) for every session"),
+  themeSetting("theme_dark", "themeDark", "The theme for a dark terminal when no theme is pinned (unset: cortex-dark)"),
+  themeSetting(
+    "theme_light",
+    "themeLight",
+    "The theme for a light terminal when no theme is pinned (unset: cortex-light)",
+  ),
   {
     key: "appearance",
+    default: JSON.stringify(DEFAULT_CONFIG.appearance),
+    meaning: '"system" follows the terminal\'s reported appearance (and its live changes); "dark" or "light" fixes it',
     apply(value, out) {
       if (!(APPEARANCES as readonly unknown[]).includes(value)) return `must be one of ${quoteAll(APPEARANCES)}`;
       out.appearance = value as Appearance;
@@ -120,25 +145,40 @@ const SETTINGS: readonly Setting[] = [
   },
   {
     key: "colors",
+    default: JSON.stringify(DEFAULT_CONFIG.colors),
+    meaning: '"auto" detects the color depth; "truecolor", "256", "16" force one; "none" turns colors off',
     apply(value, out) {
       if (!(COLOR_SETTINGS as readonly unknown[]).includes(value)) return `must be one of ${quoteAll(COLOR_SETTINGS)}`;
       out.colors = value as ColorSetting;
       return null;
     },
   },
-  booleanSetting("transparent_background", "transparentBackground"),
+  booleanSetting(
+    "transparent_background",
+    "transparentBackground",
+    "Leave the background to the terminal (its contrast cannot be checked)",
+  ),
   {
     key: "density",
+    default: JSON.stringify(DEFAULT_CONFIG.density),
+    meaning:
+      'The spacing when the profile has no saved :density choice (that choice wins): "comfortable" adds blank rows under the headers and above the status line, and margins at both ends of the status and hint lines; "compact" leaves them out',
     apply(value, out) {
       if (!isDensity(value)) return `must be one of ${quoteAll(DENSITIES)}`;
       out.density = value;
       return null;
     },
   },
-  booleanSetting("flash", "flash"),
-  booleanSetting("bell", "bell"),
+  booleanSetting("flash", "flash", "Flash the status line when a task becomes blocked"),
+  booleanSetting("bell", "bell", "Also ring the terminal bell when a task becomes blocked"),
 ];
 const KNOWN = new Set(["leader", "keys", ...SETTINGS.map(s => s.key)]);
+
+/** Every top-level setting in help order: `leader` (parsed by keys.ts), then SETTINGS; `[keys.*]` are the key tables. */
+export const SETTING_HELP: readonly SettingHelp[] = [
+  { key: "leader", default: JSON.stringify(DEFAULT_LEADER), meaning: "The leader key for the [keys.leader] table" },
+  ...SETTINGS.map(({ key, default: fallback, meaning }) => ({ key, default: fallback, meaning })),
+];
 
 function readText(file: string): { text: string } | { missing: true } | { error: string } {
   try {

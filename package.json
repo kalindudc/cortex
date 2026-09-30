@@ -3,6 +3,7 @@
   "version": "0.2.0",
   "type": "module",
   "private": true,
+  "packageManager": "pnpm@10.28.0",
   "bin": {
     "cortex": "./index.ts"
   },
@@ -14,10 +15,9 @@
     "test:integration": "pnpm run build && pnpm exec bun test test/integration/",
     "dev": "bash scripts/dev-cli.sh",
     "deploy": "pnpm run build && rm -rf ~/bin/cortex && cp bin/cortex ~/bin/",
-    "style": "pnpm exec bun scripts/sync-arch-block.ts && node node_modules/@biomejs/biome/bin/biome check --error-on-warnings --write . && pnpm exec tsc",
-    "style:check": "node node_modules/@biomejs/biome/bin/biome check --error-on-warnings . && pnpm exec tsc --noEmit && pnpm exec bun scripts/check-agents.ts",
-    "agents:check": "pnpm exec bun scripts/check-agents.ts",
-    "agents:map": "pnpm exec bun scripts/sync-arch-block.ts"
+    "style": "node node_modules/@biomejs/biome/bin/biome check --error-on-warnings --write . && pnpm exec tsc",
+    "style:check": "node node_modules/@biomejs/biome/bin/biome check --error-on-warnings . && pnpm exec tsc --noEmit && pnpm exec bun scripts/check-docs.ts",
+    "docs:check": "pnpm exec bun scripts/check-docs.ts"
   },
   "dependencies": {
     "@codemirror/commands": "^6.0.0",

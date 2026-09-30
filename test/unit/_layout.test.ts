@@ -11,8 +11,8 @@
  *      under `src/` without writing its unit test fails this guard.
  *
  *   2. UNIT NO-BINARY-SPAWN — no `test/unit/**\/*.test.ts` file may import
- *      from the integration helpers or call `runCli` / `Bun.spawn` /
- *      `startServer`. Unit tests are pure in-process by definition.
+ *      from the integration helpers or call `runCli` / `startServer`
+ *      (`Bun.spawn` of other programs is allowed). Unit tests are pure in-process.
  *
  *   3. HERMETIC TEXT GUARD — no test file under `test/` may reference the
  *      developer's real `~/.config/cortex` path literally (with one
