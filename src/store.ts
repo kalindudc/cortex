@@ -117,10 +117,23 @@ export const SHARED_TAG_BLOCKLIST: ReadonlySet<string> = new Set(["plan", "pr-de
  * A memory stream row (plan @414): bodiless and token-lean. `synced` is the
  * last time the task's BODY changed (`_body_edits`), falling back to
  * `created`; title, status, lane, tag and update writes never move it.
+ * `activity` is the newest of `created`, the last body change and the
+ * newest update that is not a status audit or `created` row: bulk status
+ * flips and lane/tag moves are not activity (plan @422).
  */
-export type MemoryStreamRow = Pick<Task, "id" | "title" | "lane" | "status" | "tags" | "updated"> & { synced: number };
-/** One ranked memory-search hit (GET /api/memory/search). */
-export type MemoryHit = MemoryStreamRow & { score: number; matched: string[]; snippet: string };
+export type MemoryStreamRow = Pick<Task, "id" | "title" | "lane" | "status" | "tags" | "updated"> & {
+  synced: number;
+  activity: number;
+};
+/** The newest stream a stream's same-lane `@id` link chain reaches (derived `_memory_links`). */
+export type LinkedStream = { id: number; status: TaskStatus; activity: number };
+/** One ranked memory-search hit (GET /api/memory/search); `latest` is null when the hit is its own chain head. */
+export type MemoryHit = MemoryStreamRow & {
+  score: number;
+  matched: string[];
+  snippet: string;
+  latest: LinkedStream | null;
+};
 /** One stream with its full update history (GET /api/memory/streams/:id). */
 export type MemoryStream = {
   task: Task;
@@ -128,6 +141,8 @@ export type MemoryStream = {
   synced: number;
   /** Highest update id at the sync: updates above it are the breadcrumbs (ids order same-millisecond writes). */
   syncedUpdateId: number;
+  /** The latest linked stream, or null when this stream is its own chain head. */
+  latest: LinkedStream | null;
 };
 
 /**
@@ -471,10 +486,21 @@ const clampInt = (value: number, min: number, max: number): number =>
 /** One FTS5 phrase for a memory term (terms are letters/digits only; quotes are doubled defensively). */
 const quoteTerm = (term: string): string => `"${term.replaceAll('"', '""')}"`;
 
-/** The memory stream row: bodiless task columns, sorted tag list, and `synced` (last body change, else `created`). */
+/**
+ * A stream's activity time over `tasks t LEFT JOIN _body_edits e`: its
+ * creation, last body change and newest update, where status audits and the
+ * `created` row do not count (34 bulk `status → done` flips once stamped
+ * 55 tasks as the newest work).
+ */
+const ACTIVITY_SQL = `MAX(t.created, COALESCE(e.edited, 0), COALESCE((
+    SELECT MAX(u.created) FROM updates u
+     WHERE u.task_id = t.id AND u.summary NOT LIKE 'status \u2192 %' AND u.summary <> 'created'), 0))`;
+
+/** The memory stream row: bodiless task columns, sorted tag list, `synced` (last body change, else `created`), `activity`. */
 const STREAM_ROW_SELECT = `
   SELECT t.id, t.title, t.lane, t.status, t.updated,
          COALESCE(e.edited, t.created) AS synced,
+         ${ACTIVITY_SQL} AS activity,
          COALESCE((SELECT GROUP_CONCAT(tag_name, ',' ORDER BY tag_name) FROM task_tags WHERE task_id = t.id), '') AS tag_csv
     FROM tasks t
     LEFT JOIN _body_edits e ON e.task_id = t.id`;
@@ -2222,10 +2248,24 @@ export class Store {
    * rowid range of its sections. The first version's whole-document tables
    * (`_memory_fts`, `_memory_index`) are derived data: dropped here and
    * rebuilt as sections by the reconcile.
+   *
+   * `_memory_links` is the derived `@id` graph (plan @422): one row per
+   * task and every `@<id>` its body or update summaries cite, maintained
+   * with the sections. An index built before it existed is rebuilt whole
+   * once, so every task's links are recorded.
    */
   private ensureMemoryIndex(): void {
     this.db.run(`DROP TABLE IF EXISTS _memory_fts;`);
     this.db.run(`DROP TABLE IF EXISTS _memory_index;`);
+    const hasLinks = this.db
+      .query<{ found: number }, []>(
+        `SELECT 1 AS found FROM sqlite_master WHERE type = 'table' AND name = '_memory_links';`,
+      )
+      .get();
+    if (!hasLinks) {
+      this.db.run(`DROP TABLE IF EXISTS _memory_sections;`);
+      this.db.run(`DROP TABLE IF EXISTS _memory_section_map;`);
+    }
     this.db.run(
       `CREATE VIRTUAL TABLE IF NOT EXISTS _memory_sections
          USING fts5(task_id UNINDEXED, title, tags, text, tokenize='porter unicode61');`,
@@ -2238,6 +2278,13 @@ export class Store {
          last_rowid  INTEGER NOT NULL
        ) WITHOUT ROWID;`,
     );
+    this.db.run(
+      `CREATE TABLE IF NOT EXISTS _memory_links (
+         task_id INTEGER NOT NULL,
+         ref_id  INTEGER NOT NULL,
+         PRIMARY KEY (task_id, ref_id)
+       ) WITHOUT ROWID;`,
+    );
   }
 
   /**
@@ -2248,7 +2295,9 @@ export class Store {
    * for rows never stamped. Its old sections are deleted by rowid range and
    * its new ones get fresh, contiguous rowids above every existing row.
    * Removed tasks leave the index. The log holds update summaries minus
-   * machine rows (status audits, `created`).
+   * machine rows (status audits, `created`). A re-indexed task's
+   * `_memory_links` rows are rewritten from the `@id` refs of its body and
+   * log (self excluded); a removed task's rows are deleted.
    */
   private reconcileMemoryIndex(): void {
     const current = this.db
@@ -2271,6 +2320,10 @@ export class Store {
     );
     const stamp = this.db.query<unknown, [number, string, number, number]>(
       `INSERT OR REPLACE INTO _memory_section_map (task_id, sig, first_rowid, last_rowid) VALUES (?, ?, ?, ?);`,
+    );
+    const unlink = this.db.query<unknown, [number]>(`DELETE FROM _memory_links WHERE task_id = ?;`);
+    const link = this.db.query<unknown, [number, number]>(
+      `INSERT OR IGNORE INTO _memory_links (task_id, ref_id) VALUES (?, ?);`,
     );
     const log = this.db.query<{ summary: string }, [number]>(
       `SELECT summary FROM updates
@@ -2297,11 +2350,50 @@ export class Store {
       const first = next;
       for (const text of texts) insert.run(next++, id, task.title, tags, text);
       stamp.run(id, sig, first, next - 1);
+      unlink.run(id);
+      for (const match of `${task.body ?? ""}\n${summaries}`.matchAll(new RegExp(REF_RE.source, REF_RE.flags))) {
+        const ref = match[1] === undefined ? 0 : Number(match[1]);
+        if (ref > 0 && ref !== id) link.run(id, ref);
+      }
     }
     for (const [gone, row] of indexed) {
       drop.run(row.first_rowid, row.last_rowid);
       this.db.run(`DELETE FROM _memory_section_map WHERE task_id = ?;`, [gone]);
+      unlink.run(gone);
     }
+  }
+
+  /**
+   * The newest stream reached from `id` through same-lane `@id` links (either
+   * direction) to LATER-created tasks: each hop takes the linked candidate
+   * with the newest activity, at most MEMORY_LIMITS.chainHops hops (creation
+   * order makes it cycle-free; a visited set guards anyway). Null when no
+   * later linked stream exists. Needs the index reconciled first.
+   */
+  private latestLinked(id: number): LinkedStream | null {
+    const origin = this.db
+      .query<{ lane: string; created: number }, [number]>(`SELECT lane, created FROM tasks WHERE id = ?;`)
+      .get(id);
+    if (!origin) return null;
+    const nextHop = this.db.query<LinkedStream & { created: number }, [number, number, string, number]>(
+      `SELECT t.id, t.status, t.created, ${ACTIVITY_SQL} AS activity
+         FROM tasks t LEFT JOIN _body_edits e ON e.task_id = t.id
+        WHERE t.id IN (SELECT task_id FROM _memory_links WHERE ref_id = ?1
+                       UNION SELECT ref_id FROM _memory_links WHERE task_id = ?2)
+          AND t.lane = ?3 AND t.created > ?4
+        ORDER BY activity DESC, t.id DESC LIMIT 1;`,
+    );
+    const visited = new Set([id]);
+    let head: (LinkedStream & { created: number }) | null = null;
+    let current = { id, created: origin.created };
+    for (let hop = 0; hop < MEMORY_LIMITS.chainHops; hop++) {
+      const row = nextHop.get(current.id, current.id, origin.lane, current.created);
+      if (!row || visited.has(row.id)) break;
+      visited.add(row.id);
+      head = row;
+      current = row;
+    }
+    return head ? { id: head.id, status: head.status, activity: head.activity } : null;
   }
 
   /**
@@ -2314,15 +2406,31 @@ export class Store {
    * when it matches at least min(groups, minMatched) groups (title and tags
    * count in every section), so incidental matches spread across a long body
    * do not (a wrong memory is worse than none). `matched` still lists every
-   * matching term. A task scores as its best qualifying
-   * section under BM25 (title > tags > text); `matched` and the snippet come
-   * from that section (the snippet from its text, or from the title when only
-   * the title/tags matched). Ensures and reconciles the index in the same
-   * transaction, so a hit always reflects the current task.
+   * matching term.
+   *
+   * Search spans ALL lanes (plan @422); `lane` is an explicit filter, `boost`
+   * the caller's lane, whose BM25 scores count MEMORY_LIMITS.laneBoost times.
+   * A task is represented by its best qualifying section (more groups, then
+   * BM25 with title > tags > text), and tasks sort by: (1) a section matching
+   * one of `phrases` (a hyphen/underscore/dot compound as adjacent tokens:
+   * `routing-events`), (2) more groups, (3) the boosted BM25 score, or, when
+   * the query asked for the newest (`recent`), the newest activity: recency
+   * only re-orders equally covered streams. `matched` and the snippet come
+   * from the kept section (the snippet from its text, or from the title when
+   * only the title/tags matched); `latest` is the hit's latest linked
+   * stream. Ensures and reconciles the index in the same transaction, so a
+   * hit always reflects the current task.
    */
   searchMemory(
     terms: readonly string[],
-    opts: { lane?: string; limit?: number; exclude?: readonly number[] } = {},
+    opts: {
+      lane?: string;
+      boost?: string;
+      recent?: boolean;
+      phrases?: readonly (readonly string[])[];
+      limit?: number;
+      exclude?: readonly number[];
+    } = {},
   ): MemoryHit[] {
     if (terms.length === 0) return [];
     const limit = clampInt(opts.limit ?? MEMORY_LIMITS.hits, 1, MEMORY_LIMITS.maxHits);
@@ -2352,25 +2460,50 @@ export class Store {
         laneClause = "AND t.lane = ?";
         params.push(opts.lane);
       }
-      // Walk the ranked sections once (no IN list over thousands of rowids):
-      // the first qualifying section of each task is its best.
+      const phrased = new Set<number>();
+      for (const parts of (opts.phrases ?? []).slice(0, MEMORY_LIMITS.phrases)) {
+        for (const row of matchOne.all(quoteTerm(parts.join(" ")))) phrased.add(row.id);
+      }
+      // Walk the ranked sections once (no IN list over thousands of rowids),
+      // keeping each task's best qualifying section: more groups, then BM25.
       const ranked = this.db
-        .query<{ rowid: number; task_id: number; rank: number }, string[]>(
-          `SELECT _memory_sections.rowid AS rowid, _memory_sections.task_id AS task_id,
+        .query<{ rowid: number; task_id: number; lane: string; rank: number }, string[]>(
+          `SELECT _memory_sections.rowid AS rowid, _memory_sections.task_id AS task_id, t.lane AS lane,
                   bm25(_memory_sections, 0.0, 6.0, 4.0, 1.0) AS rank
              FROM _memory_sections JOIN tasks t ON t.id = _memory_sections.task_id
             WHERE _memory_sections MATCH ? ${laneClause}
             ORDER BY rank;`,
         )
         .all(...params);
-      const best: { rowid: number; taskId: number; rank: number }[] = [];
-      const seen = new Set<number>();
+      type Kept = { rowid: number; taskId: number; groups: number; score: number; activity: number };
+      const kept = new Map<number, Kept>();
+      const phraseTasks = new Set<number>();
       for (const row of ranked) {
-        if (best.length === limit) break;
-        if (!qualifying.has(row.rowid) || seen.has(row.task_id) || exclude.has(row.task_id)) continue;
-        seen.add(row.task_id);
-        best.push({ rowid: row.rowid, taskId: row.task_id, rank: row.rank });
+        if (exclude.has(row.task_id)) continue;
+        if (phrased.has(row.rowid)) phraseTasks.add(row.task_id);
+        if (!qualifying.has(row.rowid)) continue;
+        const groups = coverage.get(row.rowid) ?? 0;
+        const current = kept.get(row.task_id);
+        if (current && current.groups >= groups) continue; // ranked order: the first of equal groups has the best BM25
+        const boost = opts.boost !== undefined && row.lane === opts.boost ? MEMORY_LIMITS.laneBoost : 1;
+        kept.set(row.task_id, { rowid: row.rowid, taskId: row.task_id, groups, score: -row.rank * boost, activity: 0 });
       }
+      if (opts.recent) {
+        const activityOf = this.db.query<{ activity: number }, [number]>(
+          `SELECT ${ACTIVITY_SQL} AS activity FROM tasks t LEFT JOIN _body_edits e ON e.task_id = t.id WHERE t.id = ?;`,
+        );
+        for (const hit of kept.values()) hit.activity = activityOf.get(hit.taskId)?.activity ?? 0;
+      }
+      const best = [...kept.values()]
+        .sort(
+          (a, b) =>
+            Number(phraseTasks.has(b.taskId)) - Number(phraseTasks.has(a.taskId)) ||
+            b.groups - a.groups ||
+            (opts.recent ? b.activity - a.activity : 0) ||
+            b.score - a.score ||
+            b.taskId - a.taskId,
+        )
+        .slice(0, limit);
       // The snippet comes from the section TEXT (column 3) when it matched, else
       // from the title (column 1): a tags-column snippet is just the tag names.
       const snippetOf = (column: number) =>
@@ -2387,22 +2520,30 @@ export class Store {
         const matched = terms.filter((_, i) => sets[i]?.has(hit.rowid));
         const snippet =
           textSnippet.get(textMatch, hit.rowid)?.snippet ?? titleSnippet.get(match, hit.rowid)?.snippet ?? "";
-        return [{ ...stream, score: Number((-hit.rank).toPrecision(4)), matched, snippet }];
+        const latest = this.latestLinked(hit.taskId);
+        return [{ ...stream, score: Number(hit.score.toPrecision(4)), matched, snippet, latest }];
       });
     })();
   }
 
   /**
-   * Bodiless stream rows, newest activity first: `lane`, `author` (tasks with
-   * an update by exactly that tag) and `active` (not done) filters. Powers
-   * the agent primer (GET /api/memory/streams).
+   * Bodiless stream rows, newest `activity` first: `lane`, `excludeLane`
+   * (every other lane), `author` (tasks with an update by exactly that tag)
+   * and `active` (not done) filters. Powers the agent primer (GET
+   * /api/memory/streams).
    */
-  memoryStreams(filter: { lane?: string; author?: string; active?: boolean; limit?: number } = {}): MemoryStreamRow[] {
+  memoryStreams(
+    filter: { lane?: string; excludeLane?: string; author?: string; active?: boolean; limit?: number } = {},
+  ): MemoryStreamRow[] {
     const clauses: string[] = [];
     const params: (string | number)[] = [];
     if (filter.lane) {
       clauses.push("t.lane = ?");
       params.push(filter.lane);
+    }
+    if (filter.excludeLane) {
+      clauses.push("t.lane <> ?");
+      params.push(filter.excludeLane);
     }
     if (filter.author) {
       clauses.push("t.id IN (SELECT task_id FROM updates WHERE author = ?)");
@@ -2413,28 +2554,35 @@ export class Store {
     const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
     return this.db
       .query<StreamRowSql, (string | number)[]>(
-        `${STREAM_ROW_SELECT} ${where} ORDER BY t.updated DESC, t.id DESC LIMIT ?;`,
+        `${STREAM_ROW_SELECT} ${where} ORDER BY activity DESC, t.id DESC LIMIT ?;`,
       )
       .all(...params)
       .map(rowToStream);
   }
 
-  /** One stream with its full update history and body-sync time, from one read transaction; null when missing. */
+  /**
+   * One stream with its full update history, body-sync time and latest
+   * linked stream, from one transaction (which ensures and reconciles the
+   * memory index, like searchMemory); null when missing.
+   */
   memoryStream(id: number): MemoryStream | null {
     return this.db.transaction((): MemoryStream | null => {
       const task = this.getTask(id);
       if (!task) return null;
+      this.ensureMemoryIndex();
+      this.reconcileMemoryIndex();
+      const latest = this.latestLinked(id);
       const updates = this.listUpdates(id);
       const sync = this.db
         .query<{ edited: number; update_id: number }, [number]>(
           `SELECT edited, update_id FROM _body_edits WHERE task_id = ?;`,
         )
         .get(id);
-      if (sync) return { task, updates, synced: sync.edited, syncedUpdateId: sync.update_id };
+      if (sync) return { task, updates, synced: sync.edited, syncedUpdateId: sync.update_id, latest };
       // No record (legacy, restored, or written by an older binary): the body
       // as created is the sync; updates written with the task are not breadcrumbs.
       const atCreation = updates.filter(u => u.created <= task.created).reduce((max, u) => Math.max(max, u.id), 0);
-      return { task, updates, synced: task.created, syncedUpdateId: atCreation };
+      return { task, updates, synced: task.created, syncedUpdateId: atCreation, latest };
     })();
   }
 

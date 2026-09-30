@@ -60,6 +60,7 @@
 import type { Component, TuiMouseEvent, TuiMouseEventResult } from "@earendil-works/pi-tui";
 import { Marked, type MarkedToken, type Token, type Tokens } from "marked";
 import { parseRefs } from "../ui/lib/refGrammar.ts";
+import { slugify } from "../ui/lib/slug.ts";
 import { type ClusterLines, gutterWidth, type VisualKind, wordAt, wordEnd, wordNext, wordPrev } from "./editor.ts";
 import { displayWidth, escapeTerminalLines, escapeTerminalText, hyperlink, type SafeUrl, safeUrl } from "./safety.ts";
 import type { DocumentPlace, TuiSession } from "./session.ts";
@@ -67,14 +68,8 @@ import { type ContrastPair, type ResolvedTheme, type Seg, type StyleAttributes, 
 
 // ---------- the web's slugger ----------
 
-/** The web's heading anchor slug (MarkdownView.slugify): lowercase ASCII words joined by "-", else "section". */
-export function slugify(text: string): string {
-  const slug = text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  return slug || "section";
-}
+/** The web's heading anchor slug, shared with MarkdownView and memory (src/ui/lib/slug.ts). */
+export { slugify };
 
 // ---------- the parsed document ----------
 

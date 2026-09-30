@@ -21,8 +21,14 @@ into one identity in the audit trail).
 
 ## 2. Lane
 
-Default lane = current repository directory name. Override only when the
-user explicitly names a different lane.
+Lane = the project the work belongs to, derived from the ask — not from where
+the agent runs: (1) the ask continues existing work → that stream's lane
+(`cortex_recall` / `cortex memory search`); (2) the work targets a specific
+repo or system → its lane (`cortex memory lane` run in that repo); (3)
+otherwise this checkout's lane. Never a home or scratch directory name; the
+user naming a lane always wins.
+
+Case (3), this checkout's default:
 
 ```bash
 LANE=$(cortex memory lane)

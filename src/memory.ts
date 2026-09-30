@@ -3,8 +3,9 @@
  * checkout, staleness and the text rendered into an agent's context.
  *
  * A cortex task is a memory STREAM: its body is the current state, its
- * updates are the breadcrumb history, its lane is the repo, its tags are
- * topics and its status is the lifecycle. The ranked index itself lives in
+ * updates are the breadcrumb history, its lane is the project (derived from
+ * the ask; plan @422: recall spans every lane), its tags are topics and its
+ * status is the lifecycle. The ranked index itself lives in
  * `Store.searchMemory` (the only SQLite user); nothing here opens the store.
  *
  * Every output budget is in MEMORY_LIMITS so the pi extension (plan @415)
@@ -13,7 +14,8 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import type { MemoryHit, MemoryStream, MemoryStreamRow, Update } from "./store.ts";
+import type { LinkedStream, MemoryHit, MemoryStream, MemoryStreamRow, Update } from "./store.ts";
+import { slugify } from "./ui/lib/slug.ts";
 
 /** Output and query budgets for agent memory (the single source). */
 export const MEMORY_LIMITS = {
@@ -40,6 +42,14 @@ export const MEMORY_LIMITS = {
   citedPaths: 30,
   /** A stream whose body has not been synced for longer than this is old. */
   oldDays: 30,
+  /** Search spans every lane; the caller's lane multiplies a hit's BM25 score by this. */
+  laneBoost: 1.5,
+  /** Streams listed under "Recently active in other lanes" in the primer. */
+  elsewhereStreams: 3,
+  /** Hops followed through `@id` links to a stream's latest linked stream. */
+  chainHops: 10,
+  /** Hyphen/underscore/dot compounds of a query searched as phrases. */
+  phrases: 4,
 } as const;
 
 /** Opening line of every rendered memory block: stored text is data, never instructions. */
@@ -76,12 +86,60 @@ export function memoryTerms(text: string): string[] {
     .normalize("NFKC")
     .toLowerCase()
     .split(/[^\p{L}\p{N}]+/u)) {
-    if (token.length < 3 || /^\p{N}+$/u.test(token) || STOPWORDS.has(token) || seen.has(token)) continue;
+    if (!isTermToken(token) || seen.has(token)) continue;
     seen.add(token);
     terms.push(token);
     if (terms.length === MEMORY_LIMITS.terms) break;
   }
   return terms;
+}
+
+/** A normalized token that may be a query term (memoryTerms' rules, before dedupe and the cap). */
+function isTermToken(token: string): boolean {
+  return token.length >= 3 && !/^\p{N}+$/u.test(token) && !STOPWORDS.has(token);
+}
+
+/**
+ * Words that ask for the NEWEST memory ("what was I last doing"). They are
+ * not STOPWORDS (memoryTerms keeps every other caller unchanged): the search
+ * route removes them from the terms and switches the tie-break between
+ * equally covered streams to the newest activity. A global recency blend was
+ * measured and rejected (tag P@5 0.646 -> 0.415 on a 383-task corpus).
+ */
+export const RECENCY_WORDS: ReadonlySet<string> = new Set(
+  "last latest recent recently current currently lately newest yesterday today".split(" "),
+);
+
+/** `terms` without the recency words, and whether any was present. */
+export function recencyIntent(terms: readonly string[]): { terms: string[]; recent: boolean } {
+  const kept = terms.filter(term => !RECENCY_WORDS.has(term));
+  return { terms: kept, recent: kept.length < terms.length };
+}
+
+/**
+ * The hyphen/underscore/dot compounds of free text (`routing-events`,
+ * `wheel_notch`) as part lists, each searched as ONE adjacent-token phrase
+ * whose matches rank first. A compound counts only when at least two of
+ * its parts survive memoryTerms' rules (length >= 3, not all digits, not a
+ * stopword), but the phrase keeps EVERY part (NFKC, lowercase), so
+ * adjacency still holds across `as` in `cortex-as-agent-memory`. Deduped,
+ * first-seen order, capped at MEMORY_LIMITS.phrases. The surviving parts
+ * are already terms (memoryTerms splits on the same punctuation): a phrase
+ * adds ranking, never coverage. Parts are letters and digits only, so a
+ * quoted phrase is safe in FTS5 MATCH.
+ */
+export function memoryPhrases(text: string): string[][] {
+  const phrases: string[][] = [];
+  const seen = new Set<string>();
+  for (const [compound] of text.normalize("NFKC").matchAll(/[\p{L}\p{N}]+(?:[-_.][\p{L}\p{N}]+)+/gu)) {
+    const parts = compound.toLowerCase().split(/[-_.]/);
+    const key = parts.join(" ");
+    if (parts.filter(isTermToken).length < 2 || seen.has(key)) continue;
+    seen.add(key);
+    phrases.push(parts);
+    if (phrases.length === MEMORY_LIMITS.phrases) break;
+  }
+  return phrases;
 }
 
 /**
@@ -174,7 +232,11 @@ export type Staleness = {
   synced: number;
   ageDays: number;
   old: boolean;
-  /** Whether the cwd is the stream's repo (its lane), another repo, or no git checkout. */
+  /**
+   * Whether the stream's cited files resolve in the cwd's checkout ("this";
+   * also when it cites none), mostly do not ("other": fewer than half are on
+   * disk, so the checkout is another repo), or the cwd is no git checkout.
+   */
   repo: "this" | "other" | "none";
   /** Cited files modified on disk after the sync (commits, pulls, checkouts, uncommitted edits). */
   changed: string[];
@@ -187,12 +249,14 @@ export type Staleness = {
 
 /**
  * Lane from git's common dir: `<repo>/.git` (and dot-dirs like the `.bare`
- * worktree layout) name their parent; a bare `<repo>.git` names itself
- * without the suffix. Every worktree of a repo shares its lane.
+ * worktree layout, and a common dir named `git`, as in `~/world/git`) name
+ * their parent; a bare `<repo>.git` names itself without the suffix. Every
+ * worktree of a repo shares its lane.
  */
 export function laneForCommonDir(commonDir: string): string {
   const base = path.basename(commonDir);
-  if (base.startsWith(".")) return path.basename(path.dirname(commonDir));
+  // `.git`, dot-dirs (`.bare`) and a common dir named `git` (~/world/git) all name their parent.
+  if (base.startsWith(".") || base === "git") return path.basename(path.dirname(commonDir));
   return base.replace(/\.git$/, "") || base;
 }
 
@@ -235,8 +299,10 @@ const isOld = (synced: number, now: number): boolean => (now - synced) / DAY_MS 
  * Just-in-time verification of one stream against the checkout at `cwd`:
  * cited paths resolve against the work-tree root (never the cwd), a cited
  * FILE modified after the body sync is `changed`, a vanished path is
- * `missing`, and a sync older than MEMORY_LIMITS.oldDays is `old`. Another
- * lane or no git makes the file checks `unverifiable`.
+ * `missing`, and a sync older than MEMORY_LIMITS.oldDays is `old`. The lane
+ * is not consulted (lanes are projects, which may span repos): when fewer
+ * than half of the cited paths exist in this checkout, or there is no git
+ * checkout, the file checks are `unverifiable`.
  */
 export function checkStaleness(stream: MemoryStream, cwd: string, now: number = Date.now()): Staleness {
   const { synced, task } = stream;
@@ -252,8 +318,9 @@ export function checkStaleness(stream: MemoryStream, cwd: string, now: number = 
   };
   const info = repoInfo(cwd);
   if (info === null) return { ...base, repo: "none", verdict: "unverifiable" };
-  if (info.lane !== task.lane) return { ...base, repo: "other", verdict: "unverifiable" };
   const paths = citedPaths(task.body);
+  const present = paths.filter(rel => fs.existsSync(path.join(info.root, rel)));
+  if (present.length * 2 < paths.length) return { ...base, repo: "other", verdict: "unverifiable" };
   for (const rel of paths) {
     const abs = path.join(info.root, rel);
     if (!fs.existsSync(abs)) {
@@ -271,18 +338,38 @@ export function checkStaleness(stream: MemoryStream, cwd: string, now: number = 
 
 const clip = (text: string, max: number): string => (text.length <= max ? text : `${text.slice(0, max - 1)}\u2026`);
 
-function streamLine(row: MemoryStreamRow, now: number): string {
-  const old = isOld(row.synced, now) ? " \u00b7 old" : "";
-  const title = clip(row.title, MEMORY_LIMITS.titleChars);
-  return `- [${row.id}] ${row.status} \u00b7 ${row.lane} \u00b7 synced ${isoDay(row.synced)}${old} \u00b7 ${title}`;
+/** ` · latest linked @<id> (<status>, active <day>)`, or "" when the stream is its own chain head. */
+function latestNote(latest: LinkedStream | null | undefined): string {
+  if (!latest) return "";
+  return ` \u00b7 latest linked @${latest.id} (${latest.status}, active ${isoDay(latest.activity)})`;
 }
 
-/** Hits for a query, or "" when there are none: the header names the query, each hit its own matched terms. */
-export function renderHits(terms: readonly string[], hits: readonly MemoryHit[], now: number = Date.now()): string {
+function streamLine(row: MemoryStreamRow & { latest?: LinkedStream | null }, now: number): string {
+  const active = isoDay(row.activity);
+  const synced = isoDay(row.synced) === active ? "" : ` \u00b7 synced ${isoDay(row.synced)}`;
+  const old = isOld(row.synced, now) ? " \u00b7 old" : "";
+  const title = clip(row.title, MEMORY_LIMITS.titleChars);
+  return `- [${row.id}] ${row.status} \u00b7 ${row.lane} \u00b7 active ${active}${synced}${old} \u00b7 ${title}${latestNote(row.latest)}`;
+}
+
+/**
+ * Hits for a query, or "" when there are none: the header names the query
+ * (and "newest first" when it asked for the newest) and how to load a hit
+ * (`loadHint`, default `cortex memory show <id>`); each hit its own matched
+ * terms.
+ */
+export function renderHits(
+  terms: readonly string[],
+  hits: readonly MemoryHit[],
+  now: number = Date.now(),
+  opts: { recent?: boolean; loadHint?: string } = {},
+): string {
   if (hits.length === 0) return "";
+  const order = opts.recent ? ", newest first" : "";
+  const load = opts.loadHint ?? "cortex memory show <id>";
   const lines = [
     MEMORY_PREAMBLE,
-    `Possibly relevant cortex memory (query: ${terms.join(", ")}). Load one with \`cortex memory show <id>\` before relying on it.`,
+    `Possibly relevant cortex memory (query: ${terms.join(", ")}${order}). Load one with \`${load}\` before relying on it.`,
   ];
   for (const hit of hits) {
     const matched = `(${hit.matched.length}/${terms.length}: ${hit.matched.join(", ")})`;
@@ -293,20 +380,23 @@ export function renderHits(terms: readonly string[], hits: readonly MemoryHit[],
 
 /**
  * The session primer: streams the caller touched, then the lane's active
- * streams (without repeating the touched ones), each capped at
- * MEMORY_LIMITS.primerStreams. "" when both are empty.
+ * streams, then streams recently active in OTHER lanes (work spans repos),
+ * never repeating a touched stream. Each section is capped
+ * (MEMORY_LIMITS.primerStreams, elsewhereStreams). "" when all are empty.
  */
 export function renderPrimer(input: {
   lane: string;
   author?: string;
   active: readonly MemoryStreamRow[];
   authored: readonly MemoryStreamRow[];
+  elsewhere?: readonly MemoryStreamRow[];
   now?: number;
 }): string {
   const now = input.now ?? Date.now();
   const touched = new Set(input.authored.map(row => row.id));
   const active = input.active.filter(row => !touched.has(row.id));
-  if (input.authored.length === 0 && active.length === 0) return "";
+  const elsewhere = (input.elsewhere ?? []).filter(row => !touched.has(row.id));
+  if (input.authored.length === 0 && active.length === 0 && elsewhere.length === 0) return "";
   const cap = MEMORY_LIMITS.primerStreams;
   const header = input.author
     ? `Cortex memory \u2014 lane ${input.lane} \u00b7 your author tag ${input.author}`
@@ -321,26 +411,210 @@ export function renderPrimer(input: {
     for (const row of active.slice(0, cap)) lines.push(streamLine(row, now));
     if (active.length > cap) lines.push(`(+${active.length - cap} more: cortex ls -l ${input.lane})`);
   }
+  if (elsewhere.length > 0) {
+    lines.push("Recently active in other lanes:");
+    for (const row of elsewhere.slice(0, MEMORY_LIMITS.elsewhereStreams)) lines.push(streamLine(row, now));
+  }
   return lines.join("\n");
 }
 
-/** One stream for `cortex memory show`: staleness, the (truncated) body and the breadcrumb trail since the sync. */
-export function renderStream(stream: MemoryStream, staleness: Staleness): string {
+/** One Markdown-heading section of a body: text before the first heading has `heading: null` and level 0. */
+export type HeadingSection = { heading: string | null; slug: string; level: number; text: string };
+
+/**
+ * A body split at its Markdown headings (never by size; fenced code is not
+ * scanned for headings). Each section's text starts with its heading line;
+ * slugs are the TUI's and the web's anchors (src/ui/lib/slug.ts), repeats
+ * numbered `-2`, `-3` like the reader. Leading text without content is
+ * dropped.
+ */
+export function headingSections(body: string): HeadingSection[] {
+  const sections: HeadingSection[] = [];
+  const seen = new Map<string, number>();
+  let current: Omit<HeadingSection, "text"> = { heading: null, slug: "", level: 0 };
+  let lines: string[] = [];
+  let fence: string | null = null;
+  const flush = (): void => {
+    const text = lines.join("\n").trimEnd();
+    if (current.heading !== null || text.trim()) sections.push({ ...current, text });
+  };
+  for (const line of body.split("\n")) {
+    const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+    if (marker !== undefined) {
+      if (fence === null) fence = marker.charAt(0);
+      else if (marker.charAt(0) === fence) fence = null;
+    }
+    const heading = fence === null && marker === undefined ? /^(#{1,6})\s+(.*?)(?:\s+#+)?\s*$/.exec(line) : null;
+    if (heading) {
+      flush();
+      const text = heading[2] ?? "";
+      const base = slugify(text);
+      const count = (seen.get(base) ?? 0) + 1;
+      seen.set(base, count);
+      current = { heading: text, slug: count === 1 ? base : `${base}-${count}`, level: heading[1]?.length ?? 1 };
+      lines = [];
+    }
+    lines.push(line);
+  }
+  flush();
+  return sections;
+}
+
+/** The headings `cortex memory show` leads a long body with, in this order (plan @422). */
+const PRIORITY_HEADINGS = [
+  /\bnext\b/i,
+  /open questions?|blockers?|risks?/i,
+  /decisions?/i,
+  /\b(state|status|summary|tl;?dr|mission|goal)\b/i,
+  /constraints?/i,
+];
+
+/**
+ * Index past section `i` and its subsections (the deeper headings that
+ * follow it). The leading text and a document title (the ONLY heading at the
+ * top level, as in `# Plan: …` over `##` sections) are blocks of their own.
+ */
+function blockEnd(sections: readonly HeadingSection[], i: number): number {
+  const level = sections[i]?.level ?? 0;
+  let end = i + 1;
+  if (level === 0) return end;
+  const headed = sections.filter(s => s.heading !== null);
+  const top = Math.min(...headed.map(s => s.level));
+  if (level === top && headed.filter(s => s.level === top).length === 1) return end;
+  while (end < sections.length && (sections[end]?.level ?? 0) > level) end++;
+  return end;
+}
+
+/** A section with its subsections, as one text. */
+function blockText(sections: readonly HeadingSection[], start: number): string {
+  return sections
+    .slice(start, blockEnd(sections, start))
+    .map(s => s.text)
+    .join("\n\n");
+}
+
+/** Start indices of the sections whose slug contains slugify(section); a match inside a matched block is skipped. */
+function sectionStarts(sections: readonly HeadingSection[], section: string): number[] {
+  const want = slugify(section);
+  const starts: number[] = [];
+  for (let i = 0; i < sections.length; i++) {
+    const s = sections[i];
+    if (!s || s.heading === null || !s.slug.includes(want)) continue;
+    starts.push(i);
+    i = blockEnd(sections, i) - 1;
+  }
+  return starts;
+}
+
+/**
+ * Whole blocks (a section with its subsections) in the given order within
+ * MEMORY_LIMITS.showBodyChars; the block that crosses the budget is cut at a
+ * line (a first line longer than the budget is cut inside it) with
+ * `… (#<slug> continues)` (the leading text: `… (truncated; cortex show
+ * <id>)`) and ends the output. Returns the text and the section indices it
+ * covers.
+ */
+function budgeted(
+  id: number,
+  sections: readonly HeadingSection[],
+  starts: readonly number[],
+): { text: string; used: Set<number> } {
+  const parts: string[] = [];
+  const used = new Set<number>();
+  let left = MEMORY_LIMITS.showBodyChars;
+  for (const start of starts) {
+    const block = blockText(sections, start);
+    for (let i = start; i < blockEnd(sections, start); i++) used.add(i);
+    if (block.length <= left) {
+      parts.push(block);
+      left -= block.length + 2;
+      continue;
+    }
+    const kept: string[] = [];
+    for (const line of block.split("\n")) {
+      if (line.length + 1 > left) {
+        if (kept.length === 0 && left > 0) kept.push(line.slice(0, left));
+        break;
+      }
+      kept.push(line);
+      left -= line.length + 1;
+    }
+    const section = sections[start];
+    kept.push(
+      section?.heading != null ? `\u2026 (#${section.slug} continues)` : `\u2026 (truncated; cortex show ${id})`,
+    );
+    parts.push(kept.join("\n"));
+    break;
+  }
+  return { text: parts.join("\n\n"), used };
+}
+
+/**
+ * The body as `cortex memory show` prints it. `section` → only the sections
+ * whose slug contains slugify(section), whole (subsections included).
+ * Otherwise a body within MEMORY_LIMITS.showBodyChars is printed unchanged; a
+ * longer one leads with its priority sections (Next, Open questions/Blockers/
+ * Risks, Decisions, State/Status/Summary, Constraints; document order when it
+ * has none) and ends with a Contents line of the omitted headings.
+ */
+function bodyView(id: number, body: string, section: string | undefined): string {
+  const sections = headingSections(body);
+  const slugs = (indices: Iterable<number>): string =>
+    [...indices]
+      .map(i => sections[i])
+      .flatMap(s => (s && s.heading !== null ? [`#${s.slug}`] : []))
+      .join(" ");
+  if (section !== undefined) {
+    const starts = sectionStarts(sections, section);
+    if (starts.length === 0) return `No section matches '${section}'; sections: ${slugs(sections.keys()) || "(none)"}`;
+    return budgeted(id, sections, starts).text;
+  }
+  if (body.length <= MEMORY_LIMITS.showBodyChars) return body;
+  const starts: number[] = [];
+  const claimed = new Set<number>();
+  for (const pattern of PRIORITY_HEADINGS) {
+    sections.forEach((s, i) => {
+      if (s.heading === null || claimed.has(i) || !pattern.test(s.heading)) return;
+      starts.push(i);
+      for (let j = i; j < blockEnd(sections, i); j++) claimed.add(j);
+    });
+  }
+  const { text, used } = budgeted(id, sections, starts.length > 0 ? starts : [...sections.keys()]);
+  const omitted = slugs([...sections.keys()].filter(i => !used.has(i)));
+  if (!omitted) return text;
+  return `${text}\n\nContents: ${omitted} (cortex memory show ${id} --section=<text>)`;
+}
+
+/** The sections `cortex memory show --section=<text>` prints, each with its subsections (its --json output). */
+export function matchingSections(
+  body: string,
+  section: string,
+): { heading: string | null; slug: string; text: string }[] {
+  const sections = headingSections(body);
+  return sectionStarts(sections, section).map(start => ({
+    heading: sections[start]?.heading ?? null,
+    slug: sections[start]?.slug ?? "",
+    text: blockText(sections, start),
+  }));
+}
+
+/**
+ * One stream for `cortex memory show`: staleness, its latest linked stream,
+ * the body (section-first when long; the `section` matches on request) and
+ * the breadcrumb trail since the sync.
+ */
+export function renderStream(stream: MemoryStream, staleness: Staleness, opts: { section?: string } = {}): string {
   const { task } = stream;
   const tags = task.tags.length > 0 ? ` \u00b7 ${task.tags.map(tag => `#${tag}`).join(" ")}` : "";
   let state = `staleness: ${staleness.verdict} \u00b7 synced ${isoDay(staleness.synced)} (${staleness.ageDays}d)`;
   if (staleness.old) state += " \u00b7 old";
-  if (staleness.repo === "other") state += " \u00b7 cwd is another repo";
+  if (staleness.repo === "other") state += " \u00b7 cited files are not in this checkout";
   if (staleness.repo === "none") state += " \u00b7 not in a git checkout";
   if (staleness.changed.length > 0) state += ` \u00b7 changed: ${staleness.changed.join(", ")}`;
   if (staleness.missing.length > 0) state += ` \u00b7 missing: ${staleness.missing.join(", ")}`;
-  const lines = [MEMORY_PREAMBLE, `[${task.id}] ${task.title} (${task.status} \u00b7 ${task.lane}${tags})`, state, ""];
-  const body = (task.body ?? "").trimEnd();
-  lines.push(
-    body.length > MEMORY_LIMITS.showBodyChars
-      ? `${body.slice(0, MEMORY_LIMITS.showBodyChars)}\n\u2026 (truncated; cortex show ${task.id})`
-      : body,
-  );
+  const header = `[${task.id}] ${task.title} (${task.status} \u00b7 ${task.lane}${tags})${latestNote(stream.latest)}`;
+  const lines = [MEMORY_PREAMBLE, header, state, ""];
+  lines.push(bodyView(task.id, (task.body ?? "").trimEnd(), opts.section));
   lines.push("");
   const trail = breadcrumbs(stream.updates, stream.syncedUpdateId);
   if (trail.length === 0) {

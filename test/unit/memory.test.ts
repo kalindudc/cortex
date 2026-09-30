@@ -6,13 +6,17 @@ import {
   breadcrumbs,
   checkStaleness,
   citedPaths,
+  headingSections,
   isoDay,
   laneForCommonDir,
   MEMORY_LIMITS,
   MEMORY_PREAMBLE,
+  matchingSections,
   memoryLane,
+  memoryPhrases,
   memorySections,
   memoryTerms,
+  recencyIntent,
   renderHits,
   renderPrimer,
   renderStream,
@@ -98,6 +102,16 @@ const row = (over: Partial<MemoryStreamRow> = {}): MemoryStreamRow => ({
   tags: [],
   updated: 0,
   synced: 0,
+  activity: 0,
+  ...over,
+});
+
+const stream = (over: Partial<MemoryStream> = {}): MemoryStream => ({
+  task: task(),
+  updates: [],
+  synced: 0,
+  syncedUpdateId: 0,
+  latest: null,
   ...over,
 });
 
@@ -117,6 +131,71 @@ describe("memoryTerms", () => {
     expect(memoryTerms("zeta alpha zeta beta alpha")).toEqual(["zeta", "alpha", "beta"]);
     const many = Array.from({ length: 40 }, (_, i) => `word${String.fromCharCode(97 + (i % 26))}${i}`).join(" ");
     expect(memoryTerms(many)).toHaveLength(MEMORY_LIMITS.terms);
+  });
+});
+
+describe("recencyIntent + memoryPhrases", () => {
+  test("recency words leave the terms and flag the query; without one the terms are unchanged", () => {
+    expect(recencyIntent(memoryTerms("what was I last doing for the routing-events work"))).toEqual({
+      terms: ["routing", "events"],
+      recent: true,
+    });
+    expect(recencyIntent(["latest", "today", "currently"])).toEqual({ terms: [], recent: true });
+    expect(recencyIntent(["mouse", "wheel"])).toEqual({ terms: ["mouse", "wheel"], recent: false });
+  });
+
+  test("memoryPhrases: compounds with two real terms, every part kept for adjacency", () => {
+    expect(memoryPhrases("routing-events and wheel.notch_mode")).toEqual([
+      ["routing", "events"],
+      ["wheel", "notch", "mode"],
+    ]);
+    // Fewer than two parts under memoryTerms' rules is no phrase (x.y_z, 1.4.2, memory.ts, please-fix,
+    // on-call); a qualifying compound keeps its short and stop parts; repeats dedupe case-insensitively.
+    expect(
+      memoryPhrases(
+        "cortex-as-agent-memory x.y_z 1.4.2 src/memory.ts please-fix on-call routing-events-phase-1 ROUTING_EVENTS routing-events",
+      ),
+    ).toEqual([
+      ["cortex", "as", "agent", "memory"],
+      ["routing", "events", "phase", "1"],
+      ["routing", "events"],
+    ]);
+    expect(memoryPhrases("plain words only")).toEqual([]);
+  });
+
+  test("memoryPhrases caps at MEMORY_LIMITS.phrases", () => {
+    const text = Array.from({ length: 8 }, (_, i) => `alpha${i}-beta${i}`).join(" ");
+    expect(memoryPhrases(text)).toHaveLength(MEMORY_LIMITS.phrases);
+  });
+});
+
+describe("headingSections", () => {
+  test("splits at headings only, with the reader's slugs (repeats -2, -3) and levels", () => {
+    const body = "intro\n## Steps\na\n### Steps\nb\n## Steps\nc\n# Final Notes!\nd";
+    expect(headingSections(body)).toEqual([
+      { heading: null, slug: "", level: 0, text: "intro" },
+      { heading: "Steps", slug: "steps", level: 2, text: "## Steps\na" },
+      { heading: "Steps", slug: "steps-2", level: 3, text: "### Steps\nb" },
+      { heading: "Steps", slug: "steps-3", level: 2, text: "## Steps\nc" },
+      { heading: "Final Notes!", slug: "final-notes", level: 1, text: "# Final Notes!\nd" },
+    ]);
+  });
+
+  test("never splits by size, skips headings inside fenced code and drops empty leading text", () => {
+    const long = "x".repeat(5_000);
+    const body = `\n## A\n${long}\n\`\`\`bash\n# not a heading\n\`\`\`\n## B ##`;
+    const sections = headingSections(body);
+    expect(sections.map(s => s.slug)).toEqual(["a", "b"]);
+    expect(sections[0]?.text).toContain("# not a heading");
+    expect(sections[1]?.heading).toBe("B");
+  });
+
+  test("matchingSections returns each match with its subsections", () => {
+    const body = "## 9. Next Steps\n1. a\n### Next detail\nb\n## Notes\nc";
+    expect(matchingSections(body, "next")).toEqual([
+      { heading: "9. Next Steps", slug: "9-next-steps", text: "## 9. Next Steps\n1. a\n\n### Next detail\nb" },
+    ]);
+    expect(matchingSections(body, "nope")).toEqual([]);
   });
 });
 
@@ -168,6 +247,11 @@ describe("lanes", () => {
     expect(laneForCommonDir("/x/proj")).toBe("proj");
   });
 
+  test("laneForCommonDir: a common dir named `git` names its parent (~/world/git \u2192 world)", () => {
+    expect(laneForCommonDir("/x/world/git")).toBe("world");
+    expect(laneForCommonDir("/x/gitlab")).toBe("gitlab");
+  });
+
   test("repoInfo/memoryLane: a repo, its subdirectory and a worktree share the main repo's lane", () => {
     expect(memoryLane(repo)).toBe("myrepo");
     expect(repoInfo(path.join(repo, "src", "sub"))?.lane).toBe("myrepo");
@@ -198,18 +282,13 @@ describe("breadcrumbs + checkStaleness", () => {
     const synced = Date.now() - 60_000;
     write("src/a.ts", "a2", synced + 30_000);
     write("src/b.ts", "b", synced - 30_000);
-    const stream: MemoryStream = {
-      task: task({ body: `${FILES}- \`src/gone.ts\`\n` }),
-      updates: [],
-      synced,
-      syncedUpdateId: 0,
-    };
-    const staleness = checkStaleness(stream, repo, synced + 60_000);
+    const s = stream({ task: task({ body: `${FILES}- \`src/gone.ts\`\n` }), synced });
+    const staleness = checkStaleness(s, repo, synced + 60_000);
     expect(staleness).toMatchObject({ verdict: "stale", repo: "this", checked: 3, old: false });
     expect(staleness.changed).toEqual(["src/a.ts"]);
     expect(staleness.missing).toEqual(["src/gone.ts"]);
     // From a subdirectory cwd, paths still resolve against the work-tree root.
-    expect(checkStaleness(stream, path.join(repo, "src", "sub"), synced + 60_000)).toMatchObject({
+    expect(checkStaleness(s, path.join(repo, "src", "sub"), synced + 60_000)).toMatchObject({
       changed: ["src/a.ts"],
       missing: ["src/gone.ts"],
     });
@@ -220,13 +299,13 @@ describe("breadcrumbs + checkStaleness", () => {
     write("src/a.ts", "a", synced - 30_000);
     write("src/b.ts", "b", synced - 30_000);
     const beforeSync = update(synced - 1, "before sync");
-    const stream: MemoryStream = {
+    const s = stream({
       task: task({ body: FILES }),
       updates: [beforeSync, update(synced + 1, "did X"), update(synced + 2, "status \u2192 review")],
       synced,
       syncedUpdateId: beforeSync.id,
-    };
-    expect(checkStaleness(stream, repo, synced + 1_000)).toMatchObject({ verdict: "fresh", behind: 1, changed: [] });
+    });
+    expect(checkStaleness(s, repo, synced + 1_000)).toMatchObject({ verdict: "fresh", behind: 1, changed: [] });
   });
 
   test("a sync older than oldDays is old and stale", () => {
@@ -234,26 +313,38 @@ describe("breadcrumbs + checkStaleness", () => {
     const synced = now - 40 * DAY;
     write("src/a.ts", "a", synced - DAY);
     write("src/b.ts", "b", synced - DAY);
-    const staleness = checkStaleness(
-      { task: task({ body: FILES }), updates: [], synced, syncedUpdateId: 0 },
-      repo,
-      now,
-    );
+    const staleness = checkStaleness(stream({ task: task({ body: FILES }), synced }), repo, now);
     expect(staleness).toMatchObject({ verdict: "stale", old: true, ageDays: 40, changed: [] });
   });
 
-  test("another lane or no git checkout is unverifiable", () => {
-    const stream: MemoryStream = {
-      task: task({ lane: "elsewhere", body: FILES }),
-      updates: [],
+  test("cited files absent from this checkout (fewer than half on disk) or no git checkout is unverifiable", () => {
+    const absent = stream({
+      task: task({ body: "## Files\n- `lib/x.go`\n- `lib/y.go`\n- `src/a.ts`\n" }),
       synced: Date.now(),
-      syncedUpdateId: 0,
-    };
-    expect(checkStaleness(stream, repo)).toMatchObject({ verdict: "unverifiable", repo: "other", checked: 0 });
-    expect(checkStaleness({ ...stream, task: task({ body: FILES }) }, plain)).toMatchObject({
+    });
+    expect(checkStaleness(absent, repo)).toMatchObject({ verdict: "unverifiable", repo: "other", checked: 0 });
+    expect(checkStaleness(stream({ task: task({ body: FILES }) }), plain)).toMatchObject({
       verdict: "unverifiable",
       repo: "none",
     });
+  });
+
+  test("the lane is not consulted: a stream of another lane whose files are here is checked", () => {
+    const synced = Date.now() - 60_000;
+    write("src/a.ts", "a", synced - 30_000);
+    write("src/b.ts", "b", synced - 30_000);
+    const other = stream({ task: task({ lane: "elsewhere", body: `${FILES}- \`src/gone.ts\`\n` }), synced });
+    // 2 of 3 on disk: checked, and the vanished one is missing.
+    expect(checkStaleness(other, repo, synced + 1_000)).toMatchObject({
+      verdict: "stale",
+      repo: "this",
+      checked: 3,
+      missing: ["src/gone.ts"],
+    });
+    // No cited files: nothing to check, so fresh from any checkout.
+    expect(
+      checkStaleness(stream({ task: task({ lane: "elsewhere", body: "state" }), synced }), repo, synced + 1_000),
+    ).toMatchObject({ verdict: "fresh", repo: "this", checked: 0 });
   });
 });
 
@@ -261,48 +352,146 @@ describe("rendering", () => {
   const now = Date.UTC(2026, 8, 29);
 
   test("renderPrimer is empty without streams and otherwise opens with the preamble", () => {
-    expect(renderPrimer({ lane: "l", active: [], authored: [], now })).toBe("");
-    const text = renderPrimer({ lane: "l", active: [row({ synced: now })], authored: [], now });
+    expect(renderPrimer({ lane: "l", active: [], authored: [], elsewhere: [], now })).toBe("");
+    const text = renderPrimer({ lane: "l", active: [row({ synced: now, activity: now })], authored: [], now });
     expect(text.split("\n")[0]).toBe(MEMORY_PREAMBLE);
-    expect(text).toContain(`synced ${isoDay(now)}`);
+    expect(text).toContain(`active ${isoDay(now)} \u00b7 a stream`);
+    expect(text).not.toContain("synced");
     expect(text).not.toContain("Streams you touched");
+    expect(text).not.toContain("other lanes");
   });
 
   test("renderPrimer lists touched streams first, never repeats them, caps and counts the rest", () => {
-    const active = Array.from({ length: 9 }, (_, i) => row({ id: i + 1, title: `s${i + 1}`, synced: now }));
-    const authored = [row({ id: 1, title: "s1", synced: now - 40 * DAY })];
+    const active = Array.from({ length: 9 }, (_, i) =>
+      row({ id: i + 1, title: `s${i + 1}`, synced: now, activity: now }),
+    );
+    const authored = [row({ id: 1, title: "s1", synced: now - 40 * DAY, activity: now })];
     const text = renderPrimer({ lane: "l", author: "pi-x", active, authored, now });
     expect(text).toContain("your author tag pi-x");
     expect(text).toContain("Streams you touched:\n- [1] open");
-    expect(text).toContain("synced 2026-08-20 \u00b7 old");
+    expect(text).toContain("active 2026-09-29 \u00b7 synced 2026-08-20 \u00b7 old");
     expect(text.match(/- \[1\]/g)).toHaveLength(1);
     expect(text).toContain(`(+${8 - MEMORY_LIMITS.primerStreams} more: cortex ls -l l)`);
   });
 
+  test("renderPrimer lists streams recently active in other lanes last, capped, never a touched one", () => {
+    const elsewhere = Array.from({ length: 5 }, (_, i) =>
+      row({ id: 20 + i, lane: "infra", title: `e${i}`, activity: now }),
+    );
+    const authored = [row({ id: 20, lane: "infra", title: "e0", activity: now })];
+    const text = renderPrimer({ lane: "l", active: [row({ activity: now })], authored, elsewhere, now });
+    const lines = text.split("\n");
+    const at = lines.indexOf("Recently active in other lanes:");
+    expect(at).toBeGreaterThan(lines.indexOf("Active streams (newest activity first):"));
+    expect(lines.slice(at + 1).map(line => line.slice(0, 6))).toEqual(["- [21]", "- [22]", "- [23]"]);
+    expect(MEMORY_LIMITS.elsewhereStreams).toBe(3);
+    // Only other-lane streams still make a primer.
+    expect(renderPrimer({ lane: "l", active: [], authored: [], elsewhere, now })).toContain("- [20] open \u00b7 infra");
+  });
+
   test("renderHits is empty without hits; the header names the query, each hit its own matched terms (validation F2)", () => {
     expect(renderHits(["mouse"], [], now)).toBe("");
-    const hit: MemoryHit = { ...row({ id: 4, synced: now }), score: 1, matched: ["mouse"], snippet: "the **mouse**" };
+    const hit: MemoryHit = {
+      ...row({ id: 4, synced: now - DAY, activity: now }),
+      score: 1,
+      matched: ["mouse"],
+      snippet: "the **mouse**",
+      latest: null,
+    };
     const text = renderHits(["mouse", "wheel"], [hit], now);
     expect(text.split("\n")[0]).toBe(MEMORY_PREAMBLE);
-    expect(text).toContain("(query: mouse, wheel)");
+    expect(text).toContain("(query: mouse, wheel). Load one with `cortex memory show <id>` before relying on it.");
     expect(text).not.toContain("matched: mouse, wheel");
     expect(text).toContain(
-      "- [4] open \u00b7 l \u00b7 synced 2026-09-29 \u00b7 a stream (1/2: mouse) \u2014 the **mouse**",
+      "- [4] open \u00b7 l \u00b7 active 2026-09-29 \u00b7 synced 2026-09-28 \u00b7 a stream (1/2: mouse) \u2014 the **mouse**",
     );
   });
 
-  test("renderStream truncates long bodies and caps the trail", () => {
+  test("renderHits names recency ordering, the load hint and a hit's latest linked stream", () => {
+    const hit: MemoryHit = {
+      ...row({ id: 4, synced: now, activity: now }),
+      score: 1,
+      matched: ["routing", "events"],
+      snippet: "s",
+      latest: { id: 9, status: "review", activity: now + DAY },
+    };
+    const text = renderHits(["routing", "events"], [hit], now, { recent: true, loadHint: 'cortex_recall "@<id>"' });
+    expect(text).toContain('(query: routing, events, newest first). Load one with `cortex_recall "@<id>"` before');
+    expect(text).toContain("a stream \u00b7 latest linked @9 (review, active 2026-09-30) (2/2: routing, events)");
+  });
+
+  test("renderStream prints a short body unchanged and names the latest linked stream", () => {
+    const body = "## Goal\ng\n## Next\nn";
+    const s = stream({ task: task({ body }), latest: { id: 9, status: "open", activity: now } });
+    const text = renderStream(s, checkStaleness(s, plain, now));
+    expect(text.split("\n")[1]).toBe(
+      "[7] TUI mouse wheel (open \u00b7 myrepo) \u00b7 latest linked @9 (open, active 2026-09-29)",
+    );
+    expect(text).toContain(`\n${body}\n`);
+    expect(text).not.toContain("Contents:");
+    expect(text).toContain("not in a git checkout");
+  });
+
+  test("renderStream leads a long body with Next, open questions and Decisions, then a Contents line", () => {
+    const filler = `${"x".repeat(199)}\n`.repeat(40);
+    const body = [
+      "# Handover",
+      "intro",
+      "## 1. Context",
+      filler,
+      "## 2. Decisions",
+      "- keep it",
+      "### 2.1 Rejected",
+      "- a relation table",
+      "## 3. Notes",
+      filler,
+      "## 9. Next Steps",
+      "1. ship it",
+      "## Open questions",
+      "- none",
+    ].join("\n");
+    expect(body.length).toBeGreaterThan(MEMORY_LIMITS.showBodyChars);
+    const s = stream({ task: task({ body }) });
+    const text = renderStream(s, checkStaleness(s, plain, now));
+    const next = text.indexOf("## 9. Next Steps\n1. ship it");
+    expect(next).toBeGreaterThan(0);
+    expect(text.indexOf("## Open questions")).toBeGreaterThan(next);
+    expect(text.indexOf("## 2. Decisions")).toBeGreaterThan(text.indexOf("## Open questions"));
+    expect(text).toContain("### 2.1 Rejected\n- a relation table"); // subsections travel with their section
+    expect(text).not.toContain("xxxx");
+    expect(text).toContain("Contents: #handover #1-context #3-notes (cortex memory show 7 --section=<text>)");
+  });
+
+  test("renderStream cuts the section that crosses the budget; a long headingless body is truncated", () => {
+    const long = `## Next\n${`${"y".repeat(99)}\n`.repeat(200)}`;
+    const cut = renderStream(stream({ task: task({ body: long }) }), checkStaleness(stream(), plain, now));
+    expect(cut).toContain("\u2026 (#next continues)");
+    const flat = stream({ task: task({ body: "x".repeat(MEMORY_LIMITS.showBodyChars + 5) }) });
+    const text = renderStream(flat, checkStaleness(flat, plain, now));
+    expect(text).toContain(`${"x".repeat(MEMORY_LIMITS.showBodyChars)}\n\u2026 (truncated; cortex show 7)`);
+  });
+
+  test("renderStream --section prints only the matching sections, or lists the sections", () => {
+    const body = "## Goal\ng\n## 9. Next Steps\n1. a\n### Next detail\nb\n## Notes\nc";
+    const s = stream({ task: task({ body }) });
+    const staleness = checkStaleness(s, plain, now);
+    const text = renderStream(s, staleness, { section: "next" });
+    expect(text).toContain("## 9. Next Steps\n1. a\n\n### Next detail\nb\n");
+    expect(text).not.toContain("## Goal");
+    expect(text).not.toContain("## Notes");
+    expect(renderStream(s, staleness, { section: "Open Questions" })).toContain(
+      "No section matches 'Open Questions'; sections: #goal #9-next-steps #next-detail #notes",
+    );
+  });
+
+  test("renderStream caps the trail and reports cited files from another checkout", () => {
     const synced = now - DAY;
     const updates = Array.from({ length: 13 }, (_, i) => update(synced + i + 1, `step ${i + 1}`));
-    const stream: MemoryStream = {
-      task: task({ body: "x".repeat(MEMORY_LIMITS.showBodyChars + 5) }),
-      updates,
-      synced,
-      syncedUpdateId: 0,
-    };
-    const text = renderStream(stream, checkStaleness(stream, plain, now));
+    const s = stream({ task: task({ body: "## Files\n- `lib/x.go`\n" }), updates, synced });
+    const text = renderStream(s, checkStaleness(s, repo, now));
     expect(text.split("\n")[0]).toBe(MEMORY_PREAMBLE);
-    expect(text).toContain("(truncated; cortex show 7)");
+    expect(text).toContain("staleness: unverifiable");
+    expect(text).toContain("cited files are not in this checkout");
     expect(text).toContain("Since last sync (2026-09-28): 13 updates (13 not yet folded into the body)");
     expect(text).toContain(`(+${13 - MEMORY_LIMITS.trail} earlier since sync; cortex show 7)`);
     expect(text).toContain("step 13");
@@ -311,12 +500,7 @@ describe("rendering", () => {
 
   test("renderStream says when nothing happened since the sync", () => {
     const before = update(1, "before");
-    const stream: MemoryStream = {
-      task: task({ body: "state" }),
-      updates: [before],
-      synced: 5,
-      syncedUpdateId: before.id,
-    };
-    expect(renderStream(stream, checkStaleness(stream, plain, now))).toContain("No updates since the last sync.");
+    const s = stream({ task: task({ body: "state" }), updates: [before], synced: 5, syncedUpdateId: before.id });
+    expect(renderStream(s, checkStaleness(s, plain, now))).toContain("No updates since the last sync.");
   });
 });

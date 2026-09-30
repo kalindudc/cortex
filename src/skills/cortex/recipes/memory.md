@@ -11,7 +11,7 @@ A task is a stream:
 
 - body = the CURRENT state of the work (rewritten at milestones, never appended to)
 - updates = history (progress notes and status changes are breadcrumbs)
-- lane = the repository, derived by `cortex memory lane` (git's common dir; worktrees share it)
+- lane = the project the work belongs to, derived from the ask ([persistence.md](persistence.md) "Lane"); `cortex memory lane` gives this checkout's default (git's common dir; worktrees share it). Recall searches EVERY lane, with this repo's streams first, because work spans repos
 - tags = topics
 - status = the user's tracking, NOT a relevance signal: `done` streams are still valid memory (the primer lists only unfinished streams; search covers all)
 
@@ -49,16 +49,24 @@ Verified: 2026-09-30
 
 1. READ the injected memory. With pi, a `<cortex_memory>` primer and hidden `cortex-memory` hit messages arrive automatically. Do NOT search memory at the start of a request.
 2. CONTINUING a stream: load it ONCE with `cortex_recall "@<id>"` (without pi: `cortex memory show <id>`), then act on its staleness:
+   - A long body leads with `## Next`, open questions, `## Decisions` and `## State`, then a `Contents:` line; load one more section with `cortex_recall "@<id>#<section>"` (without pi: `cortex memory show <id> --section=<section>`).
+   - "latest linked @N" names a newer stream that continues this one (a handover chain): continue THAT one.
    - fresh: continue from `## Next`, honouring `## Decisions`.
    - stale (changed or missing files): re-read those files first, fix the body to match the code, and refresh `Verified:`.
+   - unverifiable ("cited files are not in this checkout"): the stream's files live in another repo; verify there before relying on them.
    - old (not synced for 30 days): verify the claims you rely on before acting.
+   - Use `cortex_recall`, not `cortex show`/`cortex ls` in bash, for memory lookups: one call answers.
 3. NOTHING matches: just do the task. Memory is optional context, not a gate.
 
 Memory is a hint; the code and the user are the truth.
 
 Known limit: automatic hits are lexical, so a conversational prompt can
 surface weak matches. Each hit shows the words it matched (`k/n: ...`);
-skip a hit whose matched words are incidental to the ask.
+skip a hit whose matched words are incidental to the ask. After a
+session's first prompt, pi searches only when the prompt asks for earlier
+work (a recall cue: "continue", "last", "what was", an `@<id>`, ...).
+Recency words ("last", "latest", "current", ...) sort equally matching
+streams newest activity first; status changes are not activity.
 
 ## Roles
 
@@ -113,7 +121,7 @@ Prefer UPDATE or ATTACH over CREATE.
 ## Creating a stream
 
 ```bash
-cortex add "<title>" --lane "$(cortex memory lane)" --status open --as <your author tag from the primer> --body-file - <<'EOF'
+cortex add "<title>" --lane "<the project's lane>" --status open --as <your author tag from the primer> --body-file - <<'EOF'
 ## Goal
 ...
 Verified: YYYY-MM-DD
@@ -121,7 +129,9 @@ EOF
 ```
 
 The primer names your author tag (`pi-<session uuid>` under pi). Without one,
-use the [session-id recipe](session-id.md).
+use the [session-id recipe](session-id.md). The lane follows
+[persistence.md](persistence.md) "Lane" (this checkout's default:
+`$(cortex memory lane)`).
 
 ## Delegating
 

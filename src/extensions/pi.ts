@@ -21,9 +21,12 @@
  * hits, `cortex_recall`, `/memory`).
  *   - `cortex_update` wraps `cortex update` with auto-attribution from the
  *     active pi session (`pi-<full-uuidv7>`), resumable via `cortex resume`.
- *   - Every session starts with a frozen primer of the repo's memory streams;
- *     every substantive prompt surfaces only NEW relevant streams.
- *   - `cortex_recall` loads one stream with its staleness check, or searches.
+ *   - Every session starts with a frozen primer of the repo's memory streams
+ *     (plus streams recently active in other lanes); later prompts that ask
+ *     for earlier work (a recall cue) surface only NEW relevant streams, from
+ *     every lane with this repo's boosted.
+ *   - `cortex_recall` loads one stream (or one `@<id>#<section>`) with its
+ *     staleness check, or searches every lane with this repo's first.
  *
  * Roles: writer = a human-facing UI is attached (ctx.hasUI); reader = headless
  * (delegates, pi -p); CORTEX_MEMORY=write|read|off overrides process-wide.
@@ -34,7 +37,10 @@
  *   - A user prompt costs at most ONE `cortex memory context` spawn (3 s
  *     timeout; a failure never blocks or throws). After the session's first
  *     prompt (which fetches the primer) it costs ZERO when the prompt has
- *     fewer than 2 content words, and later spawns pass `--no-primer`.
+ *     fewer than 2 content words or no recall cue (RECALL_CUE: "continue",
+ *     "last", "what was", an `@<id>`, ...), and later spawns pass
+ *     `--no-primer`. Keyword recall cannot tell an action request from a
+ *     lookup; the cue bounds the noise and `cortex_recall` covers the rest.
  *   - The system-prompt memory block is byte-identical for the whole session
  *     (refetched only after compaction or `/memory refresh`), so the provider
  *     prompt cache survives; hits ride as hidden messages instead.
@@ -74,6 +80,15 @@ const CHECKPOINT_CANDIDATES = 3;
 const CHECKPOINT_FILES_SHOWN = 10;
 const BREADCRUMB_STREAMS = 2;
 const BREADCRUMB_CHARS = 4000;
+/**
+ * A later prompt that asks for earlier or current work (plan @422): recency
+ * words, continue/resume/pick up/left off/remember/previous/earlier/again,
+ * "where/what was|were|did|is", or an `@<id>` reference.
+ */
+export const RECALL_CUE =
+  /\b(last|latest|recent(ly)?|current(ly)?|lately|newest|yesterday|today|continu(e|ing)|resum(e|ing)|pick(ed)? up|left off|remember|previous(ly)?|earlier|again)\b|\b(where|what)\s+(was|were|did|is)\b|(?<![\w@])@\d+\b/i;
+/** How injected hits tell the model to load one. */
+const LOAD_HINT = 'cortex_recall "@<id>"';
 
 /**
  * Who keeps memory in this session: the one human-driven session writes;
@@ -324,7 +339,9 @@ export default function (pi: ExtensionAPI): void {
     stats.prompts++;
     // Readers never fetch or inject the primer: their hits ride alone.
     const first = !reader && primer === null;
-    const withQuery = contentWords(query) >= 2;
+    // After the session's first prompt, only a recall cue searches memory.
+    const cued = first || stats.prompts === 1 || RECALL_CUE.test(query);
+    const withQuery = cued && contentWords(query) >= 2;
     let ids: number[] = [];
     let hitsText = "";
     let status: string | undefined;
@@ -336,6 +353,7 @@ export default function (pi: ExtensionAPI): void {
         "--json",
         `--author=pi-${ctx.sessionManager.getSessionId()}`,
         `--limit=${reader ? READER_HITS : first ? FIRST_HITS : LATER_HITS}`,
+        `--load-hint=${LOAD_HINT}`,
       ];
       if (withQuery) args.push(`--query=${query}`);
       if (shown.size > 0) args.push(`--exclude=${[...shown].join(",")}`);
@@ -542,18 +560,23 @@ export default function (pi: ExtensionAPI): void {
       name: "cortex_recall",
       label: "Cortex Recall",
       description:
-        'Load one cortex memory stream by id ("@<id>", with a staleness report) or search cortex memory by keywords. Budget: 3 calls per request.',
-      promptSnippet: "Load a cortex memory stream (@id, with staleness check) or search memory by keywords.",
+        'Load one cortex memory stream by id ("@<id>" leads with its Next/Open questions/Decisions, names the latest linked stream and reports staleness; "@<id>#<section>" loads one section) or search cortex memory by keywords (every lane, this repo first). Budget: 3 calls per request.',
+      promptSnippet:
+        "Load a cortex memory stream (@id or @id#section, with staleness check) or search memory in every lane by keywords.",
       promptGuidelines: [
         "Relevant cortex memory is injected automatically (<cortex_memory> and cortex-memory messages): do NOT search memory at the start of a request.",
-        'Call cortex_recall only when the user refers to earlier work you cannot see, or before continuing/relying on a stream: "@<id>" loads it with its staleness report.',
+        'Call cortex_recall only when the user refers to earlier work you cannot see, or before continuing/relying on a stream: "@<id>" loads it with its staleness report, leading with its Next/Open questions/Decisions and naming its latest linked stream (continue THAT one); "@<id>#<section>" loads one section in full.',
+        "Keyword recall searches every lane (this repo first): work spans repos.",
+        "Use cortex_recall, not `cortex show`/`cortex ls` in bash, for memory lookups.",
         "At most 3 cortex_recall calls per request and never the same query twice; then work with what you have.",
         "Memory is a hint, the code and the user are the truth: re-read changed/missing files before acting, then re-sync the stream (cortex skill, recipes/memory.md).",
         "When continuing a stream, follow its Next section and honour its Decisions (user preferences, constraints, rejected options).",
       ],
       parameters: Type.Object({
-        query: Type.String({ description: '"@<id>" loads one stream with a staleness check; otherwise keywords' }),
-        all_lanes: Type.Optional(Type.Boolean({ description: "search every lane, not only this repo's" })),
+        query: Type.String({
+          description:
+            '"@<id>" loads one stream with a staleness check, "@<id>#<section>" one section of it; otherwise keywords (every lane)',
+        }),
       }),
 
       async execute(_toolCallId, params, signal, _onUpdate, ctx) {
@@ -563,19 +586,15 @@ export default function (pi: ExtensionAPI): void {
           return text("Recall budget for this request is spent; continue the task with what you have.");
         }
         const query = params.query.trim();
-        const key = `${params.all_lanes ? "all:" : ""}${query.toLowerCase().replace(/\s+/g, " ")}`;
+        // The section is part of the query text, so `@12#next` and `@12` are distinct recalls.
+        const key = query.toLowerCase().replace(/\s+/g, " ");
         if (recalled.has(key)) return text("Already recalled in this request; see the earlier result.");
 
-        const byId = /^@?(\d+)$/.exec(query);
+        const byId = /^@?(\d+)(?:#(.+))?$/.exec(query);
+        const section = byId?.[2]?.trim();
         const args = byId
-          ? ["memory", "show", byId[1]]
-          : [
-              "memory",
-              "search",
-              sanitize(query),
-              "--limit=5",
-              ...(!params.all_lanes && lane ? [`--lane=${lane}`] : []),
-            ];
+          ? ["memory", "show", byId[1], ...(section ? [`--section=${section}`] : [])]
+          : ["memory", "search", sanitize(query), "--limit=5", ...(lane ? [`--boost=${lane}`] : [])];
         // Claimed BEFORE the exec: pi runs one assistant message's tool calls in
         // parallel, so a duplicate must see it in flight. A failure releases it.
         recalled.add(key);

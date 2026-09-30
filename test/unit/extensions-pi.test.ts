@@ -25,8 +25,9 @@ const { default: extension, ...helpers } = (await import("../../src/extensions/p
   focusFromBash: (command: string, output: string) => number[];
   shouldCheckpoint: (s: Record<string, unknown>) => string | null;
   checkpointPrompt: (input: Record<string, unknown>) => string;
+  RECALL_CUE: RegExp;
 };
-const { memoryRole, focusFromBash, shouldCheckpoint, checkpointPrompt } = helpers;
+const { memoryRole, focusFromBash, shouldCheckpoint, checkpointPrompt, RECALL_CUE } = helpers;
 
 type ExecResult = { code: number; killed: boolean; stdout: string; stderr: string };
 type Exec = { cmd: string; args: string[]; opts: Record<string, unknown> };
@@ -150,8 +151,46 @@ describe("automatic memory context (before_agent_start)", () => {
     expect(flag(exec.args, "author")).toBe("pi-sess-1");
     expect(flag(exec.args, "limit")).toBe("5");
     expect(flag(exec.args, "query")).toBe("fix the mouse wheel scrolling");
+    expect(flag(exec.args, "load-hint")).toBe('cortex_recall "@<id>"');
     expect(exec.args).not.toContain("--no-primer");
     expect(exec.opts).toMatchObject({ cwd: "/repo", timeout: 3000 });
+  });
+
+  test("after the first prompt, only a recall cue searches memory (plan @422)", async () => {
+    const h = harness();
+    await h.prompt("copy this as a set of findings for the review"); // the first prompt always runs
+    expect(contextExecs(h.execs)).toHaveLength(1);
+    await h.prompt("copy this as a set of findings for the review");
+    await h.prompt("rename the helper and rerun the tests");
+    expect(contextExecs(h.execs)).toHaveLength(1);
+    await h.prompt("what was I last doing for the routing-events work");
+    expect(contextExecs(h.execs)).toHaveLength(2);
+    expect(flag(h.execs[1].args, "query")).toBe("what was I last doing for the routing-events work");
+    await h.prompt("look at @12 for the plan");
+    expect(contextExecs(h.execs)).toHaveLength(3);
+    await h.prompt("email me@12 please now"); // not a reference
+    expect(contextExecs(h.execs)).toHaveLength(3);
+  });
+
+  test("RECALL_CUE: recency and continuation words, where/what was, @<id>; not ordinary requests", () => {
+    for (const cue of [
+      "what was I last doing",
+      "continue the routing work",
+      "resume the migration",
+      "pick up where we left off",
+      "remember the flag we chose?",
+      "the previous approach",
+      "try again with the fix",
+      "where were the notes",
+      "what is the current state",
+      "see @421",
+      "latest handover please",
+    ]) {
+      expect(RECALL_CUE.test(cue)).toBe(true);
+    }
+    for (const plain of ["rename the helper", "copy this as a set of findings", "fix the lastIndex bug", "a@12 b"]) {
+      expect(RECALL_CUE.test(plain)).toBe(false);
+    }
   });
 
   test("unforced: the primer goes into sections.cortex_memory, byte-identical on the 2nd prompt without a refetch", async () => {
@@ -161,7 +200,7 @@ describe("automatic memory context (before_agent_start)", () => {
     expect(first.event.systemPromptOptions.sections.cortex_memory).toBe("PRIMER v1");
     expect(first.result).toBeUndefined();
     primer = "PRIMER v2";
-    const second = await h.prompt("now the scroll multiplier");
+    const second = await h.prompt("now the scroll multiplier again");
     expect(second.event.systemPromptOptions.sections.cortex_memory).toBe("PRIMER v1");
     expect(second.result).toBeUndefined();
     expect(h.execs[1].args).toContain("--no-primer");
@@ -195,7 +234,7 @@ describe("automatic memory context (before_agent_start)", () => {
     await h.prompt("do it");
     expect(h.execs).toHaveLength(1);
 
-    const later = await h.prompt("check the scroll multiplier");
+    const later = await h.prompt("check the scroll multiplier again");
     expect(h.execs).toHaveLength(2);
     expect(flag(h.execs[1].args, "limit")).toBe("3");
     expect(flag(h.execs[1].args, "exclude")).toBe("4,9");
@@ -232,7 +271,7 @@ describe("automatic memory context (before_agent_start)", () => {
     expect(await h.memory()).toContain("last error: boom");
 
     fail = false;
-    const second = await h.prompt("now the scroll multiplier");
+    const second = await h.prompt("continue with the scroll multiplier");
     expect(h.execs[1].args).toContain("--no-primer");
     expect(second.event.systemPromptOptions.sections.cortex_memory).toBeUndefined();
   });
@@ -295,17 +334,29 @@ describe("cortex_recall", () => {
     expect(r.details).toBeUndefined();
     expect(h.execs.at(-1)?.args).toEqual(["memory", "show", "12"]);
     expect(h.execs.at(-1)?.opts).toMatchObject({ cwd: "/repo", timeout: 5000 });
-    await h.prompt("check the scroll multiplier");
+    await h.prompt("check the scroll multiplier again");
     expect(flag(h.execs.at(-1)?.args ?? [], "exclude")).toBe("12");
   });
 
-  test("keywords search this lane (--limit=5) unless all_lanes", async () => {
+  test('"@12#next" loads one section; it is a different recall from "@12"', async () => {
+    const h = harness(args => (args[1] === "show" ? ok("SECTION") : context()));
+    await h.prompt("fix the mouse wheel");
+    await h.recall("@12#next");
+    expect(h.execs.at(-1)?.args).toEqual(["memory", "show", "12", "--section=next"]);
+    await h.recall("12# open questions ");
+    expect(h.execs.at(-1)?.args).toEqual(["memory", "show", "12", "--section=open questions"]);
+    expect((await h.recall("@12")).content[0].text).toBe("SECTION");
+    expect(h.execs.at(-1)?.args).toEqual(["memory", "show", "12"]);
+  });
+
+  test("keywords search every lane with this lane boosted (--limit=5); there is no all_lanes parameter", async () => {
     const h = harness(args => (args[1] === "search" ? ok("RESULTS") : context()));
     await h.prompt("fix the mouse wheel");
     await h.recall("--wheel notches");
-    expect(h.execs.at(-1)?.args).toEqual(["memory", "search", "wheel notches", "--limit=5", "--lane=cortex"]);
-    await h.recall("wheel notches", { all_lanes: true });
-    expect(h.execs.at(-1)?.args).toEqual(["memory", "search", "wheel notches", "--limit=5"]);
+    expect(h.execs.at(-1)?.args).toEqual(["memory", "search", "wheel notches", "--limit=5", "--boost=cortex"]);
+    expect(h.tools.cortex_recall.parameters.args[0]).not.toHaveProperty("all_lanes");
+    expect(h.tools.cortex_recall.description).toContain("every lane");
+    expect(h.tools.cortex_recall.promptGuidelines.join("\n")).toContain("not `cortex show`/`cortex ls` in bash");
   });
 
   test("the budget is 3 calls per request; a repeated query short-circuits; a new prompt resets both", async () => {
@@ -415,7 +466,9 @@ describe("memory roles", () => {
     expect(first.event.systemPromptOptions.sections.cortex_memory).toBeUndefined();
     await h.prompt("yes");
     expect(h.execs).toHaveLength(1);
-    const later = await h.prompt("now the scroll multiplier");
+    await h.prompt("now the scroll multiplier"); // no recall cue after the first prompt
+    expect(h.execs).toHaveLength(1);
+    const later = await h.prompt("continue with the scroll multiplier");
     expect(later.event.systemPromptOptions.sections.cortex_memory).toBeUndefined();
     expect(h.execs[1].args).toContain("--no-primer");
     expect(flag(h.execs[1].args, "limit")).toBe("3");

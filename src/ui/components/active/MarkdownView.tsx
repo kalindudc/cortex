@@ -33,6 +33,7 @@ import { useEffect, useMemo, useRef } from "preact/hooks";
 import { renderMarkdown, runMermaid, resetMermaidNode } from "../../lib/markdown.ts";
 import { parseRefs } from "../../lib/refs.ts";
 import { navigateRef } from "../../lib/refs.ts";
+import { slugify } from "../../lib/slug.ts";
 import { theme } from "../../state/theme.ts";
 
 export interface MarkdownHeading {
@@ -47,14 +48,6 @@ export interface MarkdownViewProps {
   onHeadings?: (headings: MarkdownHeading[]) => void;
   /** Follow an @id / #tag reference; default navigateRef (the workspace's selection and filters). */
   onRef?: (kind: "task" | "tag", value: string) => void;
-}
-
-function slugify(text: string): string {
-  const slug = text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  return slug || "section";
 }
 
 // Elements whose text must NEVER be ref-decorated (M2): code spans/blocks,

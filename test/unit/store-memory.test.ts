@@ -297,7 +297,16 @@ describe("Store.memoryStreams / memoryStream", () => {
     expect(ids(s.memoryStreams({ lane: "l", active: true }))).toEqual([a.id]);
     expect(ids(s.memoryStreams({ author: "pi-x" }))).toEqual([c.id]);
     const [row] = s.memoryStreams({ lane: "l", active: true });
-    expect(row).toEqual({ id: a.id, title: "a", lane: "l", status: "open", updated: 1_000, synced: 1_000, tags: [] });
+    expect(row).toEqual({
+      id: a.id,
+      title: "a",
+      lane: "l",
+      status: "open",
+      updated: 1_000,
+      synced: 1_000,
+      activity: 1_000,
+      tags: [],
+    });
     expect(Object.keys(row ?? {})).not.toContain("body");
   });
 
@@ -309,6 +318,176 @@ describe("Store.memoryStreams / memoryStream", () => {
     expect(stream?.task.id).toBe(t.id);
     expect(stream?.updates.map(u => u.summary)).toEqual(["one"]);
     expect(stream?.synced).toBe(t.created);
+    expect(stream?.latest).toBeNull();
     expect(s.memoryStream(999)).toBeNull();
+  });
+});
+
+describe("activity time (plan @422)", () => {
+  const activity = (s: Store, id: number): number | undefined => s.memoryStreams().find(r => r.id === id)?.activity;
+
+  test("status audits, lane moves, tag and title changes are not activity; updates and body edits are", () => {
+    const s = open();
+    at(1_000);
+    const t = s.addTask({ title: "a", lane: "l", body: "v1", author: "pi-x" });
+    at(2_000);
+    s.setStatus(t.id, "done", { author: "pi-x" });
+    s.moveTask(t.id, "other");
+    s.changeTaskTags(t.id, { add: ["topic"] });
+    s.editTask(t.id, { title: "renamed" });
+    expect(activity(s, t.id)).toBe(1_000);
+    at(3_000);
+    s.addUpdate({ task_id: t.id, author: "pi-x", summary: "progress" });
+    expect(activity(s, t.id)).toBe(3_000);
+    at(4_000);
+    s.editTask(t.id, { body: "v2" });
+    expect(activity(s, t.id)).toBe(4_000);
+  });
+
+  test("memoryStreams orders by activity (not `updated`) and excludeLane keeps every other lane", () => {
+    const s = open();
+    at(1_000);
+    const a = s.addTask({ title: "a", lane: "l" });
+    at(2_000);
+    const b = s.addTask({ title: "b", lane: "l" });
+    at(3_000);
+    s.addUpdate({ task_id: a.id, author: "pi-x", summary: "progress" });
+    const c = s.addTask({ title: "c", lane: "other" });
+    at(5_000);
+    s.setStatus(b.id, "review"); // bumps `updated`, not activity
+    expect(ids(s.memoryStreams({ lane: "l" }))).toEqual([a.id, b.id]);
+    expect(ids(s.memoryStreams({ excludeLane: "l" }))).toEqual([c.id]);
+    expect(ids(s.memoryStreams({ excludeLane: "other", active: true }))).toEqual([a.id, b.id]);
+  });
+});
+
+describe("cross-lane ranking (plan @422)", () => {
+  test("every lane is searched; `lane` filters and `boost` ranks the caller's lane above an equal hit", () => {
+    const s = open();
+    const mine = s.addTask({ title: "gizmo sprocket", lane: "cortex" });
+    const theirs = s.addTask({ title: "gizmo sprocket", lane: "infra" });
+    expect(ids(s.searchMemory(["gizmo", "sprocket"]))).toEqual([theirs.id, mine.id]); // tie: newest id
+    expect(ids(s.searchMemory(["gizmo", "sprocket"], { boost: "cortex" }))).toEqual([mine.id, theirs.id]);
+    expect(ids(s.searchMemory(["gizmo", "sprocket"], { lane: "cortex" }))).toEqual([mine.id]);
+    const [boosted, plain] = s.searchMemory(["gizmo", "sprocket"], { boost: "cortex" });
+    expect(boosted?.score).toBeCloseTo((plain?.score ?? 0) * MEMORY_LIMITS.laneBoost, 3);
+  });
+
+  test("a section matching a query phrase ranks first", () => {
+    const s = open();
+    const titled = s.addTask({ title: "events of routing", body: "routing and events" });
+    const phrased = s.addTask({ title: "notes", body: "the routing-events work" });
+    expect(ids(s.searchMemory(["routing", "events"]))[0]).toBe(titled.id);
+    expect(ids(s.searchMemory(["routing", "events"], { phrases: [["routing", "events"]] }))).toEqual([
+      phrased.id,
+      titled.id,
+    ]);
+  });
+
+  test("more matched groups rank above a stronger BM25 with fewer groups", () => {
+    const s = open();
+    s.addTask({ title: "alpha only" }); // distinct match sets: alpha and beta are separate groups
+    const two = s.addTask({ title: "alpha beta" });
+    const three = s.addTask({ title: "notes", body: `alpha ${"filler ".repeat(40)} beta gamma` });
+    expect(ids(s.searchMemory(["alpha", "beta", "gamma"]))).toEqual([three.id, two.id]);
+  });
+
+  test("recent: equally covered hits sort by newest activity; groups still come first", () => {
+    const s = open();
+    at(1_000);
+    const older = s.addTask({ title: "gizmo sprocket" });
+    at(2_000);
+    const newer = s.addTask({ title: "gizmo sprocket" });
+    at(3_000);
+    s.addUpdate({ task_id: older.id, author: "pi-x", summary: "progress" });
+    at(4_000);
+    s.setStatus(newer.id, "done", { author: "pi-x" }); // a bulk close is not activity
+    expect(ids(s.searchMemory(["gizmo", "sprocket"]))).toEqual([newer.id, older.id]);
+    expect(ids(s.searchMemory(["gizmo", "sprocket"], { recent: true }))).toEqual([older.id, newer.id]);
+    at(5_000);
+    s.addTask({ title: "gizmo solo" }); // distinct match sets: gizmo and sprocket are separate groups
+    s.addTask({ title: "sprocket solo" });
+    const fuller = s.addTask({ title: "gizmo sprocket widget" });
+    at(6_000);
+    s.addUpdate({ task_id: older.id, author: "pi-x", summary: "more" });
+    expect(ids(s.searchMemory(["gizmo", "sprocket", "widget"], { recent: true }))).toEqual([
+      fuller.id,
+      older.id,
+      newer.id,
+    ]);
+  });
+});
+
+describe("linked streams (_memory_links, plan @422)", () => {
+  const links = (s: Store): { task_id: number; ref_id: number }[] =>
+    s.runInTransaction(raw =>
+      raw
+        .query<{ task_id: number; ref_id: number }, []>("SELECT task_id, ref_id FROM _memory_links ORDER BY 1, 2;")
+        .all(),
+    );
+
+  test("links are rebuilt from bodies and update summaries on edit, post and remove; self refs are skipped", () => {
+    const s = open();
+    const a = s.addTask({ title: "a" });
+    const b = s.addTask({ title: "b", body: `continues @${a.id} and @${a.id}, not me @0` });
+    s.editTask(a.id, { body: `self @${a.id}` });
+    s.searchMemory(["warmup"]);
+    expect(links(s)).toEqual([{ task_id: b.id, ref_id: a.id }]);
+    s.editTask(b.id, { body: "no refs" });
+    s.addUpdate({ task_id: a.id, author: "pi-x", summary: `handed off \u2192 @${b.id}` });
+    expect(s.memoryStream(a.id)).not.toBeNull(); // show reconciles too
+    expect(links(s)).toEqual([{ task_id: a.id, ref_id: b.id }]);
+    s.removeTask(a.id);
+    s.searchMemory(["warmup"]);
+    expect(links(s)).toEqual([]);
+  });
+
+  test("an index built before _memory_links existed is rebuilt with every task's links", () => {
+    const s = open();
+    const a = s.addTask({ title: "a" });
+    const b = s.addTask({ title: "b", body: `continues @${a.id}` });
+    s.searchMemory(["warmup"]);
+    s.runInTransaction(raw => raw.run("DROP TABLE _memory_links;"));
+    expect(ids(s.searchMemory(["continues"]))).toEqual([b.id]);
+    expect(links(s)).toEqual([{ task_id: b.id, ref_id: a.id }]);
+  });
+
+  test("latest follows same-lane links to later-created streams; other lanes and older referencers are ignored", () => {
+    const s = open();
+    at(500);
+    const older = s.addTask({ title: "older", lane: "infra" });
+    at(1_000);
+    const a = s.addTask({ title: "handover a", lane: "infra" });
+    at(2_000);
+    const b = s.addTask({ title: "handover b", lane: "infra", body: `continues @${a.id}` });
+    at(3_000);
+    const c = s.addTask({ title: "handover c", lane: "infra", body: `continues @${b.id}` });
+    at(4_000);
+    const d = s.addTask({ title: "handover d", lane: "infra", body: `continues @${c.id}` });
+    at(5_000);
+    s.addTask({ title: "other lane", lane: "cortex", body: `continues @${d.id}` });
+    s.editTask(older.id, { body: `see @${d.id}` });
+    expect(s.memoryStream(a.id)?.latest).toEqual({ id: d.id, status: "open", activity: 4_000 });
+    expect(s.memoryStream(c.id)?.latest?.id).toBe(d.id);
+    expect(s.memoryStream(d.id)?.latest).toBeNull();
+    const hit = s.searchMemory(["handover"]).find(h => h.id === b.id);
+    expect(hit?.latest?.id).toBe(d.id);
+  });
+
+  test("mutual links terminate, and a hop takes the linked candidate with the newest activity", () => {
+    const s = open();
+    at(1_000);
+    const a = s.addTask({ title: "a", lane: "l" });
+    at(2_000);
+    const b = s.addTask({ title: "b", lane: "l", body: `continues @${a.id}` });
+    at(3_000);
+    const review = s.addTask({ title: "review", lane: "l", body: `reviews @${a.id}` });
+    at(4_000);
+    s.addUpdate({ task_id: a.id, author: "pi-x", summary: `handed off \u2192 @${b.id}` });
+    s.addUpdate({ task_id: b.id, author: "pi-x", summary: "still going" });
+    at(5_000);
+    s.setStatus(review.id, "done", { author: "pi-x" }); // not activity: b stays the newest
+    expect(s.memoryStream(a.id)?.latest?.id).toBe(b.id);
+    expect(s.memoryStream(b.id)?.latest).toBeNull();
   });
 });

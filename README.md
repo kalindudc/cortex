@@ -462,7 +462,7 @@ commands while a new daemon owns the database: old binaries write the file direc
 | `ls [-l lane] [-s status] [--json]` | list tasks, grouped by lane, sorted by id (`s` = `open\|review\|blocked\|done`) |
 | `show <id> [--json]` | show one task with its updates |
 | `search [text] [--json]` | fuzzy-search tasks (same scorer + `@id`/`@title`/`#tag` prefixes as the dashboard palette) in an fzf picker with a `show` preview; enter copies the task id to the clipboard and prints the task like `show`; `--json` emits ranked matches without fzf |
-| `memory search\|show\|context\|lane [--json]` | agent memory: ranked recall, one task's staleness (since its last body edit) plus the breadcrumb trail since then, the one-call agent context (primer + hits), and this repo's lane |
+| `memory search\|show\|context\|lane [--json]` | agent memory: ranked recall across every lane (`search --boost=<lane>` ranks one lane higher, `--lane` filters), one task's staleness (since its last body edit), its latest linked stream, its body (section-first when long; `show --section=<text>` loads matching sections) and the breadcrumb trail since then, the one-call agent context (primer + hits), and this checkout's lane |
 | `update <id> -m <msg> [-s status] [-b body]` | post an update; `status` = `open\|review\|blocked\|done` |
 | `edit <id> [-t title] [-b body] [-p int]` | edit task fields |
 | `mv <id> <lane>` | move a task to another lane (auto-creates `lane` if missing) |
@@ -480,21 +480,33 @@ commands while a new daemon owns the database: old binaries write the file direc
 ## Agent memory
 
 Cortex tasks double as memory streams that coding agents carry across sessions: the body is the current state
-(Goal, State, Decisions, Next, Files, `Verified:`), updates are breadcrumbs, the lane is the repo
-(`cortex memory lane`); status is only the user's tracking, so `done` streams stay searchable memory. The protocol
-agents follow lives in the cortex skill
+(Goal, State, Decisions, Next, Files, `Verified:`), updates are breadcrumbs, the lane is the project the work
+belongs to (derived from the ask; `cortex memory lane` gives this checkout's default); status is only the user's
+tracking, so `done` streams stay searchable memory. The protocol agents follow lives in the cortex skill
 (`recipes/memory.md`, installed by `cortex agents install`).
 
-- Automatic pi context: the pi extension adds a primer of the repo's streams to the system prompt once per
-  session (frozen, so the prompt cache survives; refetched only after compaction or `/memory refresh`) and
-  injects only never-shown relevant streams as hidden messages. A prompt costs at most one
-  `cortex memory context` spawn, and none after the first prompt when it has fewer than 2 content words.
-- `cortex_recall`: `"@<id>"` loads one stream with its staleness report; keywords search this repo's lane.
-  At most 3 calls per request (2 in a headless session), and a repeated query short-circuits.
+- Cross-lane recall: search spans every lane, with the caller's lane boosted rather than filtered, because work
+  spans repos. A hyphenated compound (`routing-events`) also matches as a phrase, which ranks first; recency words
+  ("what was I last doing") only re-order equally matching streams, newest activity first. Activity is the newest
+  body edit or update; status changes (a bulk close) and lane or tag moves do not count.
+- Linked streams: `@id` references in bodies and updates form handover chains; a stream names its "latest linked"
+  stream (the newest same-lane stream the chain reaches), so an older hand-off points at the one to continue.
+- Section-first show: past 12,000 characters, `cortex memory show` leads with the Next, Open questions,
+  Decisions and State sections, then a `Contents:` line; `--section=<text>` loads one section in full.
+- Automatic pi context: the pi extension adds a primer of the repo's streams (plus streams recently active in
+  other lanes) to the system prompt once per session (frozen, so the prompt cache survives; refetched only after
+  compaction or `/memory refresh`) and injects only never-shown relevant streams as hidden messages. A prompt costs
+  at most one `cortex memory context` spawn; after the first prompt, none unless it has at least 2 content words
+  and a recall cue ("continue", "last", "what was", an `@id`, ...).
+- `cortex_recall`: `"@<id>"` loads one stream with its staleness report, `"@<id>#<section>"` one section;
+  keywords search every lane with this repo's first. At most 3 calls per request (2 in a headless session), and a
+  repeated query short-circuits.
 - `/memory` in pi shows the lane, the primer, the injected hits, spawn count, latency, injected characters,
   the role, the focus streams, checkpoint and breadcrumb counts, and the last error.
 - Staleness is measured from the stream's last body edit: cited files changed or missing since then, or a sync
   older than 30 days, mark it stale before an agent relies on it. Status flips and updates never count as a sync.
+  Cited files resolve in the current checkout whatever the lane; when most are absent there, the verdict is
+  unverifiable ("cited files are not in this checkout").
 
 Without pi, agents run `cortex memory context --query="<ask>"` once and `cortex memory show <id>` for the stream
 they continue.
@@ -580,9 +592,9 @@ Bound to `127.0.0.1` only.
 | PATCH | `/api/tasks/:id/lane` | move lane |
 | DELETE | `/api/tasks/:id` | remove a task |
 | GET | `/api/tasks/:id/updates` | list updates for a task |
-| GET | `/api/memory/search?q&lane&limit&exclude` | ranked memory hits (`{ terms, hits }`) |
-| GET | `/api/memory/streams?lane&author&active&limit` | bodiless memory stream rows (with `synced`, the last body edit) |
-| GET | `/api/memory/streams/:id` | one stream: `{ task, updates, synced }` |
+| GET | `/api/memory/search?q&lane&boost&limit&exclude` | ranked memory hits across lanes (`{ terms, recent, hits }`; each hit has `activity` and `latest`) |
+| GET | `/api/memory/streams?lane&excludeLane&author&active&limit` | bodiless memory stream rows, newest activity first (with `synced`, the last body edit, and `activity`) |
+| GET | `/api/memory/streams/:id` | one stream: `{ task, updates, synced, syncedUpdateId, latest }` |
 | POST | `/api/tasks/:id/updates` | post an update |
 | GET | `/api/lanes` | list lanes |
 | POST | `/api/lanes` | create a lane |

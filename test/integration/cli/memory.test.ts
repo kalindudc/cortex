@@ -83,8 +83,13 @@ describe("cortex memory (compiled binary)", () => {
     expect(found.terms).toEqual(["mouse", "wheel", "scroll"]);
     expect(found.hits.map(hit => hit.id)).toEqual([streamId]);
     expect(found.hits[0]?.matched).toEqual(["mouse", "wheel", "scroll"]);
-    const none = await json<{ terms: string[]; hits: unknown[] }>(["memory", "search", "?! ...", "--json"]);
-    expect(none).toEqual({ terms: [], hits: [] });
+    const none = await json<{ terms: string[]; recent: boolean; hits: unknown[] }>([
+      "memory",
+      "search",
+      "?! ...",
+      "--json",
+    ]);
+    expect(none).toEqual({ terms: [], recent: false, hits: [] });
   });
 
   test("memory context returns the primer and hits in one call; --no-primer returns hits only", async () => {
@@ -137,6 +142,52 @@ describe("cortex memory (compiled binary)", () => {
     expect(resynced.staleness.verdict).toBe("fresh");
     expect(resynced.synced).toBeGreaterThan(fresh.synced);
     expect(resynced.trail).toEqual([]);
+  });
+
+  test("a stream in another lane is found from this repo; context boosts this lane and says `recent`", async () => {
+    const other = await json<{ id: number }>([
+      "add",
+      "Gateway routing-events handover",
+      "-l",
+      "infra",
+      "-b",
+      "## State\nrouting-events consumer split\n## Next\n1. flip the traffic\n## Notes\nold notes",
+      "--json",
+    ]);
+    const found = await json<{ hits: { id: number; lane: string }[] }>([
+      "memory",
+      "search",
+      "routing-events",
+      "--boost=myproj",
+      "--json",
+    ]);
+    expect(found.hits.map(hit => hit.id)).toEqual([other.id]);
+    const filtered = await json<{ hits: unknown[] }>(["memory", "search", "routing-events", "--lane=myproj", "--json"]);
+    expect(filtered.hits).toEqual([]);
+    const ctx = await json<{ lane: string; recent: boolean; primer: string; hitsText: string }>([
+      "memory",
+      "context",
+      "--json",
+      "--query=what was I last doing on routing-events",
+      '--load-hint=cortex_recall "@<id>"',
+    ]);
+    expect(ctx.lane).toBe("myproj");
+    expect(ctx.recent).toBe(true);
+    expect(ctx.hitsText).toContain(`[${other.id}] open \u00b7 infra`);
+    expect(ctx.hitsText).toContain('newest first). Load one with `cortex_recall "@<id>"`');
+    expect(ctx.primer).toContain(`Recently active in other lanes:\n- [${other.id}] open \u00b7 infra`);
+
+    const section = await cli(["memory", "show", String(other.id), "--section=next"]);
+    expect(section.code).toBe(0);
+    expect(section.stdout).toContain("## Next\n1. flip the traffic");
+    expect(section.stdout).not.toContain("## State");
+    expect(section.stdout).not.toContain("## Notes");
+    const sections = await json<{
+      sections: { heading: string | null; slug: string; text: string }[];
+      latest: unknown;
+    }>(["memory", "show", String(other.id), "--section=next", "--json"]);
+    expect(sections.sections).toEqual([{ heading: "Next", slug: "next", text: "## Next\n1. flip the traffic" }]);
+    expect(sections.latest).toBeNull();
   });
 
   test("memory show of a missing task exits 1", async () => {

@@ -50,7 +50,7 @@ Every mutating command (`add`, `edit`, `update`, `mv`, `rm`, `tag add|edit|rm`, 
 
 ## Memory
 
-Tasks double as memory streams across sessions: the body is the current state, updates are breadcrumbs, the lane is the repo (`cortex memory lane`).
+Tasks double as memory streams across sessions: the body is the current state, updates are breadcrumbs, the lane is the project (derived from the ask; recipes/persistence.md §2).
 Under pi, relevant memory is injected automatically and `cortex_recall` loads a stream with its staleness check.
 When to read, trust, write and re-sync memory: [recipes/memory.md](recipes/memory.md).
 

@@ -6,6 +6,7 @@ import {
   breadcrumbs,
   checkStaleness,
   MEMORY_LIMITS,
+  matchingSections,
   memoryLane,
   renderHits,
   renderPrimer,
@@ -16,11 +17,12 @@ import type { MemoryStream, MemoryStreamRow } from "../store.ts";
 
 /**
  * `cortex memory` — agent memory over cortex tasks (plan @414). A task is a
- * memory stream: body = current state, updates = breadcrumbs, lane = repo.
+ * memory stream: body = current state, updates = breadcrumbs, lane = the
+ * project (plan @422: derived from the ask; recall spans every lane).
  *
- *   search <query>  ranked recall (derived FTS5 index; punctuation ignored)
- *   show <id>       staleness since the last BODY sync + body + breadcrumb trail
- *   context         the one call a harness makes per prompt: primer + hits
+ *   search <query>  ranked recall across lanes (derived FTS5 index; punctuation ignored)
+ *   show <id>       staleness since the last BODY sync + body (section-first when long) + breadcrumb trail
+ *   context         the one call a harness makes per prompt: primer + hits (this lane boosted)
  *   lane            the lane of the current checkout (git's common dir)
  *
  * Every read goes through withClient (the verified daemon, or the same
@@ -53,7 +55,17 @@ const search = defineCommand({
   meta: { name: "search", description: "rank memory streams for free text (titles, tags, bodies, update logs)" },
   args: {
     query: { type: "positional", required: true, description: "free text; punctuation and filler words are ignored" },
-    lane: { type: "string", alias: "l", valueHint: "name", description: "only streams in this lane" },
+    lane: {
+      type: "string",
+      alias: "l",
+      valueHint: "name",
+      description: "only streams in this lane (default: every lane)",
+    },
+    boost: {
+      type: "string",
+      valueHint: "lane",
+      description: `rank this lane's streams higher (\u00d7${MEMORY_LIMITS.laneBoost}); use --boost=<lane>`,
+    },
     limit: {
       type: "string",
       alias: "n",
@@ -67,7 +79,9 @@ const search = defineCommand({
     const limit = positiveInt(args.limit, "limit", json);
     let result: MemorySearchResult;
     try {
-      result = await withClient(client => client.memorySearch({ q: args.query, lane: args.lane || undefined, limit }));
+      result = await withClient(client =>
+        client.memorySearch({ q: args.query, lane: args.lane || undefined, boost: args.boost || undefined, limit }),
+      );
     } catch (err) {
       emitError(json, err);
     }
@@ -75,17 +89,23 @@ const search = defineCommand({
       printJson(result);
       return;
     }
-    console.log(renderHits(result.terms, result.hits) || "(no matching memory)");
+    console.log(renderHits(result.terms, result.hits, Date.now(), { recent: result.recent }) || "(no matching memory)");
   },
 });
 
 const show = defineCommand({
   meta: {
     name: "show",
-    description: "one stream: staleness since its last body sync, the body, and the breadcrumb trail since then",
+    description:
+      "one stream: staleness since its last body sync, the body (Next/Decisions first when long), and the breadcrumb trail since then",
   },
   args: {
     id: { type: "positional", required: true, valueHint: "task-id", description: "task id (see `cortex ls`)" },
+    section: {
+      type: "string",
+      valueHint: "text",
+      description: "only the sections whose heading slug contains this text, in full; use --section=<text>",
+    },
     json: jsonArg,
   },
   async run({ args }) {
@@ -103,26 +123,39 @@ const show = defineCommand({
     }
     // After withClient: the lease is released before git runs.
     const staleness = checkStaleness(stream, process.cwd());
+    const section = args.section?.trim() || undefined;
     if (json) {
       const trail = breadcrumbs(stream.updates, stream.syncedUpdateId).slice(-MEMORY_LIMITS.trail);
-      printJson({ task: stream.task, synced: stream.synced, trail, staleness });
+      const out = { task: stream.task, synced: stream.synced, latest: stream.latest, trail, staleness };
+      printJson(section ? { ...out, sections: matchingSections(stream.task.body ?? "", section) } : out);
       return;
     }
-    console.log(renderStream(stream, staleness));
+    console.log(renderStream(stream, staleness, { section }));
   },
 });
 
 const context = defineCommand({
   meta: {
     name: "context",
-    description: "one-call agent context: the lane's primer plus hits for --query (use --flag=value)",
+    description:
+      "one-call agent context: the lane's primer plus hits for --query from every lane, this lane first (use --flag=value)",
   },
   args: {
-    lane: { type: "string", alias: "l", valueHint: "name", description: "lane (default: this checkout's lane)" },
+    lane: {
+      type: "string",
+      alias: "l",
+      valueHint: "name",
+      description: "the primer's lane and the boosted lane for hits (default: this checkout's lane)",
+    },
     author: { type: "string", valueHint: "tag", description: "author tag whose touched streams lead the primer" },
     query: { type: "string", alias: "q", valueHint: "text", description: "free text to recall hits for" },
     exclude: { type: "string", valueHint: "1,2", description: "task ids already shown to the caller" },
     limit: { type: "string", alias: "n", valueHint: "int", description: `max hits (default ${MEMORY_LIMITS.hits})` },
+    "load-hint": {
+      type: "string",
+      valueHint: "text",
+      description: "how the hits text tells the reader to load a hit (default: `cortex memory show <id>`)",
+    },
     primer: {
       type: "boolean",
       default: true,
@@ -138,25 +171,35 @@ const context = defineCommand({
     const lane = args.lane || memoryLane(process.cwd());
     const author = args.author || undefined;
     const query = (args.query ?? "").trim();
+    const loadHint = args["load-hint"]?.trim() || undefined;
     let active: MemoryStreamRow[] = [];
     let authored: MemoryStreamRow[] = [];
-    let found: MemorySearchResult = { terms: [], hits: [] };
+    let elsewhere: MemoryStreamRow[] = [];
+    let found: MemorySearchResult = { terms: [], recent: false, hits: [] };
     try {
       await withClient(async client => {
         if (args.primer) {
           // Up to 50 rows so the primer can say how many more exist.
           active = await client.memoryStreams({ lane, active: true, limit: 50 });
           if (author) authored = await client.memoryStreams({ author, limit: MEMORY_LIMITS.primerStreams });
+          elsewhere = await client.memoryStreams({
+            excludeLane: lane,
+            active: true,
+            limit: MEMORY_LIMITS.elsewhereStreams + MEMORY_LIMITS.primerStreams,
+          });
         }
-        if (query) found = await client.memorySearch({ q: query, lane, limit: limit ?? MEMORY_LIMITS.hits, exclude });
+        // Every lane, this one boosted: work spans repos (plan @422).
+        if (query) {
+          found = await client.memorySearch({ q: query, boost: lane, limit: limit ?? MEMORY_LIMITS.hits, exclude });
+        }
       });
     } catch (err) {
       emitError(json, err);
     }
-    const primer = args.primer ? renderPrimer({ lane, author, active, authored }) : "";
-    const hitsText = renderHits(found.terms, found.hits);
+    const primer = args.primer ? renderPrimer({ lane, author, active, authored, elsewhere }) : "";
+    const hitsText = renderHits(found.terms, found.hits, Date.now(), { recent: found.recent, loadHint });
     if (json) {
-      printJson({ lane, terms: found.terms, primer, hits: found.hits, hitsText });
+      printJson({ lane, terms: found.terms, recent: found.recent, primer, hits: found.hits, hitsText });
       return;
     }
     console.log([primer, hitsText].filter(Boolean).join("\n\n") || `(no memory in lane ${lane})`);

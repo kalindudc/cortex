@@ -41,11 +41,11 @@ Plans are stored in cortex — not as files. Three cortex specifics apply.
 
     DO NOT pass `--priority` unless the user explicitly asked for one. Plans are documents organised by lane + `plan` tag, not items in a priority queue — see the Priority subsection below.
 
-3. DEFAULT LANE = current repository directory name:
+3. LANE = the project the work belongs to (the cortex skill's recipes/persistence.md §2); this checkout's default:
     ```bash
     LANE=$(cortex memory lane)
     ```
-    Override only when the user explicitly names a different lane.
+    Reuse an existing stream's lane when continuing work; the user naming a lane wins.
 
 4. TAGS — every plan task MUST carry the `plan` tag. Plans inside a stack MUST also carry a stack-slug tag derived automatically from the feature title (NEVER prompt the user):
   ```bash
@@ -286,7 +286,7 @@ STOP. Before writing the plan to cortex, complete every item. Do NOT skip this.
    - [ ] Every planned Low-Level Task is a CREATE or UPDATE operation
    - [ ] Constraint enforcement completed
    - [ ] $SESSION_ID generated and held in working memory
-   - [ ] LANE resolved (default = repo dir name, or user-specified)
+   - [ ] LANE resolved (the project the work belongs to; this checkout's lane by default, or user-specified)
    - [ ] TAGS computed: `plan` always; `<stack-slug>` if writing a plan stack (auto-derived from title, never prompt the user)
 
 ## Post-Write Review

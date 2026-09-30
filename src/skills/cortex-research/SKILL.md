@@ -45,11 +45,11 @@ The analysis lives as the BODY of a cortex task. Three cortex specifics apply.
 
     DO NOT pass `--priority` unless the user explicitly asked for one. Research notes are documents organised by the `research` + `<topic-slug>` tags, not items in a priority queue.
 
-3. DEFAULT LANE = current repository directory name:
+3. LANE = the project the work belongs to (the cortex skill's recipes/persistence.md §2); this checkout's default:
     ```bash
     LANE=$(cortex memory lane)
     ```
-    Override only when the user explicitly names a different lane.
+    Reuse an existing stream's lane when continuing work; the user naming a lane wins.
 
 4. TAGS — every research task MUST carry the `research` tag PLUS an auto-derived `<topic-slug>` when multiple analysis tasks for the same research task is needed in the form of a stack:
     ```bash
@@ -263,7 +263,7 @@ STOP. Before persisting the analysis, complete every item:
    - [ ] Recommended next steps are concrete AND each names a handoff target (`cortex-planner`, `cortex-implementer`, or neither)
    - [ ] Size respected (≤300 lines soft, ≤600 hard)
    - [ ] $SESSION_ID held in working memory
-   - [ ] LANE resolved (default = repo dir name, or user-specified)
+   - [ ] LANE resolved (the project the work belongs to; this checkout's lane by default, or user-specified)
    - [ ] TAGS computed: `research` always, plus `<topic-slug>` auto-derived from title
 
 ## Post-Write Review

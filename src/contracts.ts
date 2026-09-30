@@ -310,22 +310,31 @@ export interface TaskListQuery {
   tags?: string[];
 }
 
-/** GET /api/memory/search: `q` is tokenized server-side; `exclude` drops task ids the caller already showed. */
+/**
+ * GET /api/memory/search: `q` is tokenized server-side; every lane is
+ * searched unless `lane` filters, `boost` ranks the caller's lane higher, and
+ * `exclude` drops task ids the caller already showed.
+ */
 export interface MemorySearchQuery {
   q: string;
   lane?: string;
+  boost?: string;
   limit?: number;
   exclude?: number[];
 }
 
 export interface MemorySearchResult {
   terms: string[];
+  /** The query asked for the newest (recency words): equally covered hits are newest activity first. */
+  recent: boolean;
   hits: MemoryHit[];
 }
 
 /** GET /api/memory/streams: bodiless rows, newest activity first. */
 export interface MemoryStreamsQuery {
   lane?: string;
+  /** Every lane except this one (the primer's "Recently active in other lanes"). */
+  excludeLane?: string;
   author?: string;
   active?: boolean;
   limit?: number;

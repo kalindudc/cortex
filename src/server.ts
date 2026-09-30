@@ -22,7 +22,7 @@ import { backupNotificationInput, createBackup, defaultBackupPath } from "./back
 import { createEventPublisher, type EventKind, type EventPublisher } from "./events.ts";
 import { CONTROL_PATHS, INSTANCE_HEADER, PREFER_VERSIONED } from "./api.ts";
 import { createPreviewStore, type PreviewStore, registerPreviewRoutes } from "./preview.ts";
-import { memoryTerms } from "./memory.ts";
+import { memoryPhrases, memoryTerms, recencyIntent } from "./memory.ts";
 import type {
   BlockedTransition,
   DaemonIdentity,
@@ -904,10 +904,13 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
       exclude = ids as number[];
     }
     const lane = c.req.query("lane") || undefined;
-    const terms = memoryTerms(q);
+    const boost = c.req.query("boost") || undefined;
+    // Recency words leave the terms and only re-order equally covered hits (plan @422).
+    const { terms, recent } = recencyIntent(memoryTerms(q));
+    const phrases = memoryPhrases(q);
     try {
-      const hits = terms.length > 0 ? store.searchMemory(terms, { lane, limit, exclude }) : [];
-      const body: MemorySearchResult = { terms, hits };
+      const hits = terms.length > 0 ? store.searchMemory(terms, { lane, boost, limit, exclude, recent, phrases }) : [];
+      const body: MemorySearchResult = { terms, recent, hits };
       return c.json(body);
     } catch (err) {
       return c.json({ error: `memory search unavailable: ${(err as Error).message}` }, 500);
@@ -927,7 +930,15 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
       }
     }
     const active = c.req.query("active") === "1";
-    return c.json(store.memoryStreams({ lane: c.req.query("lane") || undefined, author, active, limit }));
+    return c.json(
+      store.memoryStreams({
+        lane: c.req.query("lane") || undefined,
+        excludeLane: c.req.query("excludeLane") || undefined,
+        author,
+        active,
+        limit,
+      }),
+    );
   });
 
   app.get("/api/memory/streams/:id", c => {
