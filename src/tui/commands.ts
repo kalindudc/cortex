@@ -1332,8 +1332,7 @@ function openTags(session: TuiSession): void {
 const THEME_SOURCE: Readonly<Record<ThemeSource, (theme: ResolvedTheme) => string>> = {
   session: () => "your :theme choice (saved)",
   cli: () => "--theme (this session only)",
-  saved: () => "your saved :theme choice",
-  config: () => "tui.toml theme pins it (:theme <name> overrides it; auto keeps it)",
+  config: () => "tui.toml theme pins it (:theme <name> replaces it; :theme auto removes it)",
   appearance: t => `tui.toml theme_${t.appearance} for a ${t.appearance} terminal`,
   default: t => `auto (a ${t.appearance} terminal)`,
   colors: () => "auto (a 16-color terminal)",
@@ -1631,7 +1630,7 @@ export const COMMANDS: readonly CommandSpec[] = [
     aliases: [],
     usage: ":set <option>",
     description:
-      "Options: done (show done tasks), tasks (show the task list), number (source line numbers in Read and the Split preview); name, noname, name! toggles, name? shows",
+      "Options: done (show done tasks), tasks (show the task list), number (source line numbers in Read and the Split preview); name, noname, name! toggles, name? shows; number is saved to tui.toml, done and tasks change this session only (tui.toml's done and tasks set how it starts)",
     complete: (prefix, _session) => lastWord(prefix, OPTION_WORDS),
     run: runSet,
   },
@@ -1862,7 +1861,7 @@ export const COMMANDS: readonly CommandSpec[] = [
     aliases: [],
     usage: ":theme [name|auto]",
     description:
-      "Pick a color theme with a live preview (Esc restores, Enter applies and saves it); auto follows the terminal again",
+      "Pick a color theme with a live preview (Esc restores, Enter applies and saves it to tui.toml); auto removes tui.toml's theme and follows the terminal again",
     complete: (prefix, session) => ["auto", ...themeNames(session)].filter(n => n.startsWith(prefix)),
     run: (session, argument) => {
       const control = requireThemes(session);
@@ -1885,7 +1884,7 @@ export const COMMANDS: readonly CommandSpec[] = [
     aliases: [],
     usage: ":density [compact|comfortable]",
     description:
-      "Set the spacing, saved for the profile (over tui.toml's density): comfortable (the default) adds blank rows under the headers and above the status line; compact fits more rows; bare toggles. A terminal cannot set its font size: use its zoom keys",
+      "Set the spacing, saved as tui.toml's density: comfortable (the default) adds blank rows under the headers and above the status line; compact fits more rows; bare toggles. A terminal cannot set its font size: use its zoom keys",
     complete: prefix => DENSITIES.filter(d => d.startsWith(prefix)),
     describe: argument => (isDensity(argument) ? DENSITY_HELP[argument] : undefined),
     run: (session, argument) => {

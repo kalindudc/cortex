@@ -28,7 +28,7 @@ import {
   searchCommands,
   themeSourceText,
 } from "../../../src/tui/commands.ts";
-import { DEFAULT_CONFIG } from "../../../src/tui/config.ts";
+import { DEFAULT_CONFIG, loadConfig } from "../../../src/tui/config.ts";
 import type { Dialog } from "../../../src/tui/dialogs.ts";
 import {
   DEFAULT_KEYS,
@@ -268,6 +268,7 @@ function makeSession(over: Partial<SessionOptions> = {}): TuiSession {
     identity: IDENTITY,
     keys: DEFAULT_KEYS,
     preferences: prefs,
+    configFile: path.join(dir, "tui.toml"),
     schedule: () => () => {},
     ...over,
   });
@@ -508,6 +509,11 @@ describe("running the navigation commands", () => {
     await s.execute("set frob!");
     expect(s.status?.level).toBe("error");
     expect(s.status?.text).toMatch(/Unknown option "frob".*done.*tasks.*number/);
+    // number is saved to tui.toml (by the debounced save; here, the explicit flush); done and tasks never are.
+    await s.execute("set done! tasks! number");
+    expect(s.savePreferences()).toBe(true);
+    expect(fs.readFileSync(path.join(dir, "tui.toml"), "utf8")).toBe("number = true\n");
+    expect([s.includeDone, s.taskListVisible]).toEqual([true, false]);
   });
 
   test(":focus list|document moves focus explicitly; anything else explains", async () => {
@@ -1661,9 +1667,8 @@ describe(":theme (P9)", () => {
       /cortex-light.*:theme.*saved/,
     );
     expect(themeSourceText(resolveTheme({ config: DEFAULT_CONFIG, env, cli: "cortex-light" }))).toMatch(/--theme/);
-    expect(themeSourceText(resolveTheme({ config: DEFAULT_CONFIG, env, saved: "cortex-light" }))).toMatch(/saved/);
     expect(themeSourceText(resolveTheme({ config: { ...DEFAULT_CONFIG, theme: "cortex-light" }, env }))).toMatch(
-      /tui\.toml.*pins/,
+      /tui\.toml.*pins.*:theme auto removes/,
     );
     expect(themeSourceText(resolveTheme({ config: DEFAULT_CONFIG, env, detected: "light" }))).toMatch(
       /auto.*light terminal/,
@@ -1671,8 +1676,9 @@ describe(":theme (P9)", () => {
   });
 });
 
-describe(":density (the spacing; saved like :theme)", () => {
-  const statePath = () => path.join(dir, "tui", "default.state.json");
+describe(":density (the spacing; saved to tui.toml like :theme)", () => {
+  const tomlPath = () => path.join(dir, "tui.toml");
+  const saved = () => loadConfig(tomlPath()).config.density;
 
   test(":density <value> sets and saves it; bare toggles; either way it redraws at once and says so", async () => {
     let changes = 0;
@@ -1680,13 +1686,13 @@ describe(":density (the spacing; saved like :theme)", () => {
     expect(s.density).toBe("comfortable");
     await s.execute("density compact");
     expect(s.density).toBe("compact");
-    expect(readPreferences(statePath()).preferences.view.density).toBe("compact");
+    expect(saved()).toBe("compact");
     expect(s.status).toMatchObject({ level: "info", text: "Density: compact (saved)" });
     expect(changes).toBeGreaterThan(0);
     const before = changes;
     await s.execute("density");
     expect(s.density).toBe("comfortable");
-    expect(readPreferences(statePath()).preferences.view.density).toBe("comfortable");
+    expect(saved()).toBe("comfortable");
     expect(s.status?.text).toBe("Density: comfortable (saved)");
     expect(changes).toBeGreaterThan(before);
     await s.execute("density");
@@ -1704,7 +1710,7 @@ describe(":density (the spacing; saved like :theme)", () => {
       expect(s.status?.text, line).toContain("Usage: :density [compact|comfortable]");
     }
     expect(s.density).toBe("comfortable");
-    expect(fs.existsSync(statePath())).toBe(false);
+    expect(fs.existsSync(tomlPath())).toBe(false);
     expect(completeCommandLine("density ", COMMANDS, s)).toEqual(["density comfortable", "density compact"]);
     expect(completeCommandLine("density comp", COMMANDS, s)).toEqual(["density compact"]);
     expect(completeCommandLine("dens", COMMANDS, s)).toEqual(["density"]);
@@ -1712,11 +1718,11 @@ describe(":density (the spacing; saved like :theme)", () => {
     expect(describeCandidate("density comfortable", COMMANDS, s)).toMatch(/default/);
   });
 
-  test("a saved choice survives the session; an unsavable profile keeps it for this session and says so", async () => {
+  test("a saved choice survives the session; an unsavable tui.toml keeps it for this session and says so", async () => {
     const { s } = withDaemon();
     await s.execute("density compact");
-    expect(openPreferences(statePath()).view().density).toBe("compact");
-    fs.writeFileSync(statePath(), JSON.stringify({ version: 2 }));
+    expect(saved()).toBe("compact");
+    fs.writeFileSync(tomlPath(), "not = [toml");
     await s.execute("density comfortable");
     expect(s.density).toBe("comfortable");
     expect(s.status?.level).toBe("warn");

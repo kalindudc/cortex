@@ -484,7 +484,7 @@ describe("the list layout: the density spacer, aligned ids, right-aligned lanes,
     expect(roomy.hitAt(3)).toEqual({ kind: "pane" });
     expect(lines[4]).toContain("@1  alpha");
     expect(roomy.hitAt(4)).toEqual({ kind: "task", id: 1 });
-    const dense = createWorkspace(session(tasks, { density: "compact" }));
+    const dense = createWorkspace(session(tasks, { settings: { density: "compact" } }));
     dense.height = 8;
     lines = plain(dense.render(40));
     expect(lines[3]).toContain("@1  alpha");

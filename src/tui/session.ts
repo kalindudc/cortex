@@ -17,11 +17,12 @@
 //   the resolved theme, messages and the connection state. Selection
 //   survives the filters that hide it; only explicit calls move focus.
 // - The `:` commands come from ONE registry (src/tui/commands.ts).
-// - View preferences persist through src/tui/preferences.ts: include-done,
-//   the task-list disclosure and the list's :sort/:group globally; the last
-//   task, the search and the filter slots per database UUID; explicit
-//   `:theme` and `:density` choices globally (a saved density wins over
-//   tui.toml's `density`, which wins over the comfortable default).
+// - View preferences persist through src/tui/preferences.ts: the list's
+//   :sort/:group globally; the last task, the search and the filter slots
+//   per database UUID. The settings `:theme`, `:density` and `:set number`
+//   are written to tui.toml (src/tui/config.ts saveSettings), whose values at
+//   startup are the session's settings. tui.toml's `done` and `tasks` only set
+//   how the session starts: toggling them is never saved anywhere.
 // - Input takes ONE route whichever component the toolkit focuses: the open
 //   `:`/`/` prompt, then the top dialog (src/tui/dialogs.ts; a stack of
 //   overlays shown through the shell's overlay host), then the workspace's
@@ -111,7 +112,7 @@ import type {
 } from "./preferences.ts";
 import type { Reader } from "./reader.ts";
 import { osc52Copy } from "./safety.ts";
-import type { Density } from "./config.ts";
+import { DEFAULT_CONFIG, type Density, type SettingChanges, saveSettings, type TuiConfig } from "./config.ts";
 import type { ResolvedTheme } from "./theme.ts";
 import {
   appendTagFilter,
@@ -427,8 +428,10 @@ export interface SessionOptions {
   identity: DaemonIdentity;
   keys: KeyConfig;
   preferences: PreferenceSession;
-  /** tui.toml's `density` (default comfortable): the spacing when the profile has no saved `:density` choice. */
-  density?: Density;
+  /** tui.toml's settings at startup (each defaults to DEFAULT_CONFIG's). */
+  settings?: Partial<Pick<TuiConfig, "density" | "done" | "tasks" | "number">>;
+  /** Where setting changes are written (runTui: tuiConfigPath()); omitted, they apply to this session only. */
+  configFile?: string;
   /** A client for another instance at the same endpoint (after the daemon restarted); verified before use. */
   connect?: (instanceId: string) => CortexClient;
   /** Task to select at startup (`cortex tui <id>`). */
@@ -548,7 +551,7 @@ export class TuiSession {
   #lineNumbers: boolean;
   #sort: TaskSort;
   #group: TaskGroup;
-  /** The effective spacing: the saved `:density` choice, else tui.toml's, else comfortable. */
+  /** The effective spacing: tui.toml's `density` (or this session's `:density`), else comfortable. */
   #density: Density;
   #query = "";
   #filter: TaskFilter = NO_FILTER;
@@ -575,6 +578,8 @@ export class TuiSession {
   #warnings = 0;
   #messageId = 0;
   #cancelSave: (() => void) | null = null;
+  /** Setting changes not yet written to tui.toml (the next save writes them; a refused write keeps them). */
+  #pendingSettings: SettingChanges = {};
   #disposed = false;
   #dialogs: SessionDialog[] = [];
   #overlayHost: OverlayHost | null = null;
@@ -632,12 +637,13 @@ export class TuiSession {
     this.keys = createKeyDispatcher(options.keys);
     this.commands = options.commands ?? COMMANDS;
     const view = options.preferences.view();
-    this.#taskList = view.taskList;
-    this.#includeDone = view.includeDone;
-    this.#lineNumbers = view.lineNumbers;
+    const settings = { ...DEFAULT_CONFIG, ...options.settings };
+    this.#taskList = settings.tasks;
+    this.#includeDone = settings.done;
+    this.#lineNumbers = settings.number;
     this.#sort = view.sort;
     this.#group = view.group;
-    this.#density = view.density ?? options.density ?? "comfortable";
+    this.#density = settings.density;
     this.#preferredMode = view.mode;
     this.#draftScheduler = {
       schedule: (fn, ms) => this.#schedule(fn, ms),
@@ -1141,7 +1147,7 @@ export class TuiSession {
     return this.#taskList;
   }
 
-  /** `:set number`: Read and the Split preview show each block's source line (a global view preference). */
+  /** `:set number`: Read and the Split preview show each block's source line (tui.toml's `number`). */
   get lineNumbers(): boolean {
     return this.#lineNumbers;
   }
@@ -1149,7 +1155,9 @@ export class TuiSession {
   setLineNumbers(value: boolean): void {
     if (this.#lineNumbers === value) return;
     this.#lineNumbers = value;
-    this.#setViewPreference("lineNumbers", value);
+    // Written to tui.toml by the next (debounced) save.
+    this.#pendingSettings = { ...this.#pendingSettings, number: value };
+    this.#saveLater();
     this.#changed();
   }
 
@@ -1169,13 +1177,13 @@ export class TuiSession {
   }
 
   /**
-   * `:density` — an explicit choice: shown at once and saved now in the
-   * profile's view state (it then wins over tui.toml). False when the save
-   * failed (reported): the choice still holds for this session.
+   * `:density` — an explicit choice: shown at once and saved now as
+   * tui.toml's `density`. False when the save failed (reported): the choice
+   * still holds for this session.
    */
   setDensity(density: Density): boolean {
     this.#density = density;
-    this.#options.preferences.setView("density", density);
+    this.#pendingSettings = { ...this.#pendingSettings, density };
     this.#changed();
     return this.savePreferences();
   }
@@ -1454,11 +1462,10 @@ export class TuiSession {
     this.setFilter(appendTagFilter(this.listView, name).filter);
   }
 
-  /** Show done tasks (a global view preference). */
+  /** Show done tasks, for this session only (tui.toml's `done` sets how it starts). */
   setIncludeDone(value: boolean): void {
     if (this.#includeDone === value) return;
     this.#includeDone = value;
-    this.#setViewPreference("includeDone", value);
     this.#changed();
   }
 
@@ -1551,7 +1558,7 @@ export class TuiSession {
     this.setTaskListVisible(!this.#taskList);
   }
 
-  /** Show or hide the task list (a global view preference); hiding it moves focus to the document. */
+  /** Show or hide the task list, for this session only (tui.toml's `tasks` sets how it starts); hiding it moves focus to the document. */
   setTaskListVisible(visible: boolean): void {
     this.#setTaskList(visible);
     if (!visible) this.#focus = "document";
@@ -1559,9 +1566,7 @@ export class TuiSession {
   }
 
   #setTaskList(visible: boolean): void {
-    if (this.#taskList === visible) return;
     this.#taskList = visible;
-    this.#setViewPreference("taskList", visible);
   }
 
   get view(): SessionView {
@@ -1711,9 +1716,9 @@ export class TuiSession {
     this.#themeControl = control;
   }
 
-  /** Save the explicit `:theme` choice (null: auto) in the profile's view state now. */
+  /** Save the explicit `:theme` choice now as tui.toml's `theme`; null (auto) removes it. */
   saveThemeChoice(name: string | null): void {
-    this.#options.preferences.setView("theme", name);
+    this.#pendingSettings = { ...this.#pendingSettings, theme: name };
     this.savePreferences();
   }
 
@@ -2919,10 +2924,7 @@ export class TuiSession {
     this.#saveLater();
   }
 
-  #setViewPreference<K extends "taskList" | "includeDone" | "lineNumbers" | "sort" | "group">(
-    key: K,
-    value: ViewPreferences[K],
-  ): void {
+  #setViewPreference<K extends "sort" | "group">(key: K, value: ViewPreferences[K]): void {
     this.#options.preferences.setView(key, value);
     this.#saveLater();
   }
@@ -2935,17 +2937,33 @@ export class TuiSession {
     }, SAVE_DELAY_MS);
   }
 
-  /** Merge this session's changed view preferences into the profile's state file now; false when that failed (reported). */
+  /**
+   * Save now: this session's changed view preferences into the profile's state file, then its pending
+   * setting changes into tui.toml (without a configFile they apply to this session only). False when
+   * either failed (reported); a refused setting stays pending, so the next save retries it.
+   */
   savePreferences(): boolean {
     this.#cancelSave?.();
     this.#cancelSave = null;
+    let saved = true;
     try {
       this.#options.preferences.save();
-      return true;
     } catch (err) {
       this.notify("warn", `Could not save the view preferences: ${(err as Error).message}`);
-      return false;
+      saved = false;
     }
+    const file = this.#options.configFile;
+    if (file === undefined) this.#pendingSettings = {};
+    else if (Object.keys(this.#pendingSettings).length > 0) {
+      try {
+        saveSettings(file, this.#pendingSettings);
+        this.#pendingSettings = {};
+      } catch (err) {
+        this.notify("warn", `Could not save ${file}: ${(err as Error).message} (the setting applies to this session)`);
+        saved = false;
+      }
+    }
+    return saved;
   }
 
   /** The session's timer seam (coalescing windows; tests control it): returns a cancel function. */

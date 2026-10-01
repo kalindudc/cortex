@@ -25,7 +25,7 @@
 //   by side (the list and the document, or Split's editor and preview), the
 //   one without the focus is painted through theme.ts inactiveTheme (greyed;
 //   SGR dim without color) and the focused one's label is inverse.
-// - The density (the session's: a saved `:density`, else tui.toml's) is
+// - The density (tui.toml's `density`, which `:density` writes) is
 //   comfortable by default: a blank row under the document header (and the
 //   list header, src/tui/workspace.ts) and above the status line, and a
 //   1-cell margin at both ends of the status and hint lines; compact drops
@@ -57,8 +57,8 @@
 //   overlay host; every input, whichever component the toolkit focused,
 //   takes the session's ONE route (prompt, top dialog, then this shell).
 //   The shell owns the theme inputs, so it implements `:theme`'s live
-//   preview/restore/apply (an applied choice is saved; auto clears it and
-//   every session override).
+//   preview/restore/apply (an applied choice is written to tui.toml; auto
+//   removes it and every session override).
 // - SIGTERM/SIGHUP/SIGINT first try a bounded flush of every draft, then
 //   restore the terminal. Every exit path (:q, the signals, a crash, Ctrl-z
 //   before SIGTSTP) restores the terminal: the mouse goes off first (the shell
@@ -130,7 +130,7 @@ import {
   visualKeyLabels,
 } from "./keys.ts";
 import { filterMouseInput, MOUSE_OFF, MOUSE_ON } from "./mouse.ts";
-import { openPreferences, type PreferenceProblem } from "./preferences.ts";
+import { migrateSettings, openPreferences, type PreferenceProblem } from "./preferences.ts";
 import { displayWidth, escapeTerminalText, fitWidth } from "./safety.ts";
 import { type MessageLevel, type Problem, type ThemeChoice, TuiSession } from "./session.ts";
 import {
@@ -384,8 +384,6 @@ export interface ShellOptions {
   config: TuiConfig;
   /** `--theme`: this session only. */
   cliTheme?: string | null;
-  /** The profile's saved `:theme` choice. */
-  savedTheme?: string | null;
   env: ColorEnvironment;
   /** Custom theme directory (default themesDir()). */
   themesDir?: string;
@@ -493,10 +491,10 @@ export class Shell {
   #theme: ResolvedTheme | null = null;
   #detected: "dark" | "light" | null = null;
   #followAppearance = false;
-  /** The theme levels this session can change: `:theme` > `--theme` > the saved choice. */
+  /** The theme levels this session can change: `:theme` > `--theme` > tui.toml `theme` (`:theme auto` removes it). */
   #sessionTheme: string | null = null;
   #cliTheme: string | null;
-  #savedTheme: string | null;
+  #configTheme: string | null;
   /** The theme shown before a `:theme` preview, restored by Esc. */
   #previewBase: ResolvedTheme | null = null;
   #listening = false;
@@ -550,7 +548,7 @@ export class Shell {
     // Explicit copies (:copy) go to this terminal as OSC 52; a failed write is reported, not hidden.
     this.session.setClipboard(data => this.#terminal.write(data));
     this.#cliTheme = options.cliTheme ?? null;
-    this.#savedTheme = options.savedTheme ?? null;
+    this.#configTheme = options.config.theme;
     this.session.setSuspendHandler(() => this.suspend());
     this.session.setTerminalHandoff(run => this.handOff(run));
     this.session.setKeyHandler(event => this.#onKey(event));
@@ -714,8 +712,7 @@ export class Shell {
     return {
       session: this.#sessionTheme,
       cli: this.#cliTheme,
-      saved: this.#savedTheme,
-      config: this.#options.config,
+      config: { ...this.#options.config, theme: this.#configTheme },
       env: this.#options.env,
       themesDir: this.#options.themesDir,
     };
@@ -741,7 +738,7 @@ export class Shell {
     this.#previewBase ??= this.#theme;
     const input =
       name === null
-        ? { ...this.#themeInput(), session: null, cli: null, saved: null }
+        ? { ...this.#themeInput(), session: null, cli: null, config: { ...this.#options.config, theme: null } }
         : { ...this.#themeInput(), session: name };
     this.#setTheme(resolveTheme({ ...input, detected: this.#detected }));
   }
@@ -753,20 +750,19 @@ export class Shell {
   }
 
   /**
-   * `:theme <name>`: the in-session level (it outranks `--theme`) and SAVED
-   * as the profile's explicit choice. `:theme auto` (null) clears the saved
-   * choice and, for this session, every override including `--theme`;
-   * tui.toml `theme` still applies. Auto follows the terminal again.
+   * `:theme <name>`: the in-session level (it outranks `--theme`), written
+   * as tui.toml's `theme`. `:theme auto` (null) removes tui.toml's `theme`
+   * and, for this session, every override including `--theme`. Auto follows
+   * the terminal again.
    */
   #applyTheme(name: string | null): ResolvedTheme {
     this.#previewBase = null;
     if (name === null) {
       this.#sessionTheme = null;
       this.#cliTheme = null;
-      this.#savedTheme = null;
+      this.#configTheme = null;
     } else {
       this.#sessionTheme = name;
-      this.#savedTheme = name;
     }
     this.session.saveThemeChoice(name);
     const theme = resolveTheme({ ...this.#themeInput(), detected: this.#detected });
@@ -2641,8 +2637,13 @@ const SIGNAL_EXIT_CODES = { SIGHUP: 129, SIGINT: 130, SIGTERM: 143 } as const;
  * daemon of this database; quitting leaves that daemon running.
  */
 export async function runTui(options: RunTuiOptions = {}): Promise<number> {
-  const { config, problems: configProblems } = loadConfig(tuiConfigPath());
-  const preferences = openPreferences(tuiStatePath(options.profile ?? DEFAULT_PROFILE));
+  const statePath = tuiStatePath(options.profile ?? DEFAULT_PROFILE);
+  // Migration: the view fields tui.toml now owns leave the state file BEFORE tui.toml is read,
+  // so a move is simply read back; values that could not move apply to this session on top.
+  const moved = migrateSettings(statePath, tuiConfigPath());
+  const loaded = loadConfig(tuiConfigPath());
+  const config: TuiConfig = { ...loaded.config, ...moved.unmoved };
+  const preferences = openPreferences(statePath);
   const identity = await ensureDaemon({ databasePath: dbPath() });
   const client = createClient(identity.endpoint, { instanceId: identity.instanceId });
   const snapshot = await client.workspace();
@@ -2683,12 +2684,16 @@ export async function runTui(options: RunTuiOptions = {}): Promise<number> {
     identity,
     keys: config.keys,
     preferences,
-    // tui.toml's density; the profile's saved :density choice wins (the theme's precedence).
-    density: config.density,
+    settings: config,
+    configFile: tuiConfigPath(),
     connect: instanceId => createClient(identity.endpoint, { instanceId }),
     initialTask: options.taskId ?? null,
     heading: options.heading ?? null,
-    problems: [...configProblems.map(configProblem), ...preferences.problems().map(preferenceProblem)],
+    problems: [
+      ...loaded.problems.map(configProblem),
+      ...moved.problems.map(preferenceProblem),
+      ...preferences.problems().map(preferenceProblem),
+    ],
     onChange: () => shell?.requestRender(),
     onQuit: () => void shutdown(0),
   });
@@ -2698,7 +2703,6 @@ export async function runTui(options: RunTuiOptions = {}): Promise<number> {
     session,
     config,
     cliTheme: options.theme ?? null,
-    savedTheme: preferences.view().theme,
     env: { NO_COLOR: process.env.NO_COLOR, COLORTERM: process.env.COLORTERM, TERM: process.env.TERM },
   });
   const active = shell;

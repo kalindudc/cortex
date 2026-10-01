@@ -2,12 +2,13 @@ import { test, expect, describe, beforeEach, afterEach } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { DEFAULT_CONFIG, loadConfig, SETTING_HELP } from "../../../src/tui/config.ts";
+import { DEFAULT_CONFIG, loadConfig, SETTING_HELP, saveSettings } from "../../../src/tui/config.ts";
 import { DEFAULT_KEYS } from "../../../src/tui/keys.ts";
 
-// Plan @400 N15/N18/N22/N23: tui.toml is user-authored and read-only to
-// cortex. Each section validates on its own; an invalid one keeps its
-// defaults and records {file, keyPath, reason}. A missing file is silent.
+// tui.toml is user-authored: loading never writes it, and cortex writes only
+// the top-level settings the TUI changes, surgically (saveSettings). Each
+// section validates on its own; an invalid one keeps its defaults and records
+// {file, keyPath, reason}. A missing file is silent.
 
 let dir: string;
 let file: string;
@@ -45,9 +46,26 @@ describe("loadConfig", () => {
       colors: "auto",
       transparentBackground: false,
       density: "comfortable",
+      done: false,
+      tasks: true,
+      number: false,
       flash: true,
       bell: false,
     });
+  });
+
+  test("done, tasks and number are booleans; anything else keeps the default and is reported", () => {
+    write("done = true\ntasks = false\nnumber = true\n");
+    expect(loadConfig(file)).toEqual({
+      config: { ...DEFAULT_CONFIG, done: true, tasks: false, number: true },
+      problems: [],
+    });
+    write('done = "yes"\ntasks = 0\nnumber = [true]\n');
+    const { config, problems } = loadConfig(file);
+    expect(config).toEqual(DEFAULT_CONFIG);
+    expect(problems).toEqual(
+      ["done", "tasks", "number"].map(keyPath => ({ file, keyPath, reason: "must be true or false" })),
+    );
   });
 
   test("density: comfortable (the default) or compact; anything else keeps the default and is reported", () => {
@@ -199,7 +217,7 @@ tags = ["g"]
     expect(problems).toEqual([{ file, keyPath: "", reason: expect.stringMatching(/cannot read/) }]);
   });
 
-  test("the file is read-only to cortex: bytes and mtime are unchanged", () => {
+  test("loadConfig never writes: bytes and mtime are unchanged", () => {
     const text = `leader = ","\n[keys.normal]\nup = ["q"]\n`;
     write(text);
     const past = new Date(Date.now() - 60_000);
@@ -250,5 +268,138 @@ describe("SETTING_HELP: the tui.toml settings :help lists", () => {
       expect(loaded.problems, `${key} = ${fallback}`).toEqual([]);
       expect(loaded.config, `${key} = ${fallback} is not the default`).toEqual(DEFAULT_CONFIG);
     }
+  });
+});
+
+describe("saveSettings: surgical top-level edits", () => {
+  const read = (): string => fs.readFileSync(file, "utf8");
+  const age = (): number => {
+    const past = new Date(Date.now() - 60_000);
+    fs.utimesSync(file, past, past);
+    return fs.statSync(file).mtimeMs;
+  };
+  const valid = (target = file): void => expect(loadConfig(target).problems).toEqual([]);
+
+  test("a missing file: a change creates exactly its line (0600 in a new 0700 dir); no change creates nothing", () => {
+    const nested = path.join(dir, "new", "tui.toml");
+    expect(saveSettings(nested, { theme: null })).toEqual([]);
+    expect(saveSettings(nested, {}, { onlyMissing: true })).toEqual([]);
+    expect(fs.existsSync(path.join(dir, "new"))).toBe(false);
+    expect(saveSettings(nested, { theme: "ansi" })).toEqual(["theme"]);
+    expect(fs.readFileSync(nested, "utf8")).toBe('theme = "ansi"\n');
+    expect(fs.statSync(nested).mode & 0o777).toBe(0o600);
+    expect(fs.statSync(path.join(dir, "new")).mode & 0o777).toBe(0o700);
+    valid(nested);
+  });
+
+  test("replace: only the top-level line changes, keeping its trailing comment", () => {
+    const text = (theme: string): string =>
+      `# my settings\n\nleader = ","\ntheme = "${theme}"  # pinned\n\n# keys\n[keys.normal]\ntheme = "quit"\n`;
+    write(text("cortex-dark"));
+    // The [keys.normal] `theme` line is not an action: its problem exists before and after, untouched.
+    const problems = loadConfig(file).problems;
+    expect(problems.map(p => p.keyPath)).toEqual(["keys.normal.theme"]);
+    expect(saveSettings(file, { theme: "ansi" })).toEqual(["theme"]);
+    expect(read()).toBe(text("ansi"));
+    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+    expect(loadConfig(file).problems).toEqual(problems);
+  });
+
+  test("insert after the last top-level key, before the first header without one, or appended", () => {
+    write('# head\nleader = ","\nmouse = false\n\n# keys\n[keys.normal]\ndown = ["j", "down"]\n');
+    expect(saveSettings(file, { number: true })).toEqual(["number"]);
+    expect(read()).toBe(
+      '# head\nleader = ","\nmouse = false\nnumber = true\n\n# keys\n[keys.normal]\ndown = ["j", "down"]\n',
+    );
+    valid();
+
+    write('# head\n\n[keys.normal]\ndown = ["j", "down"]\n');
+    expect(saveSettings(file, { density: "compact" })).toEqual(["density"]);
+    expect(read()).toBe('# head\n\ndensity = "compact"\n\n[keys.normal]\ndown = ["j", "down"]\n');
+    valid();
+
+    write("# only a comment");
+    expect(saveSettings(file, { number: true })).toEqual(["number"]);
+    expect(read()).toBe("# only a comment\nnumber = true\n");
+    valid();
+  });
+
+  test("remove deletes only that line; an absent key or an unchanged value writes nothing", () => {
+    write('# c\ntheme = "ansi"\nmouse = false\n');
+    expect(saveSettings(file, { theme: null })).toEqual(["theme"]);
+    expect(read()).toBe("# c\nmouse = false\n");
+    valid();
+    let mtime = age();
+    expect(saveSettings(file, { theme: null })).toEqual([]);
+    expect(fs.statSync(file).mtimeMs).toBe(mtime);
+    write("# c\nnumber = true\n");
+    mtime = age();
+    expect(saveSettings(file, { number: true })).toEqual([]);
+    expect(fs.statSync(file).mtimeMs).toBe(mtime);
+    expect(read()).toBe("# c\nnumber = true\n");
+  });
+
+  test("onlyMissing skips present keys byte-for-byte and returns exactly the keys written", () => {
+    write('theme = "cortex-light"   # mine\n');
+    expect(saveSettings(file, { theme: "ansi", density: "compact", number: true }, { onlyMissing: true })).toEqual([
+      "density",
+      "number",
+    ]);
+    expect(read()).toBe('theme = "cortex-light"   # mine\ndensity = "compact"\nnumber = true\n');
+    valid();
+  });
+
+  test("refusals change no byte: invalid TOML, an edit that would touch another line, an invalid value", () => {
+    const cases: [string, Parameters<typeof saveSettings>[1], RegExp][] = [
+      ["mouse = [\n", { number: true }, /not valid TOML/],
+      ['leader = ","\nnote = """\ntheme = "inside"\n"""\n', { theme: "ansi" }, /by hand/],
+      ["mouse = false\n", { theme: "Not Valid" }, /theme/],
+    ];
+    for (const [text, changes, reason] of cases) {
+      write(text);
+      const mtime = age();
+      expect(() => saveSettings(file, changes), text).toThrow(reason);
+      expect(read(), text).toBe(text);
+      expect(fs.statSync(file).mtimeMs, text).toBe(mtime);
+      expect(fs.readdirSync(dir), text).toEqual(["tui.toml"]);
+    }
+  });
+
+  test("CRLF line endings and a leading BOM are preserved", () => {
+    write('\ufeff# c\r\nmouse = false\r\ntheme = "ansi"\r\n');
+    expect(saveSettings(file, { theme: "cortex-light", number: true })).toEqual(["theme", "number"]);
+    expect(read()).toBe('\ufeff# c\r\nmouse = false\r\ntheme = "cortex-light"\r\nnumber = true\r\n');
+    valid();
+  });
+
+  test("a symlinked tui.toml stays a link; its target holds the change", () => {
+    const target = path.join(dir, "dotfiles", "tui.toml");
+    fs.mkdirSync(path.dirname(target));
+    fs.writeFileSync(target, "mouse = false\n");
+    fs.symlinkSync(target, file);
+    expect(saveSettings(file, { number: true })).toEqual(["number"]);
+    expect(fs.lstatSync(file).isSymbolicLink()).toBe(true);
+    expect(fs.readFileSync(target, "utf8")).toBe("mouse = false\nnumber = true\n");
+    valid();
+  });
+
+  test("two writers of different keys keep both, and no temp file remains", () => {
+    expect(saveSettings(file, { density: "compact" })).toEqual(["density"]);
+    expect(saveSettings(file, { number: true })).toEqual(["number"]);
+    expect(loadConfig(file)).toEqual({
+      config: { ...DEFAULT_CONFIG, density: "compact", number: true },
+      problems: [],
+    });
+    expect(fs.readdirSync(dir)).toEqual(["tui.toml"]);
+  });
+
+  test("done and tasks are startup filters: read, never written", () => {
+    expect(saveSettings(file, { done: true, tasks: false } as never)).toEqual([]);
+    expect(fs.existsSync(file)).toBe(false);
+    write("done = true\n");
+    const mtime = age();
+    expect(saveSettings(file, { done: false } as never)).toEqual([]);
+    expect(fs.statSync(file).mtimeMs).toBe(mtime);
+    expect(read()).toBe("done = true\n");
   });
 });

@@ -66,8 +66,8 @@ mouse = false
 ```
 
 The bundled themes follow your terminal's light or dark appearance. `:theme` picks one with a live preview and
-remembers it; `:theme auto` follows the terminal again. A custom theme is `themes/<name>.toml` in the same
-directory, usually extending a bundled theme and overriding a few colors:
+writes it to tui.toml; `:theme auto` removes it and follows the terminal again. A custom theme is
+`themes/<name>.toml` in the same directory, usually extending a bundled theme and overriding a few colors:
 
 ```toml
 extends = "cortex-dark"
@@ -75,7 +75,15 @@ accent = "#ffb86c"
 status.blocked = "#ff7b72"
 ```
 
-cortex only reads these files, never writes them. A mistake keeps that entry's default and is listed in `:messages`.
+Settings you change in the workspace are written back to tui.toml: `:theme`, `:density` and `:set number`. cortex
+changes only that setting's line, so your comments and layout stay as you wrote them. `:theme` and `:density` save
+at once; `:set number` saves a moment later, and when you quit. If tui.toml does not parse, cortex leaves it
+untouched, says so in `:messages`, and the change applies to that workspace only. The list filters `done` and
+`tasks` work the other way: set them in tui.toml to choose how every workspace starts; `:set done|tasks`, `;d` and
+`;e` change only the workspace you are in and are never saved.
+Settings are global; a profile (`--profile`) keeps only view state, such as the open panel, the list's sort and
+grouping, and each database's last task and filters. Theme files are never written. A mistake in either file keeps
+that entry's default and is listed in `:messages`.
 
 ## Limits
 
@@ -111,10 +119,23 @@ only wraps and searches it. A new entry appears in help with no other edit, whic
 `src/tui/config.ts#loadConfig` validates each section on its own, and file content never makes it throw. A custom
 theme (`src/tui/theme.ts#loadCustomTheme`) must set every token or extend one bundled theme; bundled names win,
 errors reject it, low contrast only warns. `src/tui/theme.ts#resolveTheme` picks the theme: `:theme` in this
-session, then `--theme`, then the saved choice, then tui.toml's `theme`, then `theme_dark`/`theme_light` by
-appearance, then the bundled pair. The only TUI file cortex writes is the per-profile view state
-(`src/tui/preferences.ts#openPreferences`), keyed per database: it merges this session's changes over a fresh read
-and renames a private temp file (no lock; the narrow race is accepted).
+session, then `--theme`, then tui.toml's `theme`, then `theme_dark`/`theme_light` by appearance, then the bundled
+pair.
+
+`src/tui/config.ts#saveSettings` writes tui.toml's `src/tui/config.ts#WRITABLE_SETTINGS`. It re-reads the file,
+adds, replaces or removes only those top-level `key = value` lines, and renames a private temp file over the file
+(over a symlink's target, so a dotfiles link stays a link). A guard parses the result and refuses it unless exactly
+those keys changed, so an edit never lands inside a multi-line string. The session queues setting changes and
+`src/tui/session.ts#savePreferences` writes them with the view state; a refused write stays queued for the next
+save. The per-profile view state (`src/tui/preferences.ts#openPreferences`), keyed per database, merges this
+session's changes over a fresh read and renames a private temp file too (no lock; the narrow race is accepted).
+At startup, before tui.toml is read, `src/tui/preferences.ts#migrateSettings` moves the theme, density and line
+numbers an older view-state file still holds into tui.toml, unless tui.toml already sets them; its old include-done
+and task-list fields are dropped, never moved, because `done` and `tasks` are startup filters only you write.
+
+Why not rewrite tui.toml with `Bun.TOML.stringify`? It drops every comment. Why not a TOML library? Five scalar
+lines do not need a dependency when a parse-equality guard catches a misplaced edit. Why not per-profile settings,
+or a copy in both files? One home per setting keeps the file you edit, `:help` and the screen in agreement.
 
 ### Drafts and guarded writes
 
@@ -158,9 +179,10 @@ case-insensitive match of all the words, in the caller's order, so every lane an
   never patch state from their answer: `test/unit/tui/session.test.ts`.
 - Reference lists live only in their source, never in README or docs. `test/unit/tui/commands.test.ts` holds a
   FIXED command list, deliberately not derived from the registry, so removing a capability fails a test.
-- tui.toml and themes are never written; an invalid section keeps ALL its defaults and is reported; the view state
-  holds known fields only, never drafts: `test/unit/tui/config.test.ts`, `test/unit/tui/theme.test.ts`,
-  `test/unit/tui/preferences.test.ts`.
+- Themes are never written; tui.toml is written only by `src/tui/config.ts#saveSettings`, which changes only the
+  requested top-level lines and never writes a file that does not parse; an invalid section keeps ALL its defaults
+  and is reported; the view state holds known fields only, never drafts or settings: `test/unit/tui/config.test.ts`,
+  `test/unit/tui/theme.test.ts`, `test/unit/tui/preferences.test.ts`, `test/unit/tui/session.test.ts`.
 - Drafts save only through guarded versioned writes; a conflict keeps both versions; "saved" means acknowledged,
   never merely sent: `test/unit/tui/drafts.test.ts`.
 - Tag changes are add/remove deltas, never a whole-list replacement, and never delete a tag definition; TUI status

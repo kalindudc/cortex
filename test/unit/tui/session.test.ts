@@ -6,13 +6,9 @@ import type { CortexClient, DaemonIdentity, LiveEvent, TaskState, WorkspaceSnaps
 import type { Lane, Task } from "../../../src/store.ts";
 import { UNTAGGED } from "../../../src/lib/taskView.ts";
 import { COMMANDS, type CommandSpec } from "../../../src/tui/commands.ts";
+import { DEFAULT_CONFIG, loadConfig } from "../../../src/tui/config.ts";
 import { DEFAULT_KEYS } from "../../../src/tui/keys.ts";
-import {
-  openPreferences,
-  type PreferenceSession,
-  readPreferences,
-  savePreferences,
-} from "../../../src/tui/preferences.ts";
+import { openPreferences, type PreferenceSession } from "../../../src/tui/preferences.ts";
 import { type SessionDialog, TuiSession, type SessionOptions } from "../../../src/tui/session.ts";
 
 // Plan @400 N15/N17: one TuiSession per terminal UI. Shared data (tasks,
@@ -107,12 +103,14 @@ const settle = () => new Promise(resolve => setTimeout(resolve, 0));
 
 let dir: string;
 let prefsFile: string;
+let tomlFile: string;
 let prefs: PreferenceSession;
 let clock: ReturnType<typeof manualClock>;
 
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-tui-session-"));
   prefsFile = path.join(dir, "tui", "default.state.json");
+  tomlFile = path.join(dir, "tui.toml");
   prefs = openPreferences(prefsFile);
   clock = manualClock();
 });
@@ -128,12 +126,17 @@ function makeSession(over: Partial<SessionOptions> = {}): { session: TuiSession;
     identity: IDENTITY,
     keys: DEFAULT_KEYS,
     preferences: prefs,
+    configFile: tomlFile,
     schedule: clock.schedule,
     now: () => 1000,
     ...over,
   });
   return { session, fake };
 }
+
+/** The state file's raw view (it must never hold the settings tui.toml owns). */
+const stateView = (): Record<string, unknown> => JSON.parse(fs.readFileSync(prefsFile, "utf8")).view;
+const LEGACY = ["theme", "density", "includeDone", "taskList", "lineNumbers"];
 
 const ids = (tasks: readonly Task[]) => tasks.map(t => t.id);
 
@@ -283,7 +286,7 @@ describe("workspace list", () => {
     expect(session.status?.text).toMatch(/No task matches \/zzz/);
   });
 
-  test("filter slots and include-done persist; the filters are per database, include-done is global", () => {
+  test("filter slots persist per database; include-done is this session's (tui.toml's done sets how it starts)", () => {
     const { session } = makeSession();
     session.applySnapshot(snapshot("e:1", [task(1, { tags: ["bug"] }), task(2, { status: "done" })]));
     session.setFilter({ status: "open", lane: "now", tags: ["bug", UNTAGGED] });
@@ -292,11 +295,13 @@ describe("workspace list", () => {
     const saved = openPreferences(prefsFile);
     expect(saved.database(DB).filter).toEqual({ status: "open", lane: "now", tags: ["bug", UNTAGGED] });
     expect(saved.database(OTHER_DB).filter).toEqual({ status: null, lane: null, tags: [] });
-    expect(saved.view().includeDone).toBe(true);
+    expect(fs.existsSync(tomlFile)).toBe(false);
+    expect(stateView()).not.toHaveProperty("includeDone");
     prefs = saved;
     const restored = makeSession().session;
     expect(restored.filter).toEqual({ status: "open", lane: "now", tags: ["bug", UNTAGGED] });
-    expect(restored.includeDone).toBe(true);
+    expect(restored.includeDone).toBe(false);
+    expect(makeSession({ settings: { done: true } }).session.includeDone).toBe(true);
   });
 
   test("clearing keeps include-done; a header tag label appends to the tag filter", () => {
@@ -368,7 +373,7 @@ describe("focus and views", () => {
     session.setFocus("tasks");
     expect(session.taskListVisible).toBe(true);
     session.savePreferences();
-    expect(openPreferences(prefsFile).view().taskList).toBe(true);
+    expect(fs.existsSync(tomlFile)).toBe(false);
   });
 
   test("help and messages open as views; closing returns to the workspace", () => {
@@ -385,35 +390,77 @@ describe("focus and views", () => {
 });
 
 describe("density: the spacing (a terminal cannot set its font size)", () => {
-  test("the effective density is the saved :density choice, else tui.toml's density, else comfortable", () => {
+  test("the density is tui.toml's density (the session's settings), else comfortable", () => {
     expect(makeSession().session.density).toBe("comfortable");
-    expect(makeSession({ density: "compact" }).session.density).toBe("compact");
-    expect(makeSession({ density: "comfortable" }).session.density).toBe("comfortable");
-    // The saved choice wins over tui.toml (the theme's precedence).
-    savePreferences(prefsFile, { view: { density: "compact" } });
-    expect(makeSession({ preferences: openPreferences(prefsFile) }).session.density).toBe("compact");
-    expect(makeSession({ preferences: openPreferences(prefsFile), density: "comfortable" }).session.density).toBe(
-      "compact",
-    );
-    savePreferences(prefsFile, { view: { density: "comfortable" } });
-    expect(makeSession({ preferences: openPreferences(prefsFile), density: "compact" }).session.density).toBe(
-      "comfortable",
-    );
+    expect(makeSession({ settings: { density: "compact" } }).session.density).toBe("compact");
+    expect(makeSession({ settings: { density: "comfortable" } }).session.density).toBe("comfortable");
   });
 
-  test("setDensity saves the explicit choice now and redraws; a failed save says so and keeps it for the session", () => {
+  test("setDensity writes tui.toml's density now; an invalid tui.toml keeps it pending for the session", () => {
     let changes = 0;
     const { session } = makeSession({ onChange: () => changes++ });
     expect(session.setDensity("compact")).toBe(true);
     expect(session.density).toBe("compact");
     expect(changes).toBeGreaterThan(0);
     // Saved at once (no pending timer): the file already has it.
-    expect(readPreferences(prefsFile).preferences.view.density).toBe("compact");
-    // A profile file from a newer version is never overwritten: the choice stays for this session only.
-    fs.writeFileSync(prefsFile, JSON.stringify({ version: 2 }));
+    expect(loadConfig(tomlFile).config.density).toBe("compact");
+    // A tui.toml that does not parse is never written: the choice stays for this session, and stays pending.
+    fs.writeFileSync(tomlFile, "not = [toml");
     expect(session.setDensity("comfortable")).toBe(false);
     expect(session.density).toBe("comfortable");
-    expect(session.status?.level).toBe("warn");
+    expect(session.status).toMatchObject({ level: "warn", text: expect.stringContaining(tomlFile) });
+    expect(fs.readFileSync(tomlFile, "utf8")).toBe("not = [toml");
+    fs.writeFileSync(tomlFile, 'density = "compact"\n');
+    expect(session.savePreferences()).toBe(true);
+    expect(loadConfig(tomlFile).config.density).toBe("comfortable");
+  });
+});
+
+describe("settings: done/tasks/number start from tui.toml; only :set number is written back", () => {
+  test("they start from the session's settings, else the defaults", () => {
+    const plain = makeSession().session;
+    expect([plain.includeDone, plain.taskListVisible, plain.lineNumbers]).toEqual([false, true, false]);
+    const set = makeSession({ settings: { done: true, tasks: false, number: true } }).session;
+    expect([set.includeDone, set.taskListVisible, set.lineNumbers]).toEqual([true, false, true]);
+  });
+
+  test("number waits for the debounced save; done and tasks are never saved, to tui.toml or the state file", () => {
+    fs.writeFileSync(tomlFile, "tasks = true\n");
+    const { session } = makeSession({ settings: loadConfig(tomlFile).config });
+    session.setIncludeDone(true);
+    session.setLineNumbers(true);
+    session.setTaskListVisible(false);
+    session.setSort("title");
+    expect(fs.readFileSync(tomlFile, "utf8")).toBe("tasks = true\n");
+    clock.flush();
+    expect(fs.readFileSync(tomlFile, "utf8")).toBe("tasks = true\nnumber = true\n");
+    // Focusing the hidden list shows it, for this session only.
+    session.setFocus("tasks");
+    expect(session.savePreferences()).toBe(true);
+    expect(fs.readFileSync(tomlFile, "utf8")).toBe("tasks = true\nnumber = true\n");
+    expect([session.includeDone, session.taskListVisible]).toEqual([true, true]);
+    expect(stateView().sort).toBe("title");
+    for (const field of LEGACY) expect(stateView()).not.toHaveProperty(field);
+  });
+
+  test("two sessions on one tui.toml keep each other's keys", () => {
+    const a = makeSession().session;
+    const b = makeSession({ preferences: openPreferences(prefsFile) }).session;
+    a.setLineNumbers(true);
+    expect(b.setDensity("compact")).toBe(true);
+    a.savePreferences();
+    expect(loadConfig(tomlFile)).toEqual({
+      config: { ...DEFAULT_CONFIG, density: "compact", number: true },
+      problems: [],
+    });
+  });
+
+  test("without a configFile, changes apply to the session only", () => {
+    const { session } = makeSession({ configFile: undefined });
+    session.setLineNumbers(true);
+    expect(session.savePreferences()).toBe(true);
+    expect(session.lineNumbers).toBe(true);
+    expect(fs.existsSync(tomlFile)).toBe(false);
   });
 });
 
@@ -1267,11 +1314,12 @@ describe("dialogs, input routing and writes (Task 8 part B)", () => {
     expect(session.selectedId).toBe(1);
   });
 
-  test("saveThemeChoice saves the explicit :theme choice (null clears it) at once", () => {
+  test("saveThemeChoice writes tui.toml's theme at once (null removes the line)", () => {
     const { session } = makeSession();
+    fs.writeFileSync(tomlFile, "# mine\n");
     session.saveThemeChoice("cortex-light");
-    expect(readPreferences(prefsFile).preferences.view.theme).toBe("cortex-light");
+    expect(fs.readFileSync(tomlFile, "utf8")).toBe('# mine\ntheme = "cortex-light"\n');
     session.saveThemeChoice(null);
-    expect(readPreferences(prefsFile).preferences.view.theme).toBeNull();
+    expect(fs.readFileSync(tomlFile, "utf8")).toBe("# mine\n");
   });
 });

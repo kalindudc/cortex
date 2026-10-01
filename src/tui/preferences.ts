@@ -1,9 +1,8 @@
-// Per-profile TUI view state: `configDir()/tui/<profile>.state.json`,
-// the only terminal-UI file cortex writes (tui.toml and themes are read-only).
+// Per-profile TUI view state: `configDir()/tui/<profile>.state.json`
+// (tui.toml's settings are written by src/tui/config.ts saveSettings; themes are read-only).
 //
-// - Global view preferences (include-done, task-list and panel disclosure,
-//   Read's line numbers, the preferred Read/Edit/Split mode, an explicit `:theme` choice, the
-//   task list's `:sort` order and `:group` grouping, an explicit `:density` choice) plus
+// - Global view preferences (the open task panel, the preferred Read/Edit/Split
+//   mode, the task list's `:sort` order and `:group` grouping) plus
 //   per-database entries keyed by the database UUID (last task,
 //   filter/query), so another or a reset database never restores foreign
 //   tasks or filters.
@@ -15,12 +14,22 @@
 // - Settings are read at startup and never live-broadcast: a session's own
 //   view is its startup state plus its own changes.
 // - Only known fields are ever written: the file never contains drafts.
+// - The settings it once held (theme, density, line numbers) belong to
+//   tui.toml: migrateSettings moves them once, and every save carries them
+//   until it has. Its old include-done and task-list fields are dropped, never
+//   moved: tui.toml's `done`/`tasks` set them at startup, and a session's
+//   toggles are never saved.
 
 import fs from "node:fs";
-import path from "node:path";
-import { randomBytes } from "node:crypto";
 import type { TaskStatus } from "../store.ts";
-import { type Density, isDensity, isThemeName } from "./config.ts";
+import {
+  DEFAULT_CONFIG,
+  isDensity,
+  isThemeName,
+  type SettingChanges,
+  saveSettings,
+  writeAtomically,
+} from "./config.ts";
 
 export type DocumentMode = "read" | "edit" | "split";
 export type TaskPanel = "document" | "activity" | "related" | "authors";
@@ -43,24 +52,14 @@ export const TASK_GROUPS = ["none", "lane", "status"] as const;
 export type TaskGroup = (typeof TASK_GROUPS)[number];
 
 export interface ViewPreferences {
-  /** Show done tasks in the task list. */
-  readonly includeDone: boolean;
-  /** The task list is shown (disclosure). */
-  readonly taskList: boolean;
-  /** `:set number`: Read and the Split preview show source line numbers. */
-  readonly lineNumbers: boolean;
   /** The open task panel. */
   readonly panel: TaskPanel;
   /** The preferred document mode; temporary Edit views never change it. */
   readonly mode: DocumentMode;
-  /** An explicit `:theme` choice; null means auto. */
-  readonly theme: string | null;
   /** The task list's order without a search (a search ranks by relevance). */
   readonly sort: TaskSort;
   /** The task list's grouping without a search. */
   readonly group: TaskGroup;
-  /** An explicit `:density` choice (it wins over tui.toml's `density`); null means none. */
-  readonly density: Density | null;
 }
 
 export interface TaskFilter {
@@ -93,15 +92,10 @@ export interface PreferenceProblem {
 }
 
 export const DEFAULT_VIEW: ViewPreferences = {
-  includeDone: false,
-  taskList: true,
-  lineNumbers: false,
   panel: "document",
   mode: "read",
-  theme: null,
   sort: "id",
   group: "none",
-  density: null,
 };
 
 export const DEFAULT_DATABASE: DatabasePreferences = {
@@ -132,15 +126,20 @@ const oneOf =
 const shortString = (v: unknown): boolean => typeof v === "string" && v.length <= MAX_NAME;
 
 const VIEW_CHECKS: { readonly [K in keyof ViewPreferences]: Check } = {
-  includeDone: bool,
-  taskList: bool,
-  lineNumbers: bool,
   panel: oneOf(PANELS),
   mode: oneOf(MODES),
-  theme: v => (v === null || isThemeName(v) ? null : "must be a theme name or null"),
   sort: oneOf(TASK_SORTS),
   group: oneOf(TASK_GROUPS),
+};
+
+/** View fields that moved to tui.toml, by tui.toml key: read only to migrate, carried until then. */
+const MOVED_KEYS = { theme: "theme", density: "density", lineNumbers: "number" } as const;
+type MovedField = keyof typeof MOVED_KEYS;
+type Moved = Partial<Record<MovedField, unknown>>;
+const MOVED_CHECKS: { readonly [K in MovedField]: Check } = {
+  theme: v => (v === null || isThemeName(v) ? null : "must be a theme name or null"),
   density: v => (v === null || isDensity(v) ? null : 'must be "comfortable", "compact" or null'),
+  lineNumbers: bool,
 };
 
 const DATABASE_CHECKS: { readonly [K in keyof DatabasePreferences]: Check } = {
@@ -191,7 +190,13 @@ function pick<T extends object>(
   return out as T;
 }
 
-type Loaded = { preferences: Preferences; problems: PreferenceProblem[]; unsupportedVersion: string | null };
+type Loaded = {
+  preferences: Preferences;
+  problems: PreferenceProblem[];
+  unsupportedVersion: string | null;
+  /** The valid legacy settings in the file's view, by view field. */
+  moved: Moved;
+};
 
 function load(file: string): Loaded {
   const empty: Preferences = { view: DEFAULT_VIEW, databases: {} };
@@ -200,11 +205,12 @@ function load(file: string): Loaded {
     text = fs.readFileSync(file, "utf8");
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
-    if (code === "ENOENT") return { preferences: empty, problems: [], unsupportedVersion: null };
+    if (code === "ENOENT") return { preferences: empty, problems: [], unsupportedVersion: null, moved: {} };
     return {
       preferences: empty,
       problems: [{ file, reason: `cannot read view state: ${code}` }],
       unsupportedVersion: null,
+      moved: {},
     };
   }
   let raw: unknown;
@@ -215,6 +221,7 @@ function load(file: string): Loaded {
       preferences: empty,
       problems: [{ file, reason: `not valid JSON (${(err as Error).message}); using the defaults` }],
       unsupportedVersion: null,
+      moved: {},
     };
   }
   if (!isObject(raw)) {
@@ -222,6 +229,7 @@ function load(file: string): Loaded {
       preferences: empty,
       problems: [{ file, reason: "not a view-state object; using the defaults" }],
       unsupportedVersion: null,
+      moved: {},
     };
   }
   if (raw.version !== undefined && raw.version !== VERSION) {
@@ -230,10 +238,14 @@ function load(file: string): Loaded {
       preferences: empty,
       problems: [{ file, reason: `unsupported view-state version ${version}; using the defaults and not saving` }],
       unsupportedVersion: version,
+      moved: {},
     };
   }
   const reasons: string[] = [];
   const view = pick(raw.view, DEFAULT_VIEW, VIEW_CHECKS, "view", reasons);
+  const moved: Moved = isObject(raw.view)
+    ? pick(raw.view, {} as Record<MovedField, unknown>, MOVED_CHECKS, "view", reasons)
+    : {};
   const databases: Record<string, DatabasePreferences> = {};
   if (raw.databases !== undefined) {
     if (!isObject(raw.databases)) reasons.push("databases: must be an object; using none");
@@ -248,6 +260,7 @@ function load(file: string): Loaded {
     preferences: { view, databases },
     problems: reasons.map(reason => ({ file, reason })),
     unsupportedVersion: null,
+    moved,
   };
 }
 
@@ -279,32 +292,20 @@ function checked<T extends object>(
   return out;
 }
 
-function writeAtomically(file: string, data: string): void {
-  const dir = path.dirname(file);
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const tmp = `${file}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
-  let fd: number | null = fs.openSync(tmp, "wx", 0o600);
-  try {
-    fs.writeFileSync(fd, data);
-    fs.fsyncSync(fd);
-    fs.closeSync(fd);
-    fd = null;
-    fs.renameSync(tmp, file);
-  } catch (err) {
-    if (fd !== null) fs.closeSync(fd);
-    fs.rmSync(tmp, { force: true });
-    throw err;
-  }
-}
-
 /**
  * Merge `changes` into the view state on disk and write it atomically:
  * re-read the file, apply only the given fields (validated; unknown fields
  * are dropped), write a 0600 temp file and rename it over the original.
- * Throws for invalid changes before writing, and never overwrites a file
- * with an unsupported (e.g. newer) version. Returns the merged state.
+ * The valid legacy settings are carried unchanged unless `dropMoved` (they
+ * moved to tui.toml). Throws for invalid changes before writing, and never
+ * overwrites a file with an unsupported (e.g. newer) version. Returns the
+ * merged state.
  */
-export function savePreferences(file: string, changes: PreferenceChanges): Preferences {
+export function savePreferences(
+  file: string,
+  changes: PreferenceChanges,
+  options: { dropMoved?: boolean } = {},
+): Preferences {
   const view = checked(changes.view, VIEW_CHECKS, "view");
   const databaseChanges: [string, Partial<DatabasePreferences>][] = Object.entries(changes.databases ?? {}).map(
     ([id, patch]) => [databaseId(id), checked(patch, DATABASE_CHECKS, `databases.${id}`)],
@@ -318,7 +319,10 @@ export function savePreferences(file: string, changes: PreferenceChanges): Prefe
   const merged: Preferences = { view: { ...current.preferences.view, ...view }, databases };
   const out = {
     version: VERSION,
-    view: Object.fromEntries(VIEW_KEYS.map(k => [k, merged.view[k]])),
+    view: {
+      ...(options.dropMoved ? {} : current.moved),
+      ...Object.fromEntries(VIEW_KEYS.map(k => [k, merged.view[k]])),
+    },
     databases: Object.fromEntries(
       Object.entries(merged.databases).map(([id, entry]) => [
         id,
@@ -380,4 +384,34 @@ export function openPreferences(file: string): PreferenceSession {
     },
     problems: () => loaded.problems,
   };
+}
+
+/**
+ * The one-time move of the legacy view settings into tui.toml, run at startup before tui.toml is read.
+ * Only valid, non-null, non-default values are written, and only for keys tui.toml lacks (its keys
+ * win); the fields then leave the state file. When either write fails, the state file keeps them and
+ * `unmoved` holds the values for this session to apply: the next start retries.
+ */
+export function migrateSettings(
+  stateFile: string,
+  configFile: string,
+): { unmoved: SettingChanges; problems: PreferenceProblem[] } {
+  const { moved, unsupportedVersion } = load(stateFile);
+  const fields = Object.keys(moved) as MovedField[];
+  if (unsupportedVersion !== null || fields.length === 0) return { unmoved: {}, problems: [] };
+  const changes: Record<string, unknown> = {};
+  for (const field of fields) {
+    const key = MOVED_KEYS[field];
+    if (moved[field] !== null && moved[field] !== DEFAULT_CONFIG[key]) changes[key] = moved[field];
+  }
+  const unmoved = changes as SettingChanges;
+  try {
+    if (Object.keys(changes).length > 0) saveSettings(configFile, unmoved, { onlyMissing: true });
+    savePreferences(stateFile, {}, { dropMoved: true });
+    return { unmoved: {}, problems: [] };
+  } catch (err) {
+    const keys = fields.map(field => MOVED_KEYS[field]).join(", ");
+    const reason = `could not move ${keys} into ${configFile}: ${(err as Error).message}; they apply to this session and move at the next start`;
+    return { unmoved, problems: [{ file: stateFile, reason }] };
+  }
 }

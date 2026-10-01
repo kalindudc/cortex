@@ -700,6 +700,12 @@ describe("metadata and catalog commands in a real terminal (plan @400 Task 8 par
   test(":theme previews live, Esc restores, and Enter saves a choice that the next start uses", async () => {
     const box = sandbox("tui-theme-pick", { NO_COLOR: undefined, COLORTERM: "truecolor" });
     await seedTasks(box.env, ["themed"]);
+    // A legacy profile state with a density: the first start moves it into tui.toml.
+    const stateDir = `${box.env.XDG_CONFIG_HOME}/cortex/tui`;
+    const statePath = `${stateDir}/default.state.json`;
+    const tomlPath = `${box.env.XDG_CONFIG_HOME}/cortex/tui.toml`;
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.writeFileSync(statePath, JSON.stringify({ version: 1, view: { density: "compact" } }));
     const DARK_BG = "48;2;29;31;36";
     const LIGHT_BG = "48;2;246;242;236";
     let pty = spawnPty([BIN, "tui"], { env: box.tuiEnv, cols: 110, rows: 32 });
@@ -718,13 +724,16 @@ describe("metadata and catalog commands in a real terminal (plan @400 Task 8 par
     mark = pty.mark();
     await keys(pty, ":", ..."theme", "\r", "j", "j", "\r");
     await expectPlain(pty, "cortex-light · your :theme choice (saved)", mark);
+    // Debounced, so it is the quit path that writes it.
+    await keys(pty, ":", ..."set number", "\r");
     pty.write(":q\r");
     expect(await pty.exited()).toEqual({ code: 0, signal: null });
-    const state = JSON.parse(fs.readFileSync(`${box.env.XDG_CONFIG_HOME}/cortex/tui/default.state.json`, "utf8")) as {
-      view: { theme: string | null };
-    };
-    expect(state.view.theme).toBe("cortex-light");
-    // The next start uses the saved explicit choice: no appearance query, light from the first frame.
+    const toml = fs.readFileSync(tomlPath, "utf8");
+    for (const line of ['theme = "cortex-light"', 'density = "compact"', "number = true"]) expect(toml).toContain(line);
+    const state = JSON.parse(fs.readFileSync(statePath, "utf8")) as { view: Record<string, unknown> };
+    expect(state.view).not.toHaveProperty("theme");
+    expect(state.view).not.toHaveProperty("density");
+    // The next start uses tui.toml's theme: no appearance query, light from the first frame.
     pty = spawnPty([BIN, "tui"], { env: box.tuiEnv, cols: 110, rows: 32 });
     await ready(pty);
     expect(pty.output()).toContain(LIGHT_BG);

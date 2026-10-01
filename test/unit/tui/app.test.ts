@@ -15,7 +15,7 @@ import {
   type ShellOptions,
 } from "../../../src/tui/app.ts";
 import { withExternalProgram } from "../../../src/tui/bridge.ts";
-import { DEFAULT_CONFIG, SETTING_HELP, type TuiConfig } from "../../../src/tui/config.ts";
+import { DEFAULT_CONFIG, loadConfig, SETTING_HELP, type TuiConfig } from "../../../src/tui/config.ts";
 import { Dialog } from "../../../src/tui/dialogs.ts";
 import { parseKeys } from "../../../src/tui/keys.ts";
 import { MOUSE_OFF, MOUSE_ON, WHEEL_NOTCH_MS } from "../../../src/tui/mouse.ts";
@@ -125,6 +125,9 @@ type Harness = {
   posts: { id: number; request: Record<string, unknown> }[];
 };
 
+/** The harness session's tui.toml (it writes the settings there). */
+const tomlPath = () => path.join(dir, "tui.toml");
+
 function harness(
   options: {
     initialTask?: number;
@@ -201,6 +204,8 @@ function harness(
     identity: IDENTITY,
     keys: config.keys,
     preferences: openPreferences(path.join(dir, "tui", "default.state.json")),
+    settings: config,
+    configFile: tomlPath(),
     initialTask: options.initialTask ?? null,
     heading: options.heading ?? null,
     now: options.now,
@@ -212,7 +217,6 @@ function harness(
     session,
     config,
     cliTheme: options.cliTheme ?? null,
-    savedTheme: null,
     env: options.env ?? { NO_COLOR: "1", TERM: "xterm-256color" },
     themesDir: path.join(dir, "themes"),
     appearanceBudgetMs: options.budgetMs ?? 20,
@@ -1556,6 +1560,9 @@ describe("dialogs in the shell (Task 8 part B: N17/N19)", () => {
     expect(screen(h)).not.toContain("Shipped last week");
     type(h, ";", "d");
     expect(h.session.includeDone).toBe(true);
+    // For this session only: tui.toml's `done` sets how a workspace starts, and ;d never writes it.
+    h.session.savePreferences();
+    expect(fs.existsSync(tomlPath())).toBe(false);
     let text = screen(h);
     expect(text).toContain("Shipped last week");
     expect(text).toContain("+done");
@@ -1661,7 +1668,7 @@ describe("dialogs in the shell (Task 8 part B: N17/N19)", () => {
     expect(plain(h.shell.frame()).at(-2)).toContain("✓ saved");
   });
 
-  test(":theme previews live, Esc restores, Enter applies and SAVES; :theme auto clears the saved choice and every override", async () => {
+  test(":theme previews live, Esc restores, Enter applies and SAVES to tui.toml; :theme auto removes it and every override", async () => {
     const h = await started({ env: { TERM: "xterm-256color", COLORTERM: "truecolor" }, budgetMs: 10 });
     expect(h.shell.theme?.name).toBe("cortex-dark");
     type(h, ":", ..."theme", "\r");
@@ -1674,21 +1681,24 @@ describe("dialogs in the shell (Task 8 part B: N17/N19)", () => {
     type(h, "\x1b");
     expect(h.shell.theme?.name).toBe("cortex-dark");
     expect(h.shell.theme?.source).toBe("default");
+    expect(fs.existsSync(tomlPath())).toBe(false);
     expect(fs.existsSync(statePath())).toBe(false);
     type(h, ":", ..."theme", "\r");
     await settle();
     type(h, "j", "j", "\r");
     expect(h.session.dialog).toBeNull();
     expect(h.shell.theme).toMatchObject({ name: "cortex-light", source: "session", explicit: true });
-    expect(readPreferences(statePath()).preferences.view.theme).toBe("cortex-light");
+    expect(loadConfig(tomlPath()).config.theme).toBe("cortex-light");
+    if (fs.existsSync(statePath()))
+      expect(JSON.parse(fs.readFileSync(statePath(), "utf8")).view).not.toHaveProperty("theme");
     expect(h.session.status?.text).toMatch(/cortex-light.*:theme.*saved/);
     type(h, ":", ..."theme auto", "\r");
     await settle();
     expect(h.shell.theme).toMatchObject({ name: "cortex-dark", source: "default", explicit: false });
-    expect(readPreferences(statePath()).preferences.view.theme).toBeNull();
+    expect(fs.readFileSync(tomlPath(), "utf8")).not.toMatch(/theme/);
   });
 
-  test(":theme auto drops --theme too (for this session), and the status line explains a tui.toml pin", async () => {
+  test(":theme auto drops --theme too (for this session) and removes a tui.toml pin", async () => {
     const h = await started({
       env: { TERM: "xterm-256color", COLORTERM: "truecolor" },
       cliTheme: "high-contrast-light",
@@ -1697,14 +1707,16 @@ describe("dialogs in the shell (Task 8 part B: N17/N19)", () => {
     type(h, ":", ..."theme auto", "\r");
     await settle();
     expect(h.shell.theme?.source).toBe("default");
+    fs.writeFileSync(tomlPath(), '# mine\ntheme = "high-contrast-dark"\n');
     const pinned = await started({
       env: { TERM: "xterm-256color", COLORTERM: "truecolor" },
-      config: { ...DEFAULT_CONFIG, theme: "high-contrast-dark" },
+      config: loadConfig(tomlPath()).config,
     });
+    expect(pinned.shell.theme).toMatchObject({ name: "high-contrast-dark", source: "config" });
     type(pinned, ":", ..."theme auto", "\r");
     await settle();
-    expect(pinned.shell.theme).toMatchObject({ name: "high-contrast-dark", source: "config" });
-    expect(pinned.session.status?.text).toMatch(/tui\.toml.*pins/);
+    expect(pinned.shell.theme).toMatchObject({ source: "default", explicit: false });
+    expect(fs.readFileSync(tomlPath(), "utf8")).toBe("# mine\n");
   });
 });
 

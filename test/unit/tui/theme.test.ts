@@ -365,23 +365,29 @@ describe("resolveTheme precedence (N22)", () => {
     expect(resolveTheme(input({ config, detected: "light" }))).toMatchObject({ name: "high-contrast-light" });
   });
 
-  test("session > cli > saved > tui.toml theme > theme_dark/theme_light > bundled pair", () => {
+  test("session > cli > tui.toml theme > theme_dark/theme_light > bundled pair", () => {
     const config = cfg({ theme: "cortex-light", themeDark: "high-contrast-dark" });
-    const all = { session: "ansi", cli: "high-contrast-light", saved: "cortex-dark", config };
+    const all = { session: "ansi", cli: "high-contrast-light", config };
     expect(resolveTheme(input(all))).toMatchObject({ name: "ansi", source: "session", explicit: true });
     expect(resolveTheme(input({ ...all, session: null }))).toMatchObject({
       name: "high-contrast-light",
       source: "cli",
     });
     expect(resolveTheme(input({ ...all, session: null, cli: null }))).toMatchObject({
-      name: "cortex-dark",
-      source: "saved",
+      name: "cortex-light",
+      source: "config",
+      explicit: true,
     });
-    expect(resolveTheme(input({ config }))).toMatchObject({ name: "cortex-light", source: "config", explicit: true });
+    expect(resolveTheme(input({ config: cfg({ themeDark: "high-contrast-dark" }) }))).toMatchObject({
+      name: "high-contrast-dark",
+      source: "appearance",
+      explicit: false,
+    });
+    expect(resolveTheme(input({}))).toMatchObject({ name: "cortex-dark", source: "default", explicit: false });
   });
 
   test("an unknown or invalid explicit theme falls through with a problem", () => {
-    const r = resolveTheme(input({ saved: "gone", cli: "../x", config: cfg({ theme: "cortex-light" }) }));
+    const r = resolveTheme(input({ session: "gone", cli: "../x", config: cfg({ theme: "cortex-light" }) }));
     expect(r).toMatchObject({ name: "cortex-light", source: "config" });
     expect(r.problems.map(p => p.reason).join("\n")).toMatch(/gone/);
     expect(r.problems.map(p => p.reason).join("\n")).toMatch(/\.\.\/x/);
@@ -434,7 +440,7 @@ describe("custom themes", () => {
 
   test("extends ONE bundled theme; tables and dotted keys both work", () => {
     writeTheme("warm", `extends = "cortex-light"\naccent = "#7a2e00"\n[status]\ndone = "#2f5a1f"\n`);
-    const r = resolveTheme(input({ saved: "warm" }));
+    const r = resolveTheme(input({ session: "warm" }));
     expect(r.name).toBe("warm");
     expect(r.appearance).toBe("light");
     expect(r.colors.accent).toBe("#7a2e00");

@@ -5,7 +5,7 @@ import path from "node:path";
 import { type Component, type OverlayHandle, visibleWidth } from "@earendil-works/pi-tui";
 import type { CortexClient, DaemonIdentity, WorkspaceSnapshot } from "../../../src/contracts.ts";
 import type { Lane, Task } from "../../../src/store.ts";
-import { DEFAULT_CONFIG } from "../../../src/tui/config.ts";
+import { DEFAULT_CONFIG, loadConfig } from "../../../src/tui/config.ts";
 import { DEFAULT_KEYS } from "../../../src/tui/keys.ts";
 import { openPreferences } from "../../../src/tui/preferences.ts";
 import {
@@ -124,6 +124,7 @@ function harness(
     identity: IDENTITY,
     keys: DEFAULT_KEYS,
     preferences: openPreferences(path.join(dir, "tui", "default.state.json")),
+    configFile: path.join(dir, "tui.toml"),
     initialTask: options.initialTask ?? null,
     heading: options.heading ?? null,
     schedule: () => () => {},
@@ -1034,7 +1035,7 @@ describe("line numbers: the source line of each block in a gutter (:set number)"
     expect(source.find(r => r.includes("```sh"))).toMatch(/^ {2}5 {2}```sh/);
   });
 
-  test(":set number / nonumber / number! toggle the gutter in Read and persist as a view preference", async () => {
+  test(":set number / nonumber / number! toggle the gutter in Read and persist as tui.toml's number", async () => {
     const h = harness([task(1, { body: SOURCE })], { initialTask: 1 });
     expect(h.session.lineNumbers).toBe(false);
     expect(plain(frame(h, 60, 10))[0]).toMatch(/^ Title/);
@@ -1048,9 +1049,7 @@ describe("line numbers: the source line of each block in a gutter (:set number)"
     await h.session.execute("set number?");
     expect(h.session.status?.text).toMatch(/^number \(.*\): on$/);
     h.session.savePreferences();
-    const file = path.join(dir, "tui", "default.state.json");
-    expect(JSON.parse(fs.readFileSync(file, "utf8")).view.lineNumbers).toBe(true);
-    expect(openPreferences(file).view().lineNumbers).toBe(true);
+    expect(loadConfig(path.join(dir, "tui.toml")).config.number).toBe(true);
   });
 });
 

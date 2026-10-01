@@ -646,15 +646,13 @@ export function listThemes(dir: string = themesDir()): {
 
 // ---------- resolution (theme precedence) ----------
 
-export type ThemeSource = "session" | "cli" | "saved" | "config" | "appearance" | "default" | "colors";
+export type ThemeSource = "session" | "cli" | "config" | "appearance" | "default" | "colors";
 
 export interface ThemeInput {
-  /** In-session `:theme <name>` (the caller also saves it). */
+  /** In-session `:theme <name>` (the caller also writes it to tui.toml). */
   readonly session?: string | null;
   /** `--theme` (this session only). */
   readonly cli?: string | null;
-  /** The profile's saved `:theme` choice. */
-  readonly saved?: string | null;
   readonly config: Pick<
     TuiConfig,
     "theme" | "themeDark" | "themeLight" | "appearance" | "colors" | "transparentBackground"
@@ -670,7 +668,7 @@ export interface ResolvedTheme {
   readonly name: string;
   /** Which precedence level chose the theme, for the status line. */
   readonly source: ThemeSource;
-  /** session, cli, saved or tui.toml `theme`: appearance changes never replace it. */
+  /** session, cli or tui.toml `theme`: appearance changes never replace it. */
   readonly explicit: boolean;
   readonly appearance: "dark" | "light";
   readonly highContrast: boolean;
@@ -707,13 +705,13 @@ export function inactiveTheme(theme: ResolvedTheme): ResolvedTheme {
 }
 
 /**
- * Resolve the session theme: in-session `:theme` > `--theme` > the saved
- * profile choice > tui.toml `theme` > `theme_dark`/`theme_light` by
- * appearance > cortex-dark/cortex-light. The first four are explicit; an
- * unknown or rejected name falls through to the next level with a problem.
- * In auto, 16-color terminals get `ansi`; an explicit hex theme there is
- * mapped to the nearest standard colors with a notice. `:theme auto` is the
- * caller passing no session/cli/saved choice.
+ * Resolve the session theme: in-session `:theme` > `--theme` > tui.toml
+ * `theme` > `theme_dark`/`theme_light` by appearance >
+ * cortex-dark/cortex-light. The first three are explicit; an unknown or
+ * rejected name falls through to the next level with a problem. In auto,
+ * 16-color terminals get `ansi`; an explicit hex theme there is mapped to the
+ * nearest standard colors with a notice. `:theme auto` is the caller passing
+ * no session/cli choice and a config without `theme`.
  */
 export function resolveTheme(input: ThemeInput): ResolvedTheme {
   const problems: ThemeProblem[] = [];
@@ -748,7 +746,7 @@ export function resolveTheme(input: ThemeInput): ResolvedTheme {
   };
 
   const finish = (theme: ThemeDefinition, source: ThemeSource): ResolvedTheme => {
-    const explicit = source === "session" || source === "cli" || source === "saved" || source === "config";
+    const explicit = source === "session" || source === "cli" || source === "config";
     if (mode === "16" && THEME_TOKENS.some(t => HEX.test(theme.colors[t]))) {
       problems.push({
         file: null,
@@ -785,7 +783,6 @@ export function resolveTheme(input: ThemeInput): ResolvedTheme {
   const explicitLevels: [ThemeSource, string | null | undefined][] = [
     ["session", input.session],
     ["cli", input.cli],
-    ["saved", input.saved],
     ["config", input.config.theme],
   ];
   for (const [source, name] of explicitLevels) {
