@@ -245,14 +245,9 @@ describe("the cursor marker (IME) and scrolling", () => {
   });
 
   test("the wheel scrolls the view, not the cursor, until the cursor would leave it; it stops at the document's ends (review F15)", () => {
+    // The Shell counts the notches and scrolls `scroll` rows a notch (3 by default) through scrollRows.
     const wheel = (e: ReturnType<typeof make>, delta: 1 | -1, notches = 1) => {
-      for (let i = 0; i < notches; i++) {
-        expect(e.editor.handleMouse({ type: "wheel", button: "none", x: 0, y: 0, wheelDelta: delta } as never)).toEqual(
-          {
-            handled: true,
-          },
-        );
-      }
+      for (let i = 0; i < notches; i++) e.editor.scrollRows(delta * 3);
     };
     const lines = Array.from({ length: 50 }, (_, i) => `line ${i + 1}`).join("\n");
     const e = make(lines, 0, { height: 10 });
@@ -299,11 +294,16 @@ describe("the cursor marker (IME) and scrolling", () => {
     const wrapped = w.render();
     expect(strip(wrapped[0] ?? "")).toMatch(/^\s*vwxyz01/);
     expect([w.head(), markerAt(wrapped)?.[0]]).toEqual([21, 0]);
+    // The wheel never reaches the editor itself: only the Shell scrolls it.
+    expect(w.editor.handleMouse({ type: "wheel", button: "none", x: 0, y: 0, wheelDelta: 1 } as never)).toBeUndefined();
+    expect(strip(w.render()[0] ?? "")).toMatch(/^\s*vwxyz01/);
+    // One row a call: scroll = 1 moves the view one row a notch.
+    w.editor.scrollRows(-1);
+    expect(strip(w.render()[0] ?? "")).toMatch(/^\s*opqrstu/);
   });
 
   test("scrollPosition counts visual rows at the last render's width (wrapped rows count)", () => {
-    const wheel = (e: ReturnType<typeof make>) =>
-      e.editor.handleMouse({ type: "wheel", button: "none", x: 0, y: 0, wheelDelta: 1 } as never);
+    const wheel = (e: ReturnType<typeof make>) => e.editor.scrollRows(3);
     const lines = Array.from({ length: 50 }, (_, i) => `line ${i + 1}`).join("\n");
     const e = make(lines, 0, { height: 5 });
     e.render();

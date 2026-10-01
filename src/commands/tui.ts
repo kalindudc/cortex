@@ -124,7 +124,8 @@ export default defineCommand({
     profile: {
       type: "string",
       valueHint: "name",
-      description: "view-state profile (default: default); settings in tui.toml are shared",
+      description:
+        "view-state profile: each database's last task (default: default); settings live in tui.toml (:config)",
     },
     theme: {
       type: "string",

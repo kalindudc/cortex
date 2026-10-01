@@ -409,9 +409,9 @@ describe("the command line and the task list in a real terminal (plan @400 Task 
     mark = pty.mark();
     await keys(pty, ":", "f", TAB, TAB, TAB, SHIFT_TAB, ..." list", "\r");
     await expectPlain(pty, "│ tasks │", mark);
-    // Arguments complete too: :set do<Tab> -> :set done shows the done task.
+    // Arguments complete too: :config do<Tab> -> :config done (it toggles tui.toml's done) shows the done task.
     mark = pty.mark();
-    await keys(pty, ":", ..."set do", TAB, "\r");
+    await keys(pty, ":", ..."config do", TAB, "\r");
     await expectPlain(pty, "gamma done", mark);
     mark = pty.mark();
     await keys(pty, ":", ..."frobnicate", "\r");
@@ -514,13 +514,13 @@ describe("the command line and the task list in a real terminal (plan @400 Task 
     await keys(pty, ":", TAB);
     await expectPlain(pty, "Tab completes", mark);
     await keys(pty, "\x1b");
-    // Every dialog kind: lists, the per-task tag picker, the theme picker, a form and a confirmation.
+    // Every dialog kind: lists, the per-task tag picker, the :config pane, a form and a confirmation.
     for (const [command, shown] of [
       ["lanes", "LANES"],
       ["tags", "TAGS"],
       ["tag", "TAGS OF @1"],
       ["status", "STATUS OF @1"],
-      ["theme", "THEME"],
+      ["config", "CONFIG"],
     ] as const) {
       mark = pty.mark();
       await keys(pty, ":", ...command, "\r");
@@ -697,15 +697,15 @@ describe("metadata and catalog commands in a real terminal (plan @400 Task 8 par
     expect((await show(box.env, 1)).task.tags).toEqual([]);
   });
 
-  test(":theme previews live, Esc restores, and Enter saves a choice that the next start uses", async () => {
-    const box = sandbox("tui-theme-pick", { NO_COLOR: undefined, COLORTERM: "truecolor" });
-    await seedTasks(box.env, ["themed"]);
-    // A legacy profile state with a density: the first start moves it into tui.toml.
+  test(":config writes tui.toml; shortcuts do not outlive the session", async () => {
+    const box = sandbox("tui-config", { NO_COLOR: undefined, COLORTERM: "truecolor" });
+    await seedTasks(box.env, ["themed"], ["finished", "-s", "done"]);
+    // A legacy profile state with a density and a sort: the first start moves them into tui.toml.
     const stateDir = `${box.env.XDG_CONFIG_HOME}/cortex/tui`;
     const statePath = `${stateDir}/default.state.json`;
     const tomlPath = `${box.env.XDG_CONFIG_HOME}/cortex/tui.toml`;
     fs.mkdirSync(stateDir, { recursive: true });
-    fs.writeFileSync(statePath, JSON.stringify({ version: 1, view: { density: "compact" } }));
+    fs.writeFileSync(statePath, JSON.stringify({ version: 1, view: { density: "compact", sort: "title" } }));
     const DARK_BG = "48;2;29;31;36";
     const LIGHT_BG = "48;2;246;242;236";
     let pty = spawnPty([BIN, "tui"], { env: box.tuiEnv, cols: 110, rows: 32 });
@@ -713,7 +713,7 @@ describe("metadata and catalog commands in a real terminal (plan @400 Task 8 par
     await expectPlain(pty, "themed");
     expect(pty.output()).toContain(DARK_BG);
     let mark = pty.mark();
-    await keys(pty, ":", ..."theme", "\r");
+    await keys(pty, ":", ..."config theme", "\r");
     await expectPlain(pty, "THEME", mark);
     mark = pty.mark();
     await keys(pty, "j", "j"); // auto -> cortex-dark -> cortex-light
@@ -722,22 +722,33 @@ describe("metadata and catalog commands in a real terminal (plan @400 Task 8 par
     await keys(pty, "\x1b");
     await pty.expect(DARK_BG, { from: mark });
     mark = pty.mark();
-    await keys(pty, ":", ..."theme", "\r", "j", "j", "\r");
-    await expectPlain(pty, "cortex-light · your :theme choice (saved)", mark);
-    // Debounced, so it is the quit path that writes it.
-    await keys(pty, ":", ..."set number", "\r");
+    await keys(pty, ":", ..."config theme", "\r", "j", "j", "\r");
+    await expectPlain(pty, "cortex-light · your :config theme choice (saved)", mark);
+    // Written at once, not on quit.
+    expect(fs.readFileSync(tomlPath, "utf8")).toContain('theme = "cortex-light"');
+    mark = pty.mark();
+    await keys(pty, ":", ..."config scroll 5", "\r");
+    await expectPlain(pty, "Saved scroll = 5 to tui.toml", mark);
+    // ;d shows the done task for this session only.
+    mark = pty.mark();
+    await keys(pty, ";", "d");
+    await expectPlain(pty, "finished", mark);
     pty.write(":q\r");
     expect(await pty.exited()).toEqual({ code: 0, signal: null });
     const toml = fs.readFileSync(tomlPath, "utf8");
-    for (const line of ['theme = "cortex-light"', 'density = "compact"', "number = true"]) expect(toml).toContain(line);
-    const state = JSON.parse(fs.readFileSync(statePath, "utf8")) as { view: Record<string, unknown> };
-    expect(state.view).not.toHaveProperty("theme");
-    expect(state.view).not.toHaveProperty("density");
-    // The next start uses tui.toml's theme: no appearance query, light from the first frame.
+    for (const line of ['theme = "cortex-light"', 'density = "compact"', 'sort = "title"', "scroll = 5"])
+      expect(toml).toContain(line);
+    expect(toml).not.toMatch(/^done/m);
+    // The state file keeps each database's last task, never a view.
+    const state = JSON.parse(fs.readFileSync(statePath, "utf8")) as Record<string, unknown>;
+    expect(state).not.toHaveProperty("view");
+    // The next start uses tui.toml: light from the first frame (no appearance query), done tasks hidden.
     pty = spawnPty([BIN, "tui"], { env: box.tuiEnv, cols: 110, rows: 32 });
     await ready(pty);
+    await expectPlain(pty, "themed");
     expect(pty.output()).toContain(LIGHT_BG);
     expect(pty.output()).not.toContain("\x1b[?996n");
+    expect(plainText(pty.output())).not.toContain("finished");
     pty.write(":q\r");
     expect(await pty.exited()).toEqual({ code: 0, signal: null });
   });
@@ -766,10 +777,11 @@ describe("the document editor and drafts in a real terminal (plan @400 Task 9)",
       await Bun.sleep(100);
     }
   };
+  /** The state file's view (none: the mode is never saved; tui.toml's `mode` sets how a session starts). */
   const viewState = (box: Sandbox): { mode?: string } => {
     const file = `${box.env.XDG_CONFIG_HOME}/cortex/tui/default.state.json`;
     if (!fs.existsSync(file)) return {};
-    return (JSON.parse(fs.readFileSync(file, "utf8")) as { view: { mode?: string } }).view;
+    return (JSON.parse(fs.readFileSync(file, "utf8")) as { view?: { mode?: string } }).view ?? {};
   };
   /** Type one character every `everyMs` until `work` settles (keeps the 600 ms idle timer from firing). */
   const typeWhile = async <T>(pty: Pty, char: string, work: Promise<T>, everyMs = 80): Promise<T> => {
@@ -926,10 +938,10 @@ describe("the document editor and drafts in a real terminal (plan @400 Task 9)",
     await waitForBody(box.env, 1, b => b === null || b === "");
     pty.write(":q\r");
     expect(await pty.exited()).toEqual({ code: 0, signal: null });
-    expect(viewState(box).mode).toBe("edit");
+    expect(viewState(box).mode).toBeUndefined(); // :edit is for the session
   });
 
-  test("at 80x24 Split shows the focused half (Tab switches halves) without changing the saved preference", async () => {
+  test("at 80x24 Split shows the focused half (Tab switches halves) without changing the session's mode", async () => {
     const box = sandbox("tui-split-80");
     await seedTasks(box.env, ["split task", "-b", "split body text"]);
     const pty = spawnPty([BIN, "tui"], { env: box.tuiEnv, cols: 80, rows: 24 });
@@ -946,7 +958,7 @@ describe("the document editor and drafts in a real terminal (plan @400 Task 9)",
     await expectPlain(pty, "PREVIEW", mark);
     pty.write(":q\r");
     expect(await pty.exited()).toEqual({ code: 0, signal: null });
-    expect(viewState(box).mode).toBe("split");
+    expect(viewState(box).mode).toBeUndefined(); // :split is for the session
   });
 
   test("a concurrent CLI edit becomes a conflict: :keep saves ours over it, then :apply takes theirs", async () => {
@@ -1434,15 +1446,18 @@ describe("the mouse in a real terminal (SGR 1006 reports; N19: optional, on by d
     expect(await pty.exited()).toEqual({ code: 0, signal: null });
     expectMouseOff(pty.output().slice(mark));
     expect(isCooked(pty.localFlags())).toBe(true);
-    // The click chose Edit like :edit does: the saved preference.
-    const state = JSON.parse(fs.readFileSync(`${box.env.XDG_CONFIG_HOME}/cortex/tui/default.state.json`, "utf8")) as {
-      view: { mode?: string };
+    // The click chose Edit like :edit does: for this session, so the state file keeps no view.
+    const stateFile = `${box.env.XDG_CONFIG_HOME}/cortex/tui/default.state.json`;
+    const state = (fs.existsSync(stateFile) ? JSON.parse(fs.readFileSync(stateFile, "utf8")) : {}) as {
+      view?: unknown;
     };
-    expect(state.view.mode).toBe("edit");
+    expect(state.view).toBeUndefined();
   });
 
-  test("one wheel notch sent as three reports in ONE read (Ghostty's default mouse-scroll-multiplier) moves the list one task", async () => {
+  test("with scroll = 1, one wheel notch sent as three reports in ONE read (Ghostty's default mouse-scroll-multiplier) moves the list one task", async () => {
     const box = sandbox("tui-wheel");
+    fs.mkdirSync(`${box.env.XDG_CONFIG_HOME}/cortex`, { recursive: true });
+    fs.writeFileSync(`${box.env.XDG_CONFIG_HOME}/cortex/tui.toml`, "scroll = 1\n");
     await seedTasks(
       box.env,
       ["wheel one", "-b", "notchbody-1"],

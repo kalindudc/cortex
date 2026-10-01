@@ -795,9 +795,9 @@ export class Dialog implements Component, Focusable, SessionDialog {
   handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
     const spec = this.spec;
     if (event.type === "wheel") {
-      // One row (or field) a notch, however many reports the terminal sends for it (src/tui/mouse.ts).
+      // `scroll` rows (or one field) a notch, however many reports the terminal sends for it (src/tui/mouse.ts).
       const step = this.#session.wheelNotch(event.wheelDelta ?? 0);
-      if (step !== 0 && spec.kind === "list") this.#move(step);
+      if (step !== 0 && spec.kind === "list") this.#move(step * this.#session.scrollRows);
       else if (step !== 0 && spec.kind === "form") this.#moveField(step);
       this.#session.redraw();
       return { handled: true };

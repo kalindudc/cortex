@@ -29,9 +29,8 @@ import {
   findCommand,
   parseCommand,
   reportPendingMigrations,
-  themeSourceText,
 } from "../../../src/tui/commands.ts";
-import { DEFAULT_CONFIG, loadConfig } from "../../../src/tui/config.ts";
+import { DEFAULT_CONFIG, TASK_SORTS } from "../../../src/tui/config.ts";
 import type { Dialog } from "../../../src/tui/dialogs.ts";
 import {
   DEFAULT_KEYS,
@@ -42,9 +41,9 @@ import {
   VISUAL_ACTIONS,
   type VisualAction,
 } from "../../../src/tui/keys.ts";
-import { openPreferences, type PreferenceSession, readPreferences, TASK_SORTS } from "../../../src/tui/preferences.ts";
-import { type OverlayHost, type SessionOptions, type ThemeControl, TuiSession } from "../../../src/tui/session.ts";
-import { resolveTheme, type ResolvedTheme } from "../../../src/tui/theme.ts";
+import { openPreferences, type PreferenceSession } from "../../../src/tui/preferences.ts";
+import { type OverlayHost, type SessionOptions, TuiSession } from "../../../src/tui/session.ts";
+import { resolveTheme } from "../../../src/tui/theme.ts";
 
 // Plan @400 N17/P9 (Task 8, part A): ONE registry (name, aliases, usage,
 // description, completer, handler) drives execution, completion, `?`/:help
@@ -62,7 +61,6 @@ const COMMAND_CASES: readonly { input: string; name: string; argument: string; p
   { input: "sort -updated", name: "sort", argument: "-updated", prefix: "sor" },
   { input: "sort", name: "sort", argument: "" },
   { input: "sort group lane", name: "sort", argument: "group lane" },
-  { input: "set done!", name: "set", argument: "done!", prefix: "se" },
   { input: "focus document", name: "focus", argument: "document", prefix: "fo" },
   { input: "back", name: "back", argument: "", prefix: "ba" },
   { input: "forward", name: "forward", argument: "", prefix: "forw" },
@@ -88,11 +86,9 @@ const COMMAND_CASES: readonly { input: string; name: string; argument: string; p
   { input: "delete", name: "delete", argument: "", prefix: "de" },
   { input: "lanes", name: "lanes", argument: "", prefix: "lanes" },
   { input: "tags", name: "tags", argument: "", prefix: "tags" },
-  { input: "theme", name: "theme", argument: "", prefix: "th" },
-  { input: "theme auto", name: "theme", argument: "auto" },
-  // The spacing, saved like the theme (a terminal cannot set its font size)
-  { input: "density", name: "density", argument: "", prefix: "den" },
-  { input: "density compact", name: "density", argument: "compact" },
+  // Settings, saved to tui.toml (the only command that writes it)
+  { input: "config", name: "config", argument: "", prefix: "con" },
+  { input: "config scroll 5", name: "config", argument: "scroll 5" },
   { input: "w", name: "write", argument: "", prefix: "wr" },
   { input: "write", name: "write", argument: "" },
   { input: "wq", name: "wq", argument: "", prefix: "wq" },
@@ -169,8 +165,8 @@ const KEY_ACTION_TARGETS: Readonly<
   suspend: { command: "suspend" },
   focus_tasks: { command: "focus" },
   focus_document: { command: "focus" },
-  toggle_tasks: { command: "set" },
-  toggle_done: { command: "set" },
+  toggle_tasks: "handled",
+  toggle_done: "handled",
   read: { command: "read" },
   edit: { command: "edit" },
   split: { command: "split" },
@@ -410,11 +406,14 @@ describe("completion (commands and fixed arguments)", () => {
     expect(completeCommandLine("filter tags +d", COMMANDS, s)).toEqual(["filter tags +docs"]);
   });
 
-  test(":set and :focus complete their fixed arguments; aliases keep the typed name", () => {
+  test(":config and :focus complete their fixed arguments; aliases keep the typed name", () => {
     const s = makeSession();
-    expect(completeCommandLine("set d", COMMANDS, s)).toEqual(["set done", "set done!"]);
-    expect(completeCommandLine("set no", COMMANDS, s)).toEqual(["set nodone", "set nonumber", "set notasks"]);
-    expect(completeCommandLine("set nu", COMMANDS, s)).toEqual(["set number", "set number!"]);
+    expect(completeCommandLine("config sc", COMMANDS, s)).toEqual(["config scroll"]);
+    expect(completeCommandLine("config number ", COMMANDS, s)).toEqual([
+      "config number true",
+      "config number false",
+      "config number default",
+    ]);
     expect(completeCommandLine("focus ", COMMANDS, s)).toEqual(["focus document", "focus list"]);
     expect(completeCommandLine("help x", COMMANDS, s)).toEqual([]);
   });
@@ -491,46 +490,6 @@ describe("running the navigation commands", () => {
     expect(s.includeDone).toBe(true);
     await s.execute("clear now");
     expect(s.status?.text).toMatch(/takes no argument/);
-  });
-
-  test(":set toggles, sets, clears and reports options; unknown options explain", async () => {
-    const s = makeSession();
-    expect(s.includeDone).toBe(false);
-    await s.execute("set done!");
-    expect(s.includeDone).toBe(true);
-    expect(s.isVisible(12)).toBe(true);
-    await s.execute("set nodone");
-    expect(s.includeDone).toBe(false);
-    await s.execute("set invdone");
-    expect(s.includeDone).toBe(true);
-    await s.execute("set done?");
-    expect(s.status?.text).toBe("done (show done tasks): on");
-    await s.execute("set tasks!");
-    expect(s.taskListVisible).toBe(false);
-    await s.execute("set tasks nodone");
-    expect(s.taskListVisible).toBe(true);
-    expect(s.includeDone).toBe(false);
-    expect(s.lineNumbers).toBe(false);
-    await s.execute("set number");
-    expect(s.lineNumbers).toBe(true);
-    await s.execute("set number!");
-    expect(s.lineNumbers).toBe(false);
-    await s.execute("set invnumber");
-    await s.execute("set number?");
-    expect(s.status?.text).toBe("number (source line numbers in Read and the Split preview): on");
-    await s.execute("set nonumber");
-    expect(s.lineNumbers).toBe(false);
-    await s.execute("set");
-    expect(s.status?.text).toContain("nodone");
-    expect(s.status?.text).toContain("nonumber");
-    await s.execute("set frob!");
-    expect(s.status?.level).toBe("error");
-    expect(s.status?.text).toMatch(/Unknown option "frob".*done.*tasks.*number/);
-    // number is saved to tui.toml (by the debounced save; here, the explicit flush); done and tasks never are.
-    await s.execute("set done! tasks! number");
-    expect(s.savePreferences()).toBe(true);
-    expect(fs.readFileSync(path.join(dir, "tui.toml"), "utf8")).toBe("number = true\n");
-    expect([s.includeDone, s.taskListVisible]).toEqual([true, false]);
   });
 
   test(":focus list|document moves focus explicitly; anything else explains", async () => {
@@ -879,7 +838,7 @@ function snapshotOf(s: TuiSession) {
 }
 
 describe(":sort (orders, and :sort group; ;o opens the picker)", () => {
-  test("complete, set and persist; the list reorders; an unknown value explains and changes nothing", async () => {
+  test("complete and set for this session; the list reorders; an unknown value explains and changes nothing", async () => {
     const { s } = withDaemon();
     expect(completeCommandLine("sort ", COMMANDS, s)).toEqual([...TASK_SORTS, "group"].map(v => `sort ${v}`));
     expect(completeCommandLine("sort -", COMMANDS, s)).toEqual(["sort -id", "sort -title", "sort -updated"]);
@@ -905,6 +864,11 @@ describe(":sort (orders, and :sort group; ;o opens the picker)", () => {
     await s.execute("sort title");
     expect(s.status?.text).toMatch(/relevance/);
     expect(s.sort).toBe("title");
+    // Session-only: neither tui.toml nor the state file holds it (:config sort sets the default).
+    s.savePreferences();
+    expect(fs.existsSync(path.join(dir, "tui.toml"))).toBe(false);
+    const state = path.join(dir, "tui", "default.state.json");
+    expect(fs.existsSync(state) ? fs.readFileSync(state, "utf8") : "").not.toMatch(/sort|group/);
   });
 
   test("bare :sort opens the picker: Space tries an order, Enter picks and closes; bare :sort group starts at the grouping", async () => {
@@ -1664,136 +1628,17 @@ describe(":tags (tag definitions, P4)", () => {
   });
 });
 
-describe(":theme (P9)", () => {
-  function fakeThemes() {
-    const calls: string[] = [];
-    let current: ResolvedTheme = resolveTheme({ config: DEFAULT_CONFIG, env: { NO_COLOR: "1" } });
-    const control: ThemeControl = {
-      choices: () => [
-        { name: "cortex-dark", source: "bundled" },
-        { name: "cortex-light", source: "bundled" },
-        { name: "mine", source: "custom" },
-      ],
-      preview: name => void calls.push(`preview:${name}`),
-      restore: () => void calls.push("restore"),
-      apply: name => {
-        calls.push(`apply:${name}`);
-        current = resolveTheme({ config: DEFAULT_CONFIG, env: { NO_COLOR: "1" }, session: name });
-        return current;
-      },
-    };
-    return { control, calls };
-  }
-
-  test(":theme <name> applies and saves; :theme auto clears; unknown names explain; names complete", async () => {
-    const { s } = withDaemon();
-    const themes = fakeThemes();
-    s.setThemeControl(themes.control);
-    await s.execute("theme cortex-light");
-    await s.execute("theme auto");
-    await s.execute("theme nope");
-    expect(themes.calls).toEqual(["apply:cortex-light", "apply:null"]);
-    expect(s.status?.text).toMatch(/No theme "nope".*cortex-dark/);
-    expect(completeCommandLine("theme c", COMMANDS, s)).toEqual(["theme cortex-dark", "theme cortex-light"]);
-    expect(completeCommandLine("theme ", COMMANDS, s)[0]).toBe("theme auto");
-  });
-
-  test("bare :theme opens a picker: moving previews, Esc restores, Enter applies (and saves)", async () => {
-    const { s, type } = withDaemon();
-    const themes = fakeThemes();
-    s.setThemeControl(themes.control);
-    await s.execute("theme");
-    type("j", "j", "\x1b");
-    expect(themes.calls).toEqual(["preview:cortex-dark", "preview:cortex-light", "restore"]);
-    await s.execute("theme");
-    type("j", "j", "\r");
-    expect(themes.calls.slice(3)).toEqual(["preview:cortex-dark", "preview:cortex-light", "apply:cortex-light"]);
-    expect(s.dialog).toBeNull();
-    expect(s.status?.text).toMatch(/cortex-light/);
-  });
-
-  test("the status line names where the active theme comes from", () => {
-    const env = { NO_COLOR: "1" };
-    expect(themeSourceText(resolveTheme({ config: DEFAULT_CONFIG, env, session: "cortex-light" }))).toMatch(
-      /cortex-light.*:theme.*saved/,
-    );
-    expect(themeSourceText(resolveTheme({ config: DEFAULT_CONFIG, env, cli: "cortex-light" }))).toMatch(/--theme/);
-    expect(themeSourceText(resolveTheme({ config: { ...DEFAULT_CONFIG, theme: "cortex-light" }, env }))).toMatch(
-      /tui\.toml.*pins.*:theme auto removes/,
-    );
-    expect(themeSourceText(resolveTheme({ config: DEFAULT_CONFIG, env, detected: "light" }))).toMatch(
-      /auto.*light terminal/,
-    );
-  });
-});
-
-describe(":density (the spacing; saved to tui.toml like :theme)", () => {
-  const tomlPath = () => path.join(dir, "tui.toml");
-  const saved = () => loadConfig(tomlPath()).config.density;
-
-  test(":density <value> sets and saves it; bare toggles; either way it redraws at once and says so", async () => {
-    let changes = 0;
-    const { s } = withDaemon(TASKS, { onChange: () => changes++ });
-    expect(s.density).toBe("comfortable");
-    await s.execute("density compact");
-    expect(s.density).toBe("compact");
-    expect(saved()).toBe("compact");
-    expect(s.status).toMatchObject({ level: "info", text: "Density: compact (saved)" });
-    expect(changes).toBeGreaterThan(0);
-    const before = changes;
-    await s.execute("density");
-    expect(s.density).toBe("comfortable");
-    expect(saved()).toBe("comfortable");
-    expect(s.status?.text).toBe("Density: comfortable (saved)");
-    expect(changes).toBeGreaterThan(before);
-    await s.execute("density");
-    expect(s.density).toBe("compact");
-    // Setting the value in use again is still an explicit, saved choice.
-    await s.execute("density compact");
-    expect(s.status?.text).toBe("Density: compact (saved)");
-  });
-
-  test("an invalid value explains with the usage and changes nothing; the two values complete", async () => {
-    const { s } = withDaemon();
-    for (const line of ["density tiny", "density compact please", "density Compact"]) {
-      await s.execute(line);
-      expect(s.status?.level, line).toBe("error");
-      expect(s.status?.text, line).toContain("Usage: :density [compact|comfortable]");
-    }
-    expect(s.density).toBe("comfortable");
-    expect(fs.existsSync(tomlPath())).toBe(false);
-    expect(completeCommandLine("density ", COMMANDS, s)).toEqual(["density comfortable", "density compact"]);
-    expect(completeCommandLine("density comp", COMMANDS, s)).toEqual(["density compact"]);
-    expect(completeCommandLine("dens", COMMANDS, s)).toEqual(["density"]);
-    expect(describeCandidate("density compact", COMMANDS, s)).toMatch(/.+/);
-    expect(describeCandidate("density comfortable", COMMANDS, s)).toMatch(/default/);
-  });
-
-  test("a saved choice survives the session; an unsavable tui.toml keeps it for this session and says so", async () => {
-    const { s } = withDaemon();
-    await s.execute("density compact");
-    expect(saved()).toBe("compact");
-    fs.writeFileSync(tomlPath(), "not = [toml");
-    await s.execute("density comfortable");
-    expect(s.density).toBe("comfortable");
-    expect(s.status?.level).toBe("warn");
-    expect(s.status?.text).toMatch(/^Density: comfortable \(this session only/);
-  });
-});
-
 describe("view choices never write tasks", () => {
   test("filters, searches, include-done, the task list, focus and navigation send no write", async () => {
     const { s, daemon } = withDaemon();
     for (const line of [
-      "density compact",
-      "density",
+      "config density compact",
+      "config done",
+      "sort title",
       "filter status review",
       "filter lane now",
       "filter tags bug",
       "clear",
-      "set done!",
-      "set tasks!",
-      "set tasks!",
       "focus document",
       "open 3",
       "back",
@@ -1809,21 +1654,21 @@ describe("view choices never write tasks", () => {
 describe("document modes (P5, Task 9)", () => {
   const statePath = () => path.join(dir, "tui", "default.state.json");
 
-  test(":read, :edit and :split change the SAVED preferred mode (their aliases too); nothing else does", async () => {
+  test(":read, :edit and :split change the session's mode (their aliases too); nothing saves it", async () => {
     const { s, daemon } = withDaemon();
     expect(s.preferredMode).toBe("read");
     await s.execute("edit");
     expect(s.preferredMode).toBe("edit");
     expect(s.documentMode()).toBe("edit");
-    s.savePreferences();
-    expect(readPreferences(statePath()).preferences.view.mode).toBe("edit");
+    expect(s.status?.text).toMatch(/for this session/);
     await s.execute("sp");
     expect(s.documentMode()).toBe("split");
     await s.execute("r");
     expect(s.documentMode()).toBe("read");
     await s.execute("e");
     s.savePreferences();
-    expect(readPreferences(statePath()).preferences.view.mode).toBe("edit");
+    expect(fs.existsSync(statePath()) ? fs.readFileSync(statePath(), "utf8") : "").not.toMatch(/mode|view/);
+    expect(fs.existsSync(path.join(dir, "tui.toml"))).toBe(false);
     await s.execute("read now");
     expect(s.status?.text).toMatch(/takes no argument/);
     // Choosing a view never writes a task.
@@ -1855,7 +1700,7 @@ describe("document modes (P5, Task 9)", () => {
     await s.execute("read");
     expect(s.documentMode()).toBe("read");
     s.savePreferences();
-    expect(fs.existsSync(statePath()) ? readPreferences(statePath()).preferences.view.mode : "read").toBe("read");
+    expect(fs.existsSync(statePath()) ? fs.readFileSync(statePath(), "utf8") : "").not.toMatch(/mode|view/);
   });
 
   test("the editor and its undo history survive mode changes and task switches (stable identity)", async () => {

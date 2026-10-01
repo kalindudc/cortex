@@ -1040,9 +1040,9 @@ describe(":links lists the document's links and references; Enter follows", () =
   });
 });
 
-// ---------- line numbers (:set number) ----------
+// ---------- line numbers (tui.toml number) ----------
 
-describe("line numbers: the source line of each block in a gutter (:set number)", () => {
+describe("line numbers: the source line of each block in a gutter (tui.toml number)", () => {
   const SOURCE = [
     "# Title",
     "",
@@ -1090,21 +1090,19 @@ describe("line numbers: the source line of each block in a gutter (:set number)"
     expect(source.find(r => r.includes("```sh"))).toMatch(/^ {2}5 {2}```sh/);
   });
 
-  test(":set number / nonumber / number! toggle the gutter in Read and persist as tui.toml's number", async () => {
+  test(":config number toggles the gutter in Read at once and saves it as tui.toml's number", async () => {
     const h = harness([task(1, { body: SOURCE })], { initialTask: 1 });
     expect(h.session.lineNumbers).toBe(false);
     expect(plain(frame(h, 60, 10))[0]).toMatch(/^ Title/);
-    await h.session.execute("set number");
+    await h.session.execute("config number");
     expect(h.session.lineNumbers).toBe(true);
     expect(plain(frame(h, 60, 10))[0]).toMatch(/^ {2}1 {2}Title/);
-    await h.session.execute("set nonumber");
-    expect(plain(frame(h, 60, 10))[0]).toMatch(/^ Title/);
-    await h.session.execute("set number!");
-    expect(h.session.lineNumbers).toBe(true);
-    await h.session.execute("set number?");
-    expect(h.session.status?.text).toMatch(/^number \(.*\): on$/);
-    h.session.savePreferences();
     expect(loadConfig(path.join(dir, "tui.toml")).config.number).toBe(true);
+    await h.session.execute("config number false");
+    expect(plain(frame(h, 60, 10))[0]).toMatch(/^ Title/);
+    await h.session.execute("config number default");
+    expect(h.session.lineNumbers).toBe(false);
+    expect(fs.readFileSync(path.join(dir, "tui.toml"), "utf8")).toBe("");
   });
 });
 

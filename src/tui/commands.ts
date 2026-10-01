@@ -9,7 +9,7 @@
 //   an explanation; the session shows it and changes nothing.
 // - Completers return whole argument values for the typed argument prefix:
 //   task ids (by id prefix or by title search), statuses, lanes, tags,
-//   option names, themes, and the current document's heading slugs and code
+//   settings and their values, and the current document's heading slugs and code
 //   block numbers (`describe` says what a candidate names).
 // - Metadata and catalog commands write through the shared guarded
 //   API only (session.client.versioned, `Prefer: cortex-versioned`): each
@@ -29,8 +29,10 @@
 // - Human status changes send no author, so they never pose as attributed agent changes.
 // - Tag membership changes are atomic add/remove deltas, never a whole-list
 //   replace; removing a tag from a task never deletes its definition.
-// - Documents: :read/:edit/:split change the saved preferred mode
-//   (nothing else does); :title goes through the task's draft (in place
+// - Settings: :config (src/tui/settings.ts) is the one command that writes
+//   tui.toml; every other command changes this session only.
+// - Documents: :read/:edit/:split change the session's mode (nothing else
+//   does; :config mode sets the default); :title goes through the task's draft (in place
 //   without text); :w saves every draft (or exports with a path, :w @<id>
 //   <path> a kept draft of a deleted task; :w! replaces), :wq/:x quit only
 //   after acknowledged saves, :q refuses while a draft is unsaved and :q!
@@ -62,13 +64,12 @@ import { searchTasks } from "../lib/fuzzy.ts";
 import { UNTAGGED } from "../lib/taskView.ts";
 import type { Activity } from "./activity.ts";
 import { resumeTask } from "./bridge.ts";
-import { DENSITIES, type Density, isDensity } from "./config.ts";
+import { TASK_GROUPS, TASK_SORTS, type TaskGroup, type TaskSort } from "./config.ts";
 import { type Dialog, type DialogRow, showDialog } from "./dialogs.ts";
-import { TASK_GROUPS, TASK_SORTS, type TaskFilter, type TaskGroup, type TaskSort } from "./preferences.ts";
 import type { Reader, ReaderCodeBlock, ReaderLink } from "./reader.ts";
-import type { TaskPanel, ThemeControl, TuiSession } from "./session.ts";
-import { BUNDLED_THEME_NAMES, type ResolvedTheme, type ThemeSource } from "./theme.ts";
-import { filterChips, filterCounts, STATUS_MARK, tagLabel } from "./workspace.ts";
+import type { TaskPanel, TuiSession } from "./session.ts";
+import { completeConfig, runConfig } from "./settings.ts";
+import { filterChips, filterCounts, STATUS_MARK, type TaskFilter, tagLabel } from "./workspace.ts";
 
 /** Input the user must correct: shown as an error message, nothing changes. */
 export class CommandError extends Error {}
@@ -596,63 +597,6 @@ function openOrderPicker(session: TuiSession, start: "sort" | "group"): void {
       if (via !== "space") dialog.finish();
     },
   });
-}
-
-// ---------- :set ----------
-
-interface SessionOption {
-  readonly label: string;
-  get(session: TuiSession): boolean;
-  set(session: TuiSession, value: boolean): void;
-}
-
-const OPTIONS: Readonly<Record<string, SessionOption>> = {
-  done: {
-    label: "show done tasks",
-    get: s => s.includeDone,
-    set: (s, v) => s.setIncludeDone(v),
-  },
-  tasks: {
-    label: "show the task list",
-    get: s => s.taskListVisible,
-    set: (s, v) => s.setTaskListVisible(v),
-  },
-  number: {
-    label: "source line numbers in Read and the Split preview",
-    get: s => s.lineNumbers,
-    set: (s, v) => s.setLineNumbers(v),
-  },
-};
-
-const OPTION_WORDS = Object.keys(OPTIONS)
-  .flatMap(name => [name, `${name}!`, `no${name}`])
-  .sort();
-
-function runSet(session: TuiSession, argument: string): void {
-  const names = Object.keys(OPTIONS);
-  if (argument === "") {
-    const state = names.map(n => ((OPTIONS[n] as SessionOption).get(session) ? n : `no${n}`)).join(" ");
-    session.notify("info", `Options: ${state} (:set <name>, no<name>, <name>! toggles, <name>? shows)`);
-    return;
-  }
-  const known = names.map(n => `${n} (${(OPTIONS[n] as SessionOption).label})`).join(" or ");
-  const plans = argument.split(/\s+/).map(token => {
-    const m = /^(no|inv)?([a-z]+)([!?])?$/.exec(token);
-    const name = m?.[2] ?? token.replace(/[!?]$/, "");
-    const option = m && Object.hasOwn(OPTIONS, name) ? OPTIONS[name] : undefined;
-    if (!m || option === undefined || (m[1] !== undefined && m[3] !== undefined)) {
-      throw new CommandError(`Unknown option "${name}": ${known}`);
-    }
-    return { name, option, prefix: m[1], suffix: m[3] };
-  });
-  for (const { name, option, prefix, suffix } of plans) {
-    if (suffix === "?") {
-      session.notify("info", `${name} (${option.label}): ${option.get(session) ? "on" : "off"}`);
-      continue;
-    }
-    const toggle = suffix === "!" || prefix === "inv";
-    option.set(session, toggle ? !option.get(session) : prefix !== "no");
-  }
 }
 
 // ---------- guarded writes ----------
@@ -1398,70 +1342,6 @@ function openTags(session: TuiSession): void {
   });
 }
 
-// ---------- themes ----------
-
-const THEME_SOURCE: Readonly<Record<ThemeSource, (theme: ResolvedTheme) => string>> = {
-  session: () => "your :theme choice (saved)",
-  cli: () => "--theme (this session only)",
-  config: () => "tui.toml theme pins it (:theme <name> replaces it; :theme auto removes it)",
-  appearance: t => `tui.toml theme_${t.appearance} for a ${t.appearance} terminal`,
-  default: t => `auto (a ${t.appearance} terminal)`,
-  colors: () => "auto (a 16-color terminal)",
-};
-
-/** Which precedence level chose the active theme, for the status line. */
-export function themeSourceText(theme: ResolvedTheme): string {
-  return `Theme ${theme.name} · ${THEME_SOURCE[theme.source](theme)}`;
-}
-
-function themeNames(session: TuiSession): string[] {
-  return session.themeControl?.choices().map(c => c.name) ?? [...BUNDLED_THEME_NAMES];
-}
-
-function requireThemes(session: TuiSession): ThemeControl {
-  const control = session.themeControl;
-  if (control === null) throw new CommandError("Themes need the terminal workspace");
-  return control;
-}
-
-function openThemePicker(session: TuiSession, control: ThemeControl): void {
-  const current = session.theme;
-  const inUse = current?.explicit ? current.name : "auto";
-  const choices = control.choices();
-  const rows: DialogRow[] = [
-    {
-      key: "auto",
-      label: "auto",
-      detail: `follow the terminal (light or dark)${inUse === "auto" ? " · in use" : ""}`,
-    },
-    ...choices.map(c => ({ key: c.name, label: c.name, detail: `${c.source}${inUse === c.name ? " · in use" : ""}` })),
-  ];
-  showDialog(session, {
-    kind: "list",
-    title: current === null ? "THEME" : `THEME · ${current.name}: ${THEME_SOURCE[current.source](current)}`,
-    label: "theme",
-    pickLabel: "applies",
-    initial: inUse,
-    rows: () => rows,
-    highlight: row => {
-      if (row !== null) control.preview(row.key === "auto" ? null : row.key);
-    },
-    dismiss: () => control.restore(),
-    pick: (row, dialog: Dialog) => {
-      const theme = control.apply(row.key === "auto" ? null : row.key);
-      dialog.finish();
-      session.notify("info", themeSourceText(theme));
-    },
-  });
-}
-
-// ---------- :density ----------
-
-const DENSITY_HELP: Readonly<Record<Density, string>> = {
-  comfortable: "blank rows under the headers and above the status line (the default)",
-  compact: "no spacer rows: more rows for tasks and text",
-};
-
 // ---------- the reader: :heading, :links, :copy, :source ----------
 
 function requireReader(session: TuiSession): Reader {
@@ -1685,20 +1565,10 @@ export const COMMANDS: readonly CommandSpec[] = [
     group: "Task list",
     usage: ":sort [order | group none|lane|status]",
     description:
-      "Order the task list: id (the default), -id, title, -title, lane, status, priority, updated or -updated (- reverses; ties by id; a search ranks by relevance); :sort group lane or status puts a header with its count above each lane or status (j/k skip the headers), none is one list; bare :sort or :sort group opens the sort and group picker",
+      "Order the task list for this session: id (the default), -id, title, -title, lane, status, priority, updated or -updated (- reverses; ties by id; a search ranks by relevance); :sort group lane or status puts a header with its count above each lane or status (j/k skip the headers), none is one list; bare :sort or :sort group opens the sort and group picker; :config sort|group sets the default",
     complete: completeSort,
     describe: describeSort,
     run: runSort,
-  },
-  {
-    name: "set",
-    aliases: [],
-    group: "Workspace",
-    usage: ":set <option>",
-    description:
-      "Options: done (show done tasks), tasks (show the task list), number (source line numbers in Read and the Split preview); name, noname, name! toggles, name? shows; number is saved to tui.toml, done and tasks change this session only (tui.toml's done and tasks set how it starts)",
-    complete: (prefix, _session) => lastWord(prefix, OPTION_WORDS),
-    run: runSet,
   },
   {
     name: "new",
@@ -1936,47 +1806,6 @@ export const COMMANDS: readonly CommandSpec[] = [
     },
   },
   {
-    name: "theme",
-    aliases: [],
-    group: "Workspace",
-    usage: ":theme [name|auto]",
-    description:
-      "Pick a color theme with a live preview (Esc restores, Enter applies and saves it to tui.toml); auto removes tui.toml's theme and follows the terminal again",
-    complete: (prefix, session) => ["auto", ...themeNames(session)].filter(n => n.startsWith(prefix)),
-    run: (session, argument) => {
-      const control = requireThemes(session);
-      if (argument === "") {
-        openThemePicker(session, control);
-        return;
-      }
-      if (argument !== "auto" && !control.choices().some(c => c.name === argument)) {
-        const names = control
-          .choices()
-          .map(c => c.name)
-          .join(", ");
-        throw new CommandError(`No theme "${argument}" (themes: ${names}; auto follows the terminal)`);
-      }
-      session.notify("info", themeSourceText(control.apply(argument === "auto" ? null : argument)));
-    },
-  },
-  {
-    name: "density",
-    aliases: [],
-    group: "Workspace",
-    usage: ":density [compact|comfortable]",
-    description:
-      "Set the spacing, saved as tui.toml's density: comfortable (the default) adds blank rows under the headers and above the status line; compact fits more rows; bare toggles. A terminal cannot set its font size: use its zoom keys",
-    complete: prefix => DENSITIES.filter(d => d.startsWith(prefix)),
-    describe: argument => (isDensity(argument) ? DENSITY_HELP[argument] : undefined),
-    run: (session, argument) => {
-      const density = argument !== "" ? argument : session.density === "compact" ? "comfortable" : "compact";
-      if (!isDensity(density))
-        throw new CommandError("Usage: :density [compact|comfortable] (a bare :density toggles)");
-      if (session.setDensity(density)) session.notify("info", `Density: ${density} (saved)`);
-      else session.notify("warn", `Density: ${density} (this session only: it could not be saved, see :messages)`);
-    },
-  },
-  {
     name: "help",
     aliases: ["h"],
     group: "Workspace",
@@ -2022,6 +1851,16 @@ export const COMMANDS: readonly CommandSpec[] = [
     },
   },
   {
+    name: "config",
+    aliases: [],
+    group: "Workspace",
+    usage: ":config [setting [value]]",
+    description:
+      "Settings, saved to tui.toml: the pane (Enter changes a row, x restores its default, agent integrations install or reset); :config <setting> toggles or picks; :config <setting> <value|default> sets it",
+    complete: completeConfig,
+    run: runConfig,
+  },
+  {
     name: "suspend",
     aliases: [],
     group: "Workspace",
@@ -2037,11 +1876,11 @@ export const COMMANDS: readonly CommandSpec[] = [
     aliases: ["r"],
     group: "Document",
     usage: ":read",
-    description: "Read mode: the rendered document (saved as your preferred mode)",
+    description: "Read mode: the rendered document, for this session; :config mode sets the default",
     run: (session, argument) => {
       noArgument("read", argument);
       session.setDocumentMode("read");
-      session.notify("info", "Read mode (your preferred mode now)");
+      session.notify("info", "Read mode (for this session; :config mode sets the default)");
     },
   },
   {
@@ -2049,11 +1888,11 @@ export const COMMANDS: readonly CommandSpec[] = [
     aliases: ["e"],
     group: "Document",
     usage: ":edit",
-    description: "Edit mode: the document editor, i types in it (saved as your preferred mode)",
+    description: "Edit mode: the document editor, i types in it, for this session; :config mode sets the default",
     run: (session, argument) => {
       noArgument("edit", argument);
       session.setDocumentMode("edit");
-      session.notify("info", "Edit mode (your preferred mode now): i types in the editor");
+      session.notify("info", "Edit mode (for this session): i types in the editor");
     },
   },
   {
@@ -2062,11 +1901,11 @@ export const COMMANDS: readonly CommandSpec[] = [
     group: "Document",
     usage: ":split",
     description:
-      "Split mode: the editor beside a preview; a narrow terminal shows one half at a time, Tab switches (saved as your preferred mode)",
+      "Split mode: the editor beside a preview; a narrow terminal shows one half at a time, Tab switches; for this session, :config mode sets the default",
     run: (session, argument) => {
       noArgument("split", argument);
       session.setDocumentMode("split");
-      session.notify("info", "Split mode (your preferred mode now): Tab moves between the halves");
+      session.notify("info", "Split mode (for this session): Tab moves between the halves");
     },
   },
   {

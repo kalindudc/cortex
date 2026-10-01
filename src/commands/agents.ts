@@ -29,7 +29,7 @@ const jsonArg = {
   description: "emit the result as JSON instead of the human lines",
 };
 
-type AgentsResult = {
+export type AgentsResult = {
   skills: { name: string; dir: string }[];
   extensions: { name: string; dir: string }[];
   skipped: { name: string; reason: string }[];
@@ -47,7 +47,8 @@ function prompt(question: string): Promise<string> {
   });
 }
 
-async function installAll(wipe: boolean): Promise<AgentsResult> {
+/** The skills, plus the pi extension when pi is present; `wipe` removes their dirs first. Shared with the TUI's :config. */
+export async function installAll(wipe: boolean): Promise<AgentsResult> {
   const result: AgentsResult = { skills: [], extensions: [], skipped: [] };
   const skills = listSkills();
   if (wipe) {

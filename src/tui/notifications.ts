@@ -19,7 +19,7 @@
 //   snapshot, a reconnect, a replay or a task.updated copy of a task that is
 //   (still) blocked. By default it flashes the status line; tui.toml
 //   `bell = true` also rings the terminal bell and `flash = false` silences
-//   the flash.
+//   the flash (:config changes both live, through configure).
 // - Every untrusted string (titles, messages, authors, errors) is escaped by
 //   the dialog (src/tui/safety.ts) or the status line before style().
 
@@ -78,6 +78,12 @@ export class Notifications {
 
   get bell(): boolean {
     return this.#bell;
+  }
+
+  /** :config flash / bell: this session follows the new values at once. */
+  configure(options: { readonly flash?: boolean; readonly bell?: boolean }): void {
+    if (options.flash !== undefined) this.#flash = options.flash;
+    if (options.bell !== undefined) this.#bell = options.bell;
   }
 
   /** The ordered feed (memoized per input). */

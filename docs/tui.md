@@ -2,7 +2,7 @@
 budget: 200
 sources: [src/tui/app.ts, src/tui/session.ts, src/tui/commands.ts, src/tui/keys.ts, src/tui/config.ts, src/tui/theme.ts,
   src/tui/help.ts, src/tui/drafts.ts, src/tui/reader.ts, src/tui/diagram.ts, src/tui/safety.ts, src/tui/mouse.ts,
-  src/tui/dialogs.ts, src/tui/preferences.ts, src/lib/refGrammar.ts, src/lib/catalogSearch.ts]
+  src/tui/dialogs.ts, src/tui/preferences.ts, src/tui/settings.ts, src/lib/refGrammar.ts, src/lib/catalogSearch.ts]
 ---
 # The terminal workspace
 
@@ -66,8 +66,8 @@ bell = true
 mouse = false
 ```
 
-The bundled themes follow your terminal's light or dark appearance. `:theme` picks one with a live preview and
-writes it to tui.toml; `:theme auto` removes it and follows the terminal again. A custom theme is
+The bundled themes follow your terminal's light or dark appearance. `:config theme` picks one with a live preview
+and writes it to tui.toml; `:config theme auto` removes it and follows the terminal again. A custom theme is
 `themes/<name>.toml` in the same directory, usually extending a bundled theme and overriding a few colors:
 
 ```toml
@@ -76,14 +76,14 @@ accent = "#ffb86c"
 status.blocked = "#ff7b72"
 ```
 
-Settings you change in the workspace are written back to tui.toml: `:theme`, `:density` and `:set number`. cortex
-changes only that setting's line, so your comments and layout stay as you wrote them. `:theme` and `:density` save at
-once; `:set number` saves a moment later, and when you quit. If tui.toml does not parse, cortex leaves it untouched,
-says so in `:messages`, and the change applies to that workspace only. The list filters `done` and `tasks` work the
-other way: set them in tui.toml to choose how every workspace starts; `:set done|tasks`, `;d` and `;e` change only
-the workspace you are in and are never saved. Settings are global; a profile (`--profile`) keeps only view state,
-such as the open panel, the list's sort and grouping, and each database's last task and filters. Theme files are
-never written. A mistake in either file keeps that entry's default and is listed in `:messages`.
+`:config` is where you change a default: it lists every setting by section (Enter changes one, `x` restores its
+default) and writes only that line of tui.toml, at once, keeping your comments and layout; `:config <setting> <value>`
+does the same from the command line. The mouse and the colors apply at the next start, the rest at once. Commands and
+shortcuts (filters, the search, `:sort`, Read/Edit/Split, `;d` for done tasks, `;e` for the task list) last only for
+the workspace you are in. `scroll` sets how far one wheel notch moves in every pane. Settings are global; a profile
+(`--profile`) keeps only each database's last task. The pane also installs or resets the agent integrations, as
+`cortex agents install|reset` does. cortex leaves a tui.toml that does not parse untouched, and a mistake in it or a
+theme file keeps that entry's default; `:messages` lists both.
 
 ## Limits
 
@@ -118,23 +118,22 @@ user's keys and `src/tui/help.ts` only wraps and searches. A new entry needs no 
 
 `src/tui/config.ts#loadConfig` validates each section on its own, and file content never makes it throw. A custom
 theme (`src/tui/theme.ts#loadCustomTheme`) must set every token or extend one bundled theme; bundled names win,
-errors reject it, low contrast only warns. `src/tui/theme.ts#resolveTheme` picks the theme: `:theme` in this session,
-then `--theme`, then tui.toml's `theme`, then `theme_dark`/`theme_light` by appearance, then the bundled pair.
+errors reject it, low contrast only warns. `src/tui/theme.ts#resolveTheme` picks the theme: `:config theme` in this
+session, then `--theme`, then tui.toml's `theme`, then `theme_dark`/`theme_light` by appearance, then the bundled pair.
 
-`src/tui/config.ts#saveSettings` writes tui.toml's `src/tui/config.ts#WRITABLE_SETTINGS`. It re-reads the file,
-adds, replaces or removes only those top-level `key = value` lines, and renames a private temp file over the file
-(over a symlink's target, so a dotfiles link stays a link). A guard parses the result and refuses it unless exactly
-those keys changed, so an edit never lands inside a multi-line string. The session queues setting changes and
-`src/tui/session.ts#savePreferences` writes them with the view state; a refused write stays queued for the next
-save. The per-profile view state (`src/tui/preferences.ts#openPreferences`), keyed per database, merges this
-session's changes over a fresh read and renames a private temp file too (no lock; the narrow race is accepted).
-At startup, before tui.toml is read, `src/tui/preferences.ts#migrateSettings` moves the theme, density and line
-numbers an older view-state file still holds into tui.toml, unless tui.toml already sets them; its old include-done
-and task-list fields are dropped, never moved, because `done` and `tasks` are startup filters only you write.
+`src/tui/config.ts#saveSettings` writes tui.toml's `src/tui/config.ts#WRITABLE_SETTINGS`. It re-reads the file, adds,
+replaces or removes only those top-level `key = value` lines, and renames a private temp file over the file (over a
+symlink's target, so a dotfiles link stays a link). A guard parses the result and refuses it unless exactly those keys
+changed, so an edit never lands inside a multi-line string. The `:config` pane (`src/tui/settings.ts`) saves through
+`src/tui/session.ts#saveSetting`, then applies a live setting: a refused change never shows. The per-profile view state
+(`src/tui/preferences.ts#openPreferences`) keeps each database's last task, merged over a fresh read and renamed from a
+private temp file too (no lock; the narrow race is accepted). Before tui.toml is read,
+`src/tui/preferences.ts#migrateSettings` moves the theme, density, line numbers, mode, sort and grouping an older
+view-state file still holds into tui.toml, unless tui.toml sets them; the rest of its old view is dropped.
 
-Why not rewrite tui.toml with `Bun.TOML.stringify`? It drops every comment. Why not a TOML library? Five scalar
-lines do not need a dependency when a parse-equality guard catches a misplaced edit. Why not per-profile settings,
-or a copy in both files? One home per setting keeps the file you edit, `:help` and the screen in agreement.
+Why not rewrite tui.toml with `Bun.TOML.stringify`? It drops every comment. Why not a TOML library? A parse-equality
+guard already catches a misplaced edit. Why not per-profile settings, or a copy in both files? One home per setting
+keeps tui.toml, `:help` and the screen in agreement. Why not save a command's change? The last to quit would win.
 
 ### Drafts and guarded writes
 
@@ -165,13 +164,13 @@ or terminal images? One needs a browser DOM, the other a graphics terminal, and 
 ### Mouse and pickers
 
 `src/tui/mouse.ts#parseMouse` is the one parser, and `src/tui/mouse.ts#filterMouseInput` drops unsupported reports
-before the toolkit sees them. The Shell turns tracking on (`src/tui/mouse.ts#MOUSE_ON`) once it holds the terminal
-and off on every path that gives it back. The toolkit's own mouse stays off: it would ask for any-motion tracking,
-which nothing needs. A mouse selection is the keys' vi VISUAL selection, not a second model. The lane and tag pickers
-search with `src/lib/catalogSearch.ts#searchCatalog`: every entry for an empty query, else every case-insensitive
-match of all the words, in the caller's order, so every lane and tag stays reachable. `src/tui/dialogs.ts#paneBox`
-sizes every centred pane; the Shell draws help and `:messages` into its frame. Why not an overlay? It would need
-showing and hiding on every view change, and it would swallow the wheel.
+before the toolkit sees them. The Shell turns tracking on (`src/tui/mouse.ts#MOUSE_ON`) once it holds the terminal and
+off on every path that gives it back. The toolkit's own mouse stays off: it would ask for any-motion tracking, which
+nothing needs. A mouse selection is the keys' vi VISUAL selection, not a second model; a wheel notch counts once
+(`src/tui/mouse.ts#WheelNotches`). The lane and tag pickers search with `src/lib/catalogSearch.ts#searchCatalog`: every
+entry for an empty query, else every case-insensitive match of all the words, in the caller's order, so every lane and
+tag stays reachable. `src/tui/dialogs.ts#paneBox` sizes every centred pane; the Shell draws help and `:messages` into
+its frame. Why not an overlay? It would need showing and hiding on every view change, and it would swallow the wheel.
 
 ## Rules to keep
 
@@ -182,10 +181,11 @@ showing and hiding on every view change, and it would swallow the wheel.
   never patch state from their answer: `test/unit/tui/session.test.ts`.
 - Reference lists live only in their source, never in README or docs. `test/unit/tui/commands.test.ts` holds a
   FIXED command list, deliberately not derived from the registry, so removing a capability fails a test.
-- Themes are never written; tui.toml is written only by `src/tui/config.ts#saveSettings`, which changes only the
-  requested top-level lines and never writes a file that does not parse; an invalid section keeps ALL its defaults
-  and is reported; the view state holds known fields only, never drafts or settings: `test/unit/tui/config.test.ts`,
-  `test/unit/tui/theme.test.ts`, `test/unit/tui/preferences.test.ts`, `test/unit/tui/session.test.ts`.
+- Themes are never written; tui.toml only by `src/tui/settings.ts` and `migrateSettings`, through
+  `src/tui/config.ts#saveSettings` (only the requested top-level lines, never into an unparsable file); an invalid
+  section keeps ALL its defaults and is reported; the view state holds only each database's last task:
+  `test/unit/tui/settings.test.ts`, `test/unit/tui/config.test.ts`, `test/unit/tui/theme.test.ts`,
+  `test/unit/tui/preferences.test.ts`, `test/unit/tui/session.test.ts`.
 - Drafts save only through guarded versioned writes; a conflict keeps both versions; "saved" means acknowledged,
   never merely sent: `test/unit/tui/drafts.test.ts`.
 - Tag changes are add/remove deltas, never a whole-list replacement, and never delete a tag definition; TUI status

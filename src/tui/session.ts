@@ -17,12 +17,12 @@
 //   the resolved theme, messages and the connection state. Selection
 //   survives the filters that hide it; only explicit calls move focus.
 // - The `:` commands come from ONE registry (src/tui/commands.ts).
-// - View preferences persist through src/tui/preferences.ts: the list's
-//   order and grouping (:sort) globally; the last task, the search and the filter slots
-//   per database UUID. The settings `:theme`, `:density` and `:set number`
-//   are written to tui.toml (src/tui/config.ts saveSettings), whose values at
-//   startup are the session's settings. tui.toml's `done` and `tasks` only set
-//   how the session starts: toggling them is never saved anywhere.
+// - Only the last task persists, per database UUID (src/tui/preferences.ts).
+//   Everything a command or shortcut changes (filters, the search, sort,
+//   grouping, Read/Edit/Split, the panel, done tasks, the task list) lasts
+//   for the session: tui.toml's values at startup are its settings, and the
+//   :config pane (src/tui/settings.ts) is the one writer of tui.toml
+//   (saveSetting), applying a live setting only after the write succeeded.
 // - Input takes ONE route whichever component the toolkit focuses: the open
 //   `:`/`/` prompt, then the top dialog (src/tui/dialogs.ts; a stack of
 //   overlays shown through the shell's overlay host), then the workspace's
@@ -55,7 +55,7 @@
 //   focus (Read, or the Split preview half) `/` and n/N search the rendered
 //   document instead of the list; a jump (a task, a heading, `{`/`}`) records
 //   where the document was read, so :back/:forward return there; a heading
-//   jump from Edit shows Read for that task only (the saved mode stays), and
+//   jump from Edit shows Read for that task only (the session's mode stays), and
 //   the launch --heading belongs to its task until another is
 //   selected. @id references clear the filters and jump; #tag references set
 //   the tag filter. Copies are explicit OSC 52 writes to the shell's terminal.
@@ -100,17 +100,19 @@ import { createDocumentEditor, createEditorState, type DocumentEditor, editorTex
 import type { Help } from "./help.ts";
 import { createKeyDispatcher, type KeyConfig, type KeyDispatcher, type KeyEvent, type KeyMode } from "./keys.ts";
 import { WheelNotches } from "./mouse.ts";
-import type {
-  DocumentMode,
-  PreferenceSession,
-  TaskFilter,
-  TaskGroup,
-  TaskSort,
-  ViewPreferences,
-} from "./preferences.ts";
+import type { PreferenceSession } from "./preferences.ts";
 import type { Reader } from "./reader.ts";
 import { osc52Copy } from "./safety.ts";
-import { DEFAULT_CONFIG, type Density, type SettingChanges, saveSettings, type TuiConfig } from "./config.ts";
+import {
+  DEFAULT_CONFIG,
+  type Density,
+  type DocumentMode,
+  saveSettings,
+  type TaskGroup,
+  type TaskSort,
+  type TuiConfig,
+  type WritableSetting,
+} from "./config.ts";
 import type { ResolvedTheme } from "./theme.ts";
 import {
   appendTagFilter,
@@ -120,6 +122,7 @@ import {
   moveWithin,
   NO_FILTER,
   selectWorkspace,
+  type TaskFilter,
   type WorkspaceSelection,
   type WorkspaceView,
   withSelection,
@@ -401,7 +404,7 @@ export interface ThemeChoice {
   readonly source: "bundled" | "custom";
 }
 
-/** The shell's theme controls for `:theme` (resolution inputs live in the shell). */
+/** The shell's theme controls for `:config theme` (resolution inputs live in the shell). */
 export interface ThemeControl {
   /** Bundled, then custom themes. */
   choices(): readonly ThemeChoice[];
@@ -409,7 +412,7 @@ export interface ThemeControl {
   preview(name: string | null): void;
   /** Back to the theme shown before the previews. */
   restore(): void;
-  /** Apply and SAVE an explicit choice; null clears the saved choice and every session override (auto). */
+  /** Apply for this session (the :config pane saves it first); null clears every session override (auto). */
   apply(name: string | null): ResolvedTheme;
 }
 
@@ -427,8 +430,8 @@ export interface SessionOptions {
   keys: KeyConfig;
   preferences: PreferenceSession;
   /** tui.toml's settings at startup (each defaults to DEFAULT_CONFIG's). */
-  settings?: Partial<Pick<TuiConfig, "density" | "done" | "tasks" | "number">>;
-  /** Where setting changes are written (runTui: tuiConfigPath()); omitted, they apply to this session only. */
+  settings?: Partial<Pick<TuiConfig, "density" | "done" | "tasks" | "number" | "scroll" | "sort" | "group" | "mode">>;
+  /** The tui.toml :config writes (runTui: tuiConfigPath()); omitted, no setting can be saved. */
   configFile?: string;
   /** A client for another instance at the same endpoint (after the daemon restarted); verified before use. */
   connect?: (instanceId: string) => CortexClient;
@@ -492,7 +495,7 @@ export class TuiSession {
   readonly #options: SessionOptions;
   readonly #schedule: (fn: () => void, ms: number) => () => void;
   readonly #now: () => number;
-  /** The wheel in notches for what moves one item a notch (src/tui/mouse.ts). */
+  /** The wheel in notches, for every pane (src/tui/mouse.ts). */
   readonly #wheel: WheelNotches;
 
   // shared data
@@ -549,8 +552,10 @@ export class TuiSession {
   #lineNumbers: boolean;
   #sort: TaskSort;
   #group: TaskGroup;
-  /** The effective spacing: tui.toml's `density` (or this session's `:density`), else comfortable. */
+  /** The effective spacing: tui.toml's `density` (or :config's change), else comfortable. */
   #density: Density;
+  /** The rows or list items one wheel notch moves: tui.toml's `scroll`. */
+  #scrollRows: number;
   #query = "";
   #filter: TaskFilter = NO_FILTER;
   #theme: ResolvedTheme | null = null;
@@ -574,8 +579,6 @@ export class TuiSession {
   #warnings = 0;
   #messageId = 0;
   #cancelSave: (() => void) | null = null;
-  /** Setting changes not yet written to tui.toml (the next save writes them; a refused write keeps them). */
-  #pendingSettings: SettingChanges = {};
   #disposed = false;
   #dialogs: SessionDialog[] = [];
   #overlayHost: OverlayHost | null = null;
@@ -632,15 +635,15 @@ export class TuiSession {
     this.#wheel = new WheelNotches(this.#now);
     this.keys = createKeyDispatcher(options.keys);
     this.commands = options.commands ?? COMMANDS;
-    const view = options.preferences.view();
     const settings = { ...DEFAULT_CONFIG, ...options.settings };
     this.#taskList = settings.tasks;
     this.#includeDone = settings.done;
     this.#lineNumbers = settings.number;
-    this.#sort = view.sort;
-    this.#group = view.group;
+    this.#sort = settings.sort;
+    this.#group = settings.group;
     this.#density = settings.density;
-    this.#preferredMode = view.mode;
+    this.#scrollRows = settings.scroll;
+    this.#preferredMode = settings.mode;
     this.#draftScheduler = {
       schedule: (fn, ms) => this.#schedule(fn, ms),
       clear: cancel => {
@@ -1143,45 +1146,37 @@ export class TuiSession {
     return this.#taskList;
   }
 
-  /** `:set number`: Read and the Split preview show each block's source line (tui.toml's `number`). */
+  /** Read and the Split preview show each block's source line (tui.toml's `number`). */
   get lineNumbers(): boolean {
     return this.#lineNumbers;
   }
 
+  /** For this session (:config number saves it first). */
   setLineNumbers(value: boolean): void {
     if (this.#lineNumbers === value) return;
     this.#lineNumbers = value;
-    // Written to tui.toml by the next (debounced) save.
-    this.#pendingSettings = { ...this.#pendingSettings, number: value };
-    this.#saveLater();
     this.#changed();
   }
 
-  /** The task list's order without a search (`:sort`, a global view preference). */
+  /** The task list's order without a search (`:sort`, for this session; tui.toml's `sort` starts it). */
   get sort(): TaskSort {
     return this.#sort;
   }
 
-  /** The task list's grouping without a search (`:sort group`, a global view preference). */
+  /** The task list's grouping without a search (`:sort group`, for this session; tui.toml's `group` starts it). */
   get group(): TaskGroup {
     return this.#group;
   }
 
-  /** The spacing (`:density`): comfortable (the default) or compact. */
+  /** The spacing (tui.toml's `density`): comfortable (the default) or compact. */
   get density(): Density {
     return this.#density;
   }
 
-  /**
-   * `:density` — an explicit choice: shown at once and saved now as
-   * tui.toml's `density`. False when the save failed (reported): the choice
-   * still holds for this session.
-   */
-  setDensity(density: Density): boolean {
+  /** For this session (:config density saves it first). */
+  setDensity(density: Density): void {
     this.#density = density;
-    this.#pendingSettings = { ...this.#pendingSettings, density };
     this.#changed();
-    return this.savePreferences();
   }
 
   /** This session's list view (input of src/tui/workspace.ts selectWorkspace). */
@@ -1258,7 +1253,7 @@ export class TuiSession {
     if (this.#heading !== null && this.#heading.taskId !== id) this.#heading = null;
     this.#selectedId = id;
     this.#selectionSeeded = true;
-    this.#setDatabasePreference("lastTask", id);
+    this.#setLastTask(id);
     if (this.#preferredMode !== "read") void this.openDocument(id);
     this.#changed();
   }
@@ -1425,11 +1420,10 @@ export class TuiSession {
     const next = query.trim();
     if (next === this.#query) return;
     this.#query = next;
-    this.#setDatabasePreference("query", next);
     this.#changed();
   }
 
-  /** Replace the filter slots (persisted per database). */
+  /** Replace the filter slots (for this session only). */
   setFilter(filter: TaskFilter): void {
     const next: TaskFilter = { status: filter.status, lane: filter.lane, tags: [...filter.tags] };
     const cur = this.#filter;
@@ -1442,7 +1436,6 @@ export class TuiSession {
       return;
     }
     this.#filter = next;
-    this.#setDatabasePreference("filter", next);
     this.#changed();
   }
 
@@ -1465,19 +1458,17 @@ export class TuiSession {
     this.#changed();
   }
 
-  /** `:sort` — the list's order without a search (a global view preference). */
+  /** `:sort` — the list's order without a search, for this session (:config sort sets the default). */
   setSort(sort: TaskSort): void {
     if (this.#sort === sort) return;
     this.#sort = sort;
-    this.#setViewPreference("sort", sort);
     this.#changed();
   }
 
-  /** `:sort group` — the list's grouping without a search (a global view preference). */
+  /** `:sort group` — the list's grouping without a search, for this session (:config group sets the default). */
   setGroup(group: TaskGroup): void {
     if (this.#group === group) return;
     this.#group = group;
-    this.#setViewPreference("group", group);
     this.#changed();
   }
 
@@ -1498,7 +1489,7 @@ export class TuiSession {
     const target = this.#options.initialTask ?? null;
     if (heading !== null && target !== null && this.#selectedId === target) {
       // `cortex tui <id> --heading <slug>` asks to read there: the rendered document gets the focus
-      // (a temporary Read from Edit, the preview half in Split; the saved preference stays).
+      // (a temporary Read from Edit, the preview half in Split; the session's mode stays).
       this.#heading = { taskId: target, slug: heading };
       this.#focus = "document";
       if (this.#preferredMode === "edit") this.#temporary = { taskId: target, mode: "read" };
@@ -1506,11 +1497,10 @@ export class TuiSession {
     }
   }
 
-  /** This database's saved search and filter slots. */
+  /** A database's list starts unfiltered: filters never outlive a session, nor a replaced database. */
   #restoreDatabaseView(): void {
-    const saved = this.#databasePreferences();
-    this.#query = saved?.query ?? "";
-    this.#filter = saved?.filter ?? NO_FILTER;
+    this.#query = "";
+    this.#filter = NO_FILTER;
   }
 
   // ---------- focus, views and scroll ----------
@@ -1583,13 +1573,24 @@ export class TuiSession {
   }
 
   /**
-   * One wheel report's step for what moves one item a notch (the task list,
-   * a dialog's rows and fields): its direction when it starts a notch, 0 for
-   * the notch's other reports (a terminal may send several for one notch:
-   * src/tui/mouse.ts WheelNotches).
+   * One wheel report's step: its direction when it starts a notch, 0 for the
+   * notch's other reports (a terminal may send several for one notch:
+   * src/tui/mouse.ts WheelNotches). Every pane moves `step * scrollRows`
+   * (a form, one field a step).
    */
   wheelNotch(delta: number): number {
     return this.#wheel.step(delta);
+  }
+
+  /** The rows or list items one wheel notch moves, in every pane (tui.toml's `scroll`). */
+  get scrollRows(): number {
+    return this.#scrollRows;
+  }
+
+  /** For this session (:config scroll saves it first). */
+  setScrollRows(rows: number): void {
+    this.#scrollRows = rows;
+    this.#changed();
   }
 
   closeView(): void {
@@ -1667,19 +1668,13 @@ export class TuiSession {
     this.#changed();
   }
 
-  /** The shell's theme controls (`:theme`); null without a shell. */
+  /** The shell's theme controls (`:config theme`); null without a shell. */
   get themeControl(): ThemeControl | null {
     return this.#themeControl;
   }
 
   setThemeControl(control: ThemeControl | null): void {
     this.#themeControl = control;
-  }
-
-  /** Save the explicit `:theme` choice now as tui.toml's `theme`; null (auto) removes it. */
-  saveThemeChoice(name: string | null): void {
-    this.#pendingSettings = { ...this.#pendingSettings, theme: name };
-    this.savePreferences();
   }
 
   // ---------- the document reader and the clipboard ----------
@@ -1742,7 +1737,7 @@ export class TuiSession {
 
   /**
    * Show the current task's rendered document with the keyboard on it (a
-   * heading jump): from Edit, Read for this task only (the saved preference
+   * heading jump): from Edit, Read for this task only (the session's mode
    * stays); in Split, the preview half.
    */
   revealReader(): void {
@@ -2200,14 +2195,14 @@ export class TuiSession {
 
   // ---------- documents: modes, drafts and editors ----------
 
-  /** The saved Read/Edit/Split preference. */
+  /** The session's Read/Edit/Split mode (tui.toml's `mode` starts it). */
   get preferredMode(): DocumentMode {
     return this.#preferredMode;
   }
 
   /**
    * The mode shown for the current task: a temporary one (Edit after `i` from
-   * Read, Read after a heading jump from Edit) or the saved preference.
+   * Read, Read after a heading jump from Edit) or the session's mode.
    */
   documentMode(): DocumentMode {
     const id = this.selectedTask()?.id ?? null;
@@ -2215,15 +2210,11 @@ export class TuiSession {
     return id !== null && temporary !== null && temporary.taskId === id ? temporary.mode : this.#preferredMode;
   }
 
-  /** :read / :edit / :split and their leader keys: the ONLY way the saved preference changes. */
+  /** :read / :edit / :split and their leader keys (and :config mode): the ONLY way the session's mode changes. */
   setDocumentMode(mode: DocumentMode): void {
     this.#temporary = null;
     this.#panel = "document";
-    if (this.#preferredMode !== mode) {
-      this.#preferredMode = mode;
-      this.#options.preferences.setView("mode", mode);
-      this.#saveLater();
-    }
+    this.#preferredMode = mode;
     if (mode === "split") this.#splitHalf = "editor";
     this.#settleInsert(); // Read hides the editor: its INSERT ends
     const task = this.selectedTask();
@@ -2866,20 +2857,12 @@ export class TuiSession {
     }
   }
 
-  #setDatabasePreference(key: "lastTask" | "query" | "filter", value: number | string | TaskFilter): void {
-    const db = this.#identity.databaseId;
+  #setLastTask(id: number): void {
     try {
-      if (key === "lastTask") this.#options.preferences.setDatabase(db, key, value as number);
-      else if (key === "query") this.#options.preferences.setDatabase(db, key, value as string);
-      else this.#options.preferences.setDatabase(db, key, value as TaskFilter);
+      this.#options.preferences.setDatabase(this.#identity.databaseId, "lastTask", id);
     } catch {
-      return;
+      return; // not a UUID-keyed database: nothing per-database is kept
     }
-    this.#saveLater();
-  }
-
-  #setViewPreference<K extends "sort" | "group">(key: K, value: ViewPreferences[K]): void {
-    this.#options.preferences.setView(key, value);
     this.#saveLater();
   }
 
@@ -2891,33 +2874,37 @@ export class TuiSession {
     }, SAVE_DELAY_MS);
   }
 
-  /**
-   * Save now: this session's changed view preferences into the profile's state file, then its pending
-   * setting changes into tui.toml (without a configFile they apply to this session only). False when
-   * either failed (reported); a refused setting stays pending, so the next save retries it.
-   */
+  /** Save now: this session's last task into the profile's state file. False when it failed (reported). */
   savePreferences(): boolean {
     this.#cancelSave?.();
     this.#cancelSave = null;
-    let saved = true;
     try {
       this.#options.preferences.save();
+      return true;
     } catch (err) {
-      this.notify("warn", `Could not save the view preferences: ${(err as Error).message}`);
-      saved = false;
+      this.notify("warn", `Could not save the view state: ${(err as Error).message}`);
+      return false;
     }
+  }
+
+  /** The tui.toml :config writes; undefined: no setting can be saved in this session. */
+  get configFile(): string | undefined {
+    return this.#options.configFile;
+  }
+
+  /**
+   * :config — write one tui.toml setting now (null removes its line: the default applies). Throws a
+   * CommandError, changing nothing, without a tui.toml or when the write is refused; a live setting is
+   * applied to this session only after this returned.
+   */
+  saveSetting(key: WritableSetting, value: string | number | boolean | null): void {
     const file = this.#options.configFile;
-    if (file === undefined) this.#pendingSettings = {};
-    else if (Object.keys(this.#pendingSettings).length > 0) {
-      try {
-        saveSettings(file, this.#pendingSettings);
-        this.#pendingSettings = {};
-      } catch (err) {
-        this.notify("warn", `Could not save ${file}: ${(err as Error).message} (the setting applies to this session)`);
-        saved = false;
-      }
+    if (file === undefined) throw new CommandError("Settings are not saved in this session: it has no tui.toml");
+    try {
+      saveSettings(file, { [key]: value });
+    } catch (err) {
+      throw new CommandError(`Could not save ${file}: ${errorText(err)}`);
     }
-    return saved;
   }
 
   /** The session's timer seam (coalescing windows; tests control it): returns a cancel function. */

@@ -27,7 +27,7 @@ import { DEFAULT_CONFIG, loadConfig, SETTING_HELP, type TuiConfig } from "../../
 import { Dialog } from "../../../src/tui/dialogs.ts";
 import { parseKeys } from "../../../src/tui/keys.ts";
 import { MOUSE_OFF, MOUSE_ON, WHEEL_NOTCH_MS } from "../../../src/tui/mouse.ts";
-import { openPreferences, readPreferences } from "../../../src/tui/preferences.ts";
+import { openPreferences } from "../../../src/tui/preferences.ts";
 import { TuiSession } from "../../../src/tui/session.ts";
 import { BUNDLED_THEME_NAMES, THEME_TOKENS } from "../../../src/tui/theme.ts";
 
@@ -983,11 +983,11 @@ describe("keys (N17/N18)", () => {
     type(h, "?");
     h.terminal.rows = 600; // the whole help in its box
     const rows = boxText(h);
-    const at = rows.findIndex(row => row.includes(":set <option>"));
-    expect(rows[at]).toContain("Options: done");
+    const at = rows.findIndex(row => row.includes(":config [setting [value]]"));
+    expect(rows[at]).toContain("Settings, saved to");
     // The rest of it continues on the next rows, indented to the description column (the margin, then 27 cells).
     const rest = rows.slice(at + 1, at + 6);
-    expect(rest.join(" ")).toContain("name? shows");
+    expect(rest.join(" ")).toContain("<value|default>");
     expect(rest[0]?.startsWith(" ".repeat(28))).toBe(true);
     expect(rest[0]?.[28]).not.toBe(" ");
     // No row is cut short any more.
@@ -1071,9 +1071,9 @@ describe("keys (N17/N18)", () => {
     type(h, ":", ..."frobnicate", "\r");
     await settle();
     expect(plain(h.shell.frame()).at(-2)).toContain("error: Unknown command :frobnicate");
-    type(h, ":", ..."set bogus", "\r");
+    type(h, ":", ..."config bogus", "\r");
     await settle();
-    expect(plain(h.shell.frame()).at(-2)).toContain('Unknown option "bogus"');
+    expect(plain(h.shell.frame()).at(-2)).toContain('Unknown setting "bogus"');
   });
 
   test("n/N step the search results; :open keeps the filters; Ctrl-o goes back", async () => {
@@ -1563,9 +1563,9 @@ describe("--heading, the reader keys and the mouse", () => {
         ...over,
       }) as never;
     // Row 0 is the list header, row 1 the order, row 2 the filter line, row 3 the (comfortable) spacer,
-    // then 1 Fix, 2 Hold, 3 Draft, 4 Wait (each title fits on its row).
+    // then 1 Fix, 2 Hold, 3 Draft, 4 Wait (each title fits on its row). One notch moves 3 rows (scroll).
     expect(h.shell.handleMouse(event({ type: "wheel", x: 5, y: 4, wheelDelta: 1 }))).toEqual({ handled: true });
-    expect(h.session.selectedId).toBe(2);
+    expect(h.session.selectedId).toBe(4);
     h.shell.handleMouse(event({ type: "click", button: "left", x: 5, y: 6 }));
     expect(h.session.selectedId).toBe(3);
     expect(h.session.focus).toBe("tasks");
@@ -1763,10 +1763,10 @@ describe("dialogs in the shell (Task 8 part B: N17/N19)", () => {
     expect(plain(h.shell.frame()).at(-2)).toContain("✓ saved");
   });
 
-  test(":theme previews live, Esc restores, Enter applies and SAVES to tui.toml; :theme auto removes it and every override", async () => {
+  test(":config theme previews live, Esc restores, Enter SAVES to tui.toml and applies; :config theme auto removes it and every override", async () => {
     const h = await started({ env: { TERM: "xterm-256color", COLORTERM: "truecolor" }, budgetMs: 10 });
     expect(h.shell.theme?.name).toBe("cortex-dark");
-    type(h, ":", ..."theme", "\r");
+    type(h, ":", ..."config theme", "\r");
     await settle();
     expect(h.session.dialog?.label).toBe("theme");
     type(h, "j", "j"); // auto -> cortex-dark -> cortex-light
@@ -1778,7 +1778,7 @@ describe("dialogs in the shell (Task 8 part B: N17/N19)", () => {
     expect(h.shell.theme?.source).toBe("default");
     expect(fs.existsSync(tomlPath())).toBe(false);
     expect(fs.existsSync(statePath())).toBe(false);
-    type(h, ":", ..."theme", "\r");
+    type(h, ":", ..."config theme", "\r");
     await settle();
     type(h, "j", "j", "\r");
     expect(h.session.dialog).toBeNull();
@@ -1786,20 +1786,20 @@ describe("dialogs in the shell (Task 8 part B: N17/N19)", () => {
     expect(loadConfig(tomlPath()).config.theme).toBe("cortex-light");
     if (fs.existsSync(statePath()))
       expect(JSON.parse(fs.readFileSync(statePath(), "utf8")).view).not.toHaveProperty("theme");
-    expect(h.session.status?.text).toMatch(/cortex-light.*:theme.*saved/);
-    type(h, ":", ..."theme auto", "\r");
+    expect(h.session.status?.text).toMatch(/cortex-light.*:config theme.*saved/);
+    type(h, ":", ..."config theme auto", "\r");
     await settle();
     expect(h.shell.theme).toMatchObject({ name: "cortex-dark", source: "default", explicit: false });
     expect(fs.readFileSync(tomlPath(), "utf8")).not.toMatch(/theme/);
   });
 
-  test(":theme auto drops --theme too (for this session) and removes a tui.toml pin", async () => {
+  test(":config theme auto drops --theme too (for this session) and removes a tui.toml pin", async () => {
     const h = await started({
       env: { TERM: "xterm-256color", COLORTERM: "truecolor" },
       cliTheme: "high-contrast-light",
     });
     expect(h.shell.theme?.source).toBe("cli");
-    type(h, ":", ..."theme auto", "\r");
+    type(h, ":", ..."config theme auto", "\r");
     await settle();
     expect(h.shell.theme?.source).toBe("default");
     fs.writeFileSync(tomlPath(), '# mine\ntheme = "high-contrast-dark"\n');
@@ -1808,7 +1808,7 @@ describe("dialogs in the shell (Task 8 part B: N17/N19)", () => {
       config: loadConfig(tomlPath()).config,
     });
     expect(pinned.shell.theme).toMatchObject({ name: "high-contrast-dark", source: "config" });
-    type(pinned, ":", ..."theme auto", "\r");
+    type(pinned, ":", ..."config theme auto", "\r");
     await settle();
     expect(pinned.shell.theme).toMatchObject({ source: "default", explicit: false });
     expect(fs.readFileSync(tomlPath(), "utf8")).toBe("# mine\n");
@@ -1819,7 +1819,7 @@ describe("the document editor in the shell (Task 9: N14/N17-N19)", () => {
   const statePath = () => path.join(dir, "tui", "default.state.json");
   const markers = (lines: string[]) => lines.join("\n").split(CURSOR_MARKER).length - 1;
 
-  test(";i ;s ;r switch Edit/Split/Read and save the preference; i from Read shows Edit without changing it", async () => {
+  test(";i ;s ;r switch Edit/Split/Read for this session; i from Read shows Edit without changing it", async () => {
     const h = await started();
     type(h, ";", "i");
     await settle();
@@ -1835,7 +1835,7 @@ describe("the document editor in the shell (Task 9: N14/N17-N19)", () => {
     expect(h.session.preferredMode).toBe("read");
     expect(screen(h)).toContain("READ");
     h.session.savePreferences();
-    expect(readPreferences(statePath()).preferences.view.mode).toBe("read");
+    expect(fs.existsSync(statePath()) ? fs.readFileSync(statePath(), "utf8") : "").not.toMatch(/mode|view/);
     type(h, "\t", "i");
     await settle();
     expect(h.session.keys.mode()).toBe("INSERT");
@@ -2489,19 +2489,24 @@ describe("the mouse, top level (N19: on by default, never the only path to an ac
   });
 
   test("the wheel scrolls the pane under the pointer, never the focused one", async () => {
+    let now = 1_000;
     const long = Array.from({ length: 80 }, (_, i) => `line ${i}`).join("\n\n");
-    const h = await ready({ tasks: [task(1, { title: "long", body: long }), task(2), task(3), task(4)] });
+    const h = await ready({
+      tasks: [task(1, { title: "long", body: long }), task(2), task(3), task(4)],
+      now: () => now,
+    });
     h.session.setFocus("tasks");
     wheel(h, find(h, "line 0"));
     expect(h.session.selectedTask()?.id).toBe(1); // the list did not move
     expect(h.session.docScroll(1)).toBeGreaterThan(0);
     h.session.setFocus("document");
+    now += WHEEL_NOTCH_MS; // a new notch
     wheel(h, find(h, "@3"));
-    expect(h.session.selectedTask()?.id).toBe(2); // the list under the pointer moved; the document had the focus
+    expect(h.session.selectedTask()?.id).toBe(4); // the list under the pointer moved 3 rows; the document had the focus
     expect(h.session.focus).toBe("document");
   });
 
-  test("one wheel notch moves one row (the task list, a dialog), however many reports the terminal sends for it", async () => {
+  test("one wheel notch moves scroll rows or items in every pane, however many reports the terminal sends for it", async () => {
     // Ghostty reports one notch as mouse-scroll-multiplier (3 by default) wheel reports, more while macOS
     // speeds a fast scroll up, and a multiplexer (Herdr) forwards each one: they arrive together.
     let now = 1_000;
@@ -2513,10 +2518,17 @@ describe("the mouse, top level (N19: on by default, never the only path to an ac
     const notch = (at: readonly [number, number], direction: 1 | -1 = 1) => {
       for (let i = 0; i < 3; i++) wheel(h, at, direction);
     };
-    // Scrolled text still takes every report (three rows each): the terminal chose the lines a notch.
+    // The document moves 3 rows a notch (tui.toml scroll's default), not 3 for each report.
     notch(find(h, "line 0"));
-    expect(h.session.docScroll(1)).toBe(9);
+    expect(h.session.docScroll(1)).toBe(3);
     const list = find(h, "@3");
+    now += WHEEL_NOTCH_MS;
+    notch(list);
+    expect(h.session.selectedTask()?.id).toBe(4);
+    notch(list, -1);
+    expect(h.session.selectedTask()?.id).toBe(1);
+    // scroll = 1: one item a notch.
+    h.session.setScrollRows(1);
     now += WHEEL_NOTCH_MS;
     notch(list);
     expect(h.session.selectedTask()?.id).toBe(2);
@@ -2721,8 +2733,8 @@ describe("the mouse, top level (N19: on by default, never the only path to an ac
     expect(h.session.dialog).toBe(dialog);
     expect(h.session.focus).toBe("tasks");
     type(h, "\x1b");
-    // A list whose rows are not toggles (:theme): a click highlights (its live preview), a double click picks.
-    type(h, ":", ..."theme", "\r");
+    // A list whose rows are not toggles (the theme picker): a click highlights (its live preview), a double click picks.
+    type(h, ":", ..."config theme", "\r");
     await rendered(h);
     const themes = h.session.dialog as unknown as Dialog;
     const light = themes.rowOnScreen("cortex-light") as [number, number];

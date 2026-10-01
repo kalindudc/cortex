@@ -15,9 +15,9 @@
 //   it, so an unsupported report can never be guessed into a click.
 // - Routing (which pane is under the pointer, clicks and their counts,
 //   drags) is the shell's (src/tui/app.ts) over the toolkit's dispatch.
-// - One wheel notch may arrive as several reports (WheelNotches): what moves
-//   one item a notch (the task list, :commands, a dialog) steps once for
-//   them; scrolled text takes every report.
+// - One wheel notch may arrive as several reports (WheelNotches): every pane
+//   steps once a notch, and a step moves tui.toml's `scroll` rows or items
+//   (a form, one field).
 
 import type { Terminal } from "@earendil-works/pi-tui";
 
@@ -105,17 +105,16 @@ export function parseMouse(data: string): MouseReport | IgnoredMouse | null {
 }
 
 /**
- * The wheel in notches, for what moves one item a notch (the task list, the
- * `:commands` list, a dialog's rows and fields). A terminal may report ONE
+ * The wheel in notches, for every pane (each moves `scroll` rows or items a
+ * notch: the task list, dialogs, the document, the reader, the editor, the
+ * panels, help and messages). A terminal may report ONE
  * notch as several wheel reports: Ghostty sends one per row its
  * mouse-scroll-multiplier (3 by default) makes of the notch, more while macOS
  * speeds a fast scroll up, and a multiplexer (Herdr, tmux) forwards each. So
  * a report starts a notch (its direction is the step) unless it follows the
  * notch's first report in the same direction within WHEEL_NOTCH_MS (no step).
  * The window runs from that first report, so a steady fast scroll still steps
- * once a window; the other direction starts a notch at once. Scrolled text
- * (the document, the reader, a panel, the editor) moves on every report: the
- * terminal chose how far a notch scrolls.
+ * once a window; the other direction starts a notch at once.
  */
 export class WheelNotches {
   #direction = 0;

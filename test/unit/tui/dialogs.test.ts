@@ -495,7 +495,7 @@ describe("forms", () => {
 });
 
 describe("the wheel", () => {
-  test("one notch moves one row (a list) or one field (a form), however many reports the terminal sends for it", () => {
+  test("one notch moves scroll rows (a list) or one field (a form), however many reports the terminal sends for it", () => {
     // Ghostty reports one notch as mouse-scroll-multiplier (3 by default) wheel reports; a multiplexer forwards each.
     let now = 1_000;
     const { session, type } = setup(undefined, () => now);
@@ -505,15 +505,22 @@ describe("the wheel", () => {
         expect(dialog.handleMouse(event as never)).toEqual({ handled: true });
       }
     };
-    const list = showDialog(session, listSpec());
+    const list = showDialog(session, listSpec({ rows: () => rows("r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7") }));
+    expect(session.scrollRows).toBe(3);
     notch(list.dialog);
-    expect(list.dialog.highlighted()?.key).toBe("beta");
+    expect(list.dialog.highlighted()?.key).toBe("r3");
     now += WHEEL_NOTCH_MS;
     notch(list.dialog);
-    expect(list.dialog.highlighted()?.key).toBe("gamma");
+    expect(list.dialog.highlighted()?.key).toBe("r6");
     notch(list.dialog, -1); // the other way is a new notch at once
-    expect(list.dialog.highlighted()?.key).toBe("beta");
+    expect(list.dialog.highlighted()?.key).toBe("r3");
+    // scroll = 1: one row a notch again.
+    session.setScrollRows(1);
+    now += WHEEL_NOTCH_MS;
+    notch(list.dialog);
+    expect(list.dialog.highlighted()?.key).toBe("r4");
     type("q");
+    session.setScrollRows(3); // a form still moves one field a notch
     const form = showDialog(
       session,
       formSpec({

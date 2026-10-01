@@ -49,7 +49,7 @@
 //   link shows only its text (OSC 8; :links lists its destination); a link
 //   cortex does not follow says where it points. Without color the structure
 //   stays in bold, dim, underline and the rules/bars themselves.
-// - `:set number` adds a gutter with each block's source line (every code
+// - tui.toml `number` adds a gutter with each block's source line (every code
 //   line and table row its own). The same map (rowOfSourceLine) lets the
 //   Split preview follow the editor's cursor (`Reader.editorCursor`): a
 //   scroll or jump in the preview detaches it until the cursor moves.
@@ -926,7 +926,7 @@ export interface DocumentLayout {
   readonly width: number;
   /** The raw-source view (:source). */
   readonly source: boolean;
-  /** Cells of the line-number gutter (:set number), 0 without it. */
+  /** Cells of the line-number gutter (tui.toml `number`), 0 without it. */
   readonly gutter: number;
   /** @internal */
   readonly rows: readonly Row[];

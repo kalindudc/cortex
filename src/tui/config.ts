@@ -1,5 +1,7 @@
 // tui.toml loader and writer. The file is user-authored:
-// cortex writes ONLY the top-level settings the TUI changes, surgically (saveSettings).
+// cortex writes ONLY top-level settings, surgically (saveSettings), through the
+// :config pane (src/tui/settings.ts) and the one-time migrateSettings.
+// The key tables stay hand-edited.
 //
 // Every section validates on its own: `leader`, `[keys.normal]`,
 // `[keys.leader]`, `[keys.insert]`, `[keys.visual]` (src/tui/keys.ts), and each top-level
@@ -33,11 +35,31 @@ export type Density = (typeof DENSITIES)[number];
 
 export const isDensity = (value: unknown): value is Density => (DENSITIES as readonly unknown[]).includes(value);
 
+/** The task list's orders (`:sort`): a leading `-` reverses one; ties always break by ascending id. */
+export const TASK_SORTS = [
+  "id",
+  "-id",
+  "title",
+  "-title",
+  "lane",
+  "status",
+  "priority",
+  "updated",
+  "-updated",
+] as const;
+export type TaskSort = (typeof TASK_SORTS)[number];
+/** The task list's groupings (`:sort group`): a header row per lane or status. */
+export const TASK_GROUPS = ["none", "lane", "status"] as const;
+export type TaskGroup = (typeof TASK_GROUPS)[number];
+/** The document modes (`:read`, `:edit`, `:split`). */
+export const DOCUMENT_MODES = ["read", "edit", "split"] as const;
+export type DocumentMode = (typeof DOCUMENT_MODES)[number];
+
 export interface TuiConfig {
   readonly keys: KeyConfig;
   /** Mouse support (optional; never the only path to an action). */
   readonly mouse: boolean;
-  /** `theme`: pins a theme for every session (an explicit choice); `:theme <name>` writes it, `:theme auto` removes it. */
+  /** `theme`: pins a theme for every session (an explicit choice); `:config theme` writes it, `:config theme auto` removes it. */
   readonly theme: string | null;
   /** `theme_dark` / `theme_light`: the pair used by appearance when no theme is explicit. */
   readonly themeDark: string | null;
@@ -47,21 +69,53 @@ export interface TuiConfig {
   /** Leave the `bg` surface to the terminal; its contrast cannot be verified. */
   readonly transparentBackground: boolean;
   /**
-   * `density` (`:density` writes it): `"comfortable"` adds blank rows under the headers and above the status
+   * `density`: `"comfortable"` adds blank rows under the headers and above the status
    * line, and margins at both ends of the status and hint lines; `"compact"` leaves them out.
    */
   readonly density: Density;
-  /** `done`: start with done tasks shown in the task list (`:set done` and `;d` change it for the session only). */
+  /** `done`: start with done tasks shown in the task list (`;d` changes it for the session only). */
   readonly done: boolean;
-  /** `tasks`: start with the task list shown (`:set tasks` and `;e` change it for the session only). */
+  /** `tasks`: start with the task list shown (`;e` changes it for the session only). */
   readonly tasks: boolean;
-  /** `number`: source line numbers in Read and the Split preview (`:set number`). */
+  /** `number`: source line numbers in Read and the Split preview. */
   readonly number: boolean;
   /** Flash the status line when a task becomes blocked. */
   readonly flash: boolean;
   /** Also ring the terminal bell when a task becomes blocked (opt-in). */
   readonly bell: boolean;
+  /** `scroll`: the rows or list items one wheel notch moves, in every pane (1 to 20). */
+  readonly scroll: number;
+  /** `sort`: the task list's order at start (`:sort` changes it for the session only). */
+  readonly sort: TaskSort;
+  /** `group`: the task list's grouping at start (`:sort group` changes it for the session only). */
+  readonly group: TaskGroup;
+  /** `mode`: the document mode at start (`:read`, `:edit` and `:split` change it for the session only). */
+  readonly mode: DocumentMode;
 }
+
+/** Every top-level setting :config writes (tui.toml keys; `leader` stays with the hand-edited key tables). */
+export const WRITABLE_SETTINGS = [
+  "mouse",
+  "theme",
+  "theme_dark",
+  "theme_light",
+  "appearance",
+  "colors",
+  "transparent_background",
+  "density",
+  "flash",
+  "bell",
+  "done",
+  "tasks",
+  "number",
+  "scroll",
+  "sort",
+  "group",
+  "mode",
+] as const;
+export type WritableSetting = (typeof WRITABLE_SETTINGS)[number];
+/** tui.toml values by key; null removes the line (the setting's default applies). */
+export type SettingChanges = { readonly [K in WritableSetting]?: string | number | boolean | null };
 
 export interface ConfigProblem {
   readonly file: string;
@@ -85,6 +139,10 @@ export const DEFAULT_CONFIG: TuiConfig = {
   number: false,
   flash: true,
   bell: false,
+  scroll: 3,
+  sort: "id",
+  group: "none",
+  mode: "read",
 };
 
 /** Theme names are lowercase file-name-safe words: `cortex-dark`, `my_theme2`. */
@@ -92,9 +150,11 @@ export function isThemeName(name: unknown): name is string {
   return typeof name === "string" && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(name);
 }
 
-const APPEARANCES: readonly Appearance[] = ["system", "dark", "light"];
-const COLOR_SETTINGS: readonly ColorSetting[] = ["auto", "truecolor", "256", "16", "none"];
+export const APPEARANCES: readonly Appearance[] = ["system", "dark", "light"];
+export const COLOR_SETTINGS: readonly ColorSetting[] = ["auto", "truecolor", "256", "16", "none"];
 const MAX_CONFIG_BYTES = 1024 * 1024;
+/** `scroll`'s upper bound (its lower is 1). */
+export const MAX_SCROLL = 20;
 
 const quoteAll = (values: readonly string[]): string => values.map(v => JSON.stringify(v)).join(", ");
 
@@ -115,6 +175,23 @@ const themeSetting = (key: string, field: "theme" | "themeDark" | "themeLight", 
   apply(value, out) {
     if (!isThemeName(value)) return "must be a theme name: lowercase letters, digits, '-' or '_'";
     out[field] = value;
+    return null;
+  },
+});
+
+type ChoiceField = "appearance" | "colors" | "density" | "sort" | "group" | "mode";
+const choiceSetting = <F extends ChoiceField>(
+  key: string,
+  field: F,
+  values: readonly TuiConfig[F][],
+  meaning: string,
+): Setting => ({
+  key,
+  default: JSON.stringify(DEFAULT_CONFIG[field]),
+  meaning,
+  apply(value, out) {
+    if (!(values as readonly unknown[]).includes(value)) return `must be one of ${quoteAll(values)}`;
+    out[field] = value as TuiConfig[F];
     return null;
   },
 });
@@ -141,7 +218,7 @@ const SETTINGS: readonly Setting[] = [
   themeSetting(
     "theme",
     "theme",
-    "Pin a theme (bundled or custom) for every session; :theme writes it, :theme auto removes it",
+    "Pin a theme (bundled or custom) for every session; :config theme picks it, :config theme auto removes it",
   ),
   themeSetting("theme_dark", "themeDark", "The theme for a dark terminal when no theme is pinned (unset: cortex-dark)"),
   themeSetting(
@@ -149,47 +226,64 @@ const SETTINGS: readonly Setting[] = [
     "themeLight",
     "The theme for a light terminal when no theme is pinned (unset: cortex-light)",
   ),
-  {
-    key: "appearance",
-    default: JSON.stringify(DEFAULT_CONFIG.appearance),
-    meaning: '"system" follows the terminal\'s reported appearance (and its live changes); "dark" or "light" fixes it',
-    apply(value, out) {
-      if (!(APPEARANCES as readonly unknown[]).includes(value)) return `must be one of ${quoteAll(APPEARANCES)}`;
-      out.appearance = value as Appearance;
-      return null;
-    },
-  },
-  {
-    key: "colors",
-    default: JSON.stringify(DEFAULT_CONFIG.colors),
-    meaning: '"auto" detects the color depth; "truecolor", "256", "16" force one; "none" turns colors off',
-    apply(value, out) {
-      if (!(COLOR_SETTINGS as readonly unknown[]).includes(value)) return `must be one of ${quoteAll(COLOR_SETTINGS)}`;
-      out.colors = value as ColorSetting;
-      return null;
-    },
-  },
+  choiceSetting(
+    "appearance",
+    "appearance",
+    APPEARANCES,
+    '"system" follows the terminal\'s reported appearance (and its live changes); "dark" or "light" fixes it',
+  ),
+  choiceSetting(
+    "colors",
+    "colors",
+    COLOR_SETTINGS,
+    '"auto" detects the color depth; "truecolor", "256", "16" force one; "none" turns colors off',
+  ),
   booleanSetting(
     "transparent_background",
     "transparentBackground",
     "Leave the background to the terminal (its contrast cannot be checked)",
   ),
+  choiceSetting(
+    "density",
+    "density",
+    DENSITIES,
+    'The spacing: "comfortable" adds blank rows under the headers and above the status line, and margins at both ends of the status and hint lines; "compact" leaves them out',
+  ),
+  booleanSetting("flash", "flash", "Flash the status line when a task becomes blocked"),
+  booleanSetting("bell", "bell", "Also ring the terminal bell when a task becomes blocked"),
+  booleanSetting("done", "done", "Start with done tasks shown (;d changes it for the session only)"),
+  booleanSetting("tasks", "tasks", "Start with the task list shown (;e changes it for the session only)"),
+  booleanSetting("number", "number", "Source line numbers in Read and the Split preview"),
   {
-    key: "density",
-    default: JSON.stringify(DEFAULT_CONFIG.density),
-    meaning:
-      'The spacing (:density writes it): "comfortable" adds blank rows under the headers and above the status line, and margins at both ends of the status and hint lines; "compact" leaves them out',
+    key: "scroll",
+    default: JSON.stringify(DEFAULT_CONFIG.scroll),
+    meaning: `The rows or list items one wheel notch moves, in every pane (1 to ${MAX_SCROLL})`,
     apply(value, out) {
-      if (!isDensity(value)) return `must be one of ${quoteAll(DENSITIES)}`;
-      out.density = value;
+      if (!Number.isInteger(value) || (value as number) < 1 || (value as number) > MAX_SCROLL) {
+        return `must be a whole number from 1 to ${MAX_SCROLL}`;
+      }
+      out.scroll = value as number;
       return null;
     },
   },
-  booleanSetting("flash", "flash", "Flash the status line when a task becomes blocked"),
-  booleanSetting("bell", "bell", "Also ring the terminal bell when a task becomes blocked"),
-  booleanSetting("done", "done", "Start with done tasks shown (:set done and ;d change it for the session only)"),
-  booleanSetting("tasks", "tasks", "Start with the task list shown (:set tasks and ;e change it for the session only)"),
-  booleanSetting("number", "number", "Source line numbers in Read and the Split preview (:set number writes it)"),
+  choiceSetting(
+    "sort",
+    "sort",
+    TASK_SORTS,
+    "The task list's order at start (:sort changes it for the session only): id, -id, title, -title, lane, status, priority, updated, -updated",
+  ),
+  choiceSetting(
+    "group",
+    "group",
+    TASK_GROUPS,
+    "The task list's grouping at start (:sort group changes it for the session only): none, lane or status",
+  ),
+  choiceSetting(
+    "mode",
+    "mode",
+    DOCUMENT_MODES,
+    "The document mode at start (:read, :edit and :split change it for the session only)",
+  ),
 ];
 const KNOWN = new Set(["leader", "keys", ...SETTINGS.map(s => s.key)]);
 
@@ -274,13 +368,6 @@ export function writeAtomically(file: string, data: string): void {
   }
 }
 
-/**
- * The settings the TUI writes back: top-level keys named like their TuiConfig fields. `done` and `tasks`
- * are deliberately absent: they are startup filters, and toggling them in a session never writes the file.
- */
-export const WRITABLE_SETTINGS = ["theme", "density", "number"] as const;
-export type SettingChanges = Partial<Pick<TuiConfig, (typeof WRITABLE_SETTINGS)[number]>>;
-
 // A simple scalar value and its optional trailing comment; replacing such a value keeps the comment.
 const SIMPLE_VALUE = /^[ \t]*=[ \t]*(?:"[^"\\\n]*"|'[^'\n]*'|true|false|[A-Za-z0-9_-]+)([ \t]*#.*)?$/;
 const HEADER = /^[ \t]*\[/;
@@ -298,7 +385,7 @@ function resolveLink(file: string): string {
 }
 
 /**
- * Write `changes` into tui.toml surgically; a null `theme` removes its line. Re-reads the file first.
+ * Write `changes` into tui.toml surgically; a null value removes its key's line. Re-reads the file first.
  * Returns the keys written ([]: nothing was written). Throws a user-facing reason, changing nothing, when
  * the file cannot be read, is not valid TOML, or the edit would change anything else.
  */

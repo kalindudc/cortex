@@ -197,6 +197,8 @@ export interface DocumentEditor extends Component, Focusable {
   selectRange(kind: VisualKind, anchor: number, cursor: number): void;
   /** A double click: VISUAL over the word (or the run of blanks or punctuation) at `pos`. */
   selectWord(pos: number): void;
+  /** Scroll the view `rows` rows (the wheel); the cursor follows only when it leaves it. */
+  scrollRows(rows: number): void;
   handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined;
 }
 
@@ -457,7 +459,6 @@ interface VisibleRow {
 }
 
 const DEFAULT_WIDTH = 1000;
-const WHEEL_ROWS = 3;
 
 class Editor implements DocumentEditor {
   height = 10;
@@ -1309,12 +1310,12 @@ class Editor implements DocumentEditor {
 
   // ---------- mouse ----------
 
+  scrollRows(rows: number): void {
+    this.#scroll(rows);
+  }
+
+  // The Shell counts the wheel's notches and calls scrollRows: only clicks arrive here.
   handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
-    if (event.type === "wheel") {
-      const rows = Math.sign(event.wheelDelta ?? 0) * WHEEL_ROWS;
-      if (rows !== 0) this.#scroll(rows);
-      return { handled: true };
-    }
     if (event.type !== "click" || event.button !== "left") return undefined;
     this.placeCursor(this.offsetAt(event.x, event.y));
     return { handled: true };

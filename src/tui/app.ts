@@ -17,15 +17,15 @@
 //   task's Read/Edit/Split mode
 //   (Read and the Split preview are src/tui/reader.ts, rendering the current
 //   draft; Edit is src/tui/editor.ts; Split is useful from SPLIT_COLUMNS, and a
-//   narrower terminal shows the focused half without changing the saved
-//   preference), a status line (mode, focus, the draft's save state even in
+//   narrower terminal shows the focused half without changing the session's
+//   mode), a status line (mode, focus, the draft's save state even in
 //   Read, connection, messages, a persistent problem warning) and a hint line
 //   built from the configured keys (never a function key; only the hints
 //   that fit whole). Of two panes side
 //   by side (the list and the document, or Split's editor and preview), the
 //   one without the focus is painted through theme.ts inactiveTheme (greyed;
 //   SGR dim without color) and the focused one's label is inverse.
-// - The density (tui.toml's `density`, which `:density` writes) is
+// - The density (tui.toml's `density`, which :config writes) is
 //   comfortable by default: a blank row under the document header (and the
 //   list header, src/tui/workspace.ts) and above the status line, and a
 //   1-cell margin at both ends of the status and hint lines; compact drops
@@ -57,9 +57,9 @@
 // - Dialogs (src/tui/dialogs.ts) are toolkit overlays through this shell's
 //   overlay host; every input, whichever component the toolkit focused,
 //   takes the session's ONE route (prompt, top dialog, then this shell).
-//   The shell owns the theme inputs, so it implements `:theme`'s live
-//   preview/restore/apply (an applied choice is written to tui.toml; auto
-//   removes it and every session override).
+//   The shell owns the theme inputs, so it implements `:config theme`'s live
+//   preview/restore/apply (src/tui/settings.ts writes the choice to tui.toml
+//   first; auto removes it and every session override).
 // - SIGTERM/SIGHUP/SIGINT first try a bounded flush of every draft, then
 //   restore the terminal. Every exit path (:q, the signals, a crash, Ctrl-z
 //   before SIGTSTP) restores the terminal: the mouse goes off first (the shell
@@ -74,8 +74,8 @@
 //   document header's view tabs run :read/:edit/:split/:activity/:related/
 //   :authors; the list header's chips and sort label open the `f` and `;o`
 //   pickers; the status line's unread count opens :notifications; the wheel
-//   scrolls the pane under the pointer (a list one row a notch, however many
-//   reports the terminal sends for it). In the editor a click places the
+//   scrolls the pane under the pointer (tui.toml's `scroll` rows or items a
+//   notch, however many reports the terminal sends for it). In the editor a click places the
 //   cursor and a drag, double click (a word) or triple click (a line) makes a
 //   VISUAL selection, the same one v/V make (y/d/c act on it); the rendered
 //   document selects its rows the same way.
@@ -494,11 +494,11 @@ export class Shell {
   #theme: ResolvedTheme | null = null;
   #detected: "dark" | "light" | null = null;
   #followAppearance = false;
-  /** The theme levels this session can change: `:theme` > `--theme` > tui.toml `theme` (`:theme auto` removes it). */
+  /** The theme levels this session can change: `:config theme` > `--theme` > tui.toml `theme` (`:config theme auto` removes it). */
   #sessionTheme: string | null = null;
   #cliTheme: string | null;
   #configTheme: string | null;
-  /** The theme shown before a `:theme` preview, restored by Esc. */
+  /** The theme shown before a `:config theme` preview, restored by Esc. */
   #previewBase: ResolvedTheme | null = null;
   #listening = false;
   #detecting = false;
@@ -735,7 +735,7 @@ export class Shell {
     return themes;
   }
 
-  /** `:theme` picker: show `name` (null: auto) for this session only; the first preview remembers what Esc restores. */
+  /** The theme picker: show `name` (null: auto) for this session only; the first preview remembers what Esc restores. */
   #previewTheme(name: string | null): void {
     if (this.#theme === null) return;
     this.#previewBase ??= this.#theme;
@@ -753,10 +753,10 @@ export class Shell {
   }
 
   /**
-   * `:theme <name>`: the in-session level (it outranks `--theme`), written
-   * as tui.toml's `theme`. `:theme auto` (null) removes tui.toml's `theme`
-   * and, for this session, every override including `--theme`. Auto follows
-   * the terminal again.
+   * `:config theme <name>`: the in-session level (it outranks `--theme`);
+   * src/tui/settings.ts saves it as tui.toml's `theme` before applying.
+   * Auto (null; its line was removed) clears, for this session, every
+   * override including `--theme`: auto follows the terminal again.
    */
   #applyTheme(name: string | null): ResolvedTheme {
     this.#previewBase = null;
@@ -767,7 +767,6 @@ export class Shell {
     } else {
       this.#sessionTheme = name;
     }
-    this.session.saveThemeChoice(name);
     const theme = resolveTheme({ ...this.#themeInput(), detected: this.#detected });
     this.#setTheme(theme);
     this.#followAppearance =
@@ -857,37 +856,34 @@ export class Shell {
 
   /**
    * The wheel scrolls what is under the pointer, whichever pane has the keyboard.
-   * A list moves one row a notch, however many reports the terminal sends for it
-   * (session.wheelNotch); scrolled text takes every report.
+   * One notch is `scroll` rows or items (tui.toml) in every pane, however many
+   * reports the terminal sends for it (session.wheelNotch).
    */
   #wheel(event: TuiMouseEvent): void {
     const s = this.session;
-    const delta = Math.sign(event.wheelDelta ?? 0);
-    if (delta === 0) return;
+    const step = s.wheelNotch(event.wheelDelta ?? 0);
+    if (step === 0) return;
+    const rows = step * s.scrollRows;
     if (s.view !== "workspace") {
-      s.scrollView(delta * 3);
+      s.scrollView(rows);
       return;
     }
     switch (this.#areaAt(event.x, event.y)) {
-      case "list": {
-        const step = s.wheelNotch(delta);
-        if (step !== 0) s.moveSelection(step);
+      case "list":
+        s.moveSelection(rows);
         return;
-      }
       case "panel":
-        this.#activity.scroll(delta * 3);
+        this.#activity.scroll(rows);
         return;
       case "editor": {
-        const area = this.#layout.editor;
         const task = s.selectedTask();
         const editor = task === null ? null : (s.documentOf(task.id)?.editor ?? null);
-        if (area !== null && editor !== null)
-          editor.handleMouse({ ...event, x: event.x - area.x, y: event.y - area.y });
+        editor?.scrollRows(rows);
         return;
       }
       case "reader":
       case "document":
-        s.scrollDocument(delta * 3);
+        s.scrollDocument(rows);
         return;
       default:
         return;
@@ -1279,7 +1275,7 @@ export class Shell {
         s.toggleTaskList();
         break;
       case "toggle_done": {
-        // ;d is :set done!, saying which way it went (the list header also shows +done while they are shown).
+        // ;d shows or hides done tasks for this session, saying which way it went (the list header also shows +done while they are shown).
         s.closeView();
         s.setIncludeDone(!s.includeDone);
         const key = actionKeyLabels(s.keys.keys, "toggle_done")[0];
@@ -2147,8 +2143,8 @@ export class Shell {
     // The mouse is optional: every row here also has a key or a command.
     heading(
       this.#options.config.mouse
-        ? "MOUSE (mouse = false in tui.toml turns it off)"
-        : "MOUSE · off (mouse = true in tui.toml)",
+        ? "MOUSE (:config mouse turns it off at the next start)"
+        : "MOUSE · off (:config mouse turns it on at the next start)",
     );
     entry("click", "Focus the pane under it: the list, the document, a Split half, a panel");
     entry("click a task row", "Select it; a click on the selected row (or a double click) opens its document");
@@ -2164,7 +2160,10 @@ export class Shell {
     entry("drag", "Select from the press to the pointer: VISUAL in the editor or the rendered document (then y, d, c)");
     entry("double / triple click", "Select the word / the line (VISUAL LINE) under the pointer");
     entry("click in the editor", "Place the cursor there (VISUAL ends; INSERT keeps typing there)");
-    entry("wheel", "Scroll the pane under the pointer, whichever has the keyboard; a list moves one row a notch");
+    entry(
+      "wheel",
+      "Scroll the pane under the pointer, whichever has the keyboard; one notch moves scroll rows or items (:config scroll)",
+    );
     entry(
       "in a dialog",
       "A click highlights a row, a double click picks it; checkbox and radio rows toggle on each click; outside does nothing",
@@ -2223,7 +2222,9 @@ export class Shell {
     entry("Shift-arrows", "Select; typing or a paste replaces the selection");
     entry("Esc", "Back to NORMAL (the body saves by autosave or :w; the title saves now)");
     blank();
-    heading("SETTINGS \u00b7 tui.toml (read at start; an invalid entry keeps its default and is listed in :messages)");
+    heading(
+      "SETTINGS \u00b7 tui.toml (:config changes them; an invalid entry keeps its default and is listed in :messages)",
+    );
     for (const s of SETTING_HELP) entry(s.key, `default ${s.default ?? "unset"} \u00b7 ${s.meaning}`);
     entry(
       "[keys.<mode>]",

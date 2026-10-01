@@ -6,7 +6,7 @@ import { DEFAULT_CONFIG, loadConfig, SETTING_HELP, saveSettings } from "../../..
 import { DEFAULT_KEYS } from "../../../src/tui/keys.ts";
 
 // tui.toml is user-authored: loading never writes it, and cortex writes only
-// the top-level settings the TUI changes, surgically (saveSettings). Each
+// top-level settings, surgically (saveSettings, for :config). Each
 // section validates on its own; an invalid one keeps its defaults and records
 // {file, keyPath, reason}. A missing file is silent.
 
@@ -51,7 +51,40 @@ describe("loadConfig", () => {
       number: false,
       flash: true,
       bell: false,
+      scroll: 3,
+      sort: "id",
+      group: "none",
+      mode: "read",
     });
+  });
+
+  test("scroll, sort, group and mode load from tui.toml", () => {
+    write('scroll = 5\nsort = "-updated"\ngroup = "lane"\nmode = "split"\n');
+    expect(loadConfig(file)).toEqual({
+      config: { ...DEFAULT_CONFIG, scroll: 5, sort: "-updated", group: "lane", mode: "split" },
+      problems: [],
+    });
+    for (const scroll of [1, 20]) {
+      write(`scroll = ${scroll}\n`);
+      expect(loadConfig(file)).toEqual({ config: { ...DEFAULT_CONFIG, scroll }, problems: [] });
+    }
+  });
+
+  test("an invalid scroll, sort, group or mode keeps the default and is reported at its key", () => {
+    for (const bad of ["0", "21", "2.5", '"3"']) {
+      write(`scroll = ${bad}\nmouse = false\n`);
+      const { config, problems } = loadConfig(file);
+      expect(config.scroll, bad).toBe(3);
+      expect(config.mouse, bad).toBe(false); // the other settings still apply
+      expect(problems, bad).toEqual([{ file, keyPath: "scroll", reason: "must be a whole number from 1 to 20" }]);
+    }
+    write('sort = "size"\ngroup = "tag"\nmode = "view"\n');
+    const { config, problems } = loadConfig(file);
+    expect(config).toEqual(DEFAULT_CONFIG);
+    expect(problems.map(p => p.keyPath)).toEqual(["sort", "group", "mode"]);
+    for (const p of problems) expect(p.reason).toMatch(/^must be one of /);
+    expect(problems[0]?.reason).toMatch(/"-updated"/);
+    expect(problems[2]?.reason).toBe('must be one of "read", "edit", "split"');
   });
 
   test("done, tasks and number are booleans; anything else keeps the default and is reported", () => {
@@ -393,13 +426,37 @@ describe("saveSettings: surgical top-level edits", () => {
     expect(fs.readdirSync(dir)).toEqual(["tui.toml"]);
   });
 
-  test("done and tasks are startup filters: read, never written", () => {
-    expect(saveSettings(file, { done: true, tasks: false } as never)).toEqual([]);
-    expect(fs.existsSync(file)).toBe(false);
-    write("done = true\n");
+  test("every top-level setting but leader is writable: numbers, choices, booleans, theme pairs", () => {
+    write('# mine\nleader = ","  # comma\nscroll = 3  # rows a notch\n\n[keys.normal]\ndown = ["j", "down"]\n');
+    expect(
+      saveSettings(file, { scroll: 5, sort: "-updated", theme_dark: "ansi", transparent_background: true }),
+    ).toEqual(["theme_dark", "transparent_background", "scroll", "sort"]);
+    expect(read()).toBe(
+      '# mine\nleader = ","  # comma\nscroll = 5  # rows a notch\ntheme_dark = "ansi"\ntransparent_background = true\nsort = "-updated"\n\n[keys.normal]\ndown = ["j", "down"]\n',
+    );
+    valid();
+    expect(loadConfig(file).config).toMatchObject({
+      scroll: 5,
+      sort: "-updated",
+      themeDark: "ansi",
+      transparentBackground: true,
+    });
+    expect(saveSettings(file, { done: true, tasks: false })).toEqual(["done", "tasks"]);
+    expect(loadConfig(file).config).toMatchObject({ done: true, tasks: false });
+    expect(saveSettings(file, { leader: "x" } as never)).toEqual([]); // the key tables stay hand-edited
+  });
+
+  test("null removes any key's line; an invalid number is refused and changes no byte", () => {
+    write("# c\nbell = true\nmouse = false\n");
+    expect(saveSettings(file, { bell: null })).toEqual(["bell"]);
+    expect(read()).toBe("# c\nmouse = false\n");
+    write("scroll = 4\n");
     const mtime = age();
-    expect(saveSettings(file, { done: false } as never)).toEqual([]);
-    expect(fs.statSync(file).mtimeMs).toBe(mtime);
-    expect(read()).toBe("done = true\n");
+    for (const scroll of [0, 21, 2.5]) {
+      expect(() => saveSettings(file, { scroll }), String(scroll)).toThrow(/scroll/);
+      expect(read()).toBe("scroll = 4\n");
+      expect(fs.statSync(file).mtimeMs).toBe(mtime);
+    }
+    expect(fs.readdirSync(dir)).toEqual(["tui.toml"]);
   });
 });

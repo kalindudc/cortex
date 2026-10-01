@@ -42,11 +42,25 @@ import {
   pickActiveTask,
   searchPool,
 } from "../lib/taskView.ts";
-import type { TaskFilter, TaskGroup, TaskSort } from "./preferences.ts";
+import type { TaskGroup, TaskSort } from "./config.ts";
 import { actionKeyLabels } from "./keys.ts";
 import { displayWidth, escapeTerminalText, fitWidth } from "./safety.ts";
 import type { TuiSession } from "./session.ts";
 import { type ContrastPair, paint, type Seg, seg, style } from "./theme.ts";
+
+/** The list's filter slots (a session's own: they never outlive it). */
+export interface TaskFilter {
+  readonly status: TaskStatus | null;
+  readonly lane: string | null;
+  /** OR-composed tag names (the untagged sentinel, src/lib/taskView.ts UNTAGGED, is just a string). */
+  readonly tags: readonly string[];
+}
+
+/** The empty list's hint: the key that shows done tasks for this session, else the setting. */
+function doneHint(s: TuiSession): string {
+  const key = actionKeyLabels(s.keys.keys, "toggle_done")[0];
+  return key === undefined ? " :config done shows done tasks at every start" : ` ${key} shows done tasks`;
+}
 
 /** No structured filter at all. */
 export const NO_FILTER: TaskFilter = Object.freeze({ status: null, lane: null, tags: Object.freeze([]) });
@@ -413,7 +427,7 @@ class TaskList implements WorkspaceComponent {
           ? [" No tasks yet", ' cortex add "<title>" creates one']
           : hasFilters(s.listView)
             ? [" No tasks match the filters", " :clear clears them"]
-            : [" No open tasks", " :set done! shows done tasks"];
+            : [" No open tasks", doneHint(s)];
       for (const text of empty) line([seg("muted@panel", text)]);
     } else {
       for (const entry of this.#visibleLines(sel, width, body)) push(entry);

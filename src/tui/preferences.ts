@@ -1,88 +1,47 @@
-// Per-profile TUI view state: `configDir()/tui/<profile>.state.json`
-// (tui.toml's settings are written by src/tui/config.ts saveSettings; themes are read-only).
+// Per-profile TUI view state: `configDir()/tui/<profile>.state.json`, holding
+// each database's last task. Settings live in tui.toml, which the :config pane
+// writes (src/tui/settings.ts); themes are read-only.
 //
-// - Global view preferences (the open task panel, the preferred Read/Edit/Split
-//   mode, the task list's `:sort` order and `:sort group` grouping) plus
-//   per-database entries keyed by the database UUID (last task,
-//   filter/query), so another or a reset database never restores foreign
-//   tasks or filters.
+// - Entries are keyed by the database UUID, so another or a reset database
+//   never restores a foreign task.
 // - Saving re-reads the file, merges ONLY the fields this session changed
 //   since its last save, and renames a private temp file over it, so
 //   concurrent sessions on one profile never erase each other's choices.
 //   (Two saves racing inside the same few-millisecond read-to-rename window
 //   can still lose the earlier one's fields: there is no lock.)
-// - Settings are read at startup and never live-broadcast: a session's own
-//   view is its startup state plus its own changes.
+// - Read at startup and never live-broadcast: a session's own view is its
+//   startup state plus its own changes.
 // - Only known fields are ever written: the file never contains drafts.
-// - The settings it once held (theme, density, line numbers) belong to
-//   tui.toml: migrateSettings moves them once, and every save carries them
-//   until it has. Its old include-done and task-list fields are dropped, never
-//   moved: tui.toml's `done`/`tasks` set them at startup, and a session's
-//   toggles are never saved.
+// - The settings it once held (theme, density, line numbers, the document
+//   mode, the list's sort and grouping) belong to tui.toml: migrateSettings
+//   moves them once, and every save carries them until it has. Everything
+//   else it once held (the open panel, include-done, the task list, each
+//   database's filter and search) is dropped by the next save: commands and
+//   shortcuts last only for the session.
 
 import fs from "node:fs";
-import type { TaskStatus } from "../store.ts";
 import {
   DEFAULT_CONFIG,
+  DOCUMENT_MODES,
   isDensity,
   isThemeName,
-  type SettingChanges,
   saveSettings,
+  TASK_GROUPS,
+  TASK_SORTS,
+  type TuiConfig,
   writeAtomically,
 } from "./config.ts";
 
-export type DocumentMode = "read" | "edit" | "split";
-export type TaskPanel = "document" | "activity" | "related" | "authors";
-
-/** The task list's orders (`:sort`): a leading `-` reverses one; ties always break by ascending id. */
-export const TASK_SORTS = [
-  "id",
-  "-id",
-  "title",
-  "-title",
-  "lane",
-  "status",
-  "priority",
-  "updated",
-  "-updated",
-] as const;
-export type TaskSort = (typeof TASK_SORTS)[number];
-/** The task list's groupings (`:sort group`): a header row per lane or status. */
-export const TASK_GROUPS = ["none", "lane", "status"] as const;
-export type TaskGroup = (typeof TASK_GROUPS)[number];
-
-export interface ViewPreferences {
-  /** The open task panel. */
-  readonly panel: TaskPanel;
-  /** The preferred document mode; temporary Edit views never change it. */
-  readonly mode: DocumentMode;
-  /** The task list's order without a search (a search ranks by relevance). */
-  readonly sort: TaskSort;
-  /** The task list's grouping without a search. */
-  readonly group: TaskGroup;
-}
-
-export interface TaskFilter {
-  readonly status: TaskStatus | null;
-  readonly lane: string | null;
-  /** OR-composed tag names (the untagged sentinel, src/lib/taskView.ts UNTAGGED, is just a string). */
-  readonly tags: readonly string[];
-}
-
 export interface DatabasePreferences {
   readonly lastTask: number | null;
-  readonly filter: TaskFilter;
-  readonly query: string;
 }
 
 export interface Preferences {
-  readonly view: ViewPreferences;
   /** Keyed by database UUID. */
   readonly databases: Readonly<Record<string, DatabasePreferences>>;
 }
 
 export interface PreferenceChanges {
-  readonly view?: Partial<ViewPreferences>;
   readonly databases?: Readonly<Record<string, Partial<DatabasePreferences>>>;
 }
 
@@ -91,28 +50,10 @@ export interface PreferenceProblem {
   readonly reason: string;
 }
 
-export const DEFAULT_VIEW: ViewPreferences = {
-  panel: "document",
-  mode: "read",
-  sort: "id",
-  group: "none",
-};
-
-export const DEFAULT_DATABASE: DatabasePreferences = {
-  lastTask: null,
-  filter: { status: null, lane: null, tags: [] },
-  query: "",
-};
+export const DEFAULT_DATABASE: DatabasePreferences = { lastTask: null };
 
 const VERSION = 1;
-const STATUSES: readonly TaskStatus[] = ["draft", "open", "review", "blocked", "done"];
-const PANELS: readonly TaskPanel[] = ["document", "activity", "related", "authors"];
-const MODES: readonly DocumentMode[] = ["read", "edit", "split"];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-// The cap on a restored query.
-const MAX_QUERY = 4096;
-const MAX_NAME = 256;
-const MAX_TAGS = 1000;
 
 type Check = (value: unknown) => string | null;
 
@@ -123,48 +64,36 @@ const oneOf =
     (values as readonly unknown[]).includes(v)
       ? null
       : `must be one of ${values.map(x => JSON.stringify(x)).join(", ")}`;
-const shortString = (v: unknown): boolean => typeof v === "string" && v.length <= MAX_NAME;
-
-const VIEW_CHECKS: { readonly [K in keyof ViewPreferences]: Check } = {
-  panel: oneOf(PANELS),
-  mode: oneOf(MODES),
-  sort: oneOf(TASK_SORTS),
-  group: oneOf(TASK_GROUPS),
-};
 
 /** View fields that moved to tui.toml, by tui.toml key: read only to migrate, carried until then. */
-const MOVED_KEYS = { theme: "theme", density: "density", lineNumbers: "number" } as const;
+const MOVED_KEYS = {
+  theme: "theme",
+  density: "density",
+  lineNumbers: "number",
+  mode: "mode",
+  sort: "sort",
+  group: "group",
+} as const;
 type MovedField = keyof typeof MOVED_KEYS;
 type Moved = Partial<Record<MovedField, unknown>>;
 const MOVED_CHECKS: { readonly [K in MovedField]: Check } = {
   theme: v => (v === null || isThemeName(v) ? null : "must be a theme name or null"),
   density: v => (v === null || isDensity(v) ? null : 'must be "comfortable", "compact" or null'),
   lineNumbers: bool,
+  mode: oneOf(DOCUMENT_MODES),
+  sort: oneOf(TASK_SORTS),
+  group: oneOf(TASK_GROUPS),
 };
+/** The legacy settings by their tui.toml key: what migrateSettings could not move applies to this session. */
+export type MovedSettings = Partial<Pick<TuiConfig, (typeof MOVED_KEYS)[MovedField]>>;
 
 const DATABASE_CHECKS: { readonly [K in keyof DatabasePreferences]: Check } = {
   lastTask: v =>
     v === null || (Number.isSafeInteger(v) && (v as number) > 0) ? null : "must be a positive task id or null",
-  filter: v => {
-    if (v === null || typeof v !== "object" || Array.isArray(v)) return "must be {status, lane, tags}";
-    const f = v as Record<string, unknown>;
-    if (f.status !== null && !(STATUSES as readonly unknown[]).includes(f.status)) return "has an invalid status";
-    if (f.lane !== null && !shortString(f.lane)) return "has an invalid lane";
-    if (!Array.isArray(f.tags) || f.tags.length > MAX_TAGS || !f.tags.every(shortString)) return "has invalid tags";
-    return null;
-  },
-  query: v =>
-    typeof v === "string" && v.length <= MAX_QUERY ? null : `must be a string of at most ${MAX_QUERY} characters`,
 };
-
-const VIEW_KEYS = Object.keys(VIEW_CHECKS) as (keyof ViewPreferences)[];
 const DATABASE_KEYS = Object.keys(DATABASE_CHECKS) as (keyof DatabasePreferences)[];
 
 const isObject = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v);
-
-function copyFilter(f: TaskFilter): TaskFilter {
-  return { status: f.status, lane: f.lane, tags: [...f.tags] };
-}
 
 /** Known, valid fields of `raw` over `defaults`; each invalid field keeps its default with a problem. */
 function pick<T extends object>(
@@ -184,7 +113,7 @@ function pick<T extends object>(
     if (!Object.hasOwn(raw, key)) continue;
     const value = raw[key as string];
     const why = checks[key](value);
-    if (why === null) out[key] = key === "filter" ? copyFilter(value as TaskFilter) : value;
+    if (why === null) out[key] = value;
     else problems.push(`${at}.${String(key)}: ${why}; using the default`);
   }
   return out as T;
@@ -199,50 +128,34 @@ type Loaded = {
 };
 
 function load(file: string): Loaded {
-  const empty: Preferences = { view: DEFAULT_VIEW, databases: {} };
+  const empty: Preferences = { databases: {} };
+  const failed = (reason: string, unsupportedVersion: string | null = null): Loaded => ({
+    preferences: empty,
+    problems: [{ file, reason }],
+    unsupportedVersion,
+    moved: {},
+  });
   let text: string;
   try {
     text = fs.readFileSync(file, "utf8");
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "ENOENT") return { preferences: empty, problems: [], unsupportedVersion: null, moved: {} };
-    return {
-      preferences: empty,
-      problems: [{ file, reason: `cannot read view state: ${code}` }],
-      unsupportedVersion: null,
-      moved: {},
-    };
+    return failed(`cannot read view state: ${code}`);
   }
   let raw: unknown;
   try {
     raw = JSON.parse(text);
   } catch (err) {
-    return {
-      preferences: empty,
-      problems: [{ file, reason: `not valid JSON (${(err as Error).message}); using the defaults` }],
-      unsupportedVersion: null,
-      moved: {},
-    };
+    return failed(`not valid JSON (${(err as Error).message}); using the defaults`);
   }
-  if (!isObject(raw)) {
-    return {
-      preferences: empty,
-      problems: [{ file, reason: "not a view-state object; using the defaults" }],
-      unsupportedVersion: null,
-      moved: {},
-    };
-  }
+  if (!isObject(raw)) return failed("not a view-state object; using the defaults");
   if (raw.version !== undefined && raw.version !== VERSION) {
     const version = JSON.stringify(raw.version);
-    return {
-      preferences: empty,
-      problems: [{ file, reason: `unsupported view-state version ${version}; using the defaults and not saving` }],
-      unsupportedVersion: version,
-      moved: {},
-    };
+    return failed(`unsupported view-state version ${version}; using the defaults and not saving`, version);
   }
   const reasons: string[] = [];
-  const view = pick(raw.view, DEFAULT_VIEW, VIEW_CHECKS, "view", reasons);
+  // The view is read only for the settings that move to tui.toml; its other fields are dropped.
   const moved: Moved = isObject(raw.view)
     ? pick(raw.view, {} as Record<MovedField, unknown>, MOVED_CHECKS, "view", reasons)
     : {};
@@ -257,7 +170,7 @@ function load(file: string): Loaded {
     }
   }
   return {
-    preferences: { view, databases },
+    preferences: { databases },
     problems: reasons.map(reason => ({ file, reason })),
     unsupportedVersion: null,
     moved,
@@ -275,6 +188,7 @@ function databaseId(id: string): string {
   return id.toLowerCase();
 }
 
+/** The known fields of `changes`, validated (unknown fields are dropped); throws for an invalid one. */
 function checked<T extends object>(
   changes: Partial<T> | undefined,
   checks: { readonly [K in keyof T]: Check },
@@ -287,7 +201,7 @@ function checked<T extends object>(
     const value = changes[key];
     const why = checks[key](value);
     if (why !== null) throw new TypeError(`${at}.${String(key)} ${why}`);
-    out[key] = (key === "filter" ? copyFilter(value as TaskFilter) : value) as T[keyof T];
+    out[key] = value;
   }
   return out;
 }
@@ -296,17 +210,16 @@ function checked<T extends object>(
  * Merge `changes` into the view state on disk and write it atomically:
  * re-read the file, apply only the given fields (validated; unknown fields
  * are dropped), write a 0600 temp file and rename it over the original.
- * The valid legacy settings are carried unchanged unless `dropMoved` (they
- * moved to tui.toml). Throws for invalid changes before writing, and never
- * overwrites a file with an unsupported (e.g. newer) version. Returns the
- * merged state.
+ * The valid legacy settings are carried unchanged as `view` unless
+ * `dropMoved` (they moved to tui.toml); with none, the file has no `view`.
+ * Throws for invalid changes before writing, and never overwrites a file
+ * with an unsupported (e.g. newer) version. Returns the merged state.
  */
 export function savePreferences(
   file: string,
   changes: PreferenceChanges,
   options: { dropMoved?: boolean } = {},
 ): Preferences {
-  const view = checked(changes.view, VIEW_CHECKS, "view");
   const databaseChanges: [string, Partial<DatabasePreferences>][] = Object.entries(changes.databases ?? {}).map(
     ([id, patch]) => [databaseId(id), checked(patch, DATABASE_CHECKS, `databases.${id}`)],
   );
@@ -316,31 +229,23 @@ export function savePreferences(
   }
   const databases: Record<string, DatabasePreferences> = { ...current.preferences.databases };
   for (const [id, patch] of databaseChanges) databases[id] = { ...(databases[id] ?? DEFAULT_DATABASE), ...patch };
-  const merged: Preferences = { view: { ...current.preferences.view, ...view }, databases };
+  const moved = options.dropMoved ? {} : current.moved;
   const out = {
     version: VERSION,
-    view: {
-      ...(options.dropMoved ? {} : current.moved),
-      ...Object.fromEntries(VIEW_KEYS.map(k => [k, merged.view[k]])),
-    },
+    ...(Object.keys(moved).length > 0 ? { view: moved } : {}),
     databases: Object.fromEntries(
-      Object.entries(merged.databases).map(([id, entry]) => [
-        id,
-        Object.fromEntries(DATABASE_KEYS.map(k => [k, entry[k]])),
-      ]),
+      Object.entries(databases).map(([id, entry]) => [id, Object.fromEntries(DATABASE_KEYS.map(k => [k, entry[k]]))]),
     ),
   };
   writeAtomically(file, `${JSON.stringify(out, null, 2)}\n`);
-  return merged;
+  return { databases };
 }
 
 /** One TUI session's view of a profile's state. */
 export interface PreferenceSession {
   readonly file: string;
   /** Startup state plus this session's own changes (never another session's). */
-  view(): ViewPreferences;
   database(id: string): DatabasePreferences;
-  setView<K extends keyof ViewPreferences>(key: K, value: ViewPreferences[K]): void;
   setDatabase<K extends keyof DatabasePreferences>(id: string, key: K, value: DatabasePreferences[K]): void;
   /** Merge the fields changed since the last save into the file. No-op when nothing changed. */
   save(): void;
@@ -350,37 +255,24 @@ export interface PreferenceSession {
 
 export function openPreferences(file: string): PreferenceSession {
   const loaded = readPreferences(file);
-  let view: ViewPreferences = loaded.preferences.view;
   const databases = new Map<string, DatabasePreferences>(Object.entries(loaded.preferences.databases));
-  let pendingView: Partial<Record<keyof ViewPreferences, unknown>> = {};
-  let pendingDatabases = new Map<string, Partial<Record<keyof DatabasePreferences, unknown>>>();
+  let pending = new Map<string, Partial<DatabasePreferences>>();
 
   return {
     file,
-    view: () => view,
     database: id => databases.get(databaseId(id)) ?? DEFAULT_DATABASE,
-    setView(key, value) {
-      const why = VIEW_CHECKS[key](value);
-      if (why !== null) throw new TypeError(`view.${key} ${why}`);
-      view = { ...view, [key]: value };
-      pendingView[key] = value;
-    },
     setDatabase(id, key, value) {
       const db = databaseId(id);
+      if (!Object.hasOwn(DATABASE_CHECKS, key)) throw new TypeError(`databases.${db}.${key} is not kept`);
       const why = DATABASE_CHECKS[key](value);
       if (why !== null) throw new TypeError(`databases.${db}.${key} ${why}`);
-      const stored = key === "filter" ? copyFilter(value as TaskFilter) : value;
-      databases.set(db, { ...(databases.get(db) ?? DEFAULT_DATABASE), [key]: stored });
-      pendingDatabases.set(db, { ...(pendingDatabases.get(db) ?? {}), [key]: stored });
+      databases.set(db, { ...(databases.get(db) ?? DEFAULT_DATABASE), [key]: value });
+      pending.set(db, { ...(pending.get(db) ?? {}), [key]: value });
     },
     save() {
-      if (Object.keys(pendingView).length === 0 && pendingDatabases.size === 0) return;
-      savePreferences(file, {
-        view: pendingView as Partial<ViewPreferences>,
-        databases: Object.fromEntries(pendingDatabases) as Record<string, Partial<DatabasePreferences>>,
-      });
-      pendingView = {};
-      pendingDatabases = new Map();
+      if (pending.size === 0) return;
+      savePreferences(file, { databases: Object.fromEntries(pending) });
+      pending = new Map();
     },
     problems: () => loaded.problems,
   };
@@ -395,7 +287,7 @@ export function openPreferences(file: string): PreferenceSession {
 export function migrateSettings(
   stateFile: string,
   configFile: string,
-): { unmoved: SettingChanges; problems: PreferenceProblem[] } {
+): { unmoved: MovedSettings; problems: PreferenceProblem[] } {
   const { moved, unsupportedVersion } = load(stateFile);
   const fields = Object.keys(moved) as MovedField[];
   if (unsupportedVersion !== null || fields.length === 0) return { unmoved: {}, problems: [] };
@@ -404,7 +296,7 @@ export function migrateSettings(
     const key = MOVED_KEYS[field];
     if (moved[field] !== null && moved[field] !== DEFAULT_CONFIG[key]) changes[key] = moved[field];
   }
-  const unmoved = changes as SettingChanges;
+  const unmoved = changes as MovedSettings;
   try {
     if (Object.keys(changes).length > 0) saveSettings(configFile, unmoved, { onlyMissing: true });
     savePreferences(stateFile, {}, { dropMoved: true });
