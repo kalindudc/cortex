@@ -18,6 +18,7 @@ import {
   rowOfSourceLine,
   slugify,
 } from "../../../src/tui/reader.ts";
+import { drawMermaid } from "../../../src/tui/diagram.ts";
 import { TuiSession } from "../../../src/tui/session.ts";
 import { type ResolvedTheme, resolveTheme, type ThemeToken } from "../../../src/tui/theme.ts";
 
@@ -489,11 +490,52 @@ describe("safe GFM rendering", () => {
     expect(inert).not.toContain("§");
   });
 
-  test("Mermaid shows its source (diagrams are not rendered)", () => {
-    const out = text(render("```mermaid\ngraph TD; A-->B;\n```"));
-    expect(out).toContain("mermaid source");
-    expect(out).not.toContain(":preview");
-    expect(out).toContain("graph TD; A-->B;");
+  test("Mermaid draws as text art in its code panel; :copy keeps the source and the source line maps into the art", () => {
+    const source = "```mermaid\ngraph TD; A[Alpha]-->B[Beta];\n```";
+    const out = text(render(source));
+    expect(out).toContain("mermaid · :copy 1");
+    expect(out).toContain("│ Alpha │");
+    expect(out).toContain("▼");
+    expect(out).not.toContain("A[Alpha]-->B[Beta]");
+    const doc = parseDocument(source, 1);
+    expect(doc.codeBlocks[0]).toMatchObject({ mermaid: true, text: "graph TD; A[Alpha]-->B[Beta];\n" });
+    const layout = layoutDocument(doc, 60);
+    const [start, end] = layout.codeSpans[0] ?? [-1, -1];
+    expect(rowOfSourceLine(layout, 2)).toBeGreaterThan(start);
+    expect(rowOfSourceLine(layout, 2)).toBeLessThanOrEqual(end);
+  });
+
+  test("Mermaid that cannot be drawn shows its source and says why; a partly parsed diagram says partial", () => {
+    const gantt = text(render("```mermaid\ngantt\n  title Plan\n  section A\n  t1 :a1, 2024-01-01, 3d\n```"));
+    expect(gantt).toContain("mermaid source · :copy 1");
+    expect(gantt).toContain("t1 :a1, 2024-01-01, 3d");
+    const wide = "flowchart LR\n  A[Parse the source] --> B[Lay out the graph] --> C[Paint the rows]";
+    const w = drawMermaid(wide)?.width ?? 0;
+    expect(w).toBeGreaterThan(0);
+    const fits = text(render(`\`\`\`mermaid\n${wide}\n\`\`\``, w + 4));
+    expect(fits).toContain("mermaid · :copy 1");
+    expect(fits).not.toContain("A[Parse the source]");
+    const narrow = text(render(`\`\`\`mermaid\n${wide}\n\`\`\``, w + 3));
+    expect(narrow).toContain(`mermaid source · :copy 1 · too wide to draw (${w} columns)`);
+    expect(narrow).toContain("A[Parse the source]");
+    expect(text(render("```mermaid\ngraph TD\n  A[Start --> B\n```"))).toContain("mermaid · partial · :copy 1");
+  });
+
+  test("a drawn diagram uses existing raised theme pairs, and every row is exactly the pane width", () => {
+    const lines = renderDocument("```mermaid\ngraph TD\n  A[Alpha] --> B\n```", {
+      taskId: 1,
+      width: 60,
+      theme: COLOR_THEME,
+    });
+    expect(sgrBefore(lines, "Alpha")).toBe(pairSgr("text", "raised"));
+    expect(sgrBefore(lines, "▼")).toBe(pairSgr("accent", "raised"));
+    expect(sgrBefore(lines, "┌")).toBe(pairSgr("border", "raised"));
+    const wide = '```mermaid\ngraph LR\n  A["👨‍👩‍👧 family"] --> B["🇨🇦 flag"] --> C["中文 标签"]\n```';
+    for (const theme of [PLAIN_THEME, COLOR_THEME]) {
+      for (const width of [40, 80]) {
+        for (const line of renderDocument(wide, { taskId: 1, width, theme })) expect(visibleWidth(line)).toBe(width);
+      }
+    }
   });
 
   test("HTML entities decode in prose but never in code", () => {
@@ -535,6 +577,7 @@ describe("hostile text in every surface cannot issue terminal controls (N20, G5)
     ["code block", `\`\`\`\n${HOSTILE}\n\`\`\``],
     ["code fence label", `\`\`\`${HOSTILE}\nx\n\`\`\``],
     ["mermaid", `\`\`\`mermaid\n${HOSTILE}\n\`\`\``],
+    ["mermaid diagram", `\`\`\`mermaid\ngraph TD\n  A["x ${HOSTILE}"] --> B\n\`\`\``],
     ["table", `| h ${HOSTILE} |\n| - |\n| c ${HOSTILE} |`],
     ["list", `- item ${HOSTILE}\n- [x] done ${HOSTILE}`],
     ["quote", `> quoted ${HOSTILE}`],
@@ -730,6 +773,18 @@ describe("the reader component: scroll, headings, search and history", () => {
     lines = frame(h, 60, 12);
     expect(text(lines)).toContain("draft saved text");
     expect(text(lines)).not.toContain("**draft**");
+  });
+
+  test("search finds only the Mermaid view on screen: a drawn diagram's labels, else its source", () => {
+    const source = "flowchart LR\n  A[Alpha] --> B[Beta]";
+    const h = harness([task(1, { body: `\`\`\`mermaid\n${source}\n\`\`\`` })], { initialTask: 1 });
+    frame(h, 80, 20);
+    h.reader.search("Alpha");
+    expect(h.reader.searchStatus()?.count).toBe(1);
+    h.reader.search("-->");
+    expect(h.reader.searchStatus()?.count).toBe(0);
+    frame(h, (drawMermaid(source)?.width ?? 0) + 3, 20); // too narrow: the source shows instead
+    expect(h.reader.searchStatus()?.count).toBe(1);
   });
 
   test("} and { step to the next and previous heading, with counts; at the ends they say so", () => {

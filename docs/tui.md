@@ -1,8 +1,8 @@
 ---
 budget: 200
 sources: [src/tui/app.ts, src/tui/session.ts, src/tui/commands.ts, src/tui/keys.ts, src/tui/config.ts, src/tui/theme.ts,
-  src/tui/help.ts, src/tui/drafts.ts, src/tui/reader.ts, src/tui/safety.ts, src/tui/mouse.ts, src/tui/preferences.ts,
-  src/lib/refGrammar.ts, src/lib/catalogSearch.ts]
+  src/tui/help.ts, src/tui/drafts.ts, src/tui/reader.ts, src/tui/diagram.ts, src/tui/safety.ts, src/tui/mouse.ts,
+  src/tui/preferences.ts, src/lib/refGrammar.ts, src/lib/catalogSearch.ts]
 ---
 # The terminal workspace
 
@@ -87,7 +87,7 @@ that entry's default and is listed in `:messages`.
 
 ## Limits
 
-- Mermaid diagrams show as source text and images as `[image: ...]` placeholders; neither is rendered.
+- Images show as `[image: ...]` placeholders. Mermaid draws as text art, or as source when it cannot, saying why.
 - The workspace is keyboard-first but has not been tested with screen readers.
 - Copying to the clipboard and clickable links depend on your terminal (and on tmux or SSH passing them through).
 - Unsaved text lives in the workspace's memory. On SIGTERM, SIGHUP or SIGINT it first tries to save every draft,
@@ -160,6 +160,9 @@ text. `src/tui/reader.ts` is the only Markdown renderer: raw HTML shows as text,
 hyperlink wraps only a destination `src/tui/safety.ts#safeUrl` accepts. Why not pi-tui's Markdown component? It
 is a renderer, not a security boundary: it emits links unchecked. `@id`/`#tag` references share
 `src/lib/refGrammar.ts#REF_RE`; each consumer keeps its own RegExp instance because the `g` flag is stateful.
+`src/tui/diagram.ts#drawMermaid` draws Mermaid with the `lovely-mermaid` library: escaped source in, every span
+escaped again, roles mapped to existing theme pairs, diagram links and author colors dropped. Why not mermaid.js
+or terminal images? One needs a browser DOM, the other a graphics terminal, and neither could be searched.
 
 ### Mouse and pickers
 
@@ -188,9 +191,9 @@ case-insensitive match of all the words, in the caller's order, so every lane an
 - Tag changes are add/remove deltas, never a whole-list replacement, and never delete a tag definition; TUI status
   changes carry no author: `test/unit/tui/commands.test.ts`.
 - Every untrusted string is escaped before it is styled, the database keeps the raw text, Markdown renders only
-  through `src/tui/reader.ts` and links only past `src/tui/safety.ts#safeUrl`: `test/unit/tui/reader.test.ts` and
-  `test/integration/tui-safety.test.ts`, which seeds control sequences everywhere and scans the raw output, with a
-  positive control proving the scan can fail.
+  through `src/tui/reader.ts` (Mermaid via `src/tui/diagram.ts`), links only past `src/tui/safety.ts#safeUrl`:
+  `test/unit/tui/reader.test.ts`, `test/unit/tui/diagram.test.ts` and `test/integration/tui-safety.test.ts`, which
+  seeds control sequences everywhere and scans the raw output, with a positive control proving the scan can fail.
 - One mouse parser, Shell-owned modes, no any-motion tracking, never the only path to an action:
   `test/unit/tui/mouse.test.ts`, `test/integration/tui.test.ts`.
 - Picker search never caps, paginates, reorders or forces refinement: `test/unit/lib/catalogSearch.test.ts`.

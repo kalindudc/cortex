@@ -30,9 +30,12 @@
 //   block or heading above the top row, so a re-wrap, an edit above it or
 //   :source keeps the place. `{`/`}` and heading jumps are recorded in the
 //   session's :back/:forward history.
-// - :source shows the raw source (escaped) instead. Mermaid blocks show their
-//   source (diagrams are not rendered). Copying is
-//   an explicit :copy (OSC 52 through the session), never a rendering effect.
+// - :source shows the raw source (escaped) instead. A Mermaid block is drawn
+//   as text art (src/tui/diagram.ts) in its code panel when its type is
+//   supported and it fits the pane; otherwise its source shows, the caption
+//   says why, and only the view shown is searchable. Copying is
+//   an explicit :copy (OSC 52 through the session; a diagram copies its
+//   source), never a rendering effect.
 // - VISUAL (the shell's vi `v`/`V`) selects the RENDERED rows: `V` whole
 //   rows, `v` grapheme clusters of their visible text (decoration included,
 //   as shown), from the top row on screen. The motions move its cursor (the
@@ -59,6 +62,7 @@ import type { Component, TuiMouseEvent, TuiMouseEventResult } from "@earendil-wo
 import { Marked, type MarkedToken, type Token, type Tokens } from "marked";
 import { parseRefs } from "../lib/refGrammar.ts";
 import { slugify } from "../lib/slug.ts";
+import { drawMermaid } from "./diagram.ts";
 import { type ClusterLines, gutterWidth, type VisualKind, wordAt, wordEnd, wordNext, wordPrev } from "./editor.ts";
 import { displayWidth, escapeTerminalLines, escapeTerminalText, hyperlink, type SafeUrl, safeUrl } from "./safety.ts";
 import type { ScrollPosition } from "./scrollbar.ts";
@@ -138,6 +142,13 @@ interface SourceSpan {
   readonly lines: number;
 }
 
+/** A drawn Mermaid block: its caption, its rows (one search unit each) and the widest row in cells. */
+interface DrawnDiagram {
+  readonly caption: readonly Run[];
+  readonly rows: readonly { readonly runs: readonly Run[]; readonly unit: number }[];
+  readonly width: number;
+}
+
 type Block =
   | { readonly kind: "gap"; readonly prefix: readonly PrefixPart[]; readonly top: number }
   | ({ readonly kind: "rule"; readonly prefix: readonly PrefixPart[]; readonly top: number } & SourceSpan)
@@ -163,6 +174,8 @@ type Block =
       readonly firstLine: number;
       /** A fenced block: its caption stands for the opening fence's line. */
       readonly fenced: boolean;
+      /** A Mermaid block drawn as text art (laid out when it fits the pane), or null: the source only. */
+      readonly diagram: DrawnDiagram | null;
       readonly top: number;
     } & Omit<SourceSpan, "lines">)
   | ({
@@ -659,9 +672,32 @@ class Parser {
       lines,
       firstLine,
       fenced,
+      diagram: mermaid ? this.#diagram(token.text, code) : null,
       top: this.#top,
       line,
     });
+  }
+
+  /** A Mermaid block as text art (src/tui/diagram.ts), each row a search unit; null when it cannot be drawn. */
+  #diagram(source: string, code: number): DrawnDiagram | null {
+    const drawn = drawMermaid(source);
+    if (drawn === null) return null;
+    const rows = drawn.rows.map(row => {
+      const unit = this.#unit();
+      const runs = row.map((r): Run => {
+        const offset = this.units[unit]?.length ?? 0;
+        this.units[unit] += r.text;
+        return { text: r.text, pair: r.pair, unit, offset };
+      });
+      return { runs, unit };
+    });
+    const caption: Run[] = [
+      ui("mermaid", "muted@raised"),
+      ...(drawn.partial ? [ui(" · partial", "warn@raised")] : []),
+      ui(" · ", "dim@raised"),
+      ui(`:copy ${code + 1}`, "dim@raised"),
+    ];
+    return { caption, rows, width: drawn.width };
   }
 
   #table(token: Tokens.Table, ctx: Context, base: InlineStyle, line: number): void {
@@ -1173,6 +1209,12 @@ function layoutRendered(doc: ParsedDocument, width: number, numbers: boolean): D
   const b = new LayoutBuilder(Math.max(1, width - gutter));
   const headingRows: number[] = [];
   const codeSpans: [number, number][] = [];
+  // A Mermaid block shows its art or its source: the other view's units are blanked (copied on the first one).
+  let units: string[] | null = null;
+  const hide = (unit: number): void => {
+    units ??= [...doc.units];
+    units[unit] = "";
+  };
   for (const block of doc.blocks) {
     const { parts, inner } = b.frame(block.prefix);
     switch (block.kind) {
@@ -1197,10 +1239,20 @@ function layoutRendered(doc: ParsedDocument, width: number, numbers: boolean): D
       }
       case "code": {
         // A raised panel over the content width: a caption (the language and the :copy number; a narrow
-        // pane wraps it, never drops it), then each line behind a bar (↪ where a long one continues).
+        // pane wraps it, never drops it), then each line behind a bar (↪ where a long one continues),
+        // or a drawn diagram's rows when they fit.
         const start = b.rows.length;
         const text = Math.max(1, inner - 2);
-        wrapRuns(block.caption, text).forEach((row, i) => {
+        const diagram = block.diagram;
+        const art = diagram !== null && diagram.width <= text ? diagram : null;
+        for (const unit of art !== null ? block.lines.map(l => l.unit) : (diagram?.rows.map(r => r.unit) ?? []))
+          hide(unit);
+        const caption =
+          art?.caption ??
+          (diagram === null
+            ? block.caption
+            : [...block.caption, ui(` · too wide to draw (${diagram.width} columns)`, "dim@raised")]);
+        wrapRuns(caption, text).forEach((row, i) => {
           const line = i === 0 && block.fenced ? block.line : 0;
           b.place(
             line,
@@ -1209,19 +1261,28 @@ function layoutRendered(doc: ParsedDocument, width: number, numbers: boolean): D
             1,
           );
         });
-        block.lines.forEach((line, n) => {
-          const source = block.firstLine > 0 ? block.firstLine + n : 0;
-          const chunks = hardWrap(line.text, text);
+        if (art !== null) {
           const first = b.rows.length;
-          chunks.forEach((chunk, i) => {
-            const runs: Run[] = [
-              ui(i === 0 ? "│ " : "↪ ", i === 0 ? "border@raised" : "dim@raised"),
-              { text: chunk.text, pair: "md.code@raised", unit: line.unit, offset: chunk.offset },
-            ];
-            b.emit(parts, panel(runs, inner, "text@raised"), block.top, "text@bg", i === 0 ? source : 0);
+          art.rows.forEach((row, i) => {
+            const runs: Run[] = [ui("  ", "text@raised"), ...row.runs];
+            b.emit(parts, panel(runs, inner, "text@raised"), block.top, "text@bg", i === 0 ? block.firstLine : 0);
           });
-          b.place(source, 1, first, chunks.length);
-        });
+          b.place(block.firstLine, block.lines.length, first, art.rows.length);
+        } else {
+          block.lines.forEach((line, n) => {
+            const source = block.firstLine > 0 ? block.firstLine + n : 0;
+            const chunks = hardWrap(line.text, text);
+            const first = b.rows.length;
+            chunks.forEach((chunk, i) => {
+              const runs: Run[] = [
+                ui(i === 0 ? "│ " : "↪ ", i === 0 ? "border@raised" : "dim@raised"),
+                { text: chunk.text, pair: "md.code@raised", unit: line.unit, offset: chunk.offset },
+              ];
+              b.emit(parts, panel(runs, inner, "text@raised"), block.top, "text@bg", i === 0 ? source : 0);
+            });
+            b.place(source, 1, first, chunks.length);
+          });
+        }
         codeSpans[block.code] = [start, b.rows.length - 1];
         break;
       }
@@ -1238,7 +1299,7 @@ function layoutRendered(doc: ParsedDocument, width: number, numbers: boolean): D
     gutter,
     rows: b.rows,
     lineIndex: b.lineIndex,
-    units: doc.units,
+    units: units ?? doc.units,
     headingRows,
     codeSpans,
     rowsByUnit: b.rowsByUnit,

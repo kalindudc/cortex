@@ -32,6 +32,9 @@ importers:
       hono:
         specifier: ^4.6.0
         version: 4.12.18
+      lovely-mermaid:
+        specifier: 0.3.3
+        version: 0.3.3
       marked:
         specifier: ^15.0.0
         version: 15.0.12
@@ -262,6 +265,10 @@ packages:
   hono@4.12.18:
     resolution: {integrity: sha512-RWzP96k/yv0PQfyXnWjs6zot20TqfpfsNXhOnev8d1InAxubW93L11/oNUc3tQqn2G0bSdAOBpX+2uDFHV7kdQ==}
     engines: {node: '>=16.9.0'}
+
+  lovely-mermaid@0.3.3:
+    resolution: {integrity: sha512-EMLJS934qwt2MLO/a5o+T/89HGbuXZPwmCpHIhHO+DVrm+y5tHlEHgpZzlC2o4yW/rFPHRFO9xSMafzqH4wH5A==, tarball: https://registry.npmjs.org/lovely-mermaid/-/lovely-mermaid-0.3.3.tgz}
+    engines: {node: '>=18'}
 
   marked@15.0.12:
     resolution: {integrity: sha512-8dD6FusOQSrpv9Z1rdNMdlSgQOIP880DHqnohobOmYLElGEqAL/JvxvuxZO16r4HtjTlfPRDC1hbvxC9dPN2nA==}
@@ -518,6 +525,8 @@ snapshots:
   get-east-asian-width@1.6.0: {}
 
   hono@4.12.18: {}
+
+  lovely-mermaid@0.3.3: {}
 
   marked@15.0.12: {}
 
