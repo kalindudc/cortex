@@ -32,6 +32,7 @@ import {
   type Component,
   type Focusable,
   type OverlayHandle,
+  type OverlayOptions,
   type TuiMouseEvent,
   type TuiMouseEventResult,
   wrapTextWithAnsi,
@@ -43,14 +44,67 @@ import { displayWidth, escapeTerminalText, fitWidth } from "./safety.ts";
 import type { OverlayHost, SessionDialog, TuiSession } from "./session.ts";
 import { type ContrastPair, paint, type ResolvedTheme, type Seg, seg, style } from "./theme.ts";
 
-/** The widest a dialog grows. */
-export const DIALOG_WIDTH = 76;
-const DIALOG_MIN_WIDTH = 40;
+/** A pane's size: small (confirmations, forms), medium (pickers, the composer), large (feeds, help, references). */
+export type PaneSize = "small" | "medium" | "large";
+const PANE_WIDTH: Readonly<Record<PaneSize, number>> = { small: 60, medium: 76, large: 120 };
+const PANE_MIN_WIDTH = 40;
 /**
  * Room kept around every dialog: the status line, the prompt and up to five
  * completion rows stay visible below it, so `:` works inside dialogs.
  */
 export const DIALOG_MARGIN = { top: 1, bottom: 7, left: 2, right: 2 } as const;
+
+/**
+ * The one pane geometry: the most columns and rows (its border included) a
+ * pane of `size` may use on a `columns` x `rows` terminal. Every size fits
+ * inside the side margins; large takes 80% of the terminal (at most 120
+ * columns) and is never narrower than medium.
+ */
+export function paneBox(
+  size: PaneSize,
+  columns: number,
+  rows: number,
+): { readonly width: number; readonly height: number } {
+  const room = columns - DIALOG_MARGIN.left - DIALOG_MARGIN.right;
+  const avail = rows - DIALOG_MARGIN.top - DIALOG_MARGIN.bottom;
+  if (size !== "large")
+    return { width: Math.min(PANE_WIDTH[size], Math.max(PANE_MIN_WIDTH, room)), height: Math.max(6, avail) };
+  return {
+    width: Math.min(PANE_WIDTH.large, room, Math.max(PANE_WIDTH.medium, Math.floor(columns * 0.8))),
+    height: Math.max(6, Math.min(avail, Math.floor(rows * 0.8))),
+  };
+}
+
+/** The toolkit overlay options for a pane: always centred, sized by paneBox, inside DIALOG_MARGIN. */
+export function paneOverlay(size: PaneSize, columns: number, rows: number): OverlayOptions {
+  const { width, height } = paneBox(size, columns, rows);
+  return {
+    anchor: "center",
+    width,
+    minWidth: Math.min(PANE_MIN_WIDTH, width),
+    maxHeight: height,
+    margin: { ...DIALOG_MARGIN },
+  };
+}
+
+/**
+ * The one pane frame: `╭─ title ─╮`, the body between `│` sides, `╰──╯`,
+ * on the raised surface. Body lines arrive painted to `width - 2` cells;
+ * the raw title is escaped here.
+ */
+export function drawBox(theme: ResolvedTheme, title: string, body: readonly string[], width: number): string[] {
+  const border = (text: string) => style(theme, "border@raised", text);
+  const head = fitWidth(` ${escapeTerminalText(title)} `, Math.max(0, width - 4));
+  const top =
+    border("╭─") +
+    style(theme, "accent@raised", head, { bold: true }) +
+    border(`${"─".repeat(Math.max(0, width - 3 - displayWidth(head)))}╮`);
+  return [
+    top,
+    ...body.map(line => border("│") + line + border("│")),
+    border(`╰${"─".repeat(Math.max(0, width - 2))}╯`),
+  ];
+}
 
 // ---------- specs ----------
 
@@ -233,7 +287,12 @@ export class Dialog implements Component, Focusable, SessionDialog {
   #field = 0;
   #mode: KeyMode = "NORMAL";
 
-  constructor(session: TuiSession, host: OverlayHost, spec: DialogSpec) {
+  constructor(
+    session: TuiSession,
+    host: OverlayHost,
+    spec: DialogSpec,
+    readonly size: PaneSize = "medium",
+  ) {
     this.#session = session;
     this.#host = host;
     this.spec = spec;
@@ -765,7 +824,7 @@ export class Dialog implements Component, Focusable, SessionDialog {
     const theme = this.#session.theme;
     if (theme === null || width < 8) return [];
     const inner = width - 2;
-    const budget = Math.max(6, this.#host.rows() - DIALOG_MARGIN.top - DIALOG_MARGIN.bottom);
+    const budget = paneBox(this.size, this.#host.columns(), this.#host.rows()).height;
     const body: { line: string; hit: string | number | null }[] = [];
     const push = (segs: readonly Seg[], fill: ContrastPair = "text@raised", hit: string | number | null = null) =>
       body.push({ line: paint(theme, segs, inner, fill), hit });
@@ -788,13 +847,12 @@ export class Dialog implements Component, Focusable, SessionDialog {
     if (status.length > 0) push(status);
     push(footer);
     this.#hits = [null, ...body.map(b => b.hit), null];
-    const border = (text: string) => style(theme, "border@raised", text);
-    const title = fitWidth(` ${esc(spec.title)} `, Math.max(0, width - 4));
-    const top =
-      border("╭─") +
-      style(theme, "accent@raised", title, { bold: true }) +
-      border(`${"─".repeat(Math.max(0, width - 3 - displayWidth(title)))}╮`);
-    return [top, ...body.map(b => border("│") + b.line + border("│")), border(`╰${"─".repeat(inner)}╯`)];
+    return drawBox(
+      theme,
+      spec.title,
+      body.map(b => b.line),
+      width,
+    );
   }
 
   #renderList(
@@ -922,30 +980,19 @@ export class Dialog implements Component, Focusable, SessionDialog {
 /**
  * Show a dialog on top of everything as a toolkit overlay (it gets the
  * keyboard) and put it on the session's dialog stack. The returned handle's
- * hide() closes it like q; focus returns to what was below. `right` draws it
- * narrower at the right edge, so the task list stays in view (the filter
- * picker, whose toggles narrow the list live).
+ * hide() closes it like q; focus returns to what was below. Every dialog is
+ * centred; the caller picks only its size (lists default to medium,
+ * confirmations and forms to small), never a side.
  */
 export function showDialog(
   session: TuiSession,
   spec: DialogSpec,
-  placement: "center" | "right" = "center",
+  size: PaneSize = spec.kind === "list" ? "medium" : "small",
 ): DialogOverlay {
   const host = session.overlayHost;
   if (host === null) throw new Error("Dialogs need the terminal workspace to draw on");
-  const dialog = new Dialog(session, host, spec);
-  const room = host.columns() - DIALOG_MARGIN.left - DIALOG_MARGIN.right;
-  const width = Math.min(
-    DIALOG_WIDTH,
-    Math.max(DIALOG_MIN_WIDTH, placement === "right" ? Math.min(room, Math.floor(host.columns() * 0.6)) : room),
-  );
-  const overlay = host.showOverlay(dialog, {
-    anchor: placement === "right" ? "right-center" : "center",
-    width,
-    minWidth: Math.min(DIALOG_MIN_WIDTH, width),
-    maxHeight: "100%",
-    margin: { ...DIALOG_MARGIN },
-  });
+  const dialog = new Dialog(session, host, spec, size);
+  const overlay = host.showOverlay(dialog, paneOverlay(size, host.columns(), host.rows()));
   dialog.attach(overlay);
   session.pushDialog(dialog);
   return {

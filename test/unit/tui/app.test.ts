@@ -2,7 +2,14 @@ import { test, expect, describe, beforeEach, afterEach } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { CURSOR_MARKER, getKeybindings, type Terminal, visibleWidth } from "@earendil-works/pi-tui";
+import {
+  CURSOR_MARKER,
+  getKeybindings,
+  sliceByColumn,
+  stripTerminalSequences,
+  type Terminal,
+  visibleWidth,
+} from "@earendil-works/pi-tui";
 import type { CortexClient, DaemonIdentity, WorkspaceSnapshot } from "../../../src/contracts.ts";
 import type { Lane, Task, Update } from "../../../src/store.ts";
 import {
@@ -244,6 +251,22 @@ const plain = (lines: string[]): string[] =>
       .join(""),
   );
 const screen = (h: Harness): string => plain(h.shell.frame()).join("\n");
+/** The help or :messages box (a large pane centred over the workspace): its inner rows as plain text, the workspace cut away. */
+function boxText(h: Harness): string[] {
+  // stripTerminalSequences also drops the hyperlink reset the toolkit's compositing puts around the box.
+  const rows = h.shell.frame().map(stripTerminalSequences);
+  const top = rows.findIndex(row => /\u256d\u2500 (HELP|MESSAGES)/.test(row));
+  const head = rows[top];
+  if (head === undefined) return [];
+  const col = visibleWidth(head.slice(0, head.indexOf("\u256d")));
+  const width = visibleWidth(head.slice(0, head.indexOf("\u256e"))) + 1 - col;
+  const out: string[] = [];
+  for (const row of rows.slice(top + 1)) {
+    if (sliceByColumn(row, col, 1) === "\u2570") break;
+    out.push(sliceByColumn(row, col + 1, width - 2));
+  }
+  return out;
+}
 const type = (h: Harness, ...inputs: string[]) => {
   for (const input of inputs) h.shell.handleInput(input);
 };
@@ -801,8 +824,8 @@ describe("keys (N17/N18)", () => {
     expect(hint).toContain("Ctrl-n");
     type(h, "?");
     expect(h.session.view).toBe("help");
-    h.terminal.rows = 200; // the whole (scrollable) help on one screen
-    const help = screen(h);
+    h.terminal.rows = 400; // the whole (scrollable) help in its box
+    const help = boxText(h).join("\n");
     for (const text of [
       ":q  :quit",
       ":q!  :quit!",
@@ -830,6 +853,41 @@ describe("keys (N17/N18)", () => {
     expect(h.session.view).toBe("workspace");
   });
 
+  test("help and :messages open as a large box centred over the workspace", async () => {
+    const h = await started({ columns: 150, rows: 40 });
+    type(h, "?");
+    const rows = h.shell.frame().map(stripTerminalSequences);
+    const top = rows.findIndex(row => row.includes("\u256d\u2500 HELP"));
+    const head = rows[top] ?? "";
+    // 120 of 150 columns, centred: columns 15 to 134.
+    expect(visibleWidth(head.slice(0, head.indexOf("\u256d")))).toBe(15);
+    expect(visibleWidth(head.slice(0, head.indexOf("\u256e")))).toBe(134);
+    const bottom = rows.findIndex((row, y) => y > top && sliceByColumn(row, 15, 1) === "\u2570");
+    expect(bottom).toBeGreaterThan(top);
+    // The workspace stays in view around it: the rows above and below, and the task list at its left.
+    expect(top).toBeGreaterThan(0);
+    expect(rows.slice(0, top).join("\n")).toContain("Fix the login flow");
+    expect(bottom).toBeLessThan(rows.length - 3);
+    expect(rows.slice(top, bottom).some(row => sliceByColumn(row, 0, 15).includes("@1"))).toBe(true);
+    for (const row of h.shell.frame()) expect(visibleWidth(row)).toBeLessThanOrEqual(150);
+    expect(boxText(h)[0]).toContain("CORTEX TERMINAL WORKSPACE \u00b7 help");
+    type(h, "q");
+    expect(h.session.view).toBe("workspace");
+    h.session.addProblems(Array.from({ length: 60 }, (_, i) => ({ level: "warn" as const, text: `problem ${i + 1}` })));
+    type(h, ":", ..."messages", "\r");
+    expect(h.session.view).toBe("messages");
+    const n = h.session.messages.length;
+    expect(screen(h)).toContain(`\u256d\u2500 MESSAGES \u00b7 ${n} \u00b7 q or Esc closes`);
+    expect(boxText(h)[0]).toContain("problem 1");
+    type(h, "j");
+    expect(h.session.viewScroll).toBe(1);
+    type(h, "G");
+    expect(h.session.viewScroll).toBeGreaterThan(1);
+    expect(boxText(h).join("\n")).toContain("problem 60");
+    type(h, "q");
+    expect(h.session.view).toBe("workspace");
+  });
+
   test("/ in the help searches the help, never the task list: the first match is shown and marked; n/N step and wrap; the help stays open", async () => {
     const h = await started();
     type(h, "?");
@@ -843,7 +901,7 @@ describe("keys (N17/N18)", () => {
     expect(first).not.toBeNull();
     const count = Number(first?.[1]);
     expect(count).toBeGreaterThan(2);
-    const marked = () => plain(h.shell.frame()).filter(row => row.startsWith("\u25b8"));
+    const marked = () => boxText(h).filter(row => row.startsWith("\u25b8"));
     expect(marked().length).toBe(1); // the current match's row, in the margin
     expect(marked()[0]).toContain("picker");
     // Every match is underlined in the search pair (inverse without color); the current one is also bold.
@@ -879,7 +937,7 @@ describe("keys (N17/N18)", () => {
     type(h, "\x1b");
     expect(h.session.view).toBe("workspace");
     type(h, "?");
-    expect(plain(h.shell.frame()).some(row => row.startsWith("\u25b8"))).toBe(false);
+    expect(boxText(h).some(row => row.startsWith("\u25b8"))).toBe(false);
     expect(h.shell.frame().join("\n")).not.toContain("\x1b[4;7m");
     type(h, "n");
     expect(h.session.view).toBe("help");
@@ -892,8 +950,8 @@ describe("keys (N17/N18)", () => {
   test("the help wraps a long description under its column instead of cutting it", async () => {
     const h = await started({ columns: 80 });
     type(h, "?");
-    h.terminal.rows = 600; // the whole help on one screen
-    const rows = plain(h.shell.frame());
+    h.terminal.rows = 600; // the whole help in its box
+    const rows = boxText(h);
     const at = rows.findIndex(row => row.includes(":set <option>"));
     expect(rows[at]).toContain("Options: done");
     // The rest of it continues on the next rows, indented to the description column (the margin, then 27 cells).
@@ -902,25 +960,26 @@ describe("keys (N17/N18)", () => {
     expect(rest[0]?.startsWith(" ".repeat(28))).toBe(true);
     expect(rest[0]?.[28]).not.toBe(" ");
     // No row is cut short any more.
-    expect(rows.slice(0, -2).some(row => row.includes("\u2026"))).toBe(false);
-    for (const row of rows) expect(visibleWidth(row)).toBeLessThanOrEqual(80);
+    expect(rows.some(row => row.includes("\u2026"))).toBe(false);
+    for (const row of h.shell.frame()) expect(visibleWidth(row)).toBeLessThanOrEqual(80);
   });
 
   test("the help lists every tui.toml setting with its default and meaning, the custom theme format and the tokens", async () => {
     const h = await started();
     type(h, "?");
-    h.terminal.rows = 600; // the whole help on one screen
-    const rows = plain(h.shell.frame());
+    h.terminal.rows = 600; // the whole help in its box
+    const rows = boxText(h);
     expect(rows.some(row => row.includes("SETTINGS \u00b7 tui.toml"))).toBe(true);
     for (const s of SETTING_HELP) {
-      const row = rows.find(r => new RegExp(`^\\s+${s.key}\\s`).test(r));
+      // The entry's own row: its key two cells after the margin (a wrapped description starts further in).
+      const row = rows.find(r => new RegExp(`^ {3}${s.key}\\s`).test(r));
       expect(row, s.key).toBeDefined();
       expect(row, s.key).toContain(`default ${s.default ?? "unset"}`);
     }
     const all = rows.join(" ");
     for (const name of BUNDLED_THEME_NAMES) expect(all, name).toContain(name);
     for (const token of THEME_TOKENS) expect(all, token).toContain(token);
-    expect(rows.slice(0, -2).some(row => row.includes("\u2026"))).toBe(false);
+    expect(rows.some(row => row.includes("\u2026"))).toBe(false);
   });
 
   test("no view ever hints a function key", async () => {
@@ -1381,8 +1440,8 @@ describe("--heading, the reader keys and the mouse", () => {
     type(h, "\x0f", "\x0f");
     expect(readerRows(h)[0]).toContain("Plan");
     type(h, "?");
-    h.terminal.rows = 200;
-    const help = screen(h).split("\n");
+    h.terminal.rows = 400;
+    const help = boxText(h);
     expect(help.find(l => /^\s+}\s/.test(l))).not.toContain("(later)");
     expect(help.find(l => /^\s+{\s/.test(l))).not.toContain("(later)");
     h.terminal.rows = 40;
@@ -1548,9 +1607,8 @@ describe("dialogs in the shell (Task 8 part B: N17/N19)", () => {
     expect(h.session.dialog?.label).toBe("task tags");
     type(h, "q");
     type(h, "?");
-    h.terminal.rows = 200;
-    const help = screen(h);
-    const line = help.split("\n").find(l => l.includes(";t")) ?? "";
+    h.terminal.rows = 400;
+    const line = boxText(h).find(l => l.includes(";t")) ?? "";
     expect(line).toContain("Edit this task's tags");
     expect(line).not.toContain("(later)");
   });
@@ -1579,10 +1637,7 @@ describe("dialogs in the shell (Task 8 part B: N17/N19)", () => {
     expect(h.session.status?.text).toBe("Hiding done tasks (;d shows them); the done status filter still lists them");
     type(h, "?");
     h.terminal.rows = 400;
-    const line =
-      screen(h)
-        .split("\n")
-        .find(l => l.includes(";d ")) ?? "";
+    const line = boxText(h).find(l => l.includes(";d ")) ?? "";
     expect(line).toContain("Show or hide the done tasks");
     expect(line).not.toContain("(later)");
   });
@@ -1600,10 +1655,7 @@ describe("dialogs in the shell (Task 8 part B: N17/N19)", () => {
     expect(h.session.status?.text).toBe("@2: Blocked \u2192 Open");
     type(h, "?");
     h.terminal.rows = 400;
-    const line =
-      screen(h)
-        .split("\n")
-        .find(l => l.includes(";m ")) ?? "";
+    const line = boxText(h).find(l => l.includes(";m ")) ?? "";
     expect(line).toContain("Set this task's status in a picker");
     expect(line).not.toContain("(later)");
   });
@@ -1618,11 +1670,8 @@ describe("dialogs in the shell (Task 8 part B: N17/N19)", () => {
     expect(h.session.dialog).toBeNull();
     expect(screen(h)).toContain("sort -id");
     type(h, "?");
-    h.terminal.rows = 200;
-    const line =
-      screen(h)
-        .split("\n")
-        .find(l => l.includes(";o")) ?? "";
+    h.terminal.rows = 400;
+    const line = boxText(h).find(l => l.includes(";o")) ?? "";
     expect(line).toContain("Sort and group the task list");
     expect(line).not.toContain("(later)");
   });
@@ -1645,8 +1694,8 @@ describe("dialogs in the shell (Task 8 part B: N17/N19)", () => {
     expect(h.session.filter.status).toBeNull();
     expect(screen(h)).toContain("4 shown");
     type(h, "?");
-    h.terminal.rows = 200;
-    const help = screen(h).split("\n");
+    h.terminal.rows = 400;
+    const help = boxText(h);
     const f = help.find(l => /^\s*f\s/.test(l)) ?? "";
     expect(f).toContain("Pick filters");
     expect(help.find(l => /^\s*F\s/.test(l)) ?? "").toContain("Clear the search and every filter");
@@ -2090,8 +2139,8 @@ describe("the task panels and the update composer in the shell (Task 11: P7, N17
     type(h, "\x1b");
     await settle();
     type(h, "?");
-    h.terminal.rows = 200;
-    const help = screen(h);
+    h.terminal.rows = 400;
+    const help = boxText(h).join("\n");
     expect(help).toContain("Next task panel");
     expect(help).toContain("Post an update");
     expect(help).not.toContain("(later)");
@@ -2206,13 +2255,14 @@ describe("VISUAL and VISUAL LINE in the shell (vi v / V)", () => {
     const config: TuiConfig = { ...DEFAULT_CONFIG, keys: parseKeys({ keys: { visual: { yank: ["Y"] } } }).keys };
     const h = await started({ config });
     type(h, "?");
-    h.terminal.rows = 300;
-    const help = screen(h);
+    h.terminal.rows = 400;
+    const help = boxText(h).join("\n");
     for (const text of ["v  VISUAL", "V  VISUAL LINE", "KEYS · VISUAL", "0 (no count)", "Y ", "d x", ">", "<"]) {
       expect(help).toContain(text);
     }
-    expect(help).toContain("Copy the selection: the terminal clipboard (OSC 52) and the paste register (p)");
-    expect(help).toContain("Paste the last yank or delete after the cursor");
+    const prose = help.replace(/\s+/g, " "); // a description may wrap inside the box
+    expect(prose).toContain("Copy the selection: the terminal clipboard (OSC 52) and the paste register (p)");
+    expect(prose).toContain("Paste the last yank or delete after the cursor");
     expect(help).not.toContain("(later)");
   });
 });
@@ -2641,8 +2691,8 @@ describe("the mouse, top level (N19: on by default, never the only path to an ac
   test("help and the hint for a mouse selection name the mouse and the terminal's own selection (Shift-drag)", async () => {
     const h = await ready();
     type(h, "?");
-    h.terminal.rows = 300;
-    const help = screen(h);
+    h.terminal.rows = 400;
+    const help = boxText(h).join("\n");
     expect(help).toContain("MOUSE");
     expect(help).toMatch(/Shift-drag.*native selection/);
   });

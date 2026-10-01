@@ -1,7 +1,7 @@
-// The help view (`?`, :help): the shell's lines (src/tui/app.ts #helpLines,
-// built from the COMMANDS registry, the key table, the fixed keys and the
-// tui.toml settings (config.ts SETTING_HELP), so
-// help keeps its single sources) wrapped to the pane and searchable.
+// The help view (`?`, :help), drawn inside the large help box: the shell's
+// lines (src/tui/app.ts #helpLines, built from the COMMANDS registry, the key
+// table, the fixed keys and the tui.toml settings (config.ts SETTING_HELP),
+// so help keeps its single sources) wrapped to the box and searchable.
 //
 // - wrapHelp: rows of the pane's width in display cells, broken at spaces
 //   (a longer word is cut at the row's end). A continuation row starts at
@@ -235,14 +235,14 @@ export class Help {
     const scroll = Math.min(this.host.viewScroll, Math.max(0, rows.length - height));
     this.host.setViewScroll(scroll);
     const out = rows.slice(scroll, scroll + height).map((row, i) => {
-      const segs: Seg[] = [scroll + i === marked ? seg("accent@bg", "\u25b8") : seg("text@bg", " ")];
-      if (row.indent > 0) segs.push(seg("text@bg", " ".repeat(row.indent)));
+      const segs: Seg[] = [scroll + i === marked ? seg("accent@raised", "\u25b8") : seg("text@raised", " ")];
+      if (row.indent > 0) segs.push(seg("text@raised", " ".repeat(row.indent)));
       const line = lines[row.line];
       const own = matches.filter(m => m.line === row.line);
       if (line !== undefined) segs.push(...rowSegs(line, row, own, current));
-      return paint(theme, segs, width, "text@bg");
+      return paint(theme, segs, width, "text@raised");
     });
-    while (out.length < height) out.push(paint(theme, [], width, "text@bg"));
+    while (out.length < height) out.push(paint(theme, [], width, "text@raised"));
     return out;
   }
 

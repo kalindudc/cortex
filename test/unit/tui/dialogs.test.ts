@@ -10,15 +10,17 @@ import {
   DIALOG_MARGIN,
   Dialog,
   type DialogRow,
+  drawBox,
   type FormSpec,
   type ListSpec,
+  paneBox,
   showDialog,
 } from "../../../src/tui/dialogs.ts";
 import { DEFAULT_KEYS } from "../../../src/tui/keys.ts";
 import { WHEEL_NOTCH_MS } from "../../../src/tui/mouse.ts";
 import { openPreferences } from "../../../src/tui/preferences.ts";
 import { type OverlayHost, TuiSession } from "../../../src/tui/session.ts";
-import { resolveTheme } from "../../../src/tui/theme.ts";
+import { paint, resolveTheme, seg } from "../../../src/tui/theme.ts";
 
 // Plan @400 N17/N19 (Task 8, part B): dialogs are keyboard-complete overlays
 // that own input and return focus when they close. Lists: j/k and Enter, `/`
@@ -596,5 +598,56 @@ describe("rendering (N20, P9)", () => {
     type("\x1b");
     expect(dialog.render(60).join("")).not.toContain("\x1b_pi:c\x07");
     expect(dialog).toBeInstanceOf(Dialog);
+  });
+});
+
+describe("pane sizes: one centred placement", () => {
+  test("paneBox: small, medium and large widths and heights at three terminal sizes", () => {
+    expect(paneBox("small", 150, 40)).toEqual({ width: 60, height: 32 });
+    expect(paneBox("medium", 150, 40)).toEqual({ width: 76, height: 32 });
+    // Large: 120 at most, and 80% of the rows (40 - 8 margin rows = floor(40 * 0.8) = 32).
+    expect(paneBox("large", 150, 40)).toEqual({ width: 120, height: 32 });
+    expect(paneBox("large", 100, 30).width).toBe(80);
+    // At 80 x 24 every size fits inside the side margins, and large is never narrower than medium.
+    expect(paneBox("small", 80, 24)).toEqual({ width: 60, height: 16 });
+    expect(paneBox("medium", 80, 24)).toEqual({ width: 76, height: 16 });
+    expect(paneBox("large", 80, 24)).toEqual({ width: 76, height: 16 });
+    for (const size of ["small", "medium", "large"] as const) {
+      expect(paneBox(size, 80, 24).width).toBeLessThanOrEqual(80 - DIALOG_MARGIN.left - DIALOG_MARGIN.right);
+    }
+  });
+
+  test("showDialog centres every dialog: lists are medium, confirmations and forms small, large on request", () => {
+    const { session, fake } = setup();
+    showDialog(session, listSpec());
+    expect(fake.stack.at(-1)?.options).toMatchObject({ anchor: "center", width: 76 });
+    showDialog(session, {
+      kind: "confirm",
+      title: "Sure?",
+      label: "confirm",
+      message: ["Really?"],
+      yes: "yes",
+      confirm: () => {},
+    });
+    expect(fake.stack.at(-1)?.options).toMatchObject({ anchor: "center", width: 60 });
+    showDialog(session, formSpec());
+    expect(fake.stack.at(-1)?.options).toMatchObject({ anchor: "center", width: 60 });
+    const big = fakeHost(150, 40);
+    session.setOverlayHost(big.host);
+    showDialog(session, listSpec(), "large");
+    expect(big.stack.at(-1)?.options).toMatchObject({ anchor: "center", width: 120, maxHeight: 32 });
+  });
+
+  test("drawBox frames painted body lines at exactly the box width and escapes the title", () => {
+    const theme = resolveTheme({ config: DEFAULT_CONFIG, env: { NO_COLOR: "1" } });
+    const width = 40;
+    const body = ["one", "two"].map(text => paint(theme, [seg("text@raised", text)], width - 2, "text@raised"));
+    const lines = drawBox(theme, "TITLE", body, width);
+    expect(lines.length).toBe(body.length + 2);
+    for (const line of lines) expect(visibleWidth(line)).toBe(width);
+    expect(plain(lines).split("\n")[0]).toStartWith("╭─ TITLE");
+    const hostile = plain(drawBox(theme, "evil\x1b[31m", body, width));
+    expect(hostile).not.toContain("\x1b");
+    expect(hostile).toContain("evil^[[31m");
   });
 });

@@ -49,7 +49,8 @@
 //   frame: the prompt, a dialog field, the title or the editor cursor. The `:` line (src/tui/commandline.ts) completes from the
 //   ONE command registry (src/tui/commands.ts) and shows the candidates
 //   above it; `?`/:help and the searchable :commands view list the same
-//   registry. The help is drawn by src/tui/help.ts: wrapped under its
+//   registry. Help and :messages are a large box centred over the
+//   workspace; the help is drawn by src/tui/help.ts: wrapped under its
 //   description column, and `/` and n/N search it while it is open (never
 //   the task list). Every untrusted string crosses src/tui/safety.ts before
 //   style() colors it.
@@ -81,6 +82,7 @@
 
 import {
   CURSOR_MARKER,
+  compositeTuiLine,
   KeybindingsManager,
   type KeybindingsConfig,
   ProcessTerminal,
@@ -105,6 +107,7 @@ import { type Activity, createActivity } from "./activity.ts";
 import { createNotifications, type Notifications, UNREAD_MARK } from "./notifications.ts";
 import { CommandError, commandHelp, reportPendingMigrations } from "./commands.ts";
 import type { CommandLine } from "./commandline.ts";
+import { drawBox, paneBox } from "./dialogs.ts";
 import { DRAFT_FIELDS, type FieldState } from "./drafts.ts";
 import type { DocumentEditor, EditorMotion, Register, VisualKind } from "./editor.ts";
 import { createHelp, type Help, type HelpLine } from "./help.ts";
@@ -1666,7 +1669,7 @@ export class Shell {
         ? this.#workspace(theme, width, mainHeight)
         : s.view === "commands"
           ? this.#commandsPane(theme, width, mainHeight)
-          : this.#viewPane(theme, width, mainHeight);
+          : this.#viewBox(theme, width, mainHeight);
     // A re-wrap while rendering ends a reader selection: the status line then says NORMAL in this frame.
     this.#syncVisual();
     const bottom = s.prompt !== null ? this.#promptLine(theme, width) : this.#hintLine(theme, width);
@@ -2085,18 +2088,38 @@ export class Shell {
     });
   }
 
-  #viewPane(theme: ResolvedTheme, width: number, height: number): string[] {
+  /**
+   * Help and :messages: a large box centred over the workspace (the same
+   * geometry as a large dialog). It is drawn into this frame, not shown as a
+   * toolkit overlay, so the keys, the wheel and the mouse keep their one
+   * route: any view but the workspace is already modal here.
+   */
+  #viewBox(theme: ResolvedTheme, width: number, height: number): string[] {
     const s = this.session;
-    if (s.view === "help") return this.#help.render(theme, width, height);
-    const content = this.#messageLines(width - 2);
-    const max = Math.max(0, content.length - height);
-    const scroll = Math.min(s.viewScroll, max);
-    s.setViewScroll(scroll);
-    const out = content
-      .slice(scroll, scroll + height)
-      .map(segs => paint(theme, [seg("text@bg", " "), ...segs], width, "text@bg"));
-    while (out.length < height) out.push(paint(theme, [], width, "text@bg"));
-    return out;
+    const base = this.#workspace(theme, width, height);
+    const box = paneBox("large", width, this.#terminal.rows);
+    const w = box.width;
+    const h = Math.min(box.height, height);
+    const row = Math.floor((height - h) / 2);
+    const col = Math.floor((width - w) / 2);
+    const rows = Math.max(0, h - 2);
+    let title = "HELP";
+    let body: string[];
+    if (s.view === "help") body = this.#help.render(theme, w - 2, rows);
+    else {
+      title = `MESSAGES · ${s.messages.length} · q or Esc closes`;
+      const content = this.#messageLines(w - 4);
+      const scroll = Math.min(s.viewScroll, Math.max(0, content.length - rows));
+      s.setViewScroll(scroll);
+      body = content
+        .slice(scroll, scroll + rows)
+        .map(segs => paint(theme, [seg("text@raised", " "), ...segs], w - 2, "text@raised"));
+      while (body.length < rows) body.push(paint(theme, [], w - 2, "text@raised"));
+    }
+    const lines = drawBox(theme, title, body, w);
+    return base.map((line, y) =>
+      y < row || y >= row + h ? line : compositeTuiLine(line, lines[y - row] ?? "", col, w, width),
+    );
   }
 
   /** The :commands reference: the registry, filtered by its search; the highlighted row stays in view. */
@@ -2158,13 +2181,13 @@ export class Shell {
     const keys = this.session.keys.keys;
     const out: HelpLine[] = [];
     const blank = () => out.push({ segs: [] });
-    const heading = (text: string) => out.push({ segs: [seg("accent@bg", text, { bold: true })] });
+    const heading = (text: string) => out.push({ segs: [seg("accent@raised", text, { bold: true })] });
     const entry = (left: string, right: string, later = false) =>
       out.push({
         segs: [
-          seg("text@bg", `  ${esc(left).padEnd(HELP_KEY_WIDTH)} `),
-          seg("muted@bg", esc(right)),
-          ...(later ? [seg("dim@bg", "  (later)")] : []),
+          seg("text@raised", `  ${esc(left).padEnd(HELP_KEY_WIDTH)} `),
+          seg("muted@raised", esc(right)),
+          ...(later ? [seg("dim@raised", "  (later)")] : []),
         ],
         hang: HELP_KEY_WIDTH + 3,
       });
@@ -2268,20 +2291,23 @@ export class Shell {
     entry("theme tokens", THEME_TOKENS.join(" "));
     blank();
     const later = NORMAL_ACTIONS.some(action => !AVAILABLE_ACTIONS.has(action));
-    out.push({ segs: [seg("dim@bg", `${later ? "(later): not in this build yet. " : ""}Keys are set in tui.toml.`)] });
+    out.push({
+      segs: [seg("dim@raised", `${later ? "(later): not in this build yet. " : ""}Keys are set in tui.toml.`)],
+    });
     return out;
   }
 
   #messageLines(width: number): Seg[][] {
     const messages = this.session.messages;
-    const out: Seg[][] = [[seg("accent@bg", `MESSAGES · ${messages.length} (q or Esc closes)`, { bold: true })], []];
-    if (messages.length === 0) out.push([seg("muted@bg", "No messages.")]);
+    const out: Seg[][] = [];
+    if (messages.length === 0) out.push([seg("muted@raised", "No messages.")]);
     for (const m of messages) {
       const label = `[${m.level}] `;
-      const pair: ContrastPair = m.level === "error" ? "danger@bg" : m.level === "warn" ? "warn@bg" : "muted@bg";
+      const pair: ContrastPair =
+        m.level === "error" ? "danger@raised" : m.level === "warn" ? "warn@raised" : "muted@raised";
       const lines = wrapTextWithAnsi(esc(m.text), Math.max(1, width - label.length));
       for (const [i, line] of lines.entries()) {
-        out.push([seg(pair, i === 0 ? label : " ".repeat(label.length)), seg("text@bg", line)]);
+        out.push([seg(pair, i === 0 ? label : " ".repeat(label.length)), seg("text@raised", line)]);
       }
     }
     return out;

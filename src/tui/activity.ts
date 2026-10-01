@@ -51,7 +51,7 @@ import type { RelatedTasks, Severity, Task, TaskStatus, Update } from "../store.
 import { fmtTime } from "../lib/format.ts";
 import { type CommandLine, createCommandLine } from "./commandline.ts";
 import { CommandError } from "./commands.ts";
-import { DIALOG_MARGIN, DIALOG_WIDTH } from "./dialogs.ts";
+import { drawBox, paneBox, paneOverlay } from "./dialogs.ts";
 import { createDocumentEditor, createEditorState, type DocumentEditor, editorText } from "./editor.ts";
 import { insertKeyLabels, type KeyEvent, type KeyMode, printableKey } from "./keys.ts";
 import { renderDocument } from "./reader.ts";
@@ -68,7 +68,6 @@ const WARN_SUMMARY = 4000;
 const COLLAPSED_LINES = 3;
 /** Card content indent (the byline has the cursor marker and the disclosure). */
 const INDENT = 4;
-const DIALOG_MIN_WIDTH = 40;
 /** Invalidations inside this window share ONE Related re-read: a busy stream re-reads it at most this often. */
 export const RELATED_COALESCE_MS = 250;
 
@@ -1148,17 +1147,7 @@ class Composer implements Component, Focusable, SessionDialog {
   }
 
   show(): void {
-    const width = Math.min(
-      DIALOG_WIDTH,
-      Math.max(DIALOG_MIN_WIDTH, this.#host.columns() - DIALOG_MARGIN.left - DIALOG_MARGIN.right),
-    );
-    this.#overlay = this.#host.showOverlay(this, {
-      anchor: "center",
-      width,
-      minWidth: Math.min(DIALOG_MIN_WIDTH, width),
-      maxHeight: "100%",
-      margin: { ...DIALOG_MARGIN },
-    });
+    this.#overlay = this.#host.showOverlay(this, paneOverlay("medium", this.#host.columns(), this.#host.rows()));
     this.#session.pushDialog(this);
   }
 
@@ -1362,7 +1351,7 @@ class Composer implements Component, Focusable, SessionDialog {
     const theme = this.#session.theme;
     if (theme === null || width < 8) return [];
     const inner = width - 2;
-    const budget = Math.max(8, this.#host.rows() - DIALOG_MARGIN.top - DIALOG_MARGIN.bottom);
+    const budget = Math.max(8, paneBox("medium", this.#host.columns(), this.#host.rows()).height);
     const body: string[] = [];
     const push = (segs: readonly Seg[], fill: ContrastPair = "text@raised") =>
       body.push(paint(theme, segs, inner, fill));
@@ -1390,13 +1379,7 @@ class Composer implements Component, Focusable, SessionDialog {
     else if (draft.error !== null) push([seg("danger@raised", ` ✗ not posted: ${esc(draft.error)}`)]);
     else if (draft.notice !== null) push([seg("info@raised", ` ${esc(draft.notice)}`)]);
     push([seg("dim@raised", ` ${esc(this.hints())}`)]);
-    const border = (text: string) => style(theme, "border@raised", text);
-    const title = fitWidth(` ${esc(`Post an update · @${this.taskId} ${this.#title}`)} `, Math.max(0, width - 4));
-    const top =
-      border("╭─") +
-      style(theme, "accent@raised", title, { bold: true }) +
-      border(`${"─".repeat(Math.max(0, width - 3 - displayWidth(title)))}╮`);
-    return [top, ...body.map(line => border("│") + line + border("│")), border(`╰${"─".repeat(inner)}╯`)];
+    return drawBox(theme, `Post an update · @${this.taskId} ${this.#title}`, body, width);
   }
 
   /** The Author field: its text, and while it is typed in, a visible cursor cell with the IME marker. */

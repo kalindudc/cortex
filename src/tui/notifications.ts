@@ -211,28 +211,32 @@ export class Notifications {
       return found;
     };
     const feed = this;
-    showDialog(this.#session, {
-      kind: "list",
-      get title() {
-        return `NOTIFICATIONS · ${feed.unread()} unread`;
+    showDialog(
+      this.#session,
+      {
+        kind: "list",
+        get title() {
+          return `NOTIFICATIONS · ${feed.unread()} unread`;
+        },
+        label: "notifications",
+        pickLabel: "opens its task",
+        empty: "No notifications",
+        rows: () => this.feed().map(rowOf),
+        pick: (row, dialog) => {
+          const found = byKey(row);
+          if (found !== null) this.open(found);
+          dialog.finish();
+        },
+        keys: [
+          { key: "r", label: "read", row: true, run: row => this.markRead(need(row).row.id) },
+          { key: "u", label: "unread", row: true, run: row => this.markUnread(need(row).row.id) },
+          { key: "a", label: "all read", run: () => this.markAllRead() },
+          { key: "x", label: "dismiss", row: true, run: row => this.dismiss(need(row).row.id) },
+          { key: "X", label: "clear all", run: () => this.clearAll() },
+        ],
       },
-      label: "notifications",
-      pickLabel: "opens its task",
-      empty: "No notifications",
-      rows: () => this.feed().map(rowOf),
-      pick: (row, dialog) => {
-        const found = byKey(row);
-        if (found !== null) this.open(found);
-        dialog.finish();
-      },
-      keys: [
-        { key: "r", label: "read", row: true, run: row => this.markRead(need(row).row.id) },
-        { key: "u", label: "unread", row: true, run: row => this.markUnread(need(row).row.id) },
-        { key: "a", label: "all read", run: () => this.markAllRead() },
-        { key: "x", label: "dismiss", row: true, run: row => this.dismiss(need(row).row.id) },
-        { key: "X", label: "clear all", run: () => this.clearAll() },
-      ],
-    });
+      "large",
+    );
   }
 
   #local(id: number, change: (e: LocalError) => LocalError | null): void {

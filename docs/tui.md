@@ -2,7 +2,7 @@
 budget: 200
 sources: [src/tui/app.ts, src/tui/session.ts, src/tui/commands.ts, src/tui/keys.ts, src/tui/config.ts, src/tui/theme.ts,
   src/tui/help.ts, src/tui/drafts.ts, src/tui/reader.ts, src/tui/diagram.ts, src/tui/safety.ts, src/tui/mouse.ts,
-  src/tui/preferences.ts, src/lib/refGrammar.ts, src/lib/catalogSearch.ts]
+  src/tui/dialogs.ts, src/tui/preferences.ts, src/lib/refGrammar.ts, src/lib/catalogSearch.ts]
 ---
 # The terminal workspace
 
@@ -36,9 +36,10 @@ bottom shows the mode, whether your text is saved, the connection and any messag
 ## How you move around
 
 The keys work like vi: NORMAL mode moves and acts, INSERT types text, VISUAL selects, `:` opens a command line and
-`/` searches; `Esc` goes back to NORMAL. There is nothing to memorize: `?` or `:help` lists every mode, command,
-key (as you configured it) and setting, and `:commands` is a searchable command reference. The mouse is optional
-and on by default (click to focus, drag to select, scroll lists); every action also has a key or a command.
+`/` searches; `Esc` goes back to NORMAL. There is nothing to memorize: `?` or `:help` lists every mode, command, key
+(as you configured it) and setting; `:commands` searches the commands. Panes open in the centre, small
+(confirmations, forms), medium (pickers) or large (feeds, help), with the workspace in view around them. The mouse is
+optional and on by default (click to focus, drag to select, scroll lists); every action also has a key or a command.
 
 ## Editing and saving
 
@@ -76,14 +77,13 @@ status.blocked = "#ff7b72"
 ```
 
 Settings you change in the workspace are written back to tui.toml: `:theme`, `:density` and `:set number`. cortex
-changes only that setting's line, so your comments and layout stay as you wrote them. `:theme` and `:density` save
-at once; `:set number` saves a moment later, and when you quit. If tui.toml does not parse, cortex leaves it
-untouched, says so in `:messages`, and the change applies to that workspace only. The list filters `done` and
-`tasks` work the other way: set them in tui.toml to choose how every workspace starts; `:set done|tasks`, `;d` and
-`;e` change only the workspace you are in and are never saved.
-Settings are global; a profile (`--profile`) keeps only view state, such as the open panel, the list's sort and
-grouping, and each database's last task and filters. Theme files are never written. A mistake in either file keeps
-that entry's default and is listed in `:messages`.
+changes only that setting's line, so your comments and layout stay as you wrote them. `:theme` and `:density` save at
+once; `:set number` saves a moment later, and when you quit. If tui.toml does not parse, cortex leaves it untouched,
+says so in `:messages`, and the change applies to that workspace only. The list filters `done` and `tasks` work the
+other way: set them in tui.toml to choose how every workspace starts; `:set done|tasks`, `;d` and `;e` change only
+the workspace you are in and are never saved. Settings are global; a profile (`--profile`) keeps only view state,
+such as the open panel, the list's sort and grouping, and each database's last task and filters. Theme files are
+never written. A mistake in either file keeps that entry's default and is listed in `:messages`.
 
 ## Limits
 
@@ -118,9 +118,8 @@ only wraps and searches it. A new entry appears in help with no other edit, whic
 
 `src/tui/config.ts#loadConfig` validates each section on its own, and file content never makes it throw. A custom
 theme (`src/tui/theme.ts#loadCustomTheme`) must set every token or extend one bundled theme; bundled names win,
-errors reject it, low contrast only warns. `src/tui/theme.ts#resolveTheme` picks the theme: `:theme` in this
-session, then `--theme`, then tui.toml's `theme`, then `theme_dark`/`theme_light` by appearance, then the bundled
-pair.
+errors reject it, low contrast only warns. `src/tui/theme.ts#resolveTheme` picks the theme: `:theme` in this session,
+then `--theme`, then tui.toml's `theme`, then `theme_dark`/`theme_light` by appearance, then the bundled pair.
 
 `src/tui/config.ts#saveSettings` writes tui.toml's `src/tui/config.ts#WRITABLE_SETTINGS`. It re-reads the file,
 adds, replaces or removes only those top-level `key = value` lines, and renames a private temp file over the file
@@ -149,8 +148,7 @@ mutation id: they never retry an uncertain write, so a receipt could never be re
 (`src/tui/activity.ts`) is the one idempotent write: re-posting the same text reuses its id, so it posts once.
 
 Why not plain last-writer-wins? An autosave from a draft opened minutes ago would silently erase what an agent wrote
-since. CLI and API writes (`src/store.ts#editTask`) stay last-writer-wins by design; do not drop the TUI's guards
-to simplify.
+since. CLI and API writes (`src/store.ts#editTask`) stay last-writer-wins by design; do not drop the TUI's guards.
 
 ### Terminal safety
 
@@ -169,9 +167,11 @@ or terminal images? One needs a browser DOM, the other a graphics terminal, and 
 `src/tui/mouse.ts#parseMouse` is the one parser, and `src/tui/mouse.ts#filterMouseInput` drops unsupported reports
 before the toolkit sees them. The Shell turns tracking on (`src/tui/mouse.ts#MOUSE_ON`) once it holds the terminal
 and off on every path that gives it back. The toolkit's own mouse stays off: it would ask for any-motion tracking,
-which nothing needs. A mouse selection is the keys' vi VISUAL selection, not a second model. The lane and tag
-pickers search with `src/lib/catalogSearch.ts#searchCatalog`: every entry for an empty query, else every
-case-insensitive match of all the words, in the caller's order, so every lane and tag stays reachable.
+which nothing needs. A mouse selection is the keys' vi VISUAL selection, not a second model. The lane and tag pickers
+search with `src/lib/catalogSearch.ts#searchCatalog`: every entry for an empty query, else every case-insensitive
+match of all the words, in the caller's order, so every lane and tag stays reachable. `src/tui/dialogs.ts#paneBox`
+sizes every centred pane; the Shell draws help and `:messages` into its frame. Why not an overlay? It would need
+showing and hiding on every view change, and it would swallow the wheel.
 
 ## Rules to keep
 
@@ -197,3 +197,4 @@ case-insensitive match of all the words, in the caller's order, so every lane an
 - One mouse parser, Shell-owned modes, no any-motion tracking, never the only path to an action:
   `test/unit/tui/mouse.test.ts`, `test/integration/tui.test.ts`.
 - Picker search never caps, paginates, reorders or forces refinement: `test/unit/lib/catalogSearch.test.ts`.
+- Every pane is centred and sized by `src/tui/dialogs.ts#paneBox`: `test/unit/tui/dialogs.test.ts`.

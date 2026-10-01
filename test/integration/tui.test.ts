@@ -497,8 +497,8 @@ describe("the command line and the task list in a real terminal (plan @400 Task 
     let mark = pty.mark();
     await keys(pty, "?");
     await expectPlain(pty, "CORTEX TERMINAL WORKSPACE · help", mark);
-    // The help is longer than one screen: page through all of it so every section is drawn (and scanned).
-    for (let i = 0; i < 12; i++) await keys(pty, "\x04");
+    // The help is longer than its box: page through all of it so every section is drawn (and scanned).
+    for (let i = 0; i < 24; i++) await keys(pty, "\x04");
     await expectPlain(pty, "KEYS · NORMAL", mark);
     await expectPlain(pty, "KEYS · INSERT", mark);
     await keys(pty, "q");
@@ -1336,8 +1336,10 @@ describe("pane focus, sorting and fast filters in a real terminal", () => {
     await expectPlain(pty, /\/picker: match 2 of \d+/, mark);
     mark = pty.mark();
     await keys(pty, "\x1b");
-    // Back in the workspace, the list is unfiltered: the help's search never reached it.
-    await expectPlain(pty, "2 shown", mark);
+    // Back in the workspace, the list is unfiltered: the help's search never reached it. (The list header was never
+    // under the help box, so it is not redrawn; the rows under the box are, with both tasks.)
+    await expectPlain(pty, "alpha one", mark);
+    await expectPlain(pty, "beta two", mark);
     await expectPlain(pty, "no filters \u00b7 f picks \u00b7 / search", mark);
     pty.write(":q\r");
     expect(await pty.exited()).toEqual({ code: 0, signal: null });

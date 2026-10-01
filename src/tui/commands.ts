@@ -402,41 +402,37 @@ export function openFilterPicker(session: TuiSession): void {
     label: status,
     run: () => toggleStatus(session, status),
   }));
-  showDialog(
-    session,
-    {
-      kind: "list",
-      title: "FILTERS",
-      label: "filters",
-      pickLabel: "closes",
-      noun: "lanes and tags",
-      live: true,
-      hints: ["Space toggles", "Enter/Esc close (the filters stay)", "d o r b x u a toggle", "F clears", "/ searches"],
-      empty: "No lane or tag matches the search",
-      summary: () => filterSummary(session),
-      rows: () => filterRows(session),
-      keys: [
-        ...keys,
-        { key: "u", label: "untagged", run: () => toggleTag(session, UNTAGGED) },
-        { key: "a", label: "include done", run: () => session.setIncludeDone(!session.includeDone) },
-        { key: "F", label: "clears", run: () => session.clearFilters() },
-      ],
-      pick: (row, dialog, via) => {
-        if (via === "enter") {
-          dialog.finish();
-          return;
-        }
-        const at = row.key.indexOf(":");
-        const kind = at < 0 ? row.key : row.key.slice(0, at);
-        const value = at < 0 ? "" : row.key.slice(at + 1);
-        if (kind === "status") toggleStatus(session, value as TaskStatus);
-        else if (kind === "lane") toggleLane(session, value);
-        else if (kind === "tag") toggleTag(session, value);
-        else if (kind === "done") session.setIncludeDone(!session.includeDone);
-      },
+  showDialog(session, {
+    kind: "list",
+    title: "FILTERS",
+    label: "filters",
+    pickLabel: "closes",
+    noun: "lanes and tags",
+    live: true,
+    hints: ["Space toggles", "Enter/Esc close (the filters stay)", "d o r b x u a toggle", "F clears", "/ searches"],
+    empty: "No lane or tag matches the search",
+    summary: () => filterSummary(session),
+    rows: () => filterRows(session),
+    keys: [
+      ...keys,
+      { key: "u", label: "untagged", run: () => toggleTag(session, UNTAGGED) },
+      { key: "a", label: "include done", run: () => session.setIncludeDone(!session.includeDone) },
+      { key: "F", label: "clears", run: () => session.clearFilters() },
+    ],
+    pick: (row, dialog, via) => {
+      if (via === "enter") {
+        dialog.finish();
+        return;
+      }
+      const at = row.key.indexOf(":");
+      const kind = at < 0 ? row.key : row.key.slice(0, at);
+      const value = at < 0 ? "" : row.key.slice(at + 1);
+      if (kind === "status") toggleStatus(session, value as TaskStatus);
+      else if (kind === "lane") toggleLane(session, value);
+      else if (kind === "tag") toggleTag(session, value);
+      else if (kind === "done") session.setIncludeDone(!session.includeDone);
     },
-    "right",
-  );
+  });
 }
 
 // ---------- :sort and :group ----------

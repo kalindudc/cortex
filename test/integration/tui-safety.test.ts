@@ -489,8 +489,12 @@ describe("hostile task text in every TUI surface (G5)", () => {
     await expectPlain(pty, `is blocked by ${shown("au", "12", "")}`, mark);
     await command(pty, "activity", `bl ${shown("bl", "12")}`);
     await command(pty, "read", "READ");
-    await command(pty, "messages", `[error] No lane "nope" (lanes: ${shown("ln", "12", "")}`);
-    await expectPlain(pty, `[warn] ■ @1 is blocked by ${shown("au", "12", "")}`);
+    // A hostile name is one long word: inside the :messages box it wraps onto the row after its message's start.
+    mark = pty.mark();
+    await command(pty, "messages", `[error] No lane "nope" (lanes:`);
+    await expectPlain(pty, shown("ln", "12", ""), mark);
+    await expectPlain(pty, "[warn] ■ @1 is blocked by", mark);
+    await expectPlain(pty, shown("au", "12", ""), mark);
     await backToWorkspace(pty, "q");
     await command(pty, "notifications", "NOTIFICATIONS ·");
     await expectPlain(pty, "open → blocked");
