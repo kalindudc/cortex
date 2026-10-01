@@ -23,7 +23,7 @@ const at = (day: number): void => {
 
 let store: Store;
 let app: ReturnType<typeof buildApp>;
-const id = { a: 0, b: 0, c: 0, reviews: [] as number[], sse: 0, edge: 0 };
+const id = { a: 0, b: 0, c: 0, reviews: [] as number[], sse: 0, edge: 0, notes: 0, install: 0 };
 
 const get = async <T>(path: string): Promise<T> => {
   const res = await app.fetch(new Request(`http://localhost${path}`));
@@ -52,6 +52,19 @@ beforeAll(() => {
     title: "Google edge routing for SSE events support note",
     lane: "cortex",
     body: "Edge routing support for events delivered to the dashboard.",
+  }).id;
+  // Prompt-noise distractors: a checkout path, a PR URL and conversational filler, never the topic.
+  id.notes = store.addTask({
+    title: "Session notes: proxy setup",
+    lane: "cortex",
+    body:
+      "## State\nWorking in /Users/kalindu/src/github.com/kalindudc/cortex; see https://github.com/kalindudc/cortex/pull/12.\n" +
+      "Something came up: everything goes via the proxy, come back to it.",
+  }).id;
+  id.install = store.addTask({
+    title: "Install from source",
+    lane: "cortex",
+    body: "## Steps\nClone https://github.com/kalindudc/cortex into ~/src, then see the build script for something else.",
   }).id;
   at(1);
   id.a = store.addTask({
@@ -182,5 +195,39 @@ describe("memory evaluation (plan @422, real-prompt replay)", () => {
     expect(renderStream(c, staleness, { section: "next" })).not.toContain("## 1. Context");
     const a = await get<MemoryStream>(`/api/memory/streams/${id.a}`);
     expect(renderStream(a, staleness).split("\n")[1]).toContain(`latest linked @${id.c} (open, active 2026-09-10)`);
+  });
+
+  // The prompt-noise distractors replay the audit's path-led and chatty prompts.
+  const noNoise = (result: MemorySearchResult): void => {
+    expect(result.terms).toEqual(["gateway", "migration"]);
+    const hits = result.hits.map(hit => hit.id);
+    expect(hits).not.toContain(id.notes);
+    expect(hits).not.toContain(id.install);
+  };
+
+  test("a path-led prompt matches on its topic, not the checkout path", async () => {
+    const q = "/Users/kalindu/src/github.com/kalindudc/cortex what was I last doing on the gateway migration";
+    const result = await search(q, "&boost=cortex");
+    noNoise(result);
+    expect(result.recent).toBe(true);
+    expect(result.hits[0]?.id).toBe(id.c);
+  });
+
+  test("a chatty prompt matches on its topic, not the filler", async () => {
+    const result = await search(
+      "something came up with everything via the gateway migration, come back to it",
+      "&boost=cortex",
+    );
+    noNoise(result);
+    expect(result.hits.map(hit => hit.id).sort()).toEqual([id.a, id.b, id.c].sort());
+  });
+
+  test("a URL and an @id in the prompt add no terms", async () => {
+    const result = await search(
+      `see https://github.com/kalindudc/cortex/pull/12 and @${id.b} for the gateway migration`,
+      "&boost=cortex",
+    );
+    noNoise(result);
+    expect(result.hits.map(hit => hit.id)).toContain(id.b);
   });
 });

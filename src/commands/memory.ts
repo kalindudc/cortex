@@ -21,7 +21,7 @@ import type { MemoryStream, MemoryStreamRow } from "../store.ts";
  * stream: body = current state, updates = breadcrumbs, lane = the project
  * (derived from the ask; recall spans every lane).
  *
- *   search <query>  ranked recall across lanes (derived FTS5 index; punctuation ignored)
+ *   search <query>  ranked recall across lanes (derived FTS5 index; punctuation, paths, URLs and filler ignored)
  *   show <id>       staleness since the last BODY sync + body (section-first when long) + breadcrumb trail
  *   context         the one call a harness makes per prompt: primer + hits (this lane boosted)
  *   lane            the lane of the current checkout (git's common dir)
@@ -55,7 +55,11 @@ function taskIds(raw: string | undefined, json: boolean): number[] | undefined {
 const search = defineCommand({
   meta: { name: "search", description: "rank memory streams for free text (titles, tags, bodies, update logs)" },
   args: {
-    query: { type: "positional", required: true, description: "free text; punctuation and filler words are ignored" },
+    query: {
+      type: "positional",
+      required: true,
+      description: "free text; punctuation, filler words, URLs, paths, emails, ids and fenced code are ignored",
+    },
     lane: {
       type: "string",
       alias: "l",

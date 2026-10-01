@@ -43,4 +43,4 @@ $ cortex memory show 42 --section=next
 - Pass values as `--flag=value`. Nested subcommands skip cortex's argv normalizer, so a dash-leading value in a separate `--flag value` pair is read as a flag.
 - The search index and its `@id` link graph are DERIVED: built lazily on the first search, reconciled on every search and show, never backed up. Nothing to maintain.
 - Staleness is measured from the last BODY edit, never from status flips or updates. Cited files resolve against the cwd's checkout; when most are absent there (another repo) or outside git the verdict is `unverifiable`.
-- Punctuation and filler words ("continue the work", "please fix") are ignored; a query with no content words returns no hits.
+- Punctuation, filler words ("continue the work", "something came up"), URLs, absolute, `~/` and `./` paths, emails, UUIDs, commit hashes and fenced code are ignored. Repo-relative paths, inline code, `@id` and `#tag` still count. A query with no content words returns no hits.

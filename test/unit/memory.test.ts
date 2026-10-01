@@ -17,11 +17,13 @@ import {
   memorySections,
   memoryTerms,
   primerRows,
+  RECENCY_WORDS,
   recencyIntent,
   renderHits,
   renderPrimer,
   renderStream,
   repoInfo,
+  STOPWORDS,
 } from "../../src/memory.ts";
 import type { MemoryHit, MemoryStream, MemoryStreamRow, Task, Update } from "../../src/store.ts";
 
@@ -132,6 +134,72 @@ describe("memoryTerms", () => {
     expect(memoryTerms("zeta alpha zeta beta alpha")).toEqual(["zeta", "alpha", "beta"]);
     const many = Array.from({ length: 40 }, (_, i) => `word${String.fromCharCode(97 + (i % 26))}${i}`).join(" ");
     expect(memoryTerms(many)).toHaveLength(MEMORY_LIMITS.terms);
+  });
+});
+
+describe("query noise", () => {
+  test("a leading absolute, ~/, ./ or ../ path yields no terms, so a long path spends none of the budget", () => {
+    expect(memoryTerms("/Users/kalindu/src/github.com/kalindudc/cortex fix the mouse wheel")).toEqual([
+      "mouse",
+      "wheel",
+    ]);
+    expect(memoryTerms("~/.config/cortex/cortex.db and ./scripts/build.sh ../x/y broke the daemon")).toEqual([
+      "broke",
+      "daemon",
+    ]);
+    const deep = Array.from({ length: 20 }, (_, i) => `/seg${i}x`).join("");
+    expect(memoryTerms(`${deep} mouse wheel`)).toEqual(["mouse", "wheel"]);
+  });
+
+  test("keeps repo-relative paths, a one-segment /word and slash-separated words", () => {
+    expect(memoryTerms("src/tui/mouse.ts and the /memory panel")).toEqual(["src", "tui", "mouse", "memory", "panel"]);
+    expect(memoryTerms("and/or 2026/09/30 wheel")).toEqual(["wheel"]);
+  });
+
+  test("URLs of any scheme and emails yield no terms; @id and #tag still count", () => {
+    expect(memoryTerms("see https://github.com/kalindudc/cortex/pull/12 or file:///tmp/x wheel notch")).toEqual([
+      "wheel",
+      "notch",
+    ]);
+    expect(memoryTerms("mail kalindu@example.com about @426 and #cortex-as-agent-memory")).toEqual([
+      "mail",
+      "cortex",
+      "agent",
+      "memory",
+    ]);
+  });
+
+  test("UUIDs, hex ids and fenced code yield no terms; hex words without a digit and inline code stay", () => {
+    expect(
+      memoryTerms("pi-019a2b3c-4d5e-7f00-8123-456789abcdef planner-7f3a9201 commit 0266a7f deadbeef facade"),
+    ).toEqual(["planner", "commit", "deadbeef", "facade"]);
+    // An unclosed fence (a cut prompt) runs to the end.
+    expect(memoryTerms("wheel ```\nconst foo = bar;\n``` notch `memoryTerms` ```ts\nunclosed zzz")).toEqual([
+      "wheel",
+      "notch",
+      "memoryterms",
+    ]);
+  });
+
+  test("phrases and recency see the same clean text", () => {
+    expect(memoryPhrases("/tmp/cortex-plans.AzPZ6wlwbr/x https://ex.com/routing-events wheel-notch")).toEqual([
+      ["wheel", "notch"],
+    ]);
+    expect(memoryPhrases("#cortex-as-agent-memory")).toEqual([["cortex", "as", "agent", "memory"]]);
+    expect(recencyIntent(memoryTerms("/Users/k/src/x what was I last doing for routing-events"))).toEqual({
+      terms: ["routing", "events"],
+      recent: true,
+    });
+  });
+
+  test("conversational filler is stopworded; cortex topic and command words and recency words never are", () => {
+    expect(memoryTerms("something came up: everything goes via the repo, come back to update it")).toEqual([
+      "repo",
+      "update",
+    ]);
+    const topics = "memory plan docs daemon update repo lane tag draft open review blocked search show stop";
+    expect(topics.split(" ").filter(word => STOPWORDS.has(word))).toEqual([]);
+    expect([...RECENCY_WORDS].filter(word => STOPWORDS.has(word))).toEqual([]);
   });
 });
 

@@ -52,7 +52,9 @@ With pi (the coding agent cortex ships an extension for), memory arrives on its 
 
 Without pi, an agent runs `cortex memory context --query="<the ask>"` once, then `cortex memory show <id>`.
 
-Search matches words and their forms, and each hit shows which words matched. It covers every project, the
+Search matches words and their forms, and each hit shows which words matched. Full paths, links, commit hashes,
+UUIDs, pasted code blocks and small talk in the ask are ignored, so they never pull in unrelated streams; a
+repo-relative file like `src/tui/mouse.ts` still counts. It covers every project, the
 current one first, because work spans repos. A long body opens with its priority sections (Next, open questions,
 Decisions, State) and lists the rest. An older stream names the newer one continuing it as its "latest linked".
 
@@ -110,10 +112,19 @@ FTS5 is SQLite's full-text search engine. Its tables (`_memory_sections`, `_memo
 ### Lanes and ranking
 
 `src/memory.ts#memoryLane` names the repo from git's common dir in one spawn (`src/memory.ts#repoInfo`), else the
-directory. The search route in `src/server.ts` tokenizes with `src/memory.ts#memoryTerms`, dropping short tokens,
-digits and `src/memory.ts#STOPWORDS` (function words and agent filler, which would surface every stream).
-`src/memory.ts#recencyIntent` makes recency words a newest-activity tie-break only (a global blend was measured to
-cut precision); `src/memory.ts#memoryPhrases` searches compounds like `routing-events` as phrases.
+directory. The search route in `src/server.ts` tokenizes with `src/memory.ts#memoryTerms`. It first blanks text
+that names no topic (`src/memory.ts#queryText` applying `src/memory.ts#QUERY_NOISE`): fenced code, URLs, emails,
+UUIDs, and `~/`, `./`, `../` or absolute paths of two or more segments. A pasted checkout path would otherwise spend
+the term budget on `users`, `src`, `github`. It then drops short tokens, digits, hex ids
+(`src/memory.ts#isTermToken`) and `src/memory.ts#STOPWORDS`: function words, agent and conversational filler,
+which would surface every stream, but never a word naming a cortex topic or command, nor a
+`src/memory.ts#RECENCY_WORDS` member. `src/memory.ts#recencyIntent` makes recency words a newest-activity
+tie-break only (a global blend was measured to cut precision); `src/memory.ts#memoryPhrases` searches compounds
+like `routing-events` as phrases, from the same blanked text. Every surface (`cortex memory search`,
+`cortex memory context`, pi's automatic hits, `cortex_recall`) gets these terms. Why not drop every path and
+inline code? Streams cite repo-relative files (`src/tui/mouse.ts`) and identifiers, and recall by them works. Why
+not stopword `update` or `repo`? They name cortex topics. Why not clean the query in the pi extension or the
+route? A copy in the extension drifts, and a future caller of the helpers would get raw text.
 `src/store.ts#searchMemory` searches every lane and keeps a section only when it covers `MEMORY_LIMITS.minMatched`
 stem groups (fewer for shorter queries), title and tags counting everywhere: a wrong memory is worse than none.
 Order: phrase match, coverage, the tie-break, BM25 (title over tags over text) times the lane boost, then id.
@@ -142,7 +153,8 @@ pure functions of state and theme in `src/extensions/memory-view.ts`, installed 
 
 - `src/extensions/pi.ts#memoryRole`: a human attached (pi's `hasUI`) makes a writer, anything headless a reader.
 - `src/extensions/pi.ts#injectMemory` spawns at most once per prompt: always on a writer's first (the primer),
-  otherwise it needs two content words and either the first prompt or a `src/extensions/pi.ts#RECALL_CUE` match.
+  otherwise it needs two content words (`src/extensions/pi.ts#contentWords`, a cheap gate: the CLI's terms decide
+  the hits) and either the first prompt or a `src/extensions/pi.ts#RECALL_CUE` match.
   The primer is refetched only after compaction or `/memory refresh`; errors go to the footer, never the prompt.
 - `cortex_recall` claims a query before it runs (pi runs one message's tool calls in parallel). Failures throw:
   pi ignores a returned `isError`, and `pi.exec` reports a timeout as a success marked killed.
@@ -154,6 +166,9 @@ pure functions of state and theme in `src/extensions/memory-view.ts`, installed 
 
 - Only `src/memory.ts#memoryTerms` output reaches an FTS5 MATCH, each term quoted by `src/store.ts#quoteTerm`;
   never raw text: `test/unit/server.test.ts`, `test/integration/cli/memory.test.ts` (punctuation queries).
+- Query noise (absolute and home paths, URLs, emails, ids, fenced code) and filler never become terms;
+  repo-relative paths, inline code, `@id` and `#tag` still do; no cortex topic or recency word is a stopword:
+  `test/unit/memory.test.ts` (query noise), `test/unit/memory-eval.test.ts` (the prompt-noise cases).
 - The index is created on first use, never in `migrate()`, with no triggers or write hooks:
   `test/unit/store-memory.test.ts`. It is never backed up: `test/unit/backup.test.ts` pins `src/backup.ts#TABLES`.
 - Only `src/store.ts#recordBodySync` writes `_body_edits`; staleness never reads `tasks.updated`, and breadcrumbs
