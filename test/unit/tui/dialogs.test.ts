@@ -248,6 +248,38 @@ describe("list dialogs", () => {
     expect(quits).toEqual([false]);
   });
 
+  test("sections never touch what is around them: a blank line above each header and below the last section", () => {
+    const { session, type } = setup();
+    // The list's own lines: no border, no count line, no footer.
+    const lines = (d: Dialog): string[] =>
+      plain(d.render(60))
+        .split("\n")
+        .slice(2, -2)
+        .map(l => l.slice(1, -1).trim());
+    const sectioned: DialogRow[] = [
+      { key: "a1", label: "alpha", section: "First" },
+      { key: "a2", label: "beta", section: "First" },
+      { key: "b1", label: "gamma", section: "Second" },
+      { key: "new", label: "+ New", pinned: true },
+    ];
+    const { dialog } = showDialog(session, listSpec({ rows: () => sectioned }));
+    expect(lines(dialog)).toEqual(["", "First", "\u258calpha", "beta", "", "Second", "gamma", "", "+ New"]);
+    type("q");
+    // A list without sections has no blank lines.
+    const flat = showDialog(session, listSpec());
+    expect(lines(flat.dialog)).toEqual(["\u258calpha", "beta", "gamma"]);
+    type("q");
+    // Scrolling keeps the spacing in view: the header and the blank above the row that opens a section,
+    // the blank below the row that ends one (16 rows: four list lines).
+    session.setOverlayHost(fakeHost(100, 16).host);
+    const small = showDialog(session, listSpec({ rows: () => sectioned.slice(0, 3) }));
+    expect(lines(small.dialog)).toEqual(["", "First", "\u258calpha", "beta"]);
+    type("j", "j");
+    expect(lines(small.dialog)).toEqual(["", "Second", "\u258cgamma", ""]);
+    type("k");
+    expect(lines(small.dialog)).toEqual(["\u258cbeta", "", "Second", "gamma"]);
+  });
+
   test("a highlight callback previews each row as it is highlighted; dismiss undoes it", () => {
     const { session, type } = setup();
     const seen: (string | null)[] = [];

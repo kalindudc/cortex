@@ -1,7 +1,9 @@
 // The `:` command registry: ONE list of CommandSpec
 // (name, aliases, usage, description, completer, handler) drives execution
 // (parseCommand + run), Tab completion (completeCommandLine), `?`/:help
-// (commandHelp) and the searchable :commands reference (searchCommands).
+// (commandHelp) and the :commands list dialog (openCommandList, searched
+// over commandSearchText). Help and :commands show the commands by group
+// (COMMAND_GROUPS); the registry order is not the display order.
 //
 // - Handlers parse and validate their argument and throw CommandError with
 //   an explanation; the session shows it and changes nothing.
@@ -55,7 +57,6 @@ import type {
   Versions,
 } from "../contracts.ts";
 import type { Task, TaskStatus } from "../store.ts";
-import { searchCatalog } from "../lib/catalogSearch.ts";
 import { isValidTagName, nextStatusFor, STATUS, STATUS_LABEL } from "../lib/constants.ts";
 import { searchTasks } from "../lib/fuzzy.ts";
 import { UNTAGGED } from "../lib/taskView.ts";
@@ -72,9 +73,28 @@ import { filterChips, filterCounts, STATUS_MARK, tagLabel } from "./workspace.ts
 /** Input the user must correct: shown as an error message, nothing changes. */
 export class CommandError extends Error {}
 
+/** The sections of help and :commands, in display order. */
+export const COMMAND_GROUPS = [
+  "Task",
+  "Task list",
+  "Document",
+  "Panels",
+  "Navigation",
+  "Drafts and quitting",
+  "Workspace",
+] as const;
+export type CommandGroup = (typeof COMMAND_GROUPS)[number];
+
+/** The commands by group (COMMAND_GROUPS order, registry order within a group): display order only. */
+export function groupedCommands(specs: readonly CommandSpec[]): CommandSpec[] {
+  return COMMAND_GROUPS.flatMap(g => specs.filter(s => s.group === g));
+}
+
 export interface CommandSpec {
   name: string;
   aliases: readonly string[];
+  /** Its section in help and :commands. */
+  readonly group: CommandGroup;
   usage: string;
   description: string;
   /** Acts on the open dialog instead of closing it (:w, :q ...). */
@@ -160,28 +180,66 @@ export interface CommandHelp {
   /** Other ways to type it (`:quit` beside `:q`), not repeated from the usage. */
   readonly names: readonly string[];
   readonly description: string;
+  readonly group: CommandGroup;
 }
 
-/** The registry as help entries, in registry order. */
+/** The given commands as help entries, in the given order. */
 export function commandHelp(specs: readonly CommandSpec[]): CommandHelp[] {
   return specs.map(s => ({
     name: s.name,
     usage: s.usage,
     names: [s.name, ...s.aliases].map(n => `:${n}`).filter(n => n !== s.usage && !s.usage.startsWith(`${n} `)),
     description: s.description,
+    group: s.group,
   }));
 }
 
-/** The :commands reference search: literal, case-insensitive AND keywords over names, usage and description; uncapped. */
-export function searchCommands(specs: readonly CommandSpec[], query: string): CommandSpec[] {
-  return searchCatalog(specs, query, s =>
-    [`:${s.name}`, ...s.aliases.map(a => `:${a}`), s.usage, s.description].join(" "),
-  ).items;
+/** What the :commands dialog's `/` matches for a command: its names, aliases, usage and description. */
+export function commandSearchText(spec: CommandSpec): string {
+  return [`:${spec.name}`, ...spec.aliases.map(a => `:${a}`), spec.usage, spec.description].join(" ");
 }
 
 /** Whether a command accepts an argument (its usage shows one). */
 export function takesArgument(spec: CommandSpec): boolean {
   return /[<[]/.test(spec.usage);
+}
+
+/**
+ * The :commands reference (Ctrl-p): every command under its group in a large
+ * list dialog, with the keys, `/` filter and mouse of every dialog. Enter
+ * runs a command that takes no argument, else starts its command line.
+ */
+export function openCommandList(session: TuiSession, query: string): void {
+  const specs = groupedCommands(session.commands);
+  // Usage plus the other ways to type it, as in help (`:q  :quit`).
+  const rows: DialogRow[] = commandHelp(specs).map((h, i) => ({
+    key: h.name,
+    section: h.group,
+    label: [h.usage, ...h.names].join("  "),
+    detail: h.description,
+    search: commandSearchText(specs[i] as CommandSpec),
+  }));
+  const overlay = showDialog(
+    session,
+    {
+      kind: "list",
+      title: "COMMANDS",
+      label: "commands",
+      noun: "commands",
+      pickLabel: "runs it (or starts its line)",
+      empty: "No command matches the search",
+      rows: () => rows,
+      pick: (row, dialog) => {
+        const spec = findCommand(row.key, session.commands);
+        dialog.finish();
+        if (spec === undefined) return;
+        if (takesArgument(spec)) session.openPrompt(":", `${spec.name} `);
+        else void session.execute(spec.name);
+      },
+    },
+    "large",
+  );
+  if (query !== "") overlay.dialog.search(query);
 }
 
 // ---------- completion helpers ----------
@@ -435,7 +493,7 @@ export function openFilterPicker(session: TuiSession): void {
   });
 }
 
-// ---------- :sort and :group ----------
+// ---------- :sort (orders, and groupings with :sort group) ----------
 
 const SORT_HELP: Readonly<Record<TaskSort, string>> = {
   id: "ascending task id (the default)",
@@ -458,9 +516,42 @@ const GROUP_HELP: Readonly<Record<TaskGroup, string>> = {
 const isSort = (value: string): value is TaskSort => (TASK_SORTS as readonly string[]).includes(value);
 const isGroup = (value: string): value is TaskGroup => (TASK_GROUPS as readonly string[]).includes(value);
 
+// "lane" and "status" are both orders and groupings, so a grouping needs the `group` word.
+const GROUPING = /^group(?:\s+(\S+))?$/;
+
+/** :sort completions: an order or `group`, then after `group ` a grouping. */
+function completeSort(prefix: string): string[] {
+  const grouping = /^group\s+(\S*)$/.exec(prefix);
+  if (grouping) return TASK_GROUPS.filter(v => v.startsWith(grouping[1] ?? "")).map(v => `group ${v}`);
+  return [...TASK_SORTS, "group"].filter(v => v.startsWith(prefix));
+}
+
+function describeSort(argument: string): string | undefined {
+  const grouping = GROUPING.exec(argument);
+  if (grouping === null) return isSort(argument) ? SORT_HELP[argument] : undefined;
+  const value = grouping[1];
+  if (value === undefined) return "group the list: none, lane or status";
+  return isGroup(value) ? GROUP_HELP[value] : undefined;
+}
+
+/** :sort [order] orders the list; :sort group [none|lane|status] groups it; either bare opens the picker. */
 function runSort(session: TuiSession, argument: string): void {
-  if (argument === "") {
-    openOrderPicker(session, "sort");
+  const grouping = GROUPING.exec(argument);
+  if (argument === "" || (grouping !== null && grouping[1] === undefined)) {
+    openOrderPicker(session, argument === "" ? "sort" : "group");
+    return;
+  }
+  if (grouping !== null) {
+    const value = grouping[1] ?? "";
+    if (!isGroup(value)) {
+      throw new CommandError(
+        `Unknown grouping "${value}": ${TASK_GROUPS.slice(0, -1).join(", ")} or ${TASK_GROUPS.at(-1)}`,
+      );
+    }
+    session.setGroup(value);
+    if (session.query !== "" && value !== "none") {
+      session.notify("info", `The search shows one list by relevance; group ${value} applies once it is cleared`);
+    }
     return;
   }
   if (!isSort(argument)) throw new CommandError(`Unknown order "${argument}": ${TASK_SORTS.join(", ")}`);
@@ -470,23 +561,7 @@ function runSort(session: TuiSession, argument: string): void {
   }
 }
 
-function runGroup(session: TuiSession, argument: string): void {
-  if (argument === "") {
-    openOrderPicker(session, "group");
-    return;
-  }
-  if (!isGroup(argument)) {
-    throw new CommandError(
-      `Unknown grouping "${argument}": ${TASK_GROUPS.slice(0, -1).join(", ")} or ${TASK_GROUPS.at(-1)}`,
-    );
-  }
-  session.setGroup(argument);
-  if (session.query !== "" && argument !== "none") {
-    session.notify("info", `The search shows one list by relevance; group ${argument} applies once it is cleared`);
-  }
-}
-
-/** The sort and group picker (bare :sort/:group, ;o): Space applies a row, Enter applies it and closes. */
+/** The sort and group picker (bare :sort or :sort group, ;o): Space applies a row, Enter applies it and closes. */
 function openOrderPicker(session: TuiSession, start: "sort" | "group"): void {
   const mark = (on: boolean): string => (on ? "(\u2022)" : "( )");
   showDialog(session, {
@@ -1557,6 +1632,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "open",
     aliases: [],
+    group: "Navigation",
     usage: ":open <id|query>",
     description: "Jump to a task by id (also :<id>) or to the best search match; the list filters stay",
     complete: (prefix, session) => taskIdCandidates(prefix, session),
@@ -1585,6 +1661,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "filter",
     aliases: [],
+    group: "Task list",
     usage: ":filter [status|lane|tags] <value>",
     description:
       "Narrow the task list: :filter status review, :filter lane later, :filter tags bug untagged (+tag adds, -tag removes); a bare slot clears it; bare opens the filter picker (f)",
@@ -1594,6 +1671,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "clear",
     aliases: [],
+    group: "Task list",
     usage: ":clear",
     description: "Clear the search and every filter (include-done is kept)",
     run: (session, argument) => {
@@ -1604,26 +1682,18 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "sort",
     aliases: [],
-    usage: ":sort [order]",
+    group: "Task list",
+    usage: ":sort [order | group none|lane|status]",
     description:
-      "Order the task list: id (the default), -id, title, -title, lane, status, priority, updated or -updated (- reverses; ties by id; a search ranks by relevance); bare opens the sort and group picker",
-    complete: prefix => TASK_SORTS.filter(v => v.startsWith(prefix)),
-    describe: argument => (isSort(argument) ? SORT_HELP[argument] : undefined),
+      "Order the task list: id (the default), -id, title, -title, lane, status, priority, updated or -updated (- reverses; ties by id; a search ranks by relevance); :sort group lane or status puts a header with its count above each lane or status (j/k skip the headers), none is one list; bare :sort or :sort group opens the sort and group picker",
+    complete: completeSort,
+    describe: describeSort,
     run: runSort,
-  },
-  {
-    name: "group",
-    aliases: [],
-    usage: ":group [none|lane|status]",
-    description:
-      "Group the task list under a header per lane or status, each with its count (j/k skip the headers); bare opens the sort and group picker",
-    complete: prefix => TASK_GROUPS.filter(v => v.startsWith(prefix)),
-    describe: argument => (isGroup(argument) ? GROUP_HELP[argument] : undefined),
-    run: runGroup,
   },
   {
     name: "set",
     aliases: [],
+    group: "Workspace",
     usage: ":set <option>",
     description:
       "Options: done (show done tasks), tasks (show the task list), number (source line numbers in Read and the Split preview); name, noname, name! toggles, name? shows; number is saved to tui.toml, done and tasks change this session only (tui.toml's done and tasks set how it starts)",
@@ -1633,6 +1703,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "new",
     aliases: [],
+    group: "Task",
     usage: ":new [title]",
     description:
       "Create a task in the filtered lane (else now) and select it; without a title it is named untitled-<id> (:title renames it)",
@@ -1659,6 +1730,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "title",
     aliases: [],
+    group: "Task",
     usage: ":title [text]",
     description: "Rename the current task; without text, edit its full title in place (Enter or Esc saves)",
     run: async (session, argument) => {
@@ -1689,6 +1761,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "status",
     aliases: [],
+    group: "Task",
     usage: ":status [draft|open|review|blocked|done]",
     description:
       "Set the current task's status (a human change, never attributed to an agent); bare picks it in a list: d o r b x set one, Enter the next step",
@@ -1708,6 +1781,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "next",
     aliases: [],
+    group: "Task",
     usage: ":next",
     description: "Move the current task one step on: draft→open, open→review, review→done, blocked→open, done→open",
     run: (session, argument) => {
@@ -1718,6 +1792,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "priority",
     aliases: [],
+    group: "Task",
     usage: ":priority <n|none>",
     description: "Set the current task's priority: any whole number from 0 (the highest) up, or none",
     complete: prefix => ["none", "0", "1", "2", "3"].filter(c => c.startsWith(prefix)),
@@ -1741,6 +1816,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "lane",
     aliases: [],
+    group: "Task",
     usage: ":lane <name>",
     description: "Move the current task to another lane (:lanes manages the lanes)",
     complete: (prefix, session) => session.lanes.map(l => l.name).filter(n => n.startsWith(prefix)),
@@ -1767,6 +1843,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "tag",
     aliases: [],
+    group: "Task",
     usage: ":tag [+name -name]",
     description:
       "Add (+name, or a bare name) and remove (-name) the current task's tags; without names, pick them in a list",
@@ -1789,6 +1866,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "delete",
     aliases: [],
+    group: "Task",
     usage: ":delete",
     description: "Delete the current task after a y/n confirmation (its updates go with it)",
     run: (session, argument) => {
@@ -1799,6 +1877,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "lanes",
     aliases: [],
+    group: "Task list",
     usage: ":lanes",
     description:
       "Manage the lanes: create, rename, recolor, re-sort, and delete empty ones (the now lane is protected)",
@@ -1810,6 +1889,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "tags",
     aliases: [],
+    group: "Task list",
     usage: ":tags",
     description:
       "Manage the tag definitions: create, rename, recolor, and delete (showing how many tasks lose the tag)",
@@ -1821,6 +1901,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "focus",
     aliases: [],
+    group: "Navigation",
     usage: ":focus <list|document>",
     description: "Move the keyboard focus to the task list or the document",
     complete: prefix => ["document", "list"].filter(c => c.startsWith(prefix)),
@@ -1835,6 +1916,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "back",
     aliases: [],
+    group: "Navigation",
     usage: ":back",
     description: "Go back to the task shown before the last jump (task history)",
     run: (session, argument) => {
@@ -1845,6 +1927,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "forward",
     aliases: [],
+    group: "Navigation",
     usage: ":forward",
     description: "Go forward again in the task history",
     run: (session, argument) => {
@@ -1855,6 +1938,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "theme",
     aliases: [],
+    group: "Workspace",
     usage: ":theme [name|auto]",
     description:
       "Pick a color theme with a live preview (Esc restores, Enter applies and saves it to tui.toml); auto removes tui.toml's theme and follows the terminal again",
@@ -1878,6 +1962,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "density",
     aliases: [],
+    group: "Workspace",
     usage: ":density [compact|comfortable]",
     description:
       "Set the spacing, saved as tui.toml's density: comfortable (the default) adds blank rows under the headers and above the status line; compact fits more rows; bare toggles. A terminal cannot set its font size: use its zoom keys",
@@ -1894,6 +1979,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "help",
     aliases: ["h"],
+    group: "Workspace",
     usage: ":help",
     description: "Modes, commands and the configured keys; / searches it while it is open, n/N step",
     run: (session, argument) => {
@@ -1904,13 +1990,16 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "commands",
     aliases: [],
+    group: "Workspace",
     usage: ":commands [search]",
-    description: "Searchable command reference: / searches it, Enter picks a command",
-    run: (session, argument) => session.openCommands(argument),
+    description:
+      "Every command by group (also Ctrl-p): / searches it, Enter runs one or starts its line; with a search, it opens filtered",
+    run: (session, argument) => openCommandList(session, argument),
   },
   {
     name: "messages",
     aliases: ["mes"],
+    group: "Workspace",
     usage: ":messages",
     description: "Configuration problems, errors and notices",
     run: (session, argument) => {
@@ -1921,9 +2010,10 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "notifications",
     aliases: [],
+    group: "Workspace",
     usage: ":notifications",
     description:
-      "The notifications (read state shared with every client) and this session's errors, unread first: Enter opens the task and marks it read; r read, u unread, a all read, x dismiss, X clear all",
+      "The notifications (read state shared with every client), unread first; this session's errors are in :messages. Enter opens the task and marks it read; r read, u unread, a all read, x dismiss, X clear all",
     run: (session, argument) => {
       noArgument("notifications", argument);
       const feed = session.notificationFeed;
@@ -1934,6 +2024,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "suspend",
     aliases: [],
+    group: "Workspace",
     usage: ":suspend",
     description: "Suspend to the shell; fg resumes (the daemon keeps running)",
     run: (session, argument) => {
@@ -1944,6 +2035,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "read",
     aliases: ["r"],
+    group: "Document",
     usage: ":read",
     description: "Read mode: the rendered document (saved as your preferred mode)",
     run: (session, argument) => {
@@ -1955,6 +2047,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "edit",
     aliases: ["e"],
+    group: "Document",
     usage: ":edit",
     description: "Edit mode: the document editor, i types in it (saved as your preferred mode)",
     run: (session, argument) => {
@@ -1966,6 +2059,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "split",
     aliases: ["sp"],
+    group: "Document",
     usage: ":split",
     description:
       "Split mode: the editor beside a preview; a narrow terminal shows one half at a time, Tab switches (saved as your preferred mode)",
@@ -1978,6 +2072,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "heading",
     aliases: [],
+    group: "Document",
     usage: ":heading [slug]",
     description:
       "Jump to a heading of this document by its anchor slug (Tab completes; repeats are slug-2, slug-3); without one, pick it from the outline",
@@ -2006,6 +2101,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "links",
     aliases: [],
+    group: "Document",
     usage: ":links",
     description:
       "The links and @id/#tag references of this document: Enter follows one (@id jumps and clears the filters, #tag filters, a heading link jumps, a web link is copied)",
@@ -2017,6 +2113,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "copy",
     aliases: [],
+    group: "Document",
     usage: ":copy [n]",
     description:
       "Copy code block n (its caption shows the number; without one, the block in view) with OSC 52; terminals never confirm it",
@@ -2051,6 +2148,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "source",
     aliases: [],
+    group: "Document",
     usage: ":source",
     description:
       "Show the raw Markdown source in Read and the preview (escaped), or the rendered document again; in the Activity panel, the highlighted update's source",
@@ -2071,6 +2169,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "activity",
     aliases: [],
+    group: "Panels",
     usage: ":activity",
     description:
       "The Activity panel: this task's updates, newest first; Enter expands one (its body; :source shows its Markdown); c posts an update. Retries a failed read",
@@ -2082,6 +2181,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "related",
     aliases: [],
+    group: "Panels",
     usage: ":related",
     description:
       "The Related panel: the tasks that reference this one, that it references and that share its tags; Enter opens one (the list filters clear). Retries a failed read",
@@ -2093,6 +2193,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "authors",
     aliases: [],
+    group: "Panels",
     usage: ":authors",
     description: "The Authors panel: who posted on this task, latest first, with their post counts",
     run: (session, argument) => {
@@ -2103,6 +2204,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "post",
     aliases: [],
+    group: "Task",
     usage: ":post [text]",
     description:
       "Post an update to this task as yourself: without text, open its composer (also c: :w posts it, closing it keeps the draft); with text, post it now",
@@ -2116,6 +2218,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "backup",
     aliases: [],
+    group: "Workspace",
     usage: ":backup",
     description:
       "Write a data-only backup now through the daemon and report its path and counts; cortex restore restores one",
@@ -2127,6 +2230,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "resume",
     aliases: [],
+    group: "Task",
     usage: ":resume",
     description:
       "Resume the pi session that posted on this task (cortex resume, which asks when there are several): it gets the terminal until it exits; the daemon keeps running",
@@ -2138,6 +2242,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "write",
     aliases: ["w"],
+    group: "Drafts and quitting",
     usage: ":w [[@id] path]",
     dialog: true,
     description:
@@ -2155,6 +2260,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "write!",
     aliases: ["w!"],
+    group: "Drafts and quitting",
     usage: ":w! [@id] <path>",
     dialog: true,
     description: "Export like :w [@id] <path>, replacing the file if it exists",
@@ -2166,6 +2272,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "wq",
     aliases: ["x"],
+    group: "Drafts and quitting",
     usage: ":wq",
     dialog: true,
     description: "Save every draft and quit once the saves are acknowledged; in a form, save it and close it",
@@ -2182,6 +2289,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "apply",
     aliases: [],
+    group: "Drafts and quitting",
     usage: ":apply [title|body]",
     description: "Resolve a save conflict of the current task by taking the incoming version (theirs)",
     complete: prefix => ["title", "body"].filter(f => f.startsWith(prefix)),
@@ -2190,6 +2298,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "keep",
     aliases: [],
+    group: "Drafts and quitting",
     usage: ":keep [title|body]",
     description:
       "Resolve a save conflict of the current task by keeping your version: it is saved over the incoming one, guarded, so it can conflict again",
@@ -2199,6 +2308,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "quit",
     aliases: ["q"],
+    group: "Drafts and quitting",
     usage: ":q",
     dialog: true,
     description:
@@ -2213,6 +2323,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "quit!",
     aliases: ["q!"],
+    group: "Drafts and quitting",
     usage: ":q!",
     dialog: true,
     description: "Quit, discarding the local drafts and anything unsaved; in a dialog, close it and discard its input",

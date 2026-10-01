@@ -36,10 +36,10 @@ bottom shows the mode, whether your text is saved, the connection and any messag
 ## How you move around
 
 The keys work like vi: NORMAL mode moves and acts, INSERT types text, VISUAL selects, `:` opens a command line and
-`/` searches; `Esc` goes back to NORMAL. There is nothing to memorize: `?` or `:help` lists every mode, command, key
-(as you configured it) and setting; `:commands` searches the commands. Panes open in the centre, small
+`/` searches; `Esc` goes back to NORMAL. Nothing to memorize: `?` or `:help` lists every mode, command, key (as you
+configured it) and setting; `:commands` (Ctrl-p) lists commands by group; Enter runs one. Panes open centred: small
 (confirmations, forms), medium (pickers) or large (feeds, help), with the workspace in view around them. The mouse is
-optional and on by default (click to focus, drag to select, scroll lists); every action also has a key or a command.
+optional, on by default (click to focus, drag to select, scroll lists); every action also has a key or a command.
 
 ## Editing and saving
 
@@ -52,9 +52,9 @@ it. Status changes you make are human changes, never attributed to an agent.
 
 ## Staying in sync
 
-Changes from agents, the CLI and other workspaces appear instantly, with no refresh. When a task becomes blocked,
-the status line flashes (a terminal bell is optional). An agent's status change also leaves an unread notification;
-`:notifications` lists them. If the daemon restarts, the workspace shows as stale until it reconnects on its own.
+Changes from agents, the CLI and other workspaces appear instantly. When a task becomes blocked, the status line
+flashes (optionally with a bell). An agent's status change leaves an unread notification; `:notifications` lists them
+(errors go to `:messages`). If the daemon restarts, the workspace shows as stale until it reconnects on its own.
 
 ## Making it yours
 
@@ -112,9 +112,9 @@ in-process? Events are published inside the daemon, so only a client attached to
 ### Help, settings and themes
 
 Each reference list exists once: `src/tui/commands.ts#COMMANDS`, `src/tui/keys.ts#KEY_ACTIONS`,
-`src/tui/theme.ts#THEME_TOKENS` and `src/tui/config.ts#SETTING_HELP`. Execution, completion, `:help` and
-`:commands` all read them; `src/tui/app.ts#helpLines` builds the help with the user's keys, and `src/tui/help.ts`
-only wraps and searches it. A new entry appears in help with no other edit, which is why docs never copy them.
+`src/tui/theme.ts#THEME_TOKENS` and `src/tui/config.ts#SETTING_HELP`. Execution, completion, `:help` and `:commands`
+read them (commands by `src/tui/commands.ts#COMMAND_GROUPS`, not registry order); `src/tui/app.ts#helpLines` adds the
+user's keys and `src/tui/help.ts` only wraps and searches. A new entry needs no other edit.
 
 `src/tui/config.ts#loadConfig` validates each section on its own, and file content never makes it throw. A custom
 theme (`src/tui/theme.ts#loadCustomTheme`) must set every token or extend one bundled theme; bundled names win,

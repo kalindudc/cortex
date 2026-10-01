@@ -2,6 +2,7 @@ import { test, expect, describe, beforeEach, afterEach } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { Component, OverlayHandle } from "@earendil-works/pi-tui";
 import type { CortexClient, DaemonIdentity, LiveEvent, TaskState, WorkspaceSnapshot } from "../../../src/contracts.ts";
 import type { Lane, Task } from "../../../src/store.ts";
 import { UNTAGGED } from "../../../src/lib/taskView.ts";
@@ -9,7 +10,7 @@ import { COMMANDS, type CommandSpec } from "../../../src/tui/commands.ts";
 import { DEFAULT_CONFIG, loadConfig } from "../../../src/tui/config.ts";
 import { DEFAULT_KEYS } from "../../../src/tui/keys.ts";
 import { openPreferences, type PreferenceSession } from "../../../src/tui/preferences.ts";
-import { type SessionDialog, TuiSession, type SessionOptions } from "../../../src/tui/session.ts";
+import { type OverlayHost, type SessionDialog, TuiSession, type SessionOptions } from "../../../src/tui/session.ts";
 
 // Plan @400 N15/N17: one TuiSession per terminal UI. Shared data (tasks,
 // catalogs, notifications) comes ONLY from the daemon: a workspace snapshot
@@ -514,7 +515,6 @@ describe("INSERT ends before its target leaves the screen (review F14)", () => {
     const hiding: [string, () => void][] = [
       ["Read", () => session.setDocumentMode("read")],
       [":messages", () => session.openView("messages")],
-      [":commands", () => session.openCommands()],
       ["help", () => session.openView("help")],
       ["the list", () => session.setFocus("tasks")],
       ["the preview half", () => session.setSplitHalf("preview")],
@@ -1051,7 +1051,14 @@ describe("commands (the registry in src/tui/commands.ts)", () => {
     expect(makeSession().session.commands).toBe(COMMANDS);
     const ran: string[] = [];
     const custom: CommandSpec[] = [
-      { name: "ping", aliases: ["p"], usage: ":ping", description: "test", run: (_s, a) => void ran.push(`ping:${a}`) },
+      {
+        name: "ping",
+        aliases: ["p"],
+        group: "Workspace",
+        usage: ":ping",
+        description: "test",
+        run: (_s, a) => void ran.push(`ping:${a}`),
+      },
     ];
     const { session } = makeSession({ commands: custom });
     await session.execute("p hello");
@@ -1078,23 +1085,38 @@ describe("commands (the registry in src/tui/commands.ts)", () => {
     expect(quits).toEqual([false]);
   });
 
-  test(":commands opens the reference; / searches it; Enter runs a command or starts its command line", async () => {
+  test(":commands opens the command list dialog over the workspace; / searches it; Enter runs a command or starts its command line", async () => {
     const { session } = makeSession();
     session.applySnapshot(snapshot("e:1", [task(1)]));
+    // The toolkit's overlay stack, reduced to what dialogs need.
+    const host: OverlayHost = {
+      columns: () => 100,
+      rows: () => 30,
+      showOverlay: (_component: Component): OverlayHandle => ({
+        hide: () => {},
+        setHidden: () => {},
+        isHidden: () => false,
+        focus: () => {},
+        unfocus: () => {},
+        isFocused: () => true,
+        getBounds: () => undefined,
+      }),
+    };
+    session.setOverlayHost(host);
     await session.execute("commands");
-    expect(session.view).toBe("commands");
-    expect(session.commandList().length).toBe(COMMANDS.length);
+    expect(session.view).toBe("workspace");
+    expect(session.dialog?.label).toBe("commands");
     session.openPrompt("/");
     session.promptInsert("messages");
     await session.submitPrompt();
-    expect(session.view).toBe("commands");
-    expect(session.commandList().map(c => c.name)).toEqual(["messages"]);
-    session.pickCommand();
+    session.input("\r");
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(session.dialog).toBeNull();
     expect(session.view).toBe("messages");
-    session.openCommands("focus");
-    session.moveCommandSelection(5);
-    expect(session.commandsSelected).toBe(0);
-    session.pickCommand();
+    session.closeView();
+    await session.execute("commands focus");
+    session.input("\r");
+    expect(session.dialog).toBeNull();
     expect(session.view).toBe("workspace");
     expect(session.prompt?.kind).toBe(":");
     expect(session.prompt?.text).toBe("focus ");

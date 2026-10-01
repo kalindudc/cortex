@@ -2,7 +2,7 @@
 // (tui.toml's settings are written by src/tui/config.ts saveSettings; themes are read-only).
 //
 // - Global view preferences (the open task panel, the preferred Read/Edit/Split
-//   mode, the task list's `:sort` order and `:group` grouping) plus
+//   mode, the task list's `:sort` order and `:sort group` grouping) plus
 //   per-database entries keyed by the database UUID (last task,
 //   filter/query), so another or a reset database never restores foreign
 //   tasks or filters.
@@ -47,7 +47,7 @@ export const TASK_SORTS = [
   "-updated",
 ] as const;
 export type TaskSort = (typeof TASK_SORTS)[number];
-/** The task list's groupings (`:group`): a header row per lane or status. */
+/** The task list's groupings (`:sort group`): a header row per lane or status. */
 export const TASK_GROUPS = ["none", "lane", "status"] as const;
 export type TaskGroup = (typeof TASK_GROUPS)[number];
 

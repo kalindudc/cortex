@@ -13,12 +13,12 @@
 //   explicit selection; src/tui/workspace.ts computes the list from it),
 //   the task history of jumps (:back/:forward), focus, the task-list
 //   disclosure, document and view scroll, the `:`/`/` prompt
-//   (src/tui/commandline.ts) with its histories, the :commands reference,
+//   (src/tui/commandline.ts) with its histories,
 //   the resolved theme, messages and the connection state. Selection
 //   survives the filters that hide it; only explicit calls move focus.
 // - The `:` commands come from ONE registry (src/tui/commands.ts).
 // - View preferences persist through src/tui/preferences.ts: the list's
-//   :sort/:group globally; the last task, the search and the filter slots
+//   order and grouping (:sort) globally; the last task, the search and the filter slots
 //   per database UUID. The settings `:theme`, `:density` and `:set number`
 //   are written to tui.toml (src/tui/config.ts saveSettings), whose values at
 //   startup are the session's settings. tui.toml's `done` and `tasks` only set
@@ -85,8 +85,6 @@ import {
   completeCommandLine,
   describeCandidate,
   parseCommand,
-  searchCommands,
-  takesArgument,
 } from "./commands.ts";
 import {
   createTaskDraft,
@@ -131,7 +129,7 @@ export type Focus = "tasks" | "document";
 /** The task panels (Document/Activity/Related/Authors), in `[`/`]` order. */
 export const TASK_PANELS = ["document", "activity", "related", "authors"] as const;
 export type TaskPanel = (typeof TASK_PANELS)[number];
-export type SessionView = "workspace" | "help" | "messages" | "commands";
+export type SessionView = "workspace" | "help" | "messages";
 /** What `/` searches: the task list (and a dialog's rows), the rendered document, or the open help. */
 export type SearchTarget = "list" | "document" | "help";
 export type MessageLevel = "info" | "warn" | "error";
@@ -570,8 +568,6 @@ export class TuiSession {
   /** What the open `/` searches: the task list, the rendered document (the reader had the focus) or the open help. */
   #searchTarget: SearchTarget = "list";
   readonly #histories: Record<CommandLineKind, string[]> = { ":": [], "/": [] };
-  #commandsQuery = "";
-  #commandsSelected = 0;
   #messages: SessionMessage[] = [];
   #status: SessionMessage | null = null;
   #seenProblems = new Set<string>();
@@ -1166,7 +1162,7 @@ export class TuiSession {
     return this.#sort;
   }
 
-  /** The task list's grouping without a search (`:group`, a global view preference). */
+  /** The task list's grouping without a search (`:sort group`, a global view preference). */
   get group(): TaskGroup {
     return this.#group;
   }
@@ -1477,7 +1473,7 @@ export class TuiSession {
     this.#changed();
   }
 
-  /** `:group` — the list's grouping without a search (a global view preference). */
+  /** `:sort group` — the list's grouping without a search (a global view preference). */
   setGroup(group: TaskGroup): void {
     if (this.#group === group) return;
     this.#group = group;
@@ -1586,50 +1582,14 @@ export class TuiSession {
     this.#changed();
   }
 
-  /** :commands [search] — the searchable command reference. */
-  openCommands(query = ""): void {
-    this.#commandsQuery = query.trim();
-    this.#commandsSelected = 0;
-    this.openView("commands");
-  }
-
-  get commandsQuery(): string {
-    return this.#commandsQuery;
-  }
-
-  /** The reference's matching commands (registry order, uncapped). */
-  commandList(): readonly CommandSpec[] {
-    return searchCommands(this.commands, this.#commandsQuery);
-  }
-
-  /** Index of the highlighted command in commandList(). */
-  get commandsSelected(): number {
-    return Math.max(0, Math.min(this.#commandsSelected, this.commandList().length - 1));
-  }
-
   /**
    * One wheel report's step for what moves one item a notch (the task list,
-   * :commands, a dialog's rows and fields): its direction when it starts a
-   * notch, 0 for the notch's other reports (a terminal may send several for
-   * one notch: src/tui/mouse.ts WheelNotches).
+   * a dialog's rows and fields): its direction when it starts a notch, 0 for
+   * the notch's other reports (a terminal may send several for one notch:
+   * src/tui/mouse.ts WheelNotches).
    */
   wheelNotch(delta: number): number {
     return this.#wheel.step(delta);
-  }
-
-  moveCommandSelection(delta: number): void {
-    const last = Math.max(0, this.commandList().length - 1);
-    this.#commandsSelected = Math.max(0, Math.min(last, this.commandsSelected + delta));
-    this.#changed();
-  }
-
-  /** Enter in the reference: run a command that takes no argument, else start its command line. */
-  pickCommand(): void {
-    const spec = this.commandList()[this.commandsSelected];
-    if (spec === undefined) return;
-    this.closeView();
-    if (takesArgument(spec)) this.openPrompt(":", `${spec.name} `);
-    else void this.execute(spec.name);
   }
 
   closeView(): void {
@@ -1940,9 +1900,9 @@ export class TuiSession {
 
   /**
    * Enter: run the command line (remembered in its history), or apply the
-   * search: to the :commands reference or the help when it is open, the
-   * rendered document when it had the focus, else to the task list (an
-   * empty search clears it).
+   * search: to the open dialog, the help when it is open, the rendered
+   * document when it had the focus, else to the task list (an empty search
+   * clears it).
    */
   async submitPrompt(): Promise<void> {
     const p = this.#prompt;
@@ -1955,11 +1915,7 @@ export class TuiSession {
     if (p.kind === "/") {
       const dialog = this.dialog;
       if (dialog !== null) dialog.search(text.trim());
-      else if (this.#view === "commands") {
-        this.#commandsQuery = text.trim();
-        this.#commandsSelected = 0;
-        this.#changed();
-      } else if (this.#searchTarget === "help" && this.#view === "help" && this.#help !== null) {
+      else if (this.#searchTarget === "help" && this.#view === "help" && this.#help !== null) {
         this.#help.search(text);
       } else if (this.#searchTarget === "document" && this.#reader !== null) this.#reader.search(text);
       else this.setQuery(text);
@@ -2880,8 +2836,6 @@ export class TuiSession {
     this.#messages.push(message);
     if (this.#messages.length > MAX_MESSAGES) this.#messages.splice(0, this.#messages.length - MAX_MESSAGES);
     this.#status = message;
-    // Errors are also this session's local notification rows.
-    if (level === "error") this.#notificationFeed?.localError(message);
     this.#changed();
   }
 

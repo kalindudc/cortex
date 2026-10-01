@@ -508,7 +508,7 @@ describe("the command line and the task list in a real terminal (plan @400 Task 
     await keys(pty, "q");
     mark = pty.mark();
     await keys(pty, "\x10");
-    await expectPlain(pty, "COMMANDS ·", mark);
+    await expectPlain(pty, "COMMANDS", mark); // the dialog's border title
     await keys(pty, "q");
     mark = pty.mark();
     await keys(pty, ":", TAB);
@@ -1346,7 +1346,7 @@ describe("pane focus, sorting and fast filters in a real terminal", () => {
     expect(isCooked(pty.localFlags())).toBe(true);
   });
 
-  test(":sort and :group reorder the list; the header names them; a search ranks by relevance", async () => {
+  test(":sort and :sort group reorder the list; the header names them; a search ranks by relevance", async () => {
     const box = sandbox("tui-sort-group");
     await seedTasks(box.env, ["zeta first"], ["alpha second", "-s", "review"], ["mid third"]);
     const pty = spawnPty([BIN, "tui"], { env: box.tuiEnv, cols: 120, rows: 32 });
@@ -1357,7 +1357,7 @@ describe("pane focus, sorting and fast filters in a real terminal", () => {
     await keys(pty, ":", ..."sort title", "\r");
     await expectPlain(pty, "sort title", mark);
     mark = pty.mark();
-    await keys(pty, ":", ..."group status", "\r");
+    await keys(pty, ":", ..."sort group status", "\r");
     await expectPlain(pty, /Open · 2[\s\S]*In review · 1/, mark);
     mark = pty.mark();
     await keys(pty, "/", ..."third", "\r");

@@ -157,6 +157,8 @@ interface PanelRow {
   readonly text: string;
   /** The card (update id) or related task (task id) the row belongs to. */
   readonly item: number | null;
+  /** The blank line around a group (the Related buckets). */
+  readonly gap?: true;
 }
 
 interface AuthorRollup {
@@ -650,8 +652,17 @@ export class Activity implements Component {
       const card = this.#card(task.id);
       const at = rows.findIndex(r => r.item !== null && r.item === resolve(this.#relatedIds(task.id), card.related));
       scroll = Math.max(0, Math.min(card.relatedScroll, Math.max(0, rows.length - height)));
-      if (at >= 0 && at < scroll) scroll = at;
-      else if (at >= scroll + height) scroll = at - height + 1;
+      if (at >= 0) {
+        // The highlighted task stays in view with its bucket's spacing: the header and the blank line
+        // above it when it opens the bucket, the blank line below when it ends it.
+        let top = at;
+        if (rows[top - 1]?.item === null) top--;
+        if (top < at && rows[top - 1]?.gap === true) top--;
+        const bottom = rows[at + 1]?.gap === true ? at + 1 : at;
+        if (top < scroll) scroll = top;
+        else if (bottom >= scroll + height) scroll = bottom - height + 1;
+        scroll = Math.max(0, Math.min(at, Math.max(scroll, at - height + 1)));
+      }
       card.relatedScroll = scroll;
     } else if (panel === "authors") {
       rows = this.#authorRows(task, width, row);
@@ -807,8 +818,11 @@ export class Activity implements Component {
       ["REFERENCES", data.references, "no outbound references"],
       ["SHARED TAGS", data.shared, "no shared tags"],
     ];
+    // For readability a bucket never touches what is around it: a blank line above each one (comfortable
+    // already leaves one under the divider above the first) and after the last.
+    const gap = (): PanelRow => ({ ...row([]), gap: true });
     sections.forEach(([heading, list, empty], i) => {
-      if (i > 0) rows.push(row([]));
+      if (i > 0 || this.#session.density === "compact") rows.push(gap());
       rows.push(row([seg("accent@bg", `${heading} · ${list.length}`, { bold: true })]));
       if (list.length === 0) rows.push(row([seg("muted@bg", `  ${empty}`)]));
       for (const t of list) {
@@ -826,6 +840,7 @@ export class Activity implements Component {
         );
       }
     });
+    rows.push(gap());
     return rows;
   }
 

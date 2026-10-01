@@ -12,7 +12,7 @@
 //   notifications (mode 2031) are followed. An explicit theme never changes
 //   under the user; late replies are then ignored.
 // - The shell renders the task list (src/tui/workspace.ts: ascending id or
-//   the :sort/:group order, relevance while searching, status glyphs never
+//   the :sort order and grouping, relevance while searching, status glyphs never
 //   tint alone, the active filters as chips), the document pane in the
 //   task's Read/Edit/Split mode
 //   (Read and the Split preview are src/tui/reader.ts, rendering the current
@@ -105,7 +105,7 @@ import { subscribeChanges } from "../subscription.ts";
 import { STATUS_LABEL } from "../lib/constants.ts";
 import { type Activity, createActivity } from "./activity.ts";
 import { createNotifications, type Notifications, UNREAD_MARK } from "./notifications.ts";
-import { CommandError, commandHelp, reportPendingMigrations } from "./commands.ts";
+import { CommandError, commandHelp, groupedCommands, openCommandList, reportPendingMigrations } from "./commands.ts";
 import type { CommandLine } from "./commandline.ts";
 import { drawBox, paneBox } from "./dialogs.ts";
 import { DRAFT_FIELDS, type FieldState } from "./drafts.ts";
@@ -864,11 +864,6 @@ export class Shell {
     const s = this.session;
     const delta = Math.sign(event.wheelDelta ?? 0);
     if (delta === 0) return;
-    if (s.view === "commands") {
-      const step = s.wheelNotch(delta);
-      if (step !== 0) s.moveCommandSelection(step);
-      return;
-    }
     if (s.view !== "workspace") {
       s.scrollView(delta * 3);
       return;
@@ -1165,8 +1160,7 @@ export class Shell {
       (data === "\x1b[1~" || data === "\x1b[7~" ? "home" : data === "\x1b[4~" || data === "\x1b[8~" ? "end" : null);
     switch (name) {
       case "enter":
-        if (s.view === "commands") s.pickCommand();
-        else if (s.view === "workspace" && s.focus === "tasks") s.setFocus("document");
+        if (s.view === "workspace" && s.focus === "tasks") s.setFocus("document");
         else if (s.view === "workspace" && s.documentTarget === "title" && s.selectedTask() !== null) s.editTitle();
         else if (inPanel) this.#activity.activate();
         else if (s.readerFocused() && this.#readerShown()) void s.execute("links");
@@ -1323,8 +1317,8 @@ export class Shell {
         else s.openView("help");
         break;
       case "commands":
-        if (s.view === "commands") s.closeView();
-        else s.openCommands();
+        s.closeView();
+        openCommandList(s, "");
         break;
       case "suspend":
         this.suspend();
@@ -1633,8 +1627,7 @@ export class Shell {
 
   #move(delta: number): void {
     const s = this.session;
-    if (s.view === "commands") s.moveCommandSelection(delta);
-    else if (s.view !== "workspace") s.scrollView(delta);
+    if (s.view !== "workspace") s.scrollView(delta);
     else if (s.focus === "tasks" && s.taskListVisible) s.moveSelection(delta);
     else if (s.panel !== "document") this.#activity.move(delta);
     else s.scrollDocument(delta);
@@ -1643,8 +1636,7 @@ export class Shell {
   #edge(edge: "first" | "last"): void {
     const s = this.session;
     const far = edge === "first" ? -Number.MAX_SAFE_INTEGER : Number.MAX_SAFE_INTEGER;
-    if (s.view === "commands") s.moveCommandSelection(far);
-    else if (s.view !== "workspace") s.scrollView(far);
+    if (s.view !== "workspace") s.scrollView(far);
     else if (s.focus === "tasks" && s.taskListVisible) s.selectEdge(edge);
     else if (s.panel !== "document") this.#activity.edge(edge);
     else s.scrollDocument(far);
@@ -1665,11 +1657,7 @@ export class Shell {
     const spacer = s.density === "comfortable" ? [paint(theme, [], width, "text@bg")] : [];
     const mainHeight = height - 2 - spacer.length - suggestions.length;
     const main =
-      s.view === "workspace"
-        ? this.#workspace(theme, width, mainHeight)
-        : s.view === "commands"
-          ? this.#commandsPane(theme, width, mainHeight)
-          : this.#viewBox(theme, width, mainHeight);
+      s.view === "workspace" ? this.#workspace(theme, width, mainHeight) : this.#viewBox(theme, width, mainHeight);
     // A re-wrap while rendering ends a reader selection: the status line then says NORMAL in this frame.
     this.#syncVisual();
     const bottom = s.prompt !== null ? this.#promptLine(theme, width) : this.#hintLine(theme, width);
@@ -2122,60 +2110,6 @@ export class Shell {
     );
   }
 
-  /** The :commands reference: the registry, filtered by its search; the highlighted row stays in view. */
-  #commandsPane(theme: ResolvedTheme, width: number, height: number): string[] {
-    const s = this.session;
-    const list = s.commandList();
-    const selected = s.commandsSelected;
-    const total = s.commands.length;
-    const query = s.commandsQuery;
-    const head: Seg[][] = [
-      [
-        seg("accent@bg", "COMMANDS", { bold: true }),
-        seg("muted@bg", ` · ${list.length} of ${total}`),
-        ...(query === "" ? [] : [seg("info@bg", ` · /${esc(query)}`)]),
-        seg("dim@bg", " · / searches · Enter picks · q or Esc closes"),
-      ],
-      [],
-    ];
-    const out = head.map(segs => paint(theme, [seg("text@bg", " "), ...segs], width, "text@bg"));
-    const room = Math.max(0, height - out.length);
-    if (list.length === 0)
-      out.push(paint(theme, [seg("muted@bg", ` No command matches /${esc(query)}`)], width, "text@bg"));
-    // Usage plus the other ways to type it, as in :help (`:q  :quit`).
-    const help = new Map(commandHelp(list).map(h => [h.name, [h.usage, ...h.names].join("  ")]));
-    const usageOf = (name: string): string => esc(help.get(name) ?? "");
-    const usageWidth = Math.min(30, Math.max(12, ...list.map(c => displayWidth(usageOf(c.name)))));
-    let scroll = Math.min(s.viewScroll, Math.max(0, list.length - room));
-    if (selected < scroll) scroll = selected;
-    else if (selected >= scroll + room) scroll = selected - room + 1;
-    s.setViewScroll(scroll);
-    list.slice(scroll, scroll + room).forEach((spec, i) => {
-      const usage = fit(usageOf(spec.name), usageWidth);
-      const pad = " ".repeat(Math.max(0, usageWidth - displayWidth(usage)));
-      if (scroll + i === selected) {
-        out.push(
-          paint(
-            theme,
-            [
-              seg("accent@selection", "▌"),
-              seg("text@selection", `${usage}${pad}  `, { bold: true }),
-              seg("muted@selection", esc(spec.description)),
-            ],
-            width,
-            "text@selection",
-          ),
-        );
-      } else {
-        out.push(
-          paint(theme, [seg("text@bg", ` ${usage}${pad}  `), seg("muted@bg", esc(spec.description))], width, "text@bg"),
-        );
-      }
-    });
-    while (out.length < height) out.push(paint(theme, [], width, "text@bg"));
-    return out.slice(0, height);
-  }
-
   /** The help's lines (src/tui/help.ts wraps and searches them): an entry's description column is its hang. */
   #helpLines(): HelpLine[] {
     const keys = this.session.keys.keys;
@@ -2238,8 +2172,19 @@ export class Shell {
     entry("Shift-drag", "The terminal's native selection while the mouse is on (Option-drag in some macOS terminals)");
     blank();
     heading("COMMANDS");
-    for (const c of commandHelp(this.session.commands)) entry([c.usage, ...c.names].join("  "), c.description);
-    entry(":<id>", "Jump to a task by id, for example :42");
+    // A sub-heading per group (the registry order is not the display order), with a blank line above
+    // each group and after the last for readability.
+    let group: string | null = null;
+    for (const c of commandHelp(groupedCommands(this.session.commands))) {
+      if (c.group !== group) {
+        group = c.group;
+        blank();
+        out.push({ segs: [seg("muted@raised", `  ${group}`, { bold: true })] });
+      }
+      entry([c.usage, ...c.names].join("  "), c.description);
+      // `:<id>` is :open's shorthand (it works exactly when :open exists), so it is listed with it.
+      if (c.name === "open") entry(":<id>", "Jump to a task by id, for example :42");
+    }
     blank();
     heading("KEYS · NORMAL");
     for (const action of NORMAL_ACTIONS) {
@@ -2508,24 +2453,16 @@ export class Shell {
                         hint(key("next_pane"), "focus"),
                         hint(key("toggle_tasks"), "task list"),
                       ]
-                    : s.view === "commands"
-                      ? [
-                          hint(pair(key("down"), key("up")), "move"),
-                          "Enter picks",
-                          "/ searches",
-                          "q/Esc close",
-                          ": commands",
-                        ]
-                      : [
-                          hint(pair(key("down"), key("up")), "scroll"),
-                          hint(pair(key("top"), key("bottom")), "top/bottom"),
-                          s.view === "help" ? "/ searches" : undefined,
-                          s.view === "help" && this.#help.query !== ""
-                            ? hint(pair(key("next_match"), key("previous_match")), "matches")
-                            : undefined,
-                          "q/Esc close",
-                          ": commands",
-                        ];
+                    : [
+                        hint(pair(key("down"), key("up")), "scroll"),
+                        hint(pair(key("top"), key("bottom")), "top/bottom"),
+                        s.view === "help" ? "/ searches" : undefined,
+                        s.view === "help" && this.#help.query !== ""
+                          ? hint(pair(key("next_match"), key("previous_match")), "matches")
+                          : undefined,
+                        "q/Esc close",
+                        ": commands",
+                      ];
     const shown = parts.filter((p): p is string => p !== undefined);
     return this.#hints(
       theme,

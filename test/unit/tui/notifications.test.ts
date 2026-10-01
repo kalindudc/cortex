@@ -13,22 +13,17 @@ import type {
 import type { Notification, Task } from "../../../src/store.ts";
 import { DEFAULT_CONFIG } from "../../../src/tui/config.ts";
 import { DEFAULT_KEYS } from "../../../src/tui/keys.ts";
-import {
-  countUnread,
-  createNotifications,
-  type LocalError,
-  mergeFeed,
-  type Notifications,
-} from "../../../src/tui/notifications.ts";
+import { countUnread, createNotifications, type Notifications, orderFeed } from "../../../src/tui/notifications.ts";
 import { openPreferences } from "../../../src/tui/preferences.ts";
 import { type OverlayHost, TuiSession } from "../../../src/tui/session.ts";
 import { resolveTheme } from "../../../src/tui/theme.ts";
 
 // Plan @400 Task 11 part B (P8, N12, N15): notifications for one terminal
-// session. The feed merges the daemon's persisted notifications with this
-// session's own errors, unread first and newest first inside each group. Read state is SHARED (read, unread, all read, dismiss and
+// session. The feed is the daemon's persisted notifications, unread first and
+// newest first inside each group; this session's errors stay in :messages and
+// on the status line. Read state is SHARED (read, unread, all read, dismiss and
 // clear go to the daemon and every client re-reads on notification.changed);
-// errors and the highlighted row are the session's. Attention (a status flash
+// the highlighted row is the session's. Attention (a status flash
 // by default, the terminal bell when enabled) follows ONLY the daemon's
 // explicit task.blocked transition frame: never a snapshot, a reconnect or a
 // task.updated copy of an already-blocked task.
@@ -183,7 +178,7 @@ function setup(
   };
   /** The notifications dialog's frame (the top overlay). */
   const dialog = (width = 90): string => plain(overlays.stack.at(-1)?.component.render(width) ?? []);
-  const order = () => feed.feed().map(r => (r.kind === "notif" ? `n${r.row.id}` : `e${r.row.id}`));
+  const order = () => feed.feed().map(r => `n${r.id}`);
   return { session, feed, fake, overlays, frame, type, dialog, order, written, snapshot };
 }
 
@@ -193,42 +188,35 @@ const blocked = (t: Task, author = "pi-agent"): BlockedTransition => ({
   author,
 });
 
-describe("the merged feed (its order and unread count)", () => {
-  const err = (id: number, at: number, read = false): LocalError => ({ id, text: `error ${id}`, at, read });
-
-  test("unread first, then newest first inside each group, across persisted rows and local errors", () => {
-    const rows = mergeFeed(
-      [notif(1, 1000), notif(2, 4000), notif(3, 2000, { read: true }), notif(4, 6000, { read: true })],
-      [err(-1, 5000), err(-2, 7000, true)],
-    );
-    expect(rows.map(r => (r.kind === "notif" ? `n${r.row.id}` : `e${r.row.id}`))).toEqual([
-      "e-1",
-      "n2",
-      "n1",
-      "e-2",
-      "n4",
-      "n3",
+describe("the feed (its order and unread count)", () => {
+  test("unread first, then newest first inside each group", () => {
+    const rows = orderFeed([
+      notif(1, 1000),
+      notif(2, 4000),
+      notif(3, 2000, { read: true }),
+      notif(4, 6000, { read: true }),
     ]);
-    expect(countUnread(rows)).toBe(3);
+    expect(rows.map(r => r.id)).toEqual([2, 1, 4, 3]);
+    expect(countUnread(rows)).toBe(2);
   });
 
   test("an empty feed counts nothing", () => {
-    expect(mergeFeed([], [])).toEqual([]);
+    expect(orderFeed([])).toEqual([]);
     expect(countUnread([])).toBe(0);
   });
 });
 
-describe("persisted notifications and local errors (P8)", () => {
-  test("the feed shows the snapshot's notifications and this session's errors; only errors become local rows", () => {
+describe("persisted notifications (P8); this session's errors stay in :messages", () => {
+  test("the feed shows the snapshot's notifications; an error message adds no row and leaves the unread count", () => {
     const h = setup({ notifications: [notif(1, 1000), notif(2, 3000, { read: true })] });
     h.session.notify("info", "just a notice");
     h.session.notify("warn", "a warning");
     h.session.notify("error", "Could not reach the daemon");
-    expect(h.order()).toEqual(["e-1", "n1", "n2"]);
-    expect(h.feed.unread()).toBe(2);
-    const local = h.feed.feed()[0];
-    expect(local?.kind).toBe("error");
-    expect(local?.kind === "error" ? local.row.text : "").toBe("Could not reach the daemon");
+    expect(h.order()).toEqual(["n1", "n2"]);
+    expect(h.feed.unread()).toBe(1);
+    // The error is recorded where every session message is: :messages and the status line.
+    expect(h.session.status).toMatchObject({ level: "error", text: "Could not reach the daemon" });
+    expect(h.session.messages.some(m => m.level === "error" && m.text === "Could not reach the daemon")).toBe(true);
   });
 
   test("a notification.added frame prepends its row once; the count follows", () => {
@@ -239,17 +227,15 @@ describe("persisted notifications and local errors (P8)", () => {
     expect(h.feed.unread()).toBe(2);
   });
 
-  test("read, unread, all read, dismiss and clear go to the daemon and show at once; errors stay local", async () => {
+  test("read, unread, all read, dismiss and clear go to the daemon and show at once", async () => {
     const h = setup({ notifications: [notif(1, 1000), notif(2, 2000)] });
-    h.session.notify("error", "boom");
     h.feed.markRead(1);
-    expect(h.feed.feed().find(r => r.kind === "notif" && r.row.id === 1)?.row.read).toBe(true);
+    expect(h.feed.feed().find(r => r.id === 1)?.read).toBe(true);
     h.feed.markUnread(1);
-    expect(h.feed.feed().find(r => r.kind === "notif" && r.row.id === 1)?.row.read).toBe(false);
-    h.feed.markRead(-1); // the local error: never sent
+    expect(h.feed.feed().find(r => r.id === 1)?.read).toBe(false);
     expect(h.feed.unread()).toBe(2);
     h.feed.dismiss(2);
-    expect(h.order()).toEqual(["n1", "e-1"]);
+    expect(h.order()).toEqual(["n1"]);
     h.feed.markAllRead();
     expect(h.feed.unread()).toBe(0);
     h.feed.clearAll();
@@ -258,17 +244,6 @@ describe("persisted notifications and local errors (P8)", () => {
     for (const a of h.fake.acks) a.answer.resolve();
     await settle();
     expect(h.fake.reads.length).toBe(0); // nothing to reconcile: every acknowledgement landed
-  });
-
-  test("dismissing a local error removes it without a request", () => {
-    const h = setup();
-    h.session.notify("error", "first");
-    h.session.notify("error", "second");
-    const second = h.feed.feed()[0];
-    expect(second?.kind === "error" ? second.row.text : "").toBe("second");
-    h.feed.dismiss(second?.row.id ?? 0);
-    expect(h.feed.feed().map(r => (r.kind === "error" ? r.row.text : ""))).toEqual(["first"]);
-    expect(h.fake.acks).toEqual([]);
   });
 
   test("a failed acknowledgement is reported as an error and re-read, so the feed shows the daemon's state", async () => {
@@ -282,10 +257,9 @@ describe("persisted notifications and local errors (P8)", () => {
     expect(h.fake.reads.length).toBe(1);
     h.fake.reads[0]?.resolve([notif(1, 1000)]);
     await settle();
-    // The daemon still has it unread; the failure is a local error row beside it.
-    const persisted = h.feed.feed().find(r => r.kind === "notif");
-    expect(persisted?.row.read).toBe(false);
-    expect(h.feed.feed().some(r => r.kind === "error" && r.row.text.includes("socket hung up"))).toBe(true);
+    // The daemon still has it unread; the failure is in :messages, not a feed row.
+    expect(h.feed.feed().map(r => [r.id, r.read])).toEqual([[1, false]]);
+    expect(h.session.messages.some(m => m.level === "error" && m.text.includes("socket hung up"))).toBe(true);
   });
 });
 
@@ -325,7 +299,7 @@ describe("shared read state converges through notification.changed (N12)", () =>
     // The read began before our acknowledgement: its answer is obsolete.
     h.fake.reads[0]?.resolve([notif(1, 1000), notif(2, 2000, { read: true })]);
     await settle();
-    expect(h.feed.feed().find(r => r.row.id === 1)?.row.read).toBe(true);
+    expect(h.feed.feed().find(r => r.id === 1)?.read).toBe(true);
     expect(h.fake.reads.length).toBe(1); // reads wait while the acknowledgement is in flight
     h.fake.acks[0]?.answer.resolve();
     await settle();
@@ -392,17 +366,12 @@ describe(":notifications (the bell drawer as a keyboard-complete dialog)", () =>
     expect(h.session.selectedId).toBe(1);
   });
 
-  test("a row whose task is gone says so and is still marked read; an error row is marked read locally", async () => {
+  test("a row whose task is gone says so and is still marked read", async () => {
     const h = setup({ notifications: [notif(9, 2000, { task_id: 9, title: "[9] gone" })] });
     await h.session.execute("notifications");
     h.type("\r");
     expect(h.session.status?.text).toContain("@9 no longer exists");
     expect(h.fake.acks.map(a => a.call)).toEqual(["read 9"]);
-    h.session.notify("error", "local failure");
-    await h.session.execute("notifications");
-    h.type("\r");
-    expect(h.feed.feed().find(r => r.kind === "error")?.row.read).toBe(true);
-    expect(h.fake.acks.length).toBe(1);
   });
 
   test(":notifications takes no argument", async () => {

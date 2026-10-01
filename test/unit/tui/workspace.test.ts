@@ -377,6 +377,17 @@ describe("createWorkspace (the task list)", () => {
     expect(lines[now + 1]).toContain("@2  second");
     expect(lines[later + 1]).toContain("@1  first");
     expect(lines[later + 2]).toContain("@3  third");
+    // A blank line above each header: the comfortable spacer is the one above the first group.
+    expect(lines[now - 1]?.trim()).toBe("");
+    expect(lines[now - 2]).toContain("no filters");
+    expect(lines[later - 1]?.trim()).toBe("");
+    // Compact has no spacer, so the first group gets its own blank line.
+    s.setDensity("compact");
+    const compact = plain(list.render(40));
+    const first = compact.findIndex(l => /now \u00b7 1/.test(l));
+    expect(compact[first - 1]?.trim()).toBe("");
+    expect(compact[first - 2]).toContain("no filters");
+    s.setDensity("comfortable");
     // j/k never land on a header: from the last row of `now` j selects the first of `later`.
     s.select(2);
     s.moveSelection(1);
@@ -682,6 +693,32 @@ describe("the list layout: the density spacer, aligned ids, right-aligned lanes,
     list.render(40);
     expect(list.hitAt(4)).toEqual({ kind: "task", id: before });
     expect(rowsOf(list, s.selectedTask()?.id ?? -1).length).toBe(3);
+  });
+
+  test("R5: scrolling keeps the blank lines around the groups: below the last group, above the header opening the selection", () => {
+    const tasks = Array.from({ length: 12 }, (_, i) =>
+      task(i + 1, { title: `t${i + 1}`, lane: i < 6 ? "now" : "later" }),
+    );
+    const s = session(tasks);
+    s.setGroup("lane");
+    s.setDensity("compact");
+    const list = createWorkspace(s);
+    list.height = 9; // 3 header rows, 6 body rows (3 to 8)
+    s.selectEdge("last");
+    let lines = plain(list.render(40));
+    // The last row sits above the last group's blank line, not on the pane's last row.
+    expect(rowsOf(list, 12)).toEqual([7]);
+    expect(lines[8]?.trim()).toBe("");
+    // Up to the first row of `later`: its header and the blank line above it come into view.
+    while (s.selectedTask()?.id !== 7) {
+      s.moveSelection(-1);
+      list.render(40);
+    }
+    lines = plain(list.render(40));
+    const row = rowsOf(list, 7)[0] ?? 0;
+    expect(lines[row - 1]).toMatch(/\u2500\u2500 later \u00b7 6 /);
+    expect(row - 2).toBeGreaterThanOrEqual(3);
+    expect(lines[row - 2]?.trim()).toBe("");
   });
 
   test("R5: the expanded block that opens a group keeps its group header in view", () => {

@@ -22,6 +22,7 @@ import {
   type ShellOptions,
 } from "../../../src/tui/app.ts";
 import { withExternalProgram } from "../../../src/tui/bridge.ts";
+import { COMMAND_GROUPS } from "../../../src/tui/commands.ts";
 import { DEFAULT_CONFIG, loadConfig, SETTING_HELP, type TuiConfig } from "../../../src/tui/config.ts";
 import { Dialog } from "../../../src/tui/dialogs.ts";
 import { parseKeys } from "../../../src/tui/keys.ts";
@@ -270,6 +271,22 @@ function boxText(h: Harness): string[] {
 const type = (h: Harness, ...inputs: string[]) => {
   for (const input of inputs) h.shell.handleInput(input);
 };
+/** One unread daemon notification, as the live stream delivers it: the status line's unread badge. */
+const addUnread = (h: Harness) =>
+  h.session.receive({
+    kind: "notification.added",
+    cursor: "e:2",
+    payload: {
+      id: 7,
+      task_id: 4,
+      author: "pi-agent",
+      status: "review",
+      title: "[4] Wait for review",
+      message: "open \u2192 review",
+      read: false,
+      created: 5,
+    },
+  });
 
 describe("layout (N19)", () => {
   test("every frame fills the terminal exactly and never exceeds its width", async () => {
@@ -532,7 +549,6 @@ describe("density: the spacing around the document header and the footer (comfor
           type(h, "G");
         },
       ],
-      ["commands", () => h.session.openView("commands")],
     ] as const;
     for (const density of ["comfortable", "compact"] as const) {
       h.session.setDensity(density);
@@ -563,7 +579,7 @@ describe("density: the spacing around the document header and the footer (comfor
 
   test("S4: comfortable keeps a 1-cell margin at both ends of the status and hint lines; compact is flush", async () => {
     const h = await started();
-    h.session.notify("error", "something failed"); // a local unread notification: the right-hand badge
+    addUnread(h); // the right-hand badge
     h.session.addProblems([{ level: "warn", text: "a tui.toml problem" }]);
     let lines = plain(h.shell.frame());
     expect(lines.at(-2)).toMatch(/^ {2}NORMAL {2}\u2502 tasks/);
@@ -581,7 +597,7 @@ describe("density: the spacing around the document header and the footer (comfor
     for (const density of ["comfortable", "compact"] as const) {
       const h = await started();
       h.session.setDensity(density);
-      h.session.notify("error", "something failed");
+      addUnread(h);
       h.session.addProblems([{ level: "warn", text: "a tui.toml problem" }]);
       const lines = plain(h.shell.frame());
       const y = lines.length - 2;
@@ -843,6 +859,21 @@ describe("keys (N17/N18)", () => {
       expect(help).toContain(text);
     }
     expect(help).not.toMatch(/\bF(?:[1-9]|1[0-9]|2[0-9]|3[0-5])\b/);
+    // The commands sit under a sub-heading per group, in COMMAND_GROUPS order.
+    const lines = boxText(h).map(l => l.trim());
+    const groupRows = COMMAND_GROUPS.map(g => lines.indexOf(g));
+    expect(groupRows.every(row => row >= 0)).toBe(true);
+    expect(groupRows).toEqual([...groupRows].sort((a, b) => a - b));
+    const filterRow = lines.findIndex(l => l.startsWith(":filter [status|lane|tags]"));
+    expect(filterRow > lines.indexOf("Task list") && filterRow < lines.indexOf("Document")).toBe(true);
+    const quitRow = lines.findIndex(l => l.startsWith(":q  :quit"));
+    expect(quitRow > lines.indexOf("Drafts and quitting") && quitRow < lines.indexOf("Workspace")).toBe(true);
+    // Each group has a blank line above it, and the last one a blank line below it.
+    for (const row of groupRows) expect(lines[row - 1], lines[row] ?? "").toBe("");
+    expect(lines[lines.indexOf("KEYS \u00b7 NORMAL") - 1]).toBe("");
+    // `:<id>` is :open's shorthand, so it sits with :open in Navigation.
+    const idRow = lines.findIndex(l => l.startsWith(":<id>"));
+    expect(idRow > lines.indexOf("Navigation") && idRow < lines.indexOf("Drafts and quitting")).toBe(true);
     h.terminal.rows = 40;
     type(h, "G");
     expect(h.session.viewScroll).toBeGreaterThan(0);
@@ -984,11 +1015,15 @@ describe("keys (N17/N18)", () => {
 
   test("no view ever hints a function key", async () => {
     const h = await started();
-    for (const view of ["workspace", "help", "messages", "commands"] as const) {
+    for (const view of ["workspace", "help", "messages"] as const) {
       h.session.openView(view);
       expect(screen(h)).not.toMatch(/\bF(?:[1-9]|1[0-9]|2[0-9]|3[0-5])\b/);
     }
     h.session.closeView();
+    type(h, "\x10"); // the :commands dialog (a toolkit overlay with its own frame)
+    const dialog = plain((h.session.dialog as unknown as Dialog).render(100)).join("\n");
+    expect(`${screen(h)}\n${dialog}`).not.toMatch(/\bF(?:[1-9]|1[0-9]|2[0-9]|3[0-5])\b/);
+    type(h, "\x1b");
     type(h, ":");
     type(h, "\t");
     expect(screen(h)).not.toMatch(/\bF(?:[1-9]|1[0-9]|2[0-9]|3[0-5])\b/);
@@ -1071,23 +1106,34 @@ describe("keys (N17/N18)", () => {
     expect(hint).toContain("n/N results");
   });
 
-  test(":commands and Ctrl-p open the searchable reference; / narrows it; Enter picks", async () => {
+  test(":commands and Ctrl-p open the command list dialog by group; / narrows it; Enter runs a command or starts its line", async () => {
     const h = await started();
     type(h, "\x10");
-    expect(h.session.view).toBe("commands");
-    expect(screen(h)).toContain(`COMMANDS · ${h.session.commands.length} of ${h.session.commands.length}`);
+    expect(h.session.view).toBe("workspace");
+    expect(h.session.dialog?.label).toBe("commands");
+    // The dialog is a toolkit overlay: its own frame, not the shell's.
+    const shown = (): string => plain((h.session.dialog as unknown as Dialog).render(100)).join("\n");
+    let text = shown();
+    expect(text).toContain("╭─ COMMANDS");
+    expect(text).toContain(`${h.session.commands.length} of ${h.session.commands.length} commands`);
+    expect(text).toMatch(/│ Task\s+│/); // the first group's header
     type(h, "/", ..."task history", "\r");
-    const text = screen(h);
+    text = shown();
     expect(text).toContain("2 of");
     expect(text).toMatch(/▌:back\s+Go back/);
-    h.session.openCommands("quit");
-    expect(screen(h)).toMatch(/:q {2}:quit\s+Quit this terminal workspace/);
-    type(h, "\x1b", "\x10", "/", ..."task history", "\r");
-    type(h, "j", "\r");
+    type(h, "\r");
     await settle();
-    expect(h.session.view).toBe("workspace");
-    expect(h.session.status?.text).toMatch(/No later task/);
-    type(h, ":", ..."commands open", "\r");
+    expect(h.session.dialog).toBeNull();
+    expect(h.session.status?.text).toMatch(/No earlier task/);
+    // :commands <search> opens it already filtered; Ctrl-p inside it does nothing, Esc closes it.
+    type(h, ":", ..."commands quit", "\r");
+    await settle();
+    expect(shown()).toMatch(/:q {2}:quit\s+Quit this terminal workspace/);
+    type(h, "\x10");
+    expect(h.session.dialog?.label).toBe("commands");
+    type(h, "\x1b");
+    expect(h.session.dialog).toBeNull();
+    type(h, ":", ..."commands :open", "\r");
     await settle();
     type(h, "\r");
     expect(h.session.prompt?.text).toBe("open ");
@@ -2435,7 +2481,7 @@ describe("the mouse, top level (N19: on by default, never the only path to an ac
     await settle();
     expect(h.session.dialog?.label).toBe("sort");
     type(h, "\x1b");
-    h.session.notify("error", "something failed"); // a local, unread notification
+    addUnread(h);
     h.shell.frame();
     click(h, find(h, "1 unread"));
     await settle();
@@ -2455,7 +2501,7 @@ describe("the mouse, top level (N19: on by default, never the only path to an ac
     expect(h.session.focus).toBe("document");
   });
 
-  test("one wheel notch moves one row (the task list, :commands, a dialog), however many reports the terminal sends for it", async () => {
+  test("one wheel notch moves one row (the task list, a dialog), however many reports the terminal sends for it", async () => {
     // Ghostty reports one notch as mouse-scroll-multiplier (3 by default) wheel reports, more while macOS
     // speeds a fast scroll up, and a multiplexer (Herdr) forwards each one: they arrive together.
     let now = 1_000;
@@ -2479,13 +2525,14 @@ describe("the mouse, top level (N19: on by default, never the only path to an ac
     expect(h.session.selectedTask()?.id).toBe(3);
     notch(list, -1); // the other way is a new notch at once
     expect(h.session.selectedTask()?.id).toBe(2);
-    h.session.openView("commands");
+    type(h, "\x10");
     await rendered(h);
-    expect(h.session.commandsSelected).toBe(0);
+    const commands = h.session.dialog as unknown as Dialog;
+    expect(commands.highlighted()?.key).toBe("new");
     now += WHEEL_NOTCH_MS;
-    notch([10, 5]);
-    expect(h.session.commandsSelected).toBe(1);
-    h.session.closeView();
+    notch(commands.rowOnScreen("new") as [number, number]);
+    expect(commands.highlighted()?.key).toBe("title");
+    type(h, "\x1b");
     type(h, "f");
     await rendered(h);
     const dialog = h.session.dialog as unknown as Dialog;

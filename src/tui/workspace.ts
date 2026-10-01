@@ -10,7 +10,7 @@
 //       selection survives the filters that exclude it; without one, the
 //       first non-done task in server order.
 //   Without a query the list follows `:sort` (ascending id by default; ties
-//   always by ascending id) and `:group` (a header row per lane, in lane-catalog
+//   always by ascending id) and `:sort group` (a header row per lane, in lane-catalog
 //   order, or per status, draft to done). Headers are not rows: motions
 //   step over tasks only.
 // - filterCounts: the filter picker's per-choice counts, each slot over the
@@ -360,8 +360,8 @@ interface ListLine {
   readonly padded?: boolean;
 }
 
-/** A header above each group (never selectable), or a row of `rows`. */
-type ListEntry = { readonly group: WorkspaceGroup } | { readonly row: number };
+/** A header above each group (never selectable), a blank line around a group, or a row of `rows`. */
+type ListEntry = { readonly group: WorkspaceGroup } | { readonly gap: true } | { readonly row: number };
 
 class TaskList implements WorkspaceComponent {
   height = 0;
@@ -425,9 +425,12 @@ class TaskList implements WorkspaceComponent {
 
   /**
    * The body's lines: group headers and task rows from the scroll position.
-   * Scrolling counts rendered lines (R5): the selected row, expanded, stays
-   * whole in view (with its group header when it opens the group), and a move
-   * past the bottom scrolls just enough.
+   * For readability a group never touches what is around it: a blank line
+   * above each header and after the last group. Scrolling counts rendered
+   * lines (R5): the selected row, expanded, stays whole in view (with its
+   * group header and the blank line above when it opens the group, the blank
+   * line below when it ends one), and a move past the bottom scrolls just
+   * enough.
    */
   #visibleLines(sel: WorkspaceSelection, width: number, body: number): ListLine[] {
     const s = this.#session;
@@ -436,11 +439,14 @@ class TaskList implements WorkspaceComponent {
     sel.rows.forEach((_t, i) => {
       const group = sel.groups[next];
       if (group !== undefined && group.start === i) {
-        entries.push({ group });
+        entries.push({ gap: true }, { group });
         next++;
       }
       entries.push({ row: i });
     });
+    if (sel.groups.length > 0) entries.push({ gap: true });
+    // Comfortable already leaves a blank row above the body (S1): a blank line on top would double it.
+    const blankAbove = s.density === "comfortable";
     const selected = sel.activeIndex < 0 ? -1 : entries.findIndex(e => "row" in e && e.row === sel.activeIndex);
     // R1: the @id column fits the widest id of ALL the rows, so it never shifts while scrolling.
     const idWidth = sel.rows.reduce((n, t) => Math.max(n, `@${t.id}`.length), 0);
@@ -453,11 +459,13 @@ class TaskList implements WorkspaceComponent {
     const heightOf = (i: number): number => (i === selected ? block.length : 1);
     let scroll = this.#scroll;
     if (selected >= 0) {
-      const opensGroup = selected > 0 && "group" in (entries[selected - 1] ?? {});
-      const top = opensGroup ? selected - 1 : selected;
+      let top = selected;
+      if ("group" in (entries[top - 1] ?? {})) top--;
+      if (top < selected && "gap" in (entries[top - 1] ?? {})) top--;
+      const end = "gap" in (entries[selected + 1] ?? {}) ? selected + 1 : selected;
       if (top < scroll) scroll = top;
       let used = 0;
-      for (let i = scroll; i <= selected; i++) used += heightOf(i);
+      for (let i = scroll; i <= end; i++) used += heightOf(i);
       while (used > body && scroll < selected) used -= heightOf(scroll++);
     }
     // Never scrolled further than the point from which the rest fills the body.
@@ -473,6 +481,10 @@ class TaskList implements WorkspaceComponent {
     for (let i = scroll; i < entries.length && lines.length < body; i++) {
       const entry = entries[i];
       if (entry === undefined) continue;
+      if ("gap" in entry) {
+        if (lines.length > 0 || !blankAbove) lines.push({ segs: [], fill: "text@panel", hit: PANE });
+        continue;
+      }
       if ("group" in entry) {
         lines.push({ segs: this.#groupHeader(entry.group, width), fill: "text@panel", hit: PANE });
         continue;

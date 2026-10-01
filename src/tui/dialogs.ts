@@ -122,7 +122,10 @@ export interface DialogRow {
   readonly pinned?: boolean;
   /** Never filtered by `/` and kept in its place (e.g. the filter picker's statuses). */
   readonly fixed?: boolean;
-  /** Its section: a header line is drawn above the first row of each section (motions skip it). */
+  /**
+   * Its section: a header line is drawn above the first row of each section, with a blank line above
+   * the header and after the last section (motions skip both).
+   */
   readonly section?: string;
   /** A checkbox or radio row: EVERY click on it picks it as Space does (a toggle, the dialog stays open). */
   readonly toggle?: boolean;
@@ -875,26 +878,43 @@ export class Dialog implements Component, Focusable, SessionDialog {
       push([seg("muted@raised", ` ${esc(spec.empty ?? "Nothing matches")}`)]);
       return;
     }
-    // Lines: a section header above the first row of each section, then the rows.
-    const lines: ({ readonly header: string } | { readonly row: number })[] = [];
+    // Lines: a section header above the first row of each section, then the rows. For readability a
+    // section never touches what is around it: a blank line wherever the section changes (so above
+    // each header and below each section) and after the last one.
+    type Line = { readonly header: string } | { readonly row: number } | { readonly gap: true };
+    const lines: Line[] = [];
     let section: string | undefined;
     rows.forEach((row, i) => {
-      if (row.section !== undefined && row.section !== section) lines.push({ header: row.section });
+      if (row.section !== section) {
+        lines.push({ gap: true });
+        if (row.section !== undefined) lines.push({ header: row.section });
+      }
       section = row.section;
       lines.push({ row: i });
     });
+    if (section !== undefined) lines.push({ gap: true });
     const target = lines.findIndex(l => "row" in l && l.row === at);
-    // The highlighted row stays in view, with its section header when it opens the section.
-    const top = target > 0 && "header" in (lines[target - 1] ?? {}) ? target - 1 : target;
+    // The highlighted row stays in view with the spacing around it: its section header and the blank
+    // line above it when it opens a section, the blank line below when it ends one.
+    let top = target;
+    if ("header" in (lines[top - 1] ?? {})) top--;
+    if ("gap" in (lines[top - 1] ?? {})) top--;
+    const bottom = "gap" in (lines[target + 1] ?? {}) ? target + 1 : target;
     let scroll = Math.min(this.#scroll, Math.max(0, lines.length - visible));
     if (top < scroll) scroll = top;
-    else if (target >= scroll + visible) scroll = target - visible + 1;
+    else if (bottom >= scroll + visible) scroll = bottom - visible + 1;
+    // The row itself always shows, however few lines there are.
+    scroll = Math.min(target, Math.max(scroll, target - visible + 1));
     this.#scroll = scroll;
     const labelWidth = Math.min(
       Math.max(8, Math.floor(inner / 2)),
       Math.max(...rows.map(r => displayWidth(esc(r.label))), 1),
     );
     for (const entry of lines.slice(scroll, scroll + visible)) {
+      if ("gap" in entry) {
+        push([]);
+        continue;
+      }
       if ("header" in entry) {
         push([seg("muted@raised", ` ${esc(entry.header)}`, { bold: true })]);
         continue;

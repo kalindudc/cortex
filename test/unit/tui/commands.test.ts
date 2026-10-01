@@ -16,16 +16,19 @@ import type { Lane, Task, TaskStatus } from "../../../src/store.ts";
 import { nextStatusFor, STATUS } from "../../../src/lib/constants.ts";
 import { UNTAGGED } from "../../../src/lib/taskView.ts";
 import {
+  COMMAND_GROUPS,
   COMMANDS,
   CommandError,
   commandHelp,
+  commandSearchText,
   completeCommandLine,
   describeCandidate,
+  groupedCommands,
+  openCommandList,
   openFilterPicker,
   findCommand,
   parseCommand,
   reportPendingMigrations,
-  searchCommands,
   themeSourceText,
 } from "../../../src/tui/commands.ts";
 import { DEFAULT_CONFIG, loadConfig } from "../../../src/tui/config.ts";
@@ -58,7 +61,7 @@ const COMMAND_CASES: readonly { input: string; name: string; argument: string; p
   { input: "clear", name: "clear", argument: "", prefix: "cl" },
   { input: "sort -updated", name: "sort", argument: "-updated", prefix: "sor" },
   { input: "sort", name: "sort", argument: "" },
-  { input: "group lane", name: "group", argument: "lane", prefix: "gr" },
+  { input: "sort group lane", name: "sort", argument: "group lane" },
   { input: "set done!", name: "set", argument: "done!", prefix: "se" },
   { input: "focus document", name: "focus", argument: "document", prefix: "fo" },
   { input: "back", name: "back", argument: "", prefix: "ba" },
@@ -290,9 +293,23 @@ describe("command parsing, completion and help", () => {
       const help = commandHelp(COMMANDS).find(h => h.name === r.name);
       expect(help?.usage.startsWith(":")).toBe(true);
       expect((help?.description.length ?? 0) > 0).toBe(true);
-      expect(searchCommands(COMMANDS, r.name).map(s => s.name)).toContain(r.name);
+      expect(commandSearchText(parsed.spec)).toContain(`:${r.name}`);
     });
   }
+
+  test("every command has a group; grouping changes only the display order", () => {
+    for (const c of COMMANDS) expect(COMMAND_GROUPS, `:${c.name}`).toContain(c.group);
+    const grouped = groupedCommands(COMMANDS);
+    // Each command exactly once, the groups in COMMAND_GROUPS order, registry order within a group.
+    expect(grouped.length).toBe(COMMANDS.length);
+    expect(new Set(grouped.map(c => c.name)).size).toBe(COMMANDS.length);
+    const rank = grouped.map(c => COMMAND_GROUPS.indexOf(c.group));
+    expect(rank).toEqual([...rank].sort((a, b) => a - b));
+    for (const g of COMMAND_GROUPS) {
+      expect(grouped.filter(c => c.group === g)).toEqual(COMMANDS.filter(c => c.group === g));
+    }
+    expect(commandHelp(COMMANDS).map(h => h.group)).toEqual(COMMANDS.map(c => c.group));
+  });
 
   test("every registry entry has a usage, a description and unique names", () => {
     const names = COMMANDS.flatMap(c => [c.name, ...c.aliases]);
@@ -569,17 +586,47 @@ describe("running the navigation commands", () => {
     expect(s.view).toBe("help");
     await s.execute("messages");
     expect(s.view).toBe("messages");
-    await s.execute("commands focus");
-    expect(s.view).toBe("commands");
-    expect(s.commandList().map(c => c.name)).toEqual(["focus"]);
   });
 });
 
-describe("the :commands reference", () => {
-  test("searches names, aliases, usage and descriptions with AND keywords, uncapped", () => {
-    expect(searchCommands(COMMANDS, "").length).toBe(COMMANDS.length);
-    expect(searchCommands(COMMANDS, "q!").map(c => c.name)).toEqual(["quit!"]);
-    expect(searchCommands(COMMANDS, "task history").map(c => c.name)).toEqual(["back", "forward"]);
+describe("the :commands reference (a large list dialog, by group)", () => {
+  test("lists every command once under its group; / searches names, aliases, usage and descriptions, uncapped", async () => {
+    const { s, type } = withDaemon();
+    openCommandList(s, "");
+    const dialog = topDialog(s);
+    expect(dialog.label).toBe("commands");
+    expect(dialog.visibleRows().length).toBe(COMMANDS.length);
+    expect([...new Set(dialog.visibleRows().map(r => r.section))]).toEqual([...COMMAND_GROUPS]);
+    dialog.search("q!");
+    expect(dialog.visibleRows().map(r => r.key)).toEqual(["quit!"]);
+    dialog.search("task history");
+    expect(dialog.visibleRows().map(r => r.key)).toEqual(["back", "forward"]);
+    type("\x1b");
+    expect(s.dialog).toBeNull();
+    // :commands <search> opens it already filtered.
+    await s.execute("commands q!");
+    expect(
+      topDialog(s)
+        .visibleRows()
+        .map(r => r.key),
+    ).toEqual(["quit!"]);
+  });
+
+  test("Enter runs a command without an argument (closing the dialog) and starts the line of one with an argument", async () => {
+    const { s, type } = withDaemon();
+    await s.execute("open 2");
+    await s.execute("open 3");
+    await s.execute("commands task history");
+    expect(topDialog(s).highlighted()?.key).toBe("back");
+    type("\r");
+    await flush();
+    expect(s.dialog).toBeNull();
+    expect(s.selectedId).toBe(2);
+    await s.execute("commands :open");
+    expect(topDialog(s).highlighted()?.key).toBe("open");
+    type("\r");
+    expect(s.dialog).toBeNull();
+    expect(s.prompt?.text).toBe("open ");
   });
 });
 
@@ -831,23 +878,27 @@ function snapshotOf(s: TuiSession) {
   };
 }
 
-describe(":sort and :group (the terminal's list order; ;o opens the picker)", () => {
+describe(":sort (orders, and :sort group; ;o opens the picker)", () => {
   test("complete, set and persist; the list reorders; an unknown value explains and changes nothing", async () => {
     const { s } = withDaemon();
-    expect(completeCommandLine("sort ", COMMANDS, s)).toEqual(TASK_SORTS.map(v => `sort ${v}`));
+    expect(completeCommandLine("sort ", COMMANDS, s)).toEqual([...TASK_SORTS, "group"].map(v => `sort ${v}`));
     expect(completeCommandLine("sort -", COMMANDS, s)).toEqual(["sort -id", "sort -title", "sort -updated"]);
-    expect(completeCommandLine("group s", COMMANDS, s)).toEqual(["group status"]);
+    expect(completeCommandLine("sort g", COMMANDS, s)).toEqual(["sort group"]);
+    expect(completeCommandLine("sort group s", COMMANDS, s)).toEqual(["sort group status"]);
     expect(s.visibleTasks().map(t => t.id)).toEqual([1, 2, 3, 13]);
     await s.execute("sort -id");
     expect(s.sort).toBe("-id");
     expect(s.visibleTasks().map(t => t.id)).toEqual([13, 3, 2, 1]);
-    await s.execute("group lane");
+    await s.execute("sort group lane");
     expect(s.group).toBe("lane");
     expect(s.visibleTasks().map(t => t.id)).toEqual([2, 1, 3, 13]);
     await s.execute("sort size");
     expect(s.status?.text).toMatch(/Unknown order "size": id, -id, title/);
-    await s.execute("group owner");
+    await s.execute("sort group owner");
     expect(s.status?.text).toMatch(/Unknown grouping "owner": none, lane or status/);
+    // Grouping lives under :sort only.
+    await s.execute("group lane");
+    expect(s.status?.text).toMatch(/Unknown command :group/);
     expect([s.sort, s.group]).toEqual(["-id", "lane"]);
     // While a search ranks the list, the chosen order waits (and says so).
     s.setQuery("the");
@@ -856,7 +907,7 @@ describe(":sort and :group (the terminal's list order; ;o opens the picker)", ()
     expect(s.sort).toBe("title");
   });
 
-  test("bare :sort opens the picker: Space tries an order, Enter picks and closes; bare :group starts at the grouping", async () => {
+  test("bare :sort opens the picker: Space tries an order, Enter picks and closes; bare :sort group starts at the grouping", async () => {
     const { s, type } = withDaemon();
     await s.execute("sort");
     const picker = topDialog(s);
@@ -869,7 +920,7 @@ describe(":sort and :group (the terminal's list order; ;o opens the picker)", ()
     type("G", "\r");
     expect(s.group).toBe("status");
     expect(s.dialog).toBeNull();
-    await s.execute("group");
+    await s.execute("sort group");
     expect(topDialog(s).highlighted()?.key).toBe("group:status");
     type("\x1b");
     expect(s.dialog).toBeNull();

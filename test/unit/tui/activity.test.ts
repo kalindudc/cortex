@@ -457,6 +457,45 @@ describe("the Related panel (P7)", () => {
     expect(text).toContain("no shared tags");
   });
 
+  test("the buckets never touch what is around them: a blank line between them, above the first in compact, after the last", async () => {
+    const h = setup();
+    await h.session.execute("related");
+    h.view();
+    h.fake.relatedReads[0]?.answer.resolve(related({ shared: [task(2, { title: "shares a tag" })] }));
+    await settle();
+    const bucketLines = (): string[] =>
+      h
+        .view()
+        .split("\n")
+        .map(l => l.trim())
+        .slice(0, 10);
+    // Comfortable: the blank row under the divider (drawn by the shell) is the one above the first bucket.
+    expect(bucketLines()).toEqual([
+      "REFERENCED BY \u00b7 0",
+      "no inbound references",
+      "",
+      "REFERENCES \u00b7 0",
+      "no outbound references",
+      "",
+      "SHARED TAGS \u00b7 1",
+      "\u258c [2] shares a tag",
+      "",
+      "",
+    ]);
+    // Compact has no row under the divider: the first bucket gets its own blank line.
+    h.session.setDensity("compact");
+    expect(bucketLines().slice(0, 2)).toEqual(["", "REFERENCED BY \u00b7 0"]);
+    // The last bucket's blank line is a row of its own: scrolled to the end, it is still drawn below it.
+    h.activity.height = 3;
+    h.activity.scroll(100);
+    expect(
+      h
+        .view()
+        .split("\n")
+        .map(l => l.trim()),
+    ).toEqual(["SHARED TAGS \u00b7 1", "\u258c [2] shares a tag", ""]);
+  });
+
   test("a failure is keyed to its task with an explicit retry; a stale answer for another task is discarded", async () => {
     const h = setup();
     await h.session.execute("related");
