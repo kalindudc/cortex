@@ -116,22 +116,18 @@ Begin with thorough research to gather all necessary context:
 - Read full content of ALL pattern files (not just the closest analog) -- consistency comes from breadth
 - Verify both what patterns exist AND what infrastructure is absent -- missing frameworks/conventions are as important as existing ones
 - Before proposing edits to config or deployed files, check if they are produced by a build/template system (Makefile, Taskfile, ERB, Jinja, code generation). Search for generator scripts, `src/templates/`, and build task definitions -- editing generated files directly will be overwritten
-- Use the `codebase-explorer` skill for systematic research if the repo is unfamiliar
-- For complex verification (patterns, dependencies, infrastructure), invoke the researcher agent:
-  spawn(agent: "researcher", task: "<claims to verify + relevant paths>")
-  The researcher returns verified findings with confidence levels and file:line evidence,
-  replacing ad-hoc Read/Glob calls for complex verification. Simple file reads remain inline.
-  If the researcher fails or times out, fall back to inline verification.
+- If the repo is unfamiliar, map it first (entry points, module boundaries, where the tests live) before reading individual files
+- For complex verification (patterns, dependencies, infrastructure), delegate to a sub-agent if your harness can, asking for findings with confidence levels and file:line evidence. Simple file reads stay inline. If delegation fails or times out, verify inline.
 
-### Available Custom Tools
+### Tools by use case
 
-Use these tools during the research process to gather context efficiently:
-- `ast_query` -- structural AST pattern search. Use to find code patterns to follow (e.g., "find all classes extending BaseModel", "find all route handlers"). Prefer over grep for structural queries.
-- `git_blame_context` -- structured blame info (who, when, why, co-changed files). Use to understand why existing code exists before planning changes around it.
-- `git_diff_summary` -- structured diff summary with file categorization and counts. Use to understand recent changes to relevant modules.
-- `test_run_parsed` -- run tests with structured pass/fail results. Use to verify the baseline test suite passes before planning.
-- `stack_trace_resolve` -- resolve stack traces to actual source file:line references.
-- `gh` CLI / GitHub API -- use `gh api` and `gh search` for repo configuration state (branch protection, secrets, app installations). Verify commands work before including them in plans.
+Use whatever your environment provides for each need; prefer a purpose-built tool over raw shell output when you have one:
+- Structural code search (an AST or tree-sitter search, else `rg`): find patterns to follow, e.g. every route handler or every class extending a base class.
+- History and blame (a structured blame tool, else `git blame` / `git log`): learn why code exists before planning changes around it.
+- Recent changes (a diff-summary tool, else `git diff --stat`): scope what changed in the modules the plan touches.
+- Tests (a test runner that parses results, else the repo's test script): confirm the baseline passes before planning.
+- Stack traces (a resolver for compiled or container paths, else source maps): map frames to source file:line.
+- The code host and CI (e.g. the `gh` CLI or the host's API): repository settings such as branch protection, secrets and app installations. Verify a command works before putting it in a plan.
 
 ---
 
@@ -193,14 +189,14 @@ DO NOT write the implementation -- that is the implementer's job.
 - [Completion criteria]
 
 ## Verification Notes
-[Claims verified by multi-model consensus. Revisions made: ...]
+[Claims verified, and how (command, probe, source read). Design claims left for an independent review. Revisions made: ...]
 [If no revisions needed: "All claims verified."]
 
 ## Rules and requirements
 - ALWAYS update the source plan after each task and keep our source-of-truth up-to-date
 - MAINTAINABILITY above all else
 - ALWAYS follow KISS (keep it simple stupid), AVOID over engineering
-- ALWAYS use `dev` or `task` (go-task) commands over manual commands, if needed, prompt the user for clarification on building new commands
+- ALWAYS use the repo's own scripts or task runner (e.g. package.json scripts, make, task) over manual commands; if a new command is needed, ask the user first
 ```
 
 ---
@@ -216,22 +212,20 @@ Claims to extract:
 - Quantitative claims: line counts, element counts, test counts
 - Negative claims: "X does not support Y", "there is no Z"
 
-Verification is tiered — cheap checks first, consensus only where it pays:
+Verify inline, cheap checks first:
 
-TIER 1 — inline, ALWAYS, no spawns. Mechanical claims a single tool call proves:
+MECHANICAL claims, which a single tool call proves:
 - File existence: `ls` / `find` the Beginning-context and pattern files
 - API/function claims: read the source or installed type definitions
 - Code snippets: verify syntax and semantics
 - Quantitative claims: count against the actual source
 Log results in "Verification Notes".
 
-TIER 2 — multi-model critic consensus. ONLY for claims that carry design risk:
+DESIGN claims, which carry design risk and no single call settles:
 - Approach-level claims ("X is the right extension point", "this pattern generalizes")
 - Negative claims ("the library does not support X", "there is no existing Z")
 - External-platform behavior unprovable from the codebase
-Follow the consensus recipe at `~/.agents/skills/critique/references/consensus-recipe.md`: ONE spawned task per critic model, each covering ALL claims; majority KEEP per claim = verified.
-
-If the critique infrastructure is unavailable (recipe or critics.yml missing), verify Tier 2 claims inline as best-effort and note the limitation in Verification Notes.
+Gather the strongest evidence you can (a probe or prototype in a temp dir, primary docs, the installed source), state your confidence, and list each one in Verification Notes as a design claim, so an independent review can target them. This skill does not run that review.
 
 Any claim flagged INCORRECT: revise the plan before output. Log the revision in the "Verification Notes" section at the end of the plan.
 
@@ -318,7 +312,7 @@ Plans always produce working software. Research informs Implementation Notes; Lo
 ## Rules
 
 - ALWAYS load the `cortex` skill first for CLI vocabulary and lane / status / tag semantics
-- ALWAYS track the core protocol with TODOs or Quests, if the tooling supports it
+- ALWAYS track the core protocol with a task list, if your tooling has one
 - ALWAYS persist the plan via `cortex add --body-file`; NEVER inline `-b "..."` for multi-KB plans
 - ALWAYS attribute the plan immediately after `cortex add` with `cortex update <id> --as "$SESSION_ID" -m "plan written"`
 - ALWAYS pass `-t plan` to `cortex add` for any plan; for a plan stack, pass `-t plan,<stack-slug>` on every task in the stack

@@ -66,6 +66,74 @@ describe("cortex base skill — leaf files", () => {
   });
 });
 
+// --- self-contained: shipped skills depend on nothing outside cortex --------
+//
+// cortex ships to anyone, so its skills may name only what cortex itself ships:
+// its own skills, its own tools and its own vocabulary. Other tools are
+// described by use case ("structural code search", "logs"), never by a
+// harness- or organization-specific name; a user's own skills may build on
+// cortex's, never the reverse. CORTEX_TERMS is a FIXED list on purpose: a new
+// cortex term is added here deliberately, anything else is someone else's.
+const CORTEX_TERMS = new Set([
+  "cortex_update",
+  "cortex_recall",
+  "not_found",
+  "bad_request",
+  "body_search_not_found",
+  "body_search_ambiguous",
+  "task_tags",
+  "task_count",
+]);
+
+/** Every reference in `text` to something cortex does not ship. */
+function externalRefs(text: string): string[] {
+  const found: string[] = [];
+  for (const m of text.matchAll(/~\/\.agents\/skills\/([A-Za-z0-9_*.-]+)/g)) {
+    if (!m[1]?.startsWith("cortex")) found.push(`skill path ${m[0]}`);
+  }
+  for (const m of text.matchAll(/`([a-z0-9-]+)` skill\b/g)) {
+    if (!(listSkills() as string[]).includes(m[1] ?? "")) found.push(`skill ${m[1]}`);
+  }
+  for (const m of text.matchAll(/\bagent:\s*"([^"]*)"/g)) found.push(`agent ${m[1]}`);
+  for (const m of text.matchAll(/`([a-z][a-z0-9]*(?:_[a-z0-9]+)+)`/g)) {
+    if (!CORTEX_TERMS.has(m[1] ?? "")) found.push(`tool ${m[1]}`);
+  }
+  return found;
+}
+
+describe("shipped skills are self-contained", () => {
+  test("the scan catches each kind of external reference (positive control)", () => {
+    const bad = [
+      "Follow `~/.agents/skills/critique/references/x.md`.",
+      "Use the `codebase-explorer` skill.",
+      'spawn(agent: "researcher", task: "...")',
+      "Prefer `ast_query` over grep.",
+    ].join("\n");
+    expect(externalRefs(bad)).toEqual([
+      "skill path ~/.agents/skills/critique",
+      "skill codebase-explorer",
+      "agent researcher",
+      "tool ast_query",
+    ]);
+    const ok =
+      "Load the `cortex` skill; `cortex_update`; `~/.agents/skills/cortex*`; `~/.agents/skills/`; spawn a sub-agent.";
+    expect(externalRefs(ok)).toEqual([]);
+  });
+
+  for (const name of listSkills()) {
+    test(`${name}: every shipped file names only cortex's own skills, tools and terms`, async () => {
+      const dir = path.join(tmpDir, `self-contained-${name}`);
+      await writeSkill(name, dir);
+      const files = fs.readdirSync(dir, { recursive: true, encoding: "utf8" }).filter(f => f.endsWith(".md"));
+      expect(files.length).toBeGreaterThan(0);
+      for (const rel of files) {
+        const refs = externalRefs(fs.readFileSync(path.join(dir, rel), "utf8"));
+        expect(refs, `${name}/${rel}`).toEqual([]);
+      }
+    });
+  }
+});
+
 // --- pi-extension manifest -----------------------------------------------
 //
 // Every shipped pi extension MUST install at least one .ts file > 200 bytes

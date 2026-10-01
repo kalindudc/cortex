@@ -147,11 +147,11 @@ Scope: Run only the relevant test file(s) per task for fast feedback. Save the f
 - Unavailable runtime: When a plan specifies runtime verification for a runtime not available locally, explicitly flag the deviation in the task record and recommend manual verification rather than silently skipping. This is distinct from missing credentials (which allow structural validation) -- missing runtimes block functional verification entirely.
 - Compilation-dependency chains (A references B, B removes C): Defer verification to the last task in the chain rather than attempting intermediate builds that cannot succeed.
 
-When running tests, prefer the `test_run_parsed` tool over raw bash for structured results. It returns pass/fail per test with parsed failure locations instead of raw terminal output. Note: `test_run_parsed` cannot parse Minitest output -- fall back to reading raw test output for Ruby/Minitest projects.
+When running tests, prefer a tool that parses test results (pass/fail per test with failure locations) over raw terminal output, if you have one. Fall back to reading the raw output when it cannot parse the test framework's output.
 
-When test failures produce stack traces, use `stack_trace_resolve` to resolve compiled/container paths to actual source file:line references in the workspace.
+When test failures produce stack traces, map compiled or container paths to the actual source file:line in the workspace (a resolver tool if you have one, else source maps) before changing code.
 
-Use `ast_query` to find patterns to follow when implementing (e.g., "find all classes extending BaseModel" to match existing conventions). Prefer over grep for structural code queries.
+Use a structural (AST) code search, when you have one, to find patterns to follow when implementing (e.g., "find all classes extending BaseModel" to match existing conventions). Prefer it over grep for structural code queries.
 
 Compare RESULT vs EXPECT:
 - If verification passes: proceed to Step 5
@@ -208,7 +208,7 @@ After all tasks are completed:
 
 1. Run ALL Validation Gates from the plan
 2. Run the full build + test + lint cycle
-3. Report final status: tasks completed (N/N), validation gates (pass/fail), files touched, deviations. Use the `git_diff_summary` tool for the final changeset summary -- it provides structured file categorization and counts instead of raw diff output. Supplement with `git status` when the plan creates new files, since `git_diff_summary` only covers tracked changes and will miss untracked files.
+3. Report final status: tasks completed (N/N), validation gates (pass/fail), files touched, deviations. Summarize the changeset with a structured diff summary if you have one, else `git diff --stat`. Supplement with `git status` when the plan creates new files: a diff of tracked changes misses untracked files.
 4. Transition the cortex task to `review` — status is the canonical completion signal (the cortex task body is NEVER mutated to record completion):
 ```bash
 cortex update <id> --as "$SESSION_ID" -s review \
@@ -226,7 +226,7 @@ cortex update <id> --as "$SESSION_ID" -s done -m "merged"
 
 - NEVER git stage or git commit, do not create any commits, the user owns the commit process
 - ALWAYS load the `cortex` skill first for CLI vocabulary and status semantics
-- ALWAYS track the core protocol with TODOs or Quests, if the tooling supports it
+- ALWAYS track the core protocol with a task list, if your tooling has one
 - ALWAYS check the current status before reading the plan; require `open` or explicit user authorization for a non-open status
 - ALWAYS post ONE `cortex update` per Low-Level Task with `--as "$SESSION_ID"`
 - NEVER mutate the cortex task body -- body changes are reserved for cortex-planner

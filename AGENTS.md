@@ -81,6 +81,7 @@ One line per rule; the linked doc holds the why. A code comment states its reaso
 - Agent memory: the derived index is created on the first search (never in `migrate()`) and never backed up; never pass raw text to FTS5 MATCH; staleness runs in the CLI process, never the daemon ([memory](docs/memory.md)).
 - The pi extension (`src/extensions/pi.ts`) keeps memory overhead bounded (at most one `cortex memory context` spawn per prompt, a frozen primer, budgeted `cortex_recall`); tool failures THROW; UI renders only through `src/extensions/memory-view.ts` ([memory](docs/memory.md#the-pi-extension)).
 - `cortex init`/`cortex reset` touch ONLY the datastore; agent skills and the pi extension belong to `cortex agents install|reset` (`src/commands/agents.ts`).
+- Bundled skills (`src/skills/`) depend on nothing outside cortex: no user skills or agents, and other tools are described by use case, never by name; a user's skills may build on cortex's, never the reverse (`test/unit/skills.test.ts`).
 
 ## 6. Testing
 

@@ -106,24 +106,26 @@ Pick the cheapest source first. Most analyses need 2-3 of the buckets below, not
 
 ### 1. Codebase
 
-- `read` for full-file context; `bash` with `rg` / `find` / `ls` for fast lookups.
-- `ast_query` for structural patterns (e.g., "find every class extending BaseModel"). Prefer over grep when the question is structural.
-- `git_blame` (or `git_blame_context`) to learn WHY a piece of code exists before reasoning about whether to change it.
-- `git_diff_summary` to scope what has changed recently in a module.
+- Read whole files for context; shell search (`rg` / `find` / `ls`) for fast lookups.
+- A structural (AST) code search for structural questions (e.g., "find every class extending BaseModel"); prefer it over grep when you have one.
+- Blame and history (a structured blame tool, else `git blame` / `git log`) to learn WHY a piece of code exists before reasoning about whether to change it.
+- A diff summary (else `git diff --stat`) to scope what has changed recently in a module.
 
 ### 2. External
 
-- `web_fetch` is the primary external tool — go directly to known URLs (official docs, GitHub raw content, RFCs, API references) rather than searching.
-- `web_search` ONLY when you genuinely do not know the URL or are surveying an unfamiliar landscape. Capture the discovered URL, then `web_fetch` the actual source for the citation.
+- Fetching a known URL is the primary external source — go directly to it (official docs, raw source files, RFCs, API references) rather than searching.
+- Web search ONLY when you genuinely do not know the URL or are surveying an unfamiliar landscape. Capture the discovered URL, then fetch the actual source for the citation.
 - Prefer named formal standards and primary sources over generic "best practices" articles.
 
 ### 3. Operational and observability
 
-- `data_portal_search` / `data_portal_get_metadata` / `data_portal_query` when the question is "what does the production data say".
-- `gcp_logs_query` / `gcp_logs_tail` for "what is the system actually doing right now".
-- `grokt_search_code` / `grokt_bulk_search` / `grokt_get_file` for cross-repo code questions when the answer is not in the local checkout.
-- `slack_search_public` / `slack_search_public_and_private` for organizational context — past decisions, incident retros, ownership.
-- `github_search_issues` / `github_search_pull_requests` / `github_pull_request_read` for upstream context on libraries you depend on.
+Tool names vary by organization; match the question to whatever you have:
+
+- Data and analytics (a data warehouse or catalog, e.g. BigQuery) when the question is "what does the production data say".
+- Logs, metrics and traces (an observability platform, e.g. Observe, Cloud Logging, Datadog, Grafana) for "what is the system actually doing right now".
+- Cross-repository code search for code questions when the answer is not in the local checkout.
+- Chat and document search (e.g. Slack, a team wiki) for organizational context — past decisions, incident retros, ownership.
+- The code host's issue and pull-request search (e.g. GitHub) for upstream context on libraries you depend on.
 
 ### 4. Negative-space audit (BEFORE writing)
 
@@ -134,7 +136,7 @@ After the headline is decided, deliberately look for evidence that would FALSIFY
 
 A single recorded counter-example check is worth ten unverified claims.
 
-Use the tools that are available, if the exact tool does not exist, choose the closest one. For example, `data_portal_query` vs `query_bigquery` is a common fallback choice when the former is unavailable. Use the tools that are available to you, instead of asking the user to install new ones or worrying about the semantics of which tool is "right" for the question.
+Use the tools that are available. If no tool fits a need exactly, choose the closest one (a data-catalog query and a direct warehouse query answer the same question), instead of asking the user to install new ones or worrying about which tool is "right" for the question. If nothing can answer it, record it as an open question.
 
 ---
 
@@ -190,7 +192,7 @@ Use the following structure. Strip any section that has no content — do NOT sh
 
 - Claims re-checked: <list>
 - Counter-examples searched for: <list>
-- Multi-model critique: <invoked / skipped — reason>
+- Claims for independent review: <list, or none>
 ```
 
 NOTE: this template is a GUIDELINE, not a straitjacket. The analysis should be as long as it needs to be to answer the question decisively, but no longer. Use your judgment to include only the sections that are relevant to the specific analysis you are writing.
@@ -214,11 +216,7 @@ Before persisting, extract verifiable claims and re-check the cheap ones inline:
 - Negative — "feature Y does not support Z". Re-run the falsifier search; quote the zero-result output.
 - API — "library accepts argument shape A". Re-read the function signature; quote it.
 
-Optional multi-model critique pass — invoke when the headline is high-stakes (architectural recommendation, irreversible decision, contested area):
-
-Follow the consensus recipe at `~/.agents/skills/critique/references/consensus-recipe.md`: ONE spawned task per critic model, each covering the analysis + ALL claims to challenge; majority KEEP / REJECT per claim. Revise on REJECT and log the revision in Verification Notes.
-
-If the critique infrastructure is unavailable, perform inline verification only and note the limitation in Verification Notes.
+When the headline is high-stakes (architectural recommendation, irreversible decision, contested area), list the claims an independent reviewer should challenge under "Claims for independent review" in Verification Notes. This skill does not run that review; it makes the analysis easy to review.
 
 ---
 
@@ -283,7 +281,7 @@ Before `cortex add`, scan every section:
 ## Rules
 
 - ALWAYS load the `cortex` skill first for CLI vocabulary and lane / tag / status semantics.
-- ALWAYS track the core protocol with TODOs or Quests, if the tooling supports it.
+- ALWAYS track the core protocol with a task list, if your tooling has one.
 - ALWAYS persist the analysis via `cortex add --body-file`; NEVER inline `-b "..."` for multi-KB analyses.
 - ALWAYS attribute the analysis immediately after `cortex add` with `cortex_update` (preferred) or `cortex update <id> --as "$SESSION_ID" -m "research written"` (fallback).
 - ALWAYS pass `-t "research,<topic-slug>"` on every research task. The topic slug is auto-derived from the title — never prompt the user.

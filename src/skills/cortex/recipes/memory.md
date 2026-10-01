@@ -71,7 +71,7 @@ streams newest activity first; status changes are not activity.
 ## Roles
 
 - The interactive session (a human is attached) WRITES memory.
-- Headless sessions (delegates such as minions, `pi -p` scripts) only READ: at most 3 hits per prompt, at most 2 recalls per request, no primer, no checkpoint, no breadcrumbs.
+- Headless sessions (delegated sub-agents, `pi -p` scripts) only READ: at most 3 hits per prompt, at most 2 recalls per request, no primer, no checkpoint, no breadcrumbs.
 - `CORTEX_MEMORY=write|read|off` overrides the role for the whole process (delegates in the same process share it); `off` injects nothing.
 
 ## Write threshold
