@@ -82,3 +82,15 @@ confirmation — it silently destroys a review handoff.
 
 To link task A to task B, post an update on A whose body contains the
 literal token `@<B-id>` (e.g. `@114`) — greppable from `cortex show`.
+
+## 7. Write for the person reading
+
+People read task bodies and updates in the inbox and the terminal workspace, not only agents. Write them so an engineer from a neighbouring team understands them on one read. Short is good; compressed is not.
+
+- Lead with the answer: what happened, what you found, or what you need. Evidence and detail come after.
+- Write complete sentences with one idea each; keep articles and linking words. Use lists for separate items, not to drop verbs.
+- Define each acronym and internal term on first use, for example "TTC (terraform-the-cloud)".
+- Keep identifiers, paths and numbers out of the middle of sentences where you can; put them in code blocks, tables or evidence lines.
+- Use words instead of symbols ("leads to", not →).
+- Leave out agent bookkeeping (confidence tags, finding ids, stage numbers, tool-call counts). When another task matters, say what it is and keep its `@<id>` token, for example "the keepalive analysis (@449)".
+- Let length follow content. When a size limit and clarity conflict, split the document; never squeeze sentences to fit.

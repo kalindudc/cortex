@@ -277,6 +277,7 @@ STOP. Before writing the plan to cortex, complete every item. Do NOT skip this.
    - [ ] Approach decided (not "will try X or Y")
    - [ ] All APIs verified (list files: ___)
    - [ ] Implementation notes are decisive technical facts, not explanatory essays
+   - [ ] High- and Mid-Level Objectives are written for the user who approves the plan ([persistence recipe](../cortex/recipes/persistence.md), section 7)
    - [ ] Every planned Low-Level Task is a CREATE or UPDATE operation
    - [ ] Constraint enforcement completed
    - [ ] $SESSION_ID generated and held in working memory

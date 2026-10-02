@@ -148,7 +148,7 @@ Use the following structure. Strip any section that has no content — do NOT sh
 # Research: <title>
 
 > Question: <one falsifiable sentence>
-> Headline: <one-sentence answer>
+> Headline: <one-sentence answer in plain words a teammate outside this project would understand>
 
 ## Context
 
@@ -161,7 +161,8 @@ Use the following structure. Strip any section that has no content — do NOT sh
 
 ## Findings
 
-1. <Finding> — <evidence: file:line excerpt | URL + quoted line | command + output snippet>
+1. <Finding in one or two plain sentences.>
+   Evidence: <file:line excerpt | URL + quoted line | command + output snippet>
 2. ...
 
 ### Negative findings
@@ -203,7 +204,7 @@ What this template is NOT (anti-patterns):
 - NOT execution. No code changes, no test edits, no PR descriptions. Those belong to `cortex-implementer`.
 - NOT a chronology. The Method section describes WHAT was consulted and the SCOPE — not "first I looked at X, then I tried Y".
 - NOT a wish list. Recommended next steps are 2-3 lines each, concrete, and each names a handoff target.
-- NOT a tutorial. The reader is another senior engineer; explain the unknown, not the known.
+- NOT a tutorial. The reader is an engineer who may not know this system: explain the unknown, define internal terms on first use, and skip what any engineer knows.
 
 ---
 
@@ -269,6 +270,7 @@ STOP. Before persisting the analysis, complete every item:
 Before `cortex add`, scan every section:
 
 - [ ] Every claim is grounded in a citation — strip or label any naked claim
+- [ ] Written for the person reading ([persistence recipe](../cortex/recipes/persistence.md), section 7): plain headline, defined terms, no agent shorthand
 - [ ] Method describes sources and scope — not chronology
 - [ ] Findings are decisive — each one resolves a sub-question, not "I noticed that"
 - [ ] Negative findings exist OR the omission is deliberate

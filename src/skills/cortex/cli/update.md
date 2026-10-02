@@ -26,7 +26,7 @@ cortex update <id> -m "<message>" --as <session-id> [-s <status>] [-b <body>] [-
 | Flag | Alias | Required | Description |
 |---|---|---|---|
 | `<id>` | (positional) | yes | Task id from `cortex ls`. |
-| `--message` | `-m` | yes | Short summary, **max 4096 chars**. Keep it one-line and scannable. |
+| `--message` | `-m` | yes | What changed and what it means, in one or two plain sentences on one line, **max 4096 chars**. Put numbers, lists and logs in `--body`. |
 | `--as` | `--author` | **REQUIRED** | Session-id author tag. Format: `<role>-<8 hex>`, max 80 chars, no newlines. See [recipes/session-id.md](../recipes/session-id.md). |
 | `--status` | `-s` | no | One of `draft`, `open`, `review`, `blocked`, `done`. Flips the task and writes an audit-trail row. |
 | `--body` | `-b` | no | Longer detail shown by `cortex show <id>`. |
@@ -54,7 +54,7 @@ The TUI flashes ONLY for the second example, because the transition is into `blo
 ## Pitfalls
 
 - **Forgetting `--as` exits 1** with `Missing required argument: --as`. The fix is to grab your session id (held in working memory for the lifetime of the session — see the recipe) and re-run.
-- **Newlines in `--as` are rejected.** `-m` is not validated for newlines, but keep it one-line and prose-y; use `-b` for multi-line context.
+- **Newlines in `--as` are rejected.** `-m` is not validated for newlines, but keep it on one line as one or two plain sentences; use `-b` for multi-line detail.
 - **`--as` over 80 chars is rejected.** The format is `<role>-<8 hex>` (~17 chars); 80 is generous but enforced.
 - **`-m` over 4096 chars is rejected** by the SQLite `CHECK` constraint (`summary too long (max 4096 chars)`); neither the CLI nor the daemon pre-validates length. If your update is that long, the body (`-b`) is the right place; keep `-m` as a scannable headline.
 - **No `--severity` flag exists.** Encode urgency in the message text (`"ready for review"`, `"blocking release"`, `"FYI only"`). Structured signal goes in `--status`, not a separate severity dimension.
