@@ -86,6 +86,7 @@ Only the session you type into writes memory; headless ones (delegated agents, `
 - The primer stays byte-identical until compaction or `/memory refresh`, so your provider's prompt cache holds.
 - `cortex_recall` has a small per-request budget and answers a repeated query without searching again.
 - At most one extra "memory checkpoint" turn per request, only when the agent changed files and saved nothing.
+- Lookups grow with the number of streams, not with their updates: each task's updates are read through an index.
 - Nothing leaves your machine through cortex: search runs on the local database, and results go only into your
   agent's context, next to your prompt.
 

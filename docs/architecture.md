@@ -152,6 +152,9 @@ the next command or daemon takes over and cleans up after it. For you, this mean
 - Additive schema is `CREATE ... IF NOT EXISTS` in `src/store.ts#migrate`, one transaction on every writable open, with
   no schema version number. Rebuilds are named, detected by DDL inspection in `src/store.ts#pendingMigrations` (fresh
   databases are seeded as applied) and run only by `src/store.ts#applyMigrations`, each behind a VACUUM INTO backup.
+- `updates` is indexed by task (`idx_updates_task`, in `src/store.ts#migrate`): a task's update list, memory activity
+  and the memory index's update log would otherwise scan every update for every task. A rebuild drops the index with
+  the old table; the next writable open re-creates it.
 
 ### Live sync
 
@@ -204,7 +207,8 @@ the next command or daemon takes over and cleans up after it. For you, this mean
 - All SQLite access goes through `src/store.ts#Store`. No test enforces it; the one exception today is
   `src/backup.ts#exportData`, which opens its own readonly connection. Do not copy it.
 - Keep the historical migrations so old databases still upgrade: `test/integration/cli/migrate-summary-4096.test.ts`.
-  Opening an old database adds the private tables without touching its data: `test/unit/store.test.ts`.
+  Opening an old database adds the private tables and the `updates` index without touching its data:
+  `test/unit/store.test.ts`.
 - The lease file is never unlinked and the OS frees the lease when its holder dies: `test/unit/ownership.test.ts`,
   multi-process `test/integration/ownership.test.ts`.
 - Metadata is published atomically, only once the listener is ready (`src/commands/serve.ts#hostDaemon`), and removed

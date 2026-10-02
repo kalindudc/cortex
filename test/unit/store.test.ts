@@ -22,6 +22,17 @@ import { configDir, ownerLockPath } from "../../src/paths.ts";
 
 const open = () => Store.open(":memory:");
 
+/** The table `idx_updates_task` indexes, or undefined when it is missing. */
+const updatesIndexTable = (s: Store): string | undefined =>
+  s.runInTransaction(
+    raw =>
+      raw
+        .query<{ tbl_name: string }, []>(
+          "SELECT tbl_name FROM sqlite_master WHERE type = 'index' AND name = 'idx_updates_task';",
+        )
+        .get()?.tbl_name,
+  );
+
 // ---------- revision / guard / receipt helpers (plan @400 N7-N9) ----------
 
 const TASK_SCOPES: ResourceScope[] = ["body", "entity", "lane", "priority", "status", "title"];
@@ -382,6 +393,20 @@ describe("Store: migrate", () => {
   test("fresh DB reports no pending migrations", () => {
     const s = open();
     expect(s.pendingMigrations()).toEqual([]);
+    s.close();
+  });
+
+  test("updates are indexed by task, so per-task reads never scan the table", () => {
+    const s = open();
+    expect(updatesIndexTable(s)).toBe("updates");
+    const plan = s.runInTransaction(raw =>
+      raw
+        .query<{ detail: string }, []>("EXPLAIN QUERY PLAN SELECT * FROM updates WHERE task_id = 1;")
+        .all()
+        .map(row => row.detail)
+        .join(" | "),
+    );
+    expect(plan).toContain("USING INDEX idx_updates_task");
     s.close();
   });
 
@@ -1823,6 +1848,8 @@ describe("Store: revisions and receipts across restarts", () => {
     expect(s.pendingMigrations()).toEqual(["updates-summary-4096"]);
     expect(s.listTasks().map(t => t.title)).toEqual(["legacy task"]);
     expect(s.listUpdates(1).map(u => u.summary)).toEqual(["kept"]);
+    // makeLegacyDb rebuilds `updates`, which drops its indexes: the path of an old or rebuilt table.
+    expect(updatesIndexTable(s)).toBe("updates");
     const legacy = versionsOf(s, 1);
     s.editTask(1, { body: "guarded edit" }, { expected: { body: legacy.body } });
     expect(thrown(() => s.editTask(1, { body: "stale" }, { expected: { body: legacy.body } }))).toBeInstanceOf(

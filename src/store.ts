@@ -659,6 +659,12 @@ export class Store {
           created  INTEGER NOT NULL
         );
       `);
+      // Every per-task read of updates (listUpdates, memory activity, the
+      // memory index's update log, the body-sync watermark) would otherwise
+      // scan the whole table, so memory reads would grow as tasks x updates.
+      // A rebuild migration drops it with the old table; the next writable
+      // open re-creates it.
+      this.db.run(`CREATE INDEX IF NOT EXISTS idx_updates_task ON updates(task_id);`);
       this.db.run(`
         CREATE TABLE IF NOT EXISTS _migrations (
           name       TEXT PRIMARY KEY,
