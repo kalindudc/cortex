@@ -84,7 +84,7 @@ Draft → Verify → Fix → Repeat (max 3 rounds)
 Cheap checks:
 - Task count ≤10
 - Task block ≤25 lines
-- Tasks numbered, not ### headers
+- Tasks numbered (not ### headers), each with a `Verify:` line
 - Implementation Notes: flat bullets
 - FROM blocks: changed lines only
 - CREATE blocks: signatures only
@@ -167,6 +167,7 @@ Use the following structure for every plan:
 > Ordered from start to finish
 
 1. [Task description]
+   Verify: [command or observable result that shows this task works]
 
 \```
 UPDATE: [file path]
@@ -189,11 +190,10 @@ DO NOT write the implementation -- that is the implementer's job.
 - [Completion criteria]
 
 ## Verification Notes
-[Claims verified, and how (command, probe, source read). Design claims left for an independent review. Revisions made: ...]
+[Claims verified, and how (command, probe, source read). A claim about an external tool, flag or version quotes the version or `--help` line you checked. Design claims left for an independent review. Revisions made: ...]
 [If no revisions needed: "All claims verified."]
 
 ## Rules and requirements
-- ALWAYS update the source plan after each task and keep our source-of-truth up-to-date
 - MAINTAINABILITY above all else
 - ALWAYS follow KISS (keep it simple stupid), AVOID over engineering
 - ALWAYS use the repo's own scripts or task runner (e.g. package.json scripts, make, task) over manual commands; if a new command is needed, ask the user first

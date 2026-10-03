@@ -93,7 +93,7 @@ Prior `task N: ...` updates from a DIFFERENT author are completion records, not 
 
 ## Pre-Implementation Setup
 
-1. Branch check: Verify you are NOT on `main`. If on `main`, propose a branch name and create it with `gt create` (if available) or `git checkout -b` with the provided branch name template without prompting the user for confirmation.
+1. Branch check: Verify you are NOT on `main`. If on `main`, propose a branch name and create it with `git checkout -b` (or the repo's own branching tool) using the branch name template below, without prompting the user for confirmation.
 2. Baseline check: Run the project's build/test command. If NOT green, STOP and inform the user.
 3. Context loading: Read all files in "Beginning context". Verify each exists (or note as expected-missing for CREATE tasks).
 4. Confirm `$SESSION_ID` is set in working memory (regenerate via the recipe in Cortex persistence > SESSION ID if missing).
@@ -134,7 +134,7 @@ Guidelines:
 
 ### Step 4: Verify
 
-Run the verification command appropriate for the change type:
+Run the task's `Verify:` line when the plan gives one; otherwise run the verification command appropriate for the change type:
 
 Scope: Run only the relevant test file(s) per task for fast feedback. Save the full suite for the Completion Protocol.
 
@@ -159,7 +159,7 @@ Compare RESULT vs EXPECT:
 
 ### Step 5: Record
 
-- Post ONE cortex update per Low-Level Task:
+- Post ONE cortex update per Low-Level Task. Send it, and any task-list update, in the same message as your next action rather than in a turn of its own:
   ```bash
   cortex update <id> --as "$SESSION_ID" -m "task <N>: <one-line summary>"
   ```
