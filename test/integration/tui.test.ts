@@ -1182,6 +1182,47 @@ describe("the terminal reader in a real terminal (plan @400 Task 10)", () => {
     pty.write(":q\r");
     expect(await pty.exited()).toEqual({ code: 0, signal: null });
   });
+
+  test("Read shows the reading cursor as the terminal's cursor; w v e y copies the word under it", async () => {
+    const box = sandbox("tui-read-cursor");
+    await seedTasks(box.env, ["read cursor", "-b", "alpha beta gamma"]);
+    const pty = spawnPty([BIN, "tui", "1"], { env: box.tuiEnv, cols: 110, rows: 32 });
+    await ready(pty);
+    await expectPlain(pty, "alpha beta gamma");
+    let mark = pty.mark();
+    await keys(pty, TAB);
+    // The frame's one cursor marker becomes the terminal's own cursor, positioned and shown.
+    await pty.expect(/\x1b\[\d+;\d+H\x1b\[\?25h/, { from: mark });
+    mark = pty.mark();
+    await keys(pty, "w", "v", "e");
+    await expectPlain(pty, "VISUAL", mark);
+    mark = pty.mark();
+    await keys(pty, "y");
+    await expectPlain(pty, /Copied 4 characters/, mark);
+    const writes = [...pty.output().matchAll(/\x1b\]52;c;([A-Za-z0-9+/=]*)(?:\x07|\x1b\\)/g)];
+    expect(writes.length).toBe(1);
+    expect(Buffer.from(writes[0]?.[1] ?? "", "base64").toString("utf8")).toBe("beta");
+    pty.write(":q\r");
+    expect(await pty.exited()).toEqual({ code: 0, signal: null });
+  });
+
+  test("i from Read edits where the reading cursor was: the editor opens at that character", async () => {
+    const box = sandbox("tui-read-edit-cursor");
+    await seedTasks(box.env, ["shared cursor", "-b", "alpha **beta** gamma"]);
+    const pty = spawnPty([BIN, "tui", "1"], { env: box.tuiEnv, cols: 110, rows: 32 });
+    await ready(pty);
+    await expectPlain(pty, "alpha beta gamma");
+    let mark = pty.mark();
+    await keys(pty, TAB, "w", "i"); // the reading cursor on "beta", then INSERT there (the document loads now)
+    await expectPlain(pty, "INSERT", mark);
+    mark = pty.mark();
+    pty.write("X");
+    await expectPlain(pty, "1 alpha **Xbeta** gamma", mark);
+    pty.write("\x1b:wq\r");
+    expect(await pty.exited()).toEqual({ code: 0, signal: null });
+    const r = await runCli({ args: ["show", "1", "--json"], env: box.env });
+    expect((JSON.parse(r.stdout) as { task: { body: string } }).task.body).toBe("alpha **Xbeta** gamma");
+  });
 });
 
 describe("activity and the update composer in a real terminal (plan @400 Task 11)", () => {

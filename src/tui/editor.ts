@@ -144,6 +144,11 @@ export interface DocumentEditor extends Component, Focusable {
   height: number;
   /** The theme to paint with: the shell sets it before each render (nothing renders without one). */
   theme: ResolvedTheme | null;
+  /**
+   * Paint the cursor cell without the keyboard (and without the frame's
+   * cursor marker): Split's other half shows where the shared cursor is.
+   */
+  shadowCursor: boolean;
   getState(): EditorState;
   dispatch(spec: TransactionSpec): void;
   /** Replace the whole state (an adopted incoming version); the instance, scroll and focus stay, onChange is not called. */
@@ -464,6 +469,7 @@ class Editor implements DocumentEditor {
   height = 10;
   theme: ResolvedTheme | null = null;
   focused = false;
+  shadowCursor = false;
   #state: EditorState;
   readonly #onChange: (state: EditorState) => void;
   /** Text cells per row from the last render (layout before the first render: effectively unwrapped). */
@@ -1108,9 +1114,9 @@ class Editor implements DocumentEditor {
       let look = spans.at(pos);
       const selected = !main.empty && pos >= main.from && pos < main.to;
       if (selected) look = { pair: "text@selection", attrs: look.attrs };
-      if (pos === main.head && this.focused) {
+      if (pos === main.head && (this.focused || this.shadowCursor)) {
         flush();
-        out += CURSOR_MARKER + style(theme, look.pair, cell.text || " ", { ...look.attrs, inverse: true });
+        out += this.#marker() + style(theme, look.pair, cell.text || " ", { ...look.attrs, inverse: true });
       } else {
         if (runLook !== null && !sameLook(runLook, look)) flush();
         runLook = look;
@@ -1120,8 +1126,8 @@ class Editor implements DocumentEditor {
     }
     flush();
     const end = lineFrom + row.to;
-    if (this.focused && row.last && main.head === end && used < width) {
-      out += CURSOR_MARKER + style(theme, "text@bg", " ", { inverse: true });
+    if ((this.focused || this.shadowCursor) && row.last && main.head === end && used < width) {
+      out += this.#marker() + style(theme, "text@bg", " ", { inverse: true });
       used++;
     }
     if (used < width) out += style(theme, "text@bg", " ".repeat(width - used));
@@ -1153,13 +1159,14 @@ class Editor implements DocumentEditor {
     };
     const hole = (look: Look, text: string): void => {
       flush();
-      out += CURSOR_MARKER + style(theme, look.pair, text, { ...look.attrs, inverse: false, underline: true });
+      out += this.#marker() + style(theme, look.pair, text, { ...look.attrs, inverse: false, underline: true });
     };
+    const shown = this.focused || this.shadowCursor;
     for (const cell of row.cells) {
       if (used + cell.width > width) break;
       const pos = lineFrom + cell.from;
       let look = spans.at(pos);
-      if (pos === cursor && this.focused) hole(look, cell.text || " ");
+      if (pos === cursor && shown) hole(look, cell.text || " ");
       else {
         if (pos >= visual.from && pos < visual.to)
           look = { pair: "text@selection", attrs: { ...look.attrs, inverse: true } };
@@ -1177,12 +1184,17 @@ class Editor implements DocumentEditor {
         visual.kind === "char"
           ? end >= visual.from && end < visual.to
           : lineFrom === end && end >= visual.from && end <= visual.to;
-      if (end === cursor && this.focused) hole(PLAIN, " ");
+      if (end === cursor && shown) hole(PLAIN, " ");
       else if (selected) out += style(theme, "text@selection", " ", { inverse: true });
-      if ((end === cursor && this.focused) || selected) used++;
+      if ((end === cursor && shown) || selected) used++;
     }
     if (used < width) out += style(theme, "text@bg", " ".repeat(width - used));
     return out;
+  }
+
+  /** The frame's cursor marker: only while this editor has the keyboard (one marker per frame). */
+  #marker(): string {
+    return this.focused ? CURSOR_MARKER : "";
   }
 
   /** Move the first visible row so the cursor row is on screen. */

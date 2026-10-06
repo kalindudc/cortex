@@ -224,7 +224,7 @@ describe("three TUI sessions and CLI writers on one daemon", () => {
     expect(since(a, 0)).not.toContain("onflict");
     for (const pty of [a, b]) {
       await command(pty, "read"); // back to Read for the rest of the file
-      await keys(pty, "h"); // focus the task list
+      await keys(pty, ";", "h"); // focus the task list (h moves the reading cursor)
     }
   });
 

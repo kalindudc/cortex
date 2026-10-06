@@ -767,7 +767,7 @@ describe("keys (N17/N18)", () => {
     expect(h.session.selectedId).toBe(3);
   });
 
-  test("focus moves with Tab/Shift-Tab, h/l and ;h/;l; j/k then scroll the document", async () => {
+  test("focus moves with Tab/Shift-Tab, l (from the list) and ;h/;l; in Read, h/j move the reading cursor", async () => {
     const h = await started();
     type(h, "\t");
     expect(h.session.focus).toBe("document");
@@ -775,13 +775,16 @@ describe("keys (N17/N18)", () => {
     expect(h.session.focus).toBe("tasks");
     type(h, "l");
     expect(h.session.focus).toBe("document");
-    type(h, "h");
+    type(h, "h"); // the reading cursor's motion, as in the editor: the focus stays
+    expect(h.session.focus).toBe("document");
+    type(h, ";", "h");
     expect(h.session.focus).toBe("tasks");
     type(h, ";", "l");
     expect(h.session.focus).toBe("document");
     type(h, "j");
     expect(h.session.selectedTask()?.id).toBe(1);
-    expect(h.session.docScroll(1)).toBe(1);
+    expect(h.session.reader?.cursor()?.row).toBe(1);
+    expect(h.session.docScroll(1)).toBe(0); // the view follows the cursor only past its edge
     type(h, ";", "h");
     expect(h.session.focus).toBe("tasks");
   });
@@ -1930,7 +1933,7 @@ describe("the document editor in the shell (Task 9: N14/N17-N19)", () => {
     expect(screen(h)).toContain("PREVIEW");
   });
 
-  test("Split's preview follows the editor's cursor; scrolling the preview detaches it until the cursor moves", async () => {
+  test("Split's preview follows the editor's cursor; the preview's own motions move the shared cursor; the wheel detaches the follow until the cursor moves", async () => {
     // The preview renders `**Para n** end` as `Para n end`; the editor shows the asterisks.
     const paras = Array.from({ length: 60 }, (_, i) => `**Para ${i + 1}** end`);
     const body = [...paras.slice(0, 40), "## Tail", ...paras.slice(40)].join("\n\n");
@@ -1953,15 +1956,30 @@ describe("the document editor in the shell (Task 9: N14/N17-N19)", () => {
     expect(plain([lines[cursorRow] ?? ""])[0]).toMatch(/\*\*Para 60\*\* end.*Para 60 end/);
     type(h, "g", "g");
     expect(screen(h)).toContain("Para 1 end");
-    // Scrolling the preview (focused) detaches it: it stays put while the cursor does not move.
+    // The preview takes the keyboard at the shared cursor (the editor's, on Para 1); its G moves the one
+    // cursor to the end, and the editor's cursor follows it (the editor scrolls to show it).
     type(h, "\t");
     expect(h.session.splitHalf).toBe("preview");
-    for (let i = 0; i < 30; i++) type(h, "j");
-    expect(screen(h)).not.toContain("Para 1 end");
-    type(h, "\x1b[Z"); // Shift-Tab: back to the editor, whose cursor has not moved
+    expect(h.session.reader?.cursor()?.row).toBe(0);
+    type(h, "G");
+    const bothEnds = screen(h); // the frame syncs the halves, as every redraw does
+    const editor = h.session.documentOf(1)?.editor;
+    expect(editor?.getState().doc.lineAt(editor.cursor()).text).toBe("**Para 60** end");
+    expect(bothEnds).toContain("**Para 60** end");
+    expect(bothEnds).toContain("Para 60 end");
+    expect(bothEnds).not.toContain("Para 1 end");
+    type(h, "\x1b[Z"); // Shift-Tab: the editor leads again, where the preview left the cursor
     expect(h.session.splitHalf).toBe("editor");
+    h.shell.frame();
+    expect(editor?.getState().doc.lineAt(editor.cursor()).text).toBe("**Para 60** end");
+    type(h, "g", "g");
+    expect(screen(h)).toContain("Para 1 end");
+    // A scroll that is not the cursor's (the wheel over the preview) detaches the follow while the
+    // editor's cursor does not move; the next cursor move attaches it again.
+    h.session.scrollDocument(30);
     expect(screen(h)).not.toContain("Para 1 end");
-    type(h, "j"); // the cursor moves: following again
+    expect(editor?.cursor()).toBe(0);
+    type(h, "j");
     expect(screen(h)).toContain("Para 1 end");
   });
 
@@ -2282,6 +2300,97 @@ describe("VISUAL and VISUAL LINE in the shell (vi v / V)", () => {
     expect(h.session.status?.text).toMatch(/^Copied 2 rendered rows .*unconfirmed/);
     expect(h.session.keys.mode()).toBe("NORMAL");
     expect(h.session.tasks[0]?.body).toBe("- alpha\n- **beta** \x1b[31m\n- gamma");
+  });
+
+  test("one cursor across Read and Edit: Read's cursor carries into Edit (;i, and i before the document loaded); Edit's carries back (;r)", async () => {
+    const body = "alpha **beta** gamma\n\nsecond line here";
+    const h = await started({ tasks: [task(1, { body })], initialTask: 1 });
+    type(h, "\t", "w"); // the reading cursor on "beta"
+    type(h, "i"); // i from Read: the document is not loaded yet
+    await settle();
+    h.shell.frame();
+    const editor = h.session.documentOf(1)?.editor;
+    expect(h.session.keys.mode()).toBe("INSERT");
+    expect(editor?.cursor()).toBe(body.indexOf("beta")); // the editor opened there, past the markup
+    type(h, ..."X", "\x1b");
+    expect(h.session.documentOf(1)?.draft?.text("body")).toBe("alpha **Xbeta** gamma\n\nsecond line here");
+    type(h, ";", "r");
+    await settle();
+    h.shell.frame();
+    expect(h.session.reader?.cursor()).toEqual({ row: 0, col: 7 }); // Read shows the cursor where Edit left it: after the "X"
+    type(h, "j", "j", "0"); // Read: the start of the second paragraph
+    expect(h.session.reader?.cursor()).toEqual({ row: 2, col: 0 });
+    type(h, ";", "i");
+    await settle();
+    h.shell.frame();
+    expect(editor?.cursor()).toBe("alpha **Xbeta** gamma\n\n".length); // Edit continues where Read was
+    type(h, "w", "w"); // the editor's cursor on "here"
+    type(h, ";", "r");
+    await settle();
+    h.shell.frame();
+    expect(h.session.reader?.cursor()).toEqual({ row: 2, col: "second line ".length });
+    // k to the title and j back: a view that did not move never reads its own report back, so a cursor
+    // on a bullet (reported as its item's text) stays on the bullet.
+    const list = await started({ tasks: [task(1, { body: "- item\n- two" })], initialTask: 1 });
+    type(list, "\t", "j", "k"); // moved, so the reader has reported the bullet's position (its item's text)
+    list.shell.frame();
+    expect(list.session.reader?.cursor()).toEqual({ row: 0, col: 0 });
+    type(list, "k");
+    expect(list.session.documentTarget).toBe("title");
+    list.shell.frame();
+    type(list, "j");
+    list.shell.frame();
+    expect(list.session.reader?.cursor()).toEqual({ row: 0, col: 0 });
+  });
+
+  test("Split keeps both halves on one cursor: the keyboard's half leads, the other follows and shows a shadow cell", async () => {
+    const body = "alpha **beta** gamma\n\nsecond line here";
+    const h = await started({ columns: 160, rows: 24, tasks: [task(1, { body })], initialTask: 1 });
+    type(h, ";", "s");
+    await settle();
+    type(h, "\t", "w", "w"); // the editor leads: its cursor on "beta"
+    let lines = h.shell.frame();
+    const editor = h.session.documentOf(1)?.editor;
+    expect(editor?.cursor()).toBe(body.indexOf("beta"));
+    expect(h.session.reader?.cursor()).toEqual({ row: 0, col: 6 }); // the preview follows
+    const markers = (frame: string[]) => frame.join("\n").split(CURSOR_MARKER).length - 1;
+    expect(markers(lines)).toBe(1); // the editor's
+    const previewRow = lines.find(l => plain([l])[0]?.includes("alpha beta gamma")) ?? "";
+    const shadow = /\x1b\[([0-9;]*)mb\x1b\[0m/.exec(previewRow.slice(previewRow.indexOf("│", 60)));
+    expect(shadow?.[1]?.split(";")).toContain("7"); // the preview's "b": an inverse cell, without the marker
+    type(h, "\t", "w"); // the preview leads: its cursor to "gamma"; the editor follows
+    lines = h.shell.frame();
+    expect(h.session.reader?.cursor()).toEqual({ row: 0, col: 11 });
+    expect(editor?.cursor()).toBe(body.indexOf("gamma"));
+    expect(markers(lines)).toBe(1); // now the preview's
+    const editorRow = lines.find(l => plain([l])[0]?.includes("**beta** gamma")) ?? "";
+    const editorShadow = /\x1b\[([0-9;]*)mg\x1b\[0m/.exec(editorRow);
+    expect(editorShadow?.[1]?.split(";")).toContain("7"); // the editor's "g": the shadow cell
+    type(h, "\x1b[Z", "i", ..."X", "\x1b"); // back in the editor: INSERT types where the preview left the cursor
+    h.shell.frame();
+    expect(h.session.documentOf(1)?.draft?.text("body")).toBe("alpha **beta** Xgamma\n\nsecond line here");
+    expect(h.session.reader?.cursor()?.row).toBe(0);
+  });
+
+  test("in Read, the reading cursor: one marker on its row; w v e y copies the word under it; the prompt takes the marker", async () => {
+    const markers = (lines: string[]) => lines.join("\n").split(CURSOR_MARKER).length - 1;
+    const h = await started({ tasks: [task(1, { body: "alpha beta gamma\n\nsecond row" })] });
+    expect(markers(h.shell.frame())).toBe(0); // the list has the keyboard
+    type(h, "\t");
+    let lines = h.shell.frame();
+    expect(markers(lines)).toBe(1);
+    expect(plain([lines.find(l => l.includes(CURSOR_MARKER)) ?? ""])[0]).toContain("alpha beta gamma");
+    type(h, "w", "v", "e");
+    const mark = h.terminal.writes.length;
+    type(h, "y");
+    expect(osc52(h, mark)).toEqual([encoded("beta")]);
+    expect(h.session.reader?.cursor()).toEqual({ row: 0, col: 9 }); // VISUAL ended; the cursor stayed at its end
+    type(h, ":");
+    lines = h.shell.frame();
+    expect(markers(lines)).toBe(1);
+    expect(lines.at(-1)).toContain(CURSOR_MARKER);
+    type(h, "\x1b", "j", "k", "k");
+    expect(h.session.documentTarget).toBe("title"); // k on the first row: the title
   });
 
   test("too large for a terminal clipboard write: said plainly, nothing is sent, and the register still pastes it", async () => {
@@ -2708,6 +2817,19 @@ describe("the mouse, top level (N19: on by default, never the only path to an ac
     expect(osc52(h, mark)).toEqual([encoded("epsilon")]);
     click(h, find(h, "Plan", 0, 40));
     expect(h.session.keys.mode()).toBe("NORMAL");
+  });
+
+  test("while reading, a click places the reading cursor (VISUAL ends); v then selects from there", async () => {
+    const h = await ready({ tasks: DOC });
+    const [x, y] = find(h, "beta");
+    drag(h, [x, y], [x + 3, y]);
+    expect(h.session.keys.mode()).toBe("VISUAL");
+    click(h, find(h, "gamma"));
+    expect(h.session.keys.mode()).toBe("NORMAL");
+    type(h, "v", "e");
+    const mark = h.terminal.writes.length;
+    type(h, "y");
+    expect(osc52(h, mark)).toEqual([encoded("gamma")]);
   });
 
   test("dialogs: a click selects a row, a toggle row toggles on each click, the wheel moves the list, a click outside does nothing", async () => {

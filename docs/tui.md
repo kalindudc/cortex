@@ -1,5 +1,5 @@
 ---
-budget: 200
+budget: 202
 sources: [src/tui/app.ts, src/tui/session.ts, src/tui/commands.ts, src/tui/keys.ts, src/tui/config.ts, src/tui/theme.ts,
   src/tui/help.ts, src/tui/drafts.ts, src/tui/reader.ts, src/tui/diagram.ts, src/tui/safety.ts, src/tui/mouse.ts,
   src/tui/dialogs.ts, src/tui/preferences.ts, src/tui/settings.ts, src/lib/refGrammar.ts, src/lib/catalogSearch.ts]
@@ -35,11 +35,11 @@ bottom shows the mode, whether your text is saved, the connection and any messag
 
 ## How you move around
 
-The keys work like vi: NORMAL mode moves and acts, INSERT types text, VISUAL selects, `:` opens a command line and
-`/` searches; `Esc` goes back to NORMAL. Nothing to memorize: `?` or `:help` lists every mode, command, key (as you
-configured it) and setting; `:commands` (Ctrl-p) lists commands by group; Enter runs one. Panes open centred: small
-(confirmations, forms), medium (pickers) or large (feeds, help), with the workspace in view around them. The mouse is
-optional, on by default (click to focus, drag to select, scroll lists); every action also has a key or a command.
+The keys work like vi: NORMAL moves and acts, INSERT types, VISUAL selects, `:` opens a command line and `/` searches;
+`Esc` goes back to NORMAL. Read, Edit and Split share one cursor: motions move it, `v`/`V` select from it, a view
+change keeps it. `?` or `:help` lists every mode, command, key (as configured) and setting; `:commands` (Ctrl-p) lists
+them by group. Panes open centred: small (forms), medium (pickers), large (feeds, help). The mouse is optional, on by
+default (click to focus or place the cursor, drag to select, scroll); every action has a key or a command.
 
 ## Editing and saving
 
@@ -102,7 +102,9 @@ theme file keeps that entry's default; `:messages` lists both.
 terminal I/O: key routing, overlays, the mouse modes, the appearance query (no answer means dark), lending the
 terminal to another program (`src/tui/bridge.ts#withExternalProgram`) and restoring it on every exit path.
 `src/tui/session.ts#TuiSession` is one workspace's state, with no process-wide singletons; input takes one route
-whatever the toolkit focused: the open prompt, then the top dialog, then the shell.
+whatever the toolkit focused: the open prompt, then the top dialog, then the shell. It also keeps each task's body
+cursor (`src/tui/session.ts#bodyCursor`), the one position Read, Edit and Split show: the view with the keyboard writes
+it and the others follow it, through the source anchors `src/tui/reader.ts#parseDocument` records for rendered text.
 
 Data comes only from the daemon: a snapshot plus the live event stream (SSE, a long-lived HTTP response the daemon
 pushes changes down) from `src/subscription.ts#subscribeChanges`. The stream applies every change, so a write never
@@ -166,7 +168,7 @@ or terminal images? One needs a browser DOM, the other a graphics terminal, and 
 `src/tui/mouse.ts#parseMouse` is the one parser, and `src/tui/mouse.ts#filterMouseInput` drops unsupported reports
 before the toolkit sees them. The Shell turns tracking on (`src/tui/mouse.ts#MOUSE_ON`) once it holds the terminal and
 off on every path that gives it back. The toolkit's own mouse stays off: it would ask for any-motion tracking, which
-nothing needs. A mouse selection is the keys' vi VISUAL selection, not a second model; a wheel notch counts once
+nothing needs. A click or drag moves the keys' cursor and selection, not a second model; a wheel notch counts once
 (`src/tui/mouse.ts#WheelNotches`). The lane and tag pickers search with `src/lib/catalogSearch.ts#searchCatalog`: every
 entry for an empty query, else every case-insensitive match of all the words, in the caller's order, so every lane and
 tag stays reachable. `src/tui/dialogs.ts#paneBox` sizes every centred pane; the Shell draws help and `:messages` into

@@ -31,7 +31,13 @@
 //   1-cell margin at both ends of the status and hint lines; compact drops
 //   them. A terminal program cannot change the terminal's font size.
 // - The reader takes `{`/`}` (headings) whenever it is shown and the editor
-//   does not have the keyboard; `/` and n/N search it while it has the focus
+//   does not have the keyboard; while it has the keyboard, the NORMAL motions
+//   (h/j/k/l, w/b/e, 0/$, g/G, Ctrl-d/Ctrl-u, Home/End, the page keys) move
+//   its reading cursor, as they move the editor's (k on its first row goes to
+//   the title). Read, Edit and Split show ONE body cursor (the session's
+//   bodyCursor; #syncBodyCursor): the view with the keyboard writes it when
+//   its cursor moves, the others place theirs at it, and Split's other half
+//   paints it as a cell without the marker. `/` and n/N search it while it has the focus
 //   (the session routes them); Enter in it lists its links (:links); a click
 //   on a link or reference follows it. Its clipboard writes (:copy) are sent
 //   to this terminal only when asked.
@@ -46,7 +52,8 @@
 //   Esc or the same key again ends it, and anything that takes the keyboard
 //   away (a prompt, a dialog, another task, a click, a re-wrap) ends it too.
 //   `p`/`P` paste the register in the editor. Exactly one CURSOR_MARKER per
-//   frame: the prompt, a dialog field, the title or the editor cursor. The `:` line (src/tui/commandline.ts) completes from the
+//   frame: the prompt, a dialog field, the title, the editor cursor or the
+//   reading cursor. The `:` line (src/tui/commandline.ts) completes from the
 //   ONE command registry (src/tui/commands.ts) and shows the candidates
 //   above it; `?`/:help and the searchable :commands view list the same
 //   registry. Help and :messages are a large box centred over the
@@ -78,7 +85,7 @@
 //   notch, however many reports the terminal sends for it). In the editor a click places the
 //   cursor and a drag, double click (a word) or triple click (a line) makes a
 //   VISUAL selection, the same one v/V make (y/d/c act on it); the rendered
-//   document selects its rows the same way.
+//   document places its reading cursor and selects its rows the same way.
 
 import {
   CURSOR_MARKER,
@@ -489,6 +496,13 @@ export class Shell {
   #visual: { taskId: number; surface: "editor" | "reader" } | null = null;
   /** The paste register (p/P): the last yank or delete, characters or whole lines. */
   #register: Register | null = null;
+  /** The body cursor sync (one task): which view led last frame, and the editor state and reading cursor seen then. */
+  #bodySync: {
+    taskId: number;
+    leader: "editor" | "reader" | null;
+    editorState: unknown;
+    readerCursor: ReaderPoint | null;
+  } | null = null;
   readonly #terminal: Terminal;
   readonly #view: ShellView;
   #theme: ResolvedTheme | null = null;
@@ -1027,10 +1041,11 @@ export class Shell {
       if (this.#reader.handleMouse(local) !== undefined) return; // a link or reference: followed
     }
     this.#focusBody(reading.preview ? "preview" : null);
-    if (count === 1 || !this.#readerSelectable()) return;
+    if (!this.#readerSelectable()) return;
     const point = this.#reader.pointAt(local.x, local.y);
     if (point === null) return;
-    if (count === 2 ? this.#reader.selectWord(point) : this.#reader.selectRange("line", point, point)) {
+    if (count === 1) this.#reader.placeCursor(point);
+    else if (count === 2 ? this.#reader.selectWord(point) : this.#reader.selectRange("line", point, point)) {
       this.#mouseVisual("reader", count === 2 ? "char" : "line");
     }
   }
@@ -1074,6 +1089,9 @@ export class Shell {
   /** The workspace's keys: whatever the prompt, dialogs and INSERT did not take (session.input routes). */
   #onKey(event: KeyEvent): void {
     const s = this.session;
+    // Keys that arrive in one tick (w, then i) still see the cursor the last one left: settle the sync first.
+    const task = s.selectedTask();
+    if (task !== null && s.view === "workspace") this.#syncBodyCursor(task.id, s.documentOf(task.id)?.editor ?? null);
     this.#syncVisual();
     if (this.#visual !== null) {
       this.#onVisualKey(event);
@@ -1154,6 +1172,11 @@ export class Shell {
     const name =
       key ??
       (data === "\x1b[1~" || data === "\x1b[7~" ? "home" : data === "\x1b[4~" || data === "\x1b[8~" ? "end" : null);
+    const motion = PLAIN_MOTIONS[name ?? ""];
+    if (motion !== undefined && this.#readerSelectable()) {
+      this.#reader.moveCursor(motion.reader, count);
+      return;
+    }
     switch (name) {
       case "enter":
         if (s.view === "workspace" && s.focus === "tasks") s.setFocus("document");
@@ -1194,10 +1217,12 @@ export class Shell {
     return s.view === "workspace" && s.focus === "document" && s.panel !== "document" && s.documentTarget === "body";
   }
 
-  /** The body is scrolled to its top (Read, or the Split preview): k then moves the document cursor to the title. */
+  /** The body's top (the reading cursor on its first row, else scrolled to it): k then moves the document cursor to the title. */
   #atBodyTop(): boolean {
     const task = this.session.selectedTask();
-    return task !== null && this.session.docScroll(task.id) === 0;
+    if (task === null) return false;
+    if (this.#readerSelectable()) return (this.#reader.cursor()?.row ?? 0) === 0;
+    return this.session.docScroll(task.id) === 0;
   }
 
   #onAction(action: NormalAction, count: number): void {
@@ -1207,6 +1232,12 @@ export class Shell {
     const inDocument = s.view === "workspace" && s.focus === "document";
     const onTitle = inDocument && s.documentTarget === "title";
     const inPanel = this.#inPanel();
+    // The rendered document has the keyboard: the motions move its reading cursor (k on its first row: the title).
+    const motion = MOTIONS[action];
+    if (motion !== undefined && this.#readerSelectable() && !(action === "up" && this.#atBodyTop())) {
+      this.#reader.moveCursor(motion.reader, count);
+      return;
+    }
     switch (action) {
       case "down":
         if (onTitle) s.setDocumentTarget("body");
@@ -1365,7 +1396,11 @@ export class Shell {
       case "line_end": {
         const motion = MOTIONS[action];
         if (editor !== null && motion !== undefined) editor.move(motion.editor, { count });
-        else s.notify("info", "Word and line motions move the editor cursor, or a VISUAL selection (v, V)");
+        else
+          s.notify(
+            "info",
+            "Word and line motions move a cursor: the editor's or the rendered document's (Tab focuses it)",
+          );
         break;
       }
       case "visual":
@@ -1532,7 +1567,7 @@ export class Shell {
   }
 
   #visualMove(motion: { editor: EditorMotion; reader: SelectionMotion; inLine?: true }, count: number): void {
-    if (this.#visual?.surface === "reader") this.#reader.moveSelection(motion.reader, count);
+    if (this.#visual?.surface === "reader") this.#reader.moveCursor(motion.reader, count);
     else this.#activeEditor()?.move(motion.editor, { count, wrap: motion.inLine !== true });
   }
 
@@ -1702,6 +1737,7 @@ export class Shell {
       const mode = s.documentMode();
       if (mode !== "read" && s.documentOf(task.id) === null) void s.openDocument(task.id);
       const doc = s.documentOf(task.id);
+      this.#syncBodyCursor(task.id, doc?.editor ?? null);
       const draft = doc?.draft ?? null;
       const focused = s.view === "workspace" && s.focus === "document";
       // One cursor marker per frame: the prompt and dialog fields own it while they are open.
@@ -1850,7 +1886,8 @@ export class Shell {
         const editorTheme = focused && s.splitHalf !== "editor" ? inactiveTheme(theme) : theme;
         const previewTheme = focused && s.splitHalf !== "preview" ? inactiveTheme(theme) : theme;
         // The halves render before their divider: the preview follows the editor's cursor (the editor
-        // renders first, so its cursor row is this frame's), and the labels then name what it shows.
+        // renders first, so its cursor row is this frame's) unless the preview leads the shared cursor,
+        // and the labels then name what it shows. Both halves paint the cursor; the keyboard's has the marker.
         const top = out.length + 1 + gap;
         const rows = Math.max(0, height - top);
         const editorLines = this.#editorRows(
@@ -1862,10 +1899,11 @@ export class Shell {
           onEditor && markable,
           x + 1,
           top,
+          true,
         );
-        const cursor = cursorOf(doc.editor, rows);
+        const cursor = onPreview ? null : cursorOf(doc.editor, rows);
         const previewLines = s.withPaneTheme(previewTheme, () =>
-          this.#readerRows(right, rows, x + left + 1, top, true, cursor),
+          this.#readerRows(right, rows, x + left + 1, top, true, cursor, true),
         );
         out.push(
           this.#divider(editorTheme, left, [[" EDIT ", onEditor]], fill) +
@@ -1898,10 +1936,18 @@ export class Shell {
         const rows = Math.max(0, height - top);
         const body =
           half === "editor"
-            ? this.#editorRows(theme, doc.editor, task.id, width - 1, rows, editorFocused && markable, x + 1, top).map(
-                line => style(theme, "text@bg", " ") + line,
-              )
-            : this.#readerRows(width, rows, x, top, true, cursorOf(doc.editor, rows));
+            ? this.#editorRows(
+                theme,
+                doc.editor,
+                task.id,
+                width - 1,
+                rows,
+                editorFocused && markable,
+                x + 1,
+                top,
+                true,
+              ).map(line => style(theme, "text@bg", " ") + line)
+            : this.#readerRows(width, rows, x, top, true, editorFocused ? null : cursorOf(doc.editor, rows), true);
         out.push(
           this.#divider(
             theme,
@@ -1973,6 +2019,45 @@ export class Shell {
     return paint(theme, segs, width, fill);
   }
 
+  /**
+   * One body cursor for Read, Edit and Split. The view with the keyboard
+   * leads: when its cursor moved since the last frame it writes the session's
+   * body cursor; the other views place theirs at it. A view that just took
+   * the keyboard without moving (Tab, :edit, ;r, i from Read) reads the shared
+   * position first; one whose cursor already moved (a click placed it) leads
+   * at once. A leader never reads its own report back, so the mapping's
+   * approximations never walk the cursor.
+   */
+  #syncBodyCursor(taskId: number, editor: DocumentEditor | null): void {
+    const s = this.session;
+    const reader = this.#reader;
+    const last = this.#bodySync?.taskId === taskId ? this.#bodySync : null;
+    const editorLeads = editor !== null && this.#activeEditor() === editor;
+    const leader: "editor" | "reader" | null = editorLeads ? "editor" : this.#readerSelectable() ? "reader" : null;
+    const handoff = leader !== null && leader !== last?.leader;
+    const state = editor?.getState() ?? null;
+    const at = reader.cursor();
+    const editorMoved = state !== null && last?.editorState != null && state !== last.editorState;
+    const readerMoved =
+      at !== null &&
+      last?.readerCursor != null &&
+      (at.row !== last.readerCursor.row || at.col !== last.readerCursor.col);
+    if (leader === "editor" && editorMoved && editor !== null) s.setBodyCursor(taskId, editor.cursor());
+    else if (leader === "reader" && readerMoved) {
+      const source = reader.cursorSource();
+      if (source !== null) {
+        s.setBodyCursor(taskId, source);
+        reader.syncedTo(source);
+      }
+    }
+    const shared = s.bodyCursor(taskId);
+    if (editor !== null && shared !== null && (leader !== "editor" || (handoff && !editorMoved))) {
+      if (editor.cursor() !== shared) editor.placeCursor(shared);
+    }
+    reader.syncSource = leader !== "reader" || (handoff && !readerMoved) ? shared : null;
+    this.#bodySync = { taskId, leader, editorState: editor?.getState() ?? null, readerCursor: at };
+  }
+
   /** The editor's rows at `width` x `height`; `focused` puts its cursor (and the marker) on screen; the last column is its scrollbar. */
   #editorRows(
     theme: ResolvedTheme,
@@ -1983,10 +2068,12 @@ export class Shell {
     focused: boolean,
     x: number,
     y: number,
+    shadow = false,
   ): string[] {
     editor.theme = theme;
     editor.height = height;
     editor.focused = focused;
+    editor.shadowCursor = shadow;
     this.#layout.editor = { taskId, x, y, width, height };
     // The last column is the body's scrollbar (src/tui/scrollbar.ts); the mouse area keeps it (the wheel scrolls).
     const lines = editor.render(Math.max(1, width - 1));
@@ -2001,11 +2088,17 @@ export class Shell {
     y: number,
     preview: boolean,
     cursor: EditorCursor | null,
+    shadow = false,
   ): string[] {
     this.#reader.height = height;
     this.#reader.editorCursor = cursor;
+    // One cursor marker per frame: an open prompt or dialog owns it.
+    this.#reader.focused = this.#readerSelectable() && this.session.prompt === null && this.session.dialog === null;
+    this.#reader.shadowCursor = shadow;
     this.#layout.reader = { x, y, width, height, preview };
     const lines = this.#reader.render(Math.max(1, width - 1));
+    // The render may have placed the cursor at the shared position: that is not a move of its own.
+    if (this.#bodySync !== null) this.#bodySync.readerCursor = this.#reader.cursor();
     const theme = this.session.theme; // the pane's (withPaneTheme), as the reader paints with
     return theme === null ? lines : withScrollbar(theme, lines, this.#reader.scrollPosition());
   }
@@ -2159,7 +2252,10 @@ export class Shell {
     entry("status line", "The unread count opens :notifications; the problems, :messages");
     entry("drag", "Select from the press to the pointer: VISUAL in the editor or the rendered document (then y, d, c)");
     entry("double / triple click", "Select the word / the line (VISUAL LINE) under the pointer");
-    entry("click in the editor", "Place the cursor there (VISUAL ends; INSERT keeps typing there)");
+    entry(
+      "click in the document",
+      "Place the cursor there, in the editor or the rendered document (VISUAL ends; INSERT keeps typing; a link is followed)",
+    );
     entry(
       "wheel",
       "Scroll the pane under the pointer, whichever has the keyboard; one notch moves scroll rows or items (:config scroll)",
@@ -2436,7 +2532,8 @@ export class Shell {
                         : hint(pair(key("previous_heading"), key("next_heading")), "headings"),
                       this.#reader.links().length === 0 ? undefined : "Enter links",
                       ":q quit",
-                      hint(pair(key("down"), key("up")), "scroll"),
+                      hint(pair(key("down"), key("up")), "move"),
+                      hint(key("visual"), "selects"),
                       hint(key("insert"), "edits"),
                       hint(key("next_pane"), "focus"),
                     ]

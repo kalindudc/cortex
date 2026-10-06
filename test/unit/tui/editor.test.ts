@@ -226,6 +226,23 @@ describe("the cursor marker (IME) and scrolling", () => {
     expect(markerAt(e.render())).toEqual([1, gutterWidth(2) + 6]);
   });
 
+  test("a shadow cursor paints the cell without the marker (Split's other half); VISUAL's hole too", () => {
+    const e = make("hello world", 6);
+    expect(e.render()[0]).not.toContain("\x1b[7m");
+    e.editor.shadowCursor = true;
+    const row = e.render()[0] ?? "";
+    expect(row).toContain("\x1b[7mw\x1b[0m"); // the block cursor on "w"
+    expect(row).not.toContain(CURSOR_MARKER);
+    expect(strip(row).slice(gutterWidth(1))).toMatch(/^hello world/);
+    e.editor.setVisual("char");
+    e.editor.move("right", { count: 2, wrap: false });
+    const visual = e.render()[0] ?? "";
+    expect(visual).toContain("\x1b[4mr\x1b[0m"); // the hole, still without the marker
+    expect(visual).not.toContain(CURSOR_MARKER);
+    e.editor.focused = true;
+    expect(markerAt(e.render())).toEqual([0, gutterWidth(1) + 8]);
+  });
+
   test("the view scrolls to keep the cursor visible; the marker row and the gutter agree", () => {
     const lines = Array.from({ length: 50 }, (_, i) => `line ${i + 1}`).join("\n");
     const e = make(lines, 0, { height: 5 });

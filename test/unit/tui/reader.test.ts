@@ -2,7 +2,7 @@ import { test, expect, describe, beforeEach, afterEach } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { type Component, type OverlayHandle, visibleWidth } from "@earendil-works/pi-tui";
+import { CURSOR_MARKER, type Component, type OverlayHandle, visibleWidth } from "@earendil-works/pi-tui";
 import type { CortexClient, DaemonIdentity, WorkspaceSnapshot } from "../../../src/contracts.ts";
 import type { Lane, Task } from "../../../src/store.ts";
 import { DEFAULT_CONFIG, loadConfig } from "../../../src/tui/config.ts";
@@ -1176,9 +1176,9 @@ describe("VISUAL in the rendered document (Read, the Split preview): v by charac
     expect(h.reader.select("line")).toBe(true);
     expect(h.reader.selecting()).toBe("line");
     expect(h.reader.selectedText()).toEqual({ text: "• one item\n", linewise: true, rows: 1 });
-    h.reader.moveSelection("down");
+    h.reader.moveCursor("down");
     expect(h.reader.selectedText()).toEqual({ text: "• one item\n• two item\n", linewise: true, rows: 2 });
-    h.reader.moveSelection("down", 2);
+    h.reader.moveCursor("down", 2);
     expect(h.reader.selectedText()?.text).toBe("• one item\n• two item\n\nA bold paragraph.\n");
     const lines = frame(h, 40, 10);
     // The selection pair PLUS inverse (it shows without color); the cursor is an underlined hole; text unchanged.
@@ -1187,7 +1187,7 @@ describe("VISUAL in the rendered document (Read, the Split preview): v by charac
     expect(lines[3]).toContain("\x1b[4mA\x1b[0m");
     expect(plain(lines)[3]).toBe(" A bold paragraph.                      ");
     for (const line of lines) expect(visibleWidth(line)).toBe(40);
-    h.reader.moveSelection("top");
+    h.reader.moveCursor("top");
     expect(h.reader.selectedText()?.rows).toBe(1);
     h.reader.endSelection();
     expect(h.reader.selecting()).toBeNull();
@@ -1199,20 +1199,20 @@ describe("VISUAL in the rendered document (Read, the Split preview): v by charac
     frame(h, 40, 10);
     h.reader.select("char");
     expect(h.reader.selectedText()).toEqual({ text: "•", linewise: false, rows: 1 });
-    h.reader.moveSelection("word-next");
+    h.reader.moveCursor("word-next");
     expect(h.reader.selectedText()?.text).toBe("• o");
-    h.reader.moveSelection("word-end");
+    h.reader.moveCursor("word-end");
     expect(h.reader.selectedText()?.text).toBe("• one");
-    h.reader.moveSelection("line-end");
+    h.reader.moveCursor("line-end");
     expect(h.reader.selectedText()?.text).toBe("• one item");
-    h.reader.moveSelection("down");
+    h.reader.moveCursor("down");
     expect(h.reader.selectedText()).toEqual({ text: "• one item\n• two item", linewise: false, rows: 2 });
-    h.reader.moveSelection("left", 5);
+    h.reader.moveCursor("left", 5);
     expect(h.reader.selectedText()?.text).toBe("• one item\n• two");
     h.reader.swapSelectionEnds();
-    h.reader.moveSelection("right", 2);
+    h.reader.moveCursor("right", 2);
     expect(h.reader.selectedText()?.text).toBe("one item\n• two");
-    h.reader.moveSelection("word-prev");
+    h.reader.moveCursor("word-prev");
     expect(h.reader.selectedText()?.text).toBe("• one item\n• two");
     h.reader.select("line"); // V switches the kind in place
     expect(h.reader.selectedText()?.text).toBe("• one item\n• two item\n");
@@ -1240,14 +1240,14 @@ describe("VISUAL in the rendered document (Read, the Split preview): v by charac
     const h = harness([task(1, { body: long })], { initialTask: 1 });
     frame(h, 40, 10);
     h.reader.select("line");
-    h.reader.moveSelection("down", 25);
+    h.reader.moveCursor("down", 25);
     expect(h.session.docScroll(1)).toBe(16);
     expect(text(frame(h, 40, 10))).toContain("Line 12");
-    h.reader.moveSelection("half-up");
+    h.reader.moveCursor("half-up");
     expect(h.reader.selectedText()?.rows).toBe(21);
-    h.reader.moveSelection("top");
+    h.reader.moveCursor("top");
     expect(h.session.docScroll(1)).toBe(0);
-    h.reader.moveSelection("bottom");
+    h.reader.moveCursor("bottom");
     expect(h.reader.selectedText()?.rows).toBe(79);
   });
 
@@ -1298,5 +1298,228 @@ describe("the mouse in the rendered document (the shell routes presses and drags
     expect(h.reader.selectedText()?.text).toBe("beta");
     expect(h.reader.selectRange("line", anchor as never, anchor as never)).toBe(true);
     expect(h.reader.selectedText()).toEqual({ text: "alpha beta gamma\n", linewise: true, rows: 1 });
+  });
+});
+
+describe("the reading cursor (Read, the focused Split preview): painted while the reader has the keyboard", () => {
+  const MARK = CURSOR_MARKER;
+  const body = "- one item\n- two item\n\nA **bold** paragraph with [a link](https://ok.example).";
+  const markers = (lines: readonly string[]) => lines.join("\n").split(MARK).length - 1;
+
+  test("focused: one inverse cell behind the cursor marker; unfocused: none; rows keep their width", () => {
+    const h = harness([task(1, { body })], { initialTask: 1 });
+    expect(markers(frame(h, 40, 10))).toBe(0);
+    h.reader.focused = true;
+    const lines = frame(h, 40, 10);
+    expect(markers(lines)).toBe(1);
+    expect(lines[0]).toContain(`${MARK}\x1b[7m•\x1b[0m`);
+    expect(h.reader.cursor()).toEqual({ row: 0, col: 0 });
+    for (const line of lines) expect(visibleWidth(line.replace(MARK, ""))).toBe(40);
+  });
+
+  test("motions move it (counts, words, line ends, ends of the document); v then selects from it", () => {
+    const h = harness([task(1, { body })], { initialTask: 1 });
+    h.reader.focused = true;
+    frame(h, 40, 10);
+    h.reader.moveCursor("down");
+    h.reader.moveCursor("word-next");
+    expect(h.reader.cursor()).toEqual({ row: 1, col: 2 });
+    h.reader.moveCursor("line-end");
+    expect(h.reader.cursor()).toEqual({ row: 1, col: 9 });
+    h.reader.select("char");
+    h.reader.moveCursor("word-prev");
+    expect(h.reader.selectedText()?.text).toBe("item");
+    h.reader.endSelection();
+    expect(h.reader.cursor()).toEqual({ row: 1, col: 6 }); // Esc keeps the cursor where the selection's end was
+    h.reader.moveCursor("bottom");
+    expect(h.reader.cursor()?.col).toBe(0);
+    h.reader.moveCursor("top");
+    expect(h.reader.cursor()).toEqual({ row: 0, col: 0 });
+  });
+
+  test("the marker never lands inside a link: the cursor's cell leaves the OSC 8 wrapper, the rest stays linked", () => {
+    const h = harness([task(1, { body })], { initialTask: 1 });
+    h.reader.focused = true;
+    frame(h, 80, 10);
+    h.reader.moveCursor("down", 3);
+    for (let i = 0; i < 5; i++) h.reader.moveCursor("word-next");
+    const lines = frame(h, 80, 10);
+    const row = lines[3] ?? "";
+    expect(h.reader.cursor()).toEqual({ row: 3, col: 24 }); // the "l" of "a link"
+    expect(row).toContain(`\x1b]8;;\x1b\\${MARK}`); // the link closes before the marker
+    expect(row.split("\x1b]8;;https://ok.example/").length - 1).toBe(2); // and opens again after the cursor's cell
+    expect(plain([row.replace(MARK, "")])[0]).toContain("a link");
+    expect(residue([row.replace(MARK, "")])).not.toMatch(/[\x00-\x09\x0b-\x1f\x7f-\x9f]/);
+  });
+
+  test("a scroll it did not make keeps it on screen; a heading jump and a search match place it", () => {
+    const long = [
+      "# Top",
+      "",
+      ...Array.from({ length: 30 }, (_, i) => `Line ${i} text`),
+      "## Tail",
+      "",
+      "the needle end",
+    ].join("\n\n");
+    const h = harness([task(1, { body: long })], { initialTask: 1 });
+    h.reader.focused = true;
+    frame(h, 40, 10);
+    h.session.scrollDocument(20);
+    frame(h, 40, 10);
+    expect(h.reader.cursor()?.row).toBe(20);
+    h.reader.stepHeading(1);
+    frame(h, 40, 10);
+    expect(h.reader.cursor()?.row).toBe(h.session.docScroll(1));
+    h.reader.stepHeading(-1);
+    h.reader.search("needle");
+    const lines = frame(h, 40, 10);
+    expect(h.reader.cursor()?.col).toBe(4);
+    expect(plain(lines).find(l => l.includes("needle"))).toBeDefined();
+    const before = h.session.docScroll(1);
+    const row = h.reader.cursor()?.row ?? 0;
+    h.reader.moveCursor("half-up"); // as vi's Ctrl-u: the view scrolls as far as the cursor moves
+    expect(h.reader.cursor()?.row).toBe(row - 5);
+    expect(h.session.docScroll(1)).toBe(before - 5);
+  });
+
+  test("a re-wrap keeps its row on screen; another task starts a new one on the top row on screen", () => {
+    const h = harness([task(1, { body }), task(2, { body: "other" })], { initialTask: 1 });
+    h.reader.focused = true;
+    frame(h, 40, 10);
+    h.reader.moveCursor("down", 3);
+    frame(h, 30, 10);
+    expect(h.reader.cursor()?.row).toBe(3);
+    h.session.select(2);
+    frame(h, 40, 10);
+    expect(h.reader.cursor()).toEqual({ row: 0, col: 0 });
+  });
+});
+
+describe("one cursor for Read, Edit and Split: the reading cursor maps to the body text and back", () => {
+  /** Show `source` (as the shell does for a following reader), then the cursor's place. */
+  const shown = (h: Harness, source: number, width = 40): { row: number; col: number } | null => {
+    h.reader.syncSource = source;
+    frame(h, width, 12);
+    h.reader.syncSource = null;
+    return h.reader.cursor();
+  };
+
+  test("cursorSource is the offset of the character under the cursor; markup and decoration are skipped", () => {
+    const body = "alpha **beta** gamma\n\n- item\n  continues\n- two";
+    const h = harness([task(1, { body })], { initialTask: 1 });
+    frame(h, 40, 12);
+    expect(h.reader.cursorSource()).toBe(0);
+    h.reader.moveCursor("word-next");
+    expect(h.reader.cursorSource()).toBe(body.indexOf("beta"));
+    h.reader.moveCursor("line-end");
+    expect(h.reader.cursorSource()).toBe(body.indexOf("gamma") + 4);
+    h.reader.placeCursor({ row: 2, col: 0 }); // the bullet: the item's text
+    expect(h.reader.cursorSource()).toBe(body.indexOf("item"));
+    h.reader.placeCursor({ row: 2, col: 7 }); // "continues" after the soft break and its indent
+    expect(h.reader.cursorSource()).toBe(body.indexOf("continues"));
+    h.reader.placeCursor({ row: 3, col: 2 });
+    expect(h.reader.cursorSource()).toBe(body.indexOf("two"));
+    h.reader.placeCursor({ row: 1, col: 0 }); // the blank row between the blocks: the line after the paragraph
+    expect(h.reader.cursorSource()).toBe(body.indexOf("\n\n") + 1);
+  });
+
+  test("a body offset shows at its character: markup goes to the text after it, a blank line to its row", () => {
+    const body = "alpha **beta** gamma\n\n- item\n  continues\n- two";
+    const h = harness([task(1, { body })], { initialTask: 1 });
+    frame(h, 40, 12);
+    expect(shown(h, body.indexOf("gamma"))).toEqual({ row: 0, col: 11 });
+    expect(shown(h, body.indexOf("**"))).toEqual({ row: 0, col: 6 }); // the opening markup: "beta"
+    expect(shown(h, body.indexOf("** gamma"))).toEqual({ row: 0, col: 10 }); // the closing markup: the space after it
+    expect(shown(h, body.indexOf("continues"))).toEqual({ row: 2, col: 7 });
+    expect(shown(h, body.indexOf("- two"))).toEqual({ row: 3, col: 0 }); // the marker: its row
+    expect(shown(h, body.indexOf("two"))).toEqual({ row: 3, col: 2 });
+    expect(shown(h, body.indexOf("\n\n") + 1)).toEqual({ row: 0, col: 0 }); // the blank line belongs to the block above
+    expect(shown(h, body.length + 50)).toEqual({ row: 3, col: 4 }); // past the end: the last character
+  });
+
+  test("every visible character of a rich paragraph round-trips (emphasis, code, a link)", () => {
+    const body = "alpha **beta** _gamma_ `code` [link](https://x.example) end";
+    const h = harness([task(1, { body })], { initialTask: 1 });
+    const lines = plain(frame(h, 80, 6));
+    const width = (lines[0] ?? "").trimEnd().length - 1; // the margin cell, then the text
+    expect(width).toBe("alpha beta gamma code link end".length);
+    for (let col = 0; col < width; col++) {
+      h.reader.placeCursor({ row: 0, col });
+      const source = h.reader.cursorSource() ?? -1;
+      expect(source).toBeGreaterThanOrEqual(0);
+      expect(shown(h, source, 80)).toEqual({ row: 0, col });
+    }
+    h.reader.placeCursor({ row: 0, col: 22 }); // the "l" of link
+    expect(h.reader.cursorSource()).toBe(body.indexOf("link"));
+  });
+
+  test("code lines, table cells, quotes and the source view map by line and column", () => {
+    const body =
+      "```js\nconst x = 1;\n  indented();\n```\n\n| a | bb |\n|---|---|\n| c | dd |\n\n> quoted *text*\n> more";
+    const h = harness([task(1, { body })], { initialTask: 1 });
+    const rows = plain(frame(h, 60, 16));
+    const codeRow = rows.findIndex(l => l.includes("const x"));
+    const ddRow = rows.findIndex(l => l.includes("dd"));
+    const quoteRow = rows.findIndex(l => l.includes("quoted"));
+    expect(shown(h, body.indexOf("x = 1"), 60)).toEqual({ row: codeRow, col: 2 + "const ".length });
+    expect(shown(h, body.indexOf("indented"), 60)).toEqual({ row: codeRow + 1, col: 2 + 2 });
+    h.reader.placeCursor({ row: codeRow, col: 0 }); // the code bar: the line's first character
+    expect(h.reader.cursorSource()).toBe(body.indexOf("const"));
+    expect(shown(h, body.indexOf("dd"), 60)).toEqual({ row: ddRow, col: 6 });
+    h.reader.placeCursor({ row: ddRow, col: 0 }); // the table border: the row's first cell
+    expect(h.reader.cursorSource()).toBe(body.indexOf("c |"));
+    expect(shown(h, body.indexOf("more"), 60)).toEqual({ row: quoteRow, col: 2 + "quoted text ".length });
+    h.reader.placeCursor({ row: quoteRow, col: 0 }); // the quote bar
+    expect(h.reader.cursorSource()).toBe(body.indexOf("quoted"));
+    // :source shows the raw lines: each row is its line.
+    h.reader.toggleSource();
+    frame(h, 60, 16);
+    const at = body.indexOf("indented");
+    expect(shown(h, at, 60)).toEqual({ row: 2, col: 2 });
+    h.reader.placeCursor({ row: 2, col: 4 });
+    expect(h.reader.cursorSource()).toBe(at + 2);
+  });
+
+  test("CRLF bodies map through the raw offsets; an empty body maps to 0", () => {
+    const h = harness([task(1, { body: "ab\r\ncd" }), task(2, { body: "" })], { initialTask: 1 });
+    frame(h, 40, 6);
+    h.reader.placeCursor({ row: 0, col: 3 }); // "c" of the soft-broken paragraph "ab cd"
+    expect(h.reader.cursorSource()).toBe(4);
+    expect(shown(h, 4)).toEqual({ row: 0, col: 3 });
+    expect(shown(h, 2)).toEqual({ row: 0, col: 2 }); // the CR: the break's space
+    h.session.select(2);
+    frame(h, 40, 6);
+    expect(h.reader.cursorSource()).toBe(0);
+    expect(shown(h, 0)).toEqual({ row: 0, col: 0 });
+  });
+
+  test("a synced offset is shown once per value and layout (a clamp keeps); a value this reader reported is a no-op", () => {
+    const long = Array.from({ length: 40 }, (_, i) => `Line ${i} text`).join("\n\n");
+    const h = harness([task(1, { body: long })], { initialTask: 1 });
+    frame(h, 40, 10);
+    const at = long.indexOf("Line 30");
+    h.reader.syncSource = at;
+    frame(h, 40, 10);
+    expect(h.reader.cursor()?.row).toBe(60);
+    expect(h.session.docScroll(1)).toBeGreaterThan(0); // revealed: the row is on screen
+    h.reader.moveCursor("up", 2); // as a clamp would: the same value does not pull the cursor back
+    frame(h, 40, 10);
+    expect(h.reader.cursor()?.row).toBe(58);
+    h.reader.syncSource = long.indexOf("Line 20");
+    frame(h, 40, 10);
+    expect(h.reader.cursor()?.row).toBe(40);
+    h.reader.syncSource = at; // a different value again: shown again
+    frame(h, 40, 10);
+    expect(h.reader.cursor()?.row).toBe(60);
+    // Leading: the cursor on a bullet reports the item's text; following that report back must not move it.
+    const h2 = harness([task(1, { body: "- item" })], { initialTask: 1 });
+    frame(h2, 40, 10);
+    h2.reader.syncSource = null;
+    const reported = h2.reader.cursorSource() ?? -1;
+    expect(reported).toBe(2);
+    h2.reader.syncedTo(reported);
+    h2.reader.syncSource = reported;
+    frame(h2, 40, 10);
+    expect(h2.reader.cursor()).toEqual({ row: 0, col: 0 });
   });
 });

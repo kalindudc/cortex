@@ -36,12 +36,27 @@
 //   says why, and only the view shown is searchable. Copying is
 //   an explicit :copy (OSC 52 through the session; a diagram copies its
 //   source), never a rendering effect.
-// - VISUAL (the shell's vi `v`/`V`) selects the RENDERED rows: `V` whole
-//   rows, `v` grapheme clusters of their visible text (decoration included,
-//   as shown), from the top row on screen. The motions move its cursor (the
-//   view follows); selectedText() is the visible characters only (already
-//   escaped: no SGR, OSC 8 or other control byte), rows joined by line
-//   breaks. A re-wrap, another task or a click ends it. Read never edits.
+// - The reading cursor is a place in the RENDERED rows: a row and a grapheme
+//   cluster of its visible text (decoration included, as shown). The
+//   motions move it and the view follows (a half page or a page scrolls with
+//   it, as in vi); a scroll it did not make (the wheel, Split following the
+//   editor) takes it along; a jump (a heading, a search match, :back) or a
+//   click places it; a re-wrap keeps its row on screen. While the reader has
+//   the keyboard (`focused`) it is painted inverse behind CURSOR_MARKER,
+//   never inside an OSC 8 link: hyperlink() refuses the marker's bytes;
+//   Split's other half paints it without the marker (`shadowCursor`).
+// - It is the same cursor as the editor's: the parser records, per inline
+//   token and soft-broken line, where a unit's rendered text starts in the
+//   source (SourceAnchor), so a rendered place maps to a body offset
+//   (cursorSource) and back (`syncSource`, which the shell sets while the
+//   editor leads). Decoration, captions and blank rows map to their source
+//   line's start; markup between texts to the text after it. Entities and
+//   escaped control characters shift the column inside one run only.
+// - VISUAL (the shell's vi `v`/`V`) selects from the reading cursor, which is
+//   its moving end: `V` whole rows, `v` clusters; Esc leaves the cursor where
+//   the selection ended. selectedText() is the visible characters only
+//   (already escaped: no SGR, OSC 8 or other control byte), rows joined by
+//   line breaks. A re-wrap, another task or a click ends it. Read never edits.
 // - The look: no Markdown markers; H1/H2 in md.heading over a heavy/light
 //   rule, H3+ bold accent; one blank row between blocks (never two); code
 //   (and inline code) on the raised surface with a caption; quotes behind an
@@ -58,7 +73,7 @@
 // web counts them in its heading numbering; named HTML entities outside the
 // common set below stay literal.
 
-import type { Component, TuiMouseEvent, TuiMouseEventResult } from "@earendil-works/pi-tui";
+import { CURSOR_MARKER, type Component, type TuiMouseEvent, type TuiMouseEventResult } from "@earendil-works/pi-tui";
 import { Marked, type MarkedToken, type Token, type Tokens } from "marked";
 import { parseRefs } from "../lib/refGrammar.ts";
 import { slugify } from "../lib/slug.ts";
@@ -187,6 +202,19 @@ type Block =
       readonly top: number;
     } & Omit<SourceSpan, "lines">);
 
+/**
+ * Where a unit's rendered text comes from: from offset `at` of the unit's
+ * text on, the characters follow the (line-ending normalized) source from
+ * `source` on, until the unit's next anchor. One per inline token and per
+ * soft-broken line, so a rendered character maps to its source character
+ * (and back) through the nearest anchor before it.
+ */
+interface SourceAnchor {
+  readonly unit: number;
+  readonly at: number;
+  readonly source: number;
+}
+
 export interface ParsedDocument {
   readonly taskId: number;
   readonly source: string;
@@ -202,6 +230,14 @@ export interface ParsedDocument {
   readonly topLines: readonly number[];
   /** @internal How many lines the source has (the line-number gutter's width). */
   readonly lineCount: number;
+  /** @internal The normalized source's line starts (block and anchor positions are offsets into it). */
+  readonly lines: SourceLines;
+  /** @internal Every anchor, by source offset. */
+  readonly anchors: readonly SourceAnchor[];
+  /** @internal Each unit's anchors, by unit offset. */
+  readonly unitAnchors: ReadonlyMap<number, readonly SourceAnchor[]>;
+  /** @internal The `\r` of each CRLF in the raw text, and the `\n` it left in the normalized text; null without CRLF. */
+  readonly crlf: { readonly raw: readonly number[]; readonly normalized: readonly number[] } | null;
 }
 
 // GFM without soft breaks, on a private instance: never the global one.
@@ -477,6 +513,11 @@ class Parser {
   /** The source search: where the next block may start, and the end of the current top-level block. */
   #cursor = 0;
   #end = 0;
+  /** Where the current block was found, and where its next inline token may start. */
+  #at = 0;
+  #inline = 0;
+  /** The source anchors, in parse order (parseDocument sorts them). */
+  readonly anchors: SourceAnchor[] = [];
 
   constructor(
     readonly taskId: number,
@@ -510,16 +551,45 @@ class Parser {
    */
   #locate(token: { readonly raw?: unknown }, container: boolean): number {
     const raw = typeof token.raw === "string" ? token.raw : "";
-    const first =
-      raw
-        .split("\n")
-        .find(l => l.trim() !== "")
-        ?.trim() ?? "";
+    const lines = raw
+      .split("\n")
+      .map(l => l.trim())
+      .filter(l => l !== "");
+    const first = lines[0] ?? "";
     const found = first === "" ? -1 : this.source.text.indexOf(first, this.#cursor);
     const at = found < 0 || found >= this.#end ? this.#cursor : found;
     const line = this.source.lineAt(at);
-    this.#cursor = container ? at : Math.max(at + first.length, this.source.startOf(line + spanOf(raw)));
+    if (container) this.#cursor = at;
+    else {
+      // Past the leaf's last line, found the same way: a list item's text joins its lines with blank
+      // lines the source does not have, so counting the raw's lines would skip the next item.
+      const last = lines[lines.length - 1] ?? "";
+      const end = lines.length > 1 ? this.source.text.indexOf(last, at + first.length) : -1;
+      this.#cursor = end >= 0 && end < this.#end ? end + last.length : at + first.length;
+    }
+    this.#at = at;
+    this.#inline = at;
     return line;
+  }
+
+  /**
+   * Where inline text `raw` starts in the source: its first non-blank line,
+   * searched forward from the inline cursor inside the current top-level
+   * block (nested text has lost its `>` and indentation, so a whole raw may
+   * not occur). The cursor moves past it; not found means the cursor itself.
+   */
+  #find(raw: string): number {
+    const needle = raw.split("\n").find(l => l.trim() !== "") ?? "";
+    if (needle === "") return this.#inline;
+    const found = this.source.text.indexOf(needle, this.#inline);
+    if (found < 0 || found >= this.#end) return this.#inline;
+    this.#inline = found + needle.length;
+    return found;
+  }
+
+  /** Anchor the next text of `unit` at `source`. */
+  #anchor(unit: number, source: number): void {
+    if (unit >= 0) this.anchors.push({ unit, at: this.units[unit]?.length ?? 0, source });
   }
 
   #unit(): number {
@@ -602,6 +672,7 @@ class Parser {
         const lines = token.text.replace(/\n+$/, "").split("\n");
         lines.forEach((line: string, i: number) => {
           if (i > 0) this.#hard(runs, unit);
+          this.#anchor(unit, this.#find(line));
           this.#run(runs, unit, line.replace(/\t/g, "    "), base);
         });
         this.blocks.push({ kind: "text", prefix: ctx.prefix, runs, heading: -1, top: this.#top, ...span });
@@ -657,13 +728,19 @@ class Parser {
       ui(" · ", "dim@raised"),
       ui(`:copy ${code + 1}`, "dim@raised"),
     ];
-    const lines = escapeTerminalLines(token.text).map(text => {
+    const fenced = /^ {0,3}(?:`{3,}|~{3,})/.test(token.raw);
+    const firstLine = line > 0 ? line + (fenced ? 1 : 0) : 0;
+    const raw = token.text.split("\n");
+    const lines = escapeTerminalLines(token.text).map((text, n) => {
       const unit = this.#unit();
+      // Each code line is anchored where it is in the source (past a fence, or an indent).
+      const source = raw[n] ?? "";
+      const at =
+        source.trim() === "" ? (firstLine > 0 ? this.source.startOf(firstLine + n) : this.#inline) : this.#find(source);
+      this.anchors.push({ unit, at: 0, source: at });
       this.units[unit] = text;
       return { text, unit };
     });
-    const fenced = /^ {0,3}(?:`{3,}|~{3,})/.test(token.raw);
-    const firstLine = line > 0 ? line + (fenced ? 1 : 0) : 0;
     this.blocks.push({
       kind: "code",
       prefix: ctx.prefix,
@@ -672,18 +749,20 @@ class Parser {
       lines,
       firstLine,
       fenced,
-      diagram: mermaid ? this.#diagram(token.text, code) : null,
+      diagram: mermaid ? this.#diagram(token.text, code, firstLine) : null,
       top: this.#top,
       line,
     });
   }
 
   /** A Mermaid block as text art (src/tui/diagram.ts), each row a search unit; null when it cannot be drawn. */
-  #diagram(source: string, code: number): DrawnDiagram | null {
+  #diagram(source: string, code: number, firstLine: number): DrawnDiagram | null {
     const drawn = drawMermaid(source);
     if (drawn === null) return null;
     const rows = drawn.rows.map(row => {
       const unit = this.#unit();
+      // Art is not in the source: every row stands for the block's first code line.
+      if (firstLine > 0) this.anchors.push({ unit, at: 0, source: this.source.startOf(firstLine) });
       const runs = row.map((r): Run => {
         const offset = this.units[unit]?.length ?? 0;
         this.units[unit] += r.text;
@@ -707,8 +786,16 @@ class Parser {
       this.#inlines(c.tokens, header ? { ...base, bold: true } : base, true, unit, runs);
       return runs;
     };
+    // Each row's cells are searched from its line: the header's, then past the delimiter row.
+    const startRow = (r: number): void => {
+      if (line > 0) this.#inline = this.source.startOf(line + r);
+    };
+    startRow(0);
     const header = token.header.map(c => cell(c, true));
-    const rows = token.rows.map(r => r.map(c => cell(c, false)));
+    const rows = token.rows.map((r, i) => {
+      startRow(i + 2);
+      return r.map(c => cell(c, false));
+    });
     this.blocks.push({ kind: "table", prefix: ctx.prefix, header, rows, align: token.align, top: this.#top, line });
   }
 
@@ -743,11 +830,27 @@ class Parser {
     link?: { index: number; url?: SafeUrl },
   ): void {
     let buffer = "";
+    // Where each line of the buffered text starts in the source (buffer offsets; whitespace collapses a little).
+    let pending: { at: number; source: number }[] = [];
+    const append = (raw: string, text: string): void => {
+      let within = 0;
+      for (const line of raw.split("\n")) {
+        if (line.trim() !== "")
+          pending.push({ at: buffer.length + Math.min(within, text.length), source: this.#find(line) });
+        within += line.length + 1;
+      }
+      buffer += text;
+    };
     const flush = (): void => {
       if (buffer === "") return;
       // HTML collapses whitespace (soft line breaks included) to one space.
       const text = buffer.replace(/[ \t\n\r\f]+/g, " ");
       buffer = "";
+      const base = this.units[unit]?.length ?? 0;
+      if (unit >= 0) {
+        for (const p of pending) this.anchors.push({ unit, at: base + Math.min(p.at, text.length), source: p.source });
+      }
+      pending = [];
       if (!prose || link !== undefined) {
         this.#run(runs, unit, text, style, link);
         return;
@@ -771,10 +874,10 @@ class Parser {
           if (t.tokens && t.tokens.length > 0) {
             flush();
             this.#inlines(t.tokens, style, prose, unit, runs, link);
-          } else buffer += decodeEntities(t.text);
+          } else append(t.raw, decodeEntities(t.text));
           break;
         case "escape":
-          buffer += t.text;
+          append(t.raw, t.text);
           break;
         case "strong":
           flush();
@@ -788,12 +891,16 @@ class Parser {
           flush();
           this.#inlines(t.tokens, { ...style, strikethrough: true }, prose, unit, runs, link);
           break;
-        case "codespan":
+        case "codespan": {
           flush();
+          const at = this.#find(t.raw);
+          this.#anchor(unit, at + Math.max(0, t.raw.indexOf(t.text)));
           this.#run(runs, unit, t.text.replace(/\t/g, " "), codeStyle(style), link);
           break;
+        }
         case "br":
           flush();
+          this.#find(t.raw);
           this.#hard(runs, unit);
           break;
         case "link":
@@ -804,16 +911,18 @@ class Parser {
           flush();
           const image = t;
           const alt = textContent(image.tokens) || image.text;
+          this.#anchor(unit, this.#find(image.raw));
           this.#run(runs, unit, `[image: ${alt}]`, link === undefined ? { ...style, pair: "muted@bg" } : style, link);
           if (image.href) this.#run(runs, unit, ` (${image.href})`, { pair: "dim@bg" });
           break;
         }
         case "html":
           flush();
+          this.#anchor(unit, this.#find(t.raw));
           this.#run(runs, unit, t.text.replace(/[\t\n\r]+/g, " "), style, link);
           break;
         default:
-          buffer += decodeEntities(ownText(token));
+          append(typeof token.raw === "string" ? token.raw : "", decodeEntities(ownText(token)));
       }
     }
     flush();
@@ -887,6 +996,26 @@ export function parseDocument(source: string, taskId: number): ParsedDocument {
   const ranges = topRanges(lines.text, tokens);
   const parser = new Parser(taskId, headings, lines);
   parser.document(tokens, ranges);
+  const anchors = [...parser.anchors].sort((a, b) => a.source - b.source || a.unit - b.unit || a.at - b.at);
+  const unitAnchors = new Map<number, SourceAnchor[]>();
+  for (const anchor of parser.anchors) {
+    const list = unitAnchors.get(anchor.unit);
+    if (list === undefined) unitAnchors.set(anchor.unit, [anchor]);
+    else list.push(anchor);
+  }
+  for (const list of unitAnchors.values()) list.sort((a, b) => a.at - b.at);
+  let crlf: ParsedDocument["crlf"] = null;
+  if (source.includes("\r")) {
+    const raw: number[] = [];
+    const normalized: number[] = [];
+    for (let i = 0; i < source.length; i++) {
+      if (source.charCodeAt(i) === 13 && source.charCodeAt(i + 1) === 10) {
+        raw.push(i);
+        normalized.push(i - raw.length + 1);
+      }
+    }
+    crlf = { raw, normalized };
+  }
   return {
     taskId,
     source,
@@ -895,6 +1024,10 @@ export function parseDocument(source: string, taskId: number): ParsedDocument {
     codeBlocks: parser.codeBlocks,
     blocks: parser.blocks,
     units: parser.units,
+    lines,
+    anchors,
+    unitAnchors,
+    crlf,
     topLines: ranges.map(([start]) => lines.lineAt(start) - 1),
     lineCount: lines.count,
   };
@@ -1403,7 +1536,9 @@ const overlaps = (run: Run, m: Match): boolean =>
 /**
  * One row, exactly `width` cells: the margin (`▸` on the current match's
  * row), the decoration, the runs (matches in the search pair, underlined;
- * the current one bold; validated URLs as OSC 8), then padding.
+ * the current one bold; validated URLs as OSC 8), then padding. `cursor`, a
+ * cluster of the row's visible text, is the reading cursor: painted inverse
+ * behind CURSOR_MARKER, never inside a link (hyperlink() refuses control bytes).
  */
 function paintRow(
   theme: ResolvedTheme,
@@ -1413,6 +1548,8 @@ function paintRow(
   current: Match | null,
   marked: boolean,
   gutter: number,
+  cursor: number | null = null,
+  marker = true,
 ): { text: string; hits: Hit[] } {
   const hits: Hit[] = [];
   let out = "";
@@ -1423,10 +1560,6 @@ function paintRow(
   }
   out += marked ? style(theme, "accent@bg", "▸") : style(theme, "text@bg", " ");
   let used = gutter + MARGIN;
-  for (const part of row.prefix) {
-    out += style(theme, part.pair, part.text, part.attrs);
-    used += displayWidth(part.text);
-  }
   let openUrl: SafeUrl | null = null;
   let linked = "";
   const emit = (styled: string, url: SafeUrl | null): void => {
@@ -1438,28 +1571,54 @@ function paintRow(
     if (url === null) out += styled;
     else linked += styled;
   };
+  // The reading cursor: its cluster inverse, behind the frame's cursor marker and outside any link
+  // (hyperlink() refuses control bytes, and the marker has them).
+  let index = 0;
+  const piece = (text: string, pair: ContrastPair, attrs: StyleAttributes | undefined, url: SafeUrl | null): void => {
+    const clusters = cursor === null ? [] : Array.from(graphemes.segment(text), g => g.segment);
+    const at = cursor === null ? -1 : cursor - index;
+    index += clusters.length;
+    if (at < 0 || at >= clusters.length) {
+      emit(style(theme, pair, text, attrs), url);
+      return;
+    }
+    const before = clusters.slice(0, at).join("");
+    const after = clusters.slice(at + 1).join("");
+    if (before !== "") emit(style(theme, pair, before, attrs), url);
+    emit((marker ? CURSOR_MARKER : "") + style(theme, pair, clusters[at] as string, { ...attrs, inverse: true }), null);
+    if (after !== "") emit(style(theme, pair, after, attrs), url);
+  };
+  for (const part of row.prefix) {
+    piece(part.text, part.pair, part.attrs, null);
+    used += displayWidth(part.text);
+  }
   for (const run of row.runs) {
     if (run.text === "") continue;
     const w = displayWidth(run.text);
     const url = run.url ?? null;
     const found = run.unit >= 0 ? (matches.get(run.unit) ?? []).filter(m => overlaps(run, m)) : [];
-    if (found.length === 0) emit(style(theme, run.pair, run.text, run.attrs), url);
+    if (found.length === 0) piece(run.text, run.pair, run.attrs, url);
     else {
       let at = 0;
       for (const m of found) {
         const from = Math.max(0, m.start - run.offset);
         const to = Math.min(run.text.length, m.end - run.offset);
-        if (from > at) emit(style(theme, run.pair, run.text.slice(at, from), run.attrs), url);
+        if (from > at) piece(run.text.slice(at, from), run.pair, run.attrs, url);
         const isCurrent = current !== null && current.unit === m.unit && current.start === m.start;
-        emit(style(theme, "text@search", run.text.slice(from, to), { underline: true, bold: isCurrent }), url);
+        piece(run.text.slice(from, to), "text@search", { underline: true, bold: isCurrent }, url);
         at = to;
       }
-      if (at < run.text.length) emit(style(theme, run.pair, run.text.slice(at), run.attrs), url);
+      if (at < run.text.length) piece(run.text.slice(at), run.pair, run.attrs, url);
     }
     if (run.link !== undefined) hits.push({ x: used, width: w, link: run.link });
     used += w;
   }
   emit("", null);
+  // An empty row: the cursor is one cell.
+  if (cursor !== null && index === 0 && used < width) {
+    out += (marker ? CURSOR_MARKER : "") + style(theme, "text@bg", " ", { inverse: true });
+    used++;
+  }
   if (used < width) out += style(theme, row.fill, " ".repeat(width - used));
   return { text: out, hits };
 }
@@ -1483,7 +1642,8 @@ function rowClusters(row: Row): string[] {
 /**
  * paintRow for a row under a VISUAL selection: the selected clusters in the
  * selection pair PLUS inverse (visible without color), the cursor as an
- * underlined hole in it, an empty row as one selected cell. Search matches
+ * underlined hole in it (behind CURSOR_MARKER with `marker`, outside any
+ * link), an empty row as one selected cell. Search matches
  * give way to the selection on these rows; links stay links.
  */
 function paintSelectedRow(
@@ -1493,6 +1653,7 @@ function paintSelectedRow(
   marked: boolean,
   gutter: number,
   selection: RowSelection,
+  marker = false,
 ): { text: string; hits: Hit[] } {
   const hits: Hit[] = [];
   let out = "";
@@ -1527,7 +1688,9 @@ function paintSelectedRow(
           : state === 1
             ? style(theme, "text@selection", chunk, { ...attrs, inverse: true })
             : style(theme, pair, chunk, { ...attrs, inverse: false, underline: true });
-      emit(styled, url);
+      // The frame's cursor marker sits outside any link: hyperlink() refuses control bytes.
+      if (state === 2 && marker) emit(CURSOR_MARKER + styled, null);
+      else emit(styled, url);
       chunk = "";
     };
     for (const { segment } of graphemes.segment(text)) {
@@ -1554,7 +1717,7 @@ function paintSelectedRow(
   if (index === 0 && used < width) {
     out +=
       selection.cursor === 0
-        ? style(theme, "text@bg", " ", { underline: true })
+        ? (marker ? CURSOR_MARKER : "") + style(theme, "text@bg", " ", { underline: true })
         : style(theme, "text@selection", " ", { inverse: true });
     used++;
   }
@@ -1641,6 +1804,179 @@ function matchRow(layout: DocumentLayout, m: Match): number {
   return layout.rowsByUnit.get(m.unit)?.[0] ?? 0;
 }
 
+const clusterCount = (text: string): number => (text === "" ? 0 : Array.from(graphemes.segment(text)).length);
+
+/**
+ * The cluster of `row`'s visible text showing offset `offset` of unit
+ * `unit`: inside a run, that character; past the row's last text of the
+ * unit, the cluster after it (the caller clamps); 0 when the row shows
+ * none of the unit before it.
+ */
+function colOfUnitOffset(row: Row | undefined, unit: number, offset: number): number {
+  if (row === undefined) return 0;
+  let col = 0;
+  let after: number | null = null;
+  for (const part of row.prefix) col += clusterCount(part.text);
+  for (const run of row.runs) {
+    if (run.unit === unit && offset >= run.offset && offset < run.offset + run.text.length) {
+      return col + clusterCount(run.text.slice(0, offset - run.offset));
+    }
+    col += clusterCount(run.text);
+    if (run.unit === unit && run.text !== "" && offset >= run.offset + run.text.length) after = col;
+  }
+  return after ?? 0;
+}
+
+/** The unit and unit offset shown at cluster `col` of `row`: a decoration or padding cell takes the text beside it; null on a row without text. */
+function unitOffsetAt(row: Row, col: number): { unit: number; offset: number } | null {
+  let count = 0;
+  for (const part of row.prefix) count += clusterCount(part.text);
+  let before: { unit: number; offset: number } | null = null;
+  let first: { unit: number; offset: number } | null = null;
+  let pending = col < count; // the cursor is on the decoration: the first text that follows
+  for (const run of row.runs) {
+    if (run.text === "") continue;
+    const clusters = clusterCount(run.text);
+    if (run.unit >= 0) {
+      first ??= { unit: run.unit, offset: run.offset };
+      if (pending) return { unit: run.unit, offset: run.offset };
+      if (col < count + clusters) {
+        const shown = Array.from(graphemes.segment(run.text), g => g.segment);
+        return { unit: run.unit, offset: run.offset + shown.slice(0, col - count).join("").length };
+      }
+      before = { unit: run.unit, offset: run.offset + run.text.length };
+    } else if (col < count + clusters) {
+      // Interface text (a code bar, padding): the text before it, else the text after it.
+      if (before !== null) return before;
+      pending = true;
+    }
+    count += clusters;
+  }
+  return before ?? first;
+}
+
+/** How many of the sorted numbers are below `value`. */
+function countBelow(sorted: readonly number[], value: number): number {
+  let lo = 0;
+  let hi = sorted.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if ((sorted[mid] as number) < value) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+/** A normalized source offset as an offset in the raw text (CRLF counted). */
+const toRaw = (doc: ParsedDocument, pos: number): number =>
+  doc.crlf === null ? pos : pos + countBelow(doc.crlf.normalized, pos);
+/** A raw text offset as an offset in the normalized source. */
+const toNormalized = (doc: ParsedDocument, pos: number): number =>
+  doc.crlf === null ? pos : pos - countBelow(doc.crlf.raw, pos);
+
+/** The 1-based source line a layout row stands for: its block's, proportionally; after a block, the line below it. */
+function lineOfRow(doc: ParsedDocument, layout: DocumentLayout, row: number): number {
+  const index = layout.lineIndex;
+  let lo = 0;
+  let hi = index.length - 1;
+  let found: LineEntry | undefined;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const entry = index[mid] as LineEntry;
+    if (entry.row <= row) {
+      found = entry;
+      lo = mid + 1;
+    } else hi = mid - 1;
+  }
+  if (found === undefined) return 1;
+  const line =
+    row < found.row + found.rows
+      ? found.line + Math.floor(((row - found.row) * found.lines) / found.rows)
+      : found.line + found.lines;
+  return Math.max(1, Math.min(doc.lines.count, line));
+}
+
+/**
+ * The raw-text offset a rendered place shows: through its unit's nearest
+ * anchor (a decoration or an empty row takes its source line's start). The
+ * source view maps each row to its line.
+ */
+function sourceOf(doc: ParsedDocument, layout: DocumentLayout, at: Place): number {
+  const row = layout.rows[at.row];
+  const found = row === undefined ? null : unitOffsetAt(row, at.col);
+  let pos: number | null = null;
+  if (found !== null && layout.source) pos = doc.lines.startOf(found.unit + 1) + found.offset;
+  else if (found !== null) {
+    const list = doc.unitAnchors.get(found.unit) ?? [];
+    let anchor: SourceAnchor | undefined;
+    let next: SourceAnchor | undefined;
+    for (const a of list) {
+      if (a.at <= found.offset) anchor = a;
+      else {
+        next = a;
+        break;
+      }
+    }
+    if (anchor !== undefined) {
+      pos = anchor.source + (found.offset - anchor.at);
+      if (next !== undefined) pos = Math.min(pos, Math.max(anchor.source, next.source - 1));
+    }
+  }
+  if (pos === null) pos = doc.lines.startOf(lineOfRow(doc, layout, at.row));
+  return toRaw(doc, Math.max(0, Math.min(pos, doc.lines.text.length)));
+}
+
+/**
+ * The rendered place of a raw-text offset: the character its unit's nearest
+ * anchor maps it to; markup between two texts goes to the text after it; an
+ * offset past a unit's text on its line stays at that text's end; anything
+ * else (a blank line, a rule) goes to its line's row.
+ */
+function placeOf(doc: ParsedDocument, layout: DocumentLayout, source: number): Place {
+  const target = Math.max(0, Math.min(toNormalized(doc, source), doc.lines.text.length));
+  const byLine = (): Place => ({ row: rowOfSourceLine(layout, doc.lines.lineAt(target)), col: 0 });
+  const inRows = (unit: number, offset: number): Place | null => {
+    const rows = layout.rowsByUnit.get(unit);
+    if (rows === undefined || rows.length === 0) return null;
+    let row = rows[0] as number;
+    for (const r of rows) {
+      const first = layout.rows[r]?.runs.find(run => run.unit === unit && run.text !== "");
+      if (first !== undefined && first.offset <= offset) row = r;
+    }
+    return { row, col: colOfUnitOffset(layout.rows[row], unit, offset) };
+  };
+  if (layout.source) {
+    const line = doc.lines.lineAt(target);
+    return inRows(line - 1, target - doc.lines.startOf(line)) ?? byLine();
+  }
+  const anchors = doc.anchors;
+  let lo = 0;
+  let hi = anchors.length - 1;
+  let found: SourceAnchor | undefined;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const a = anchors[mid] as SourceAnchor;
+    if (a.source <= target) {
+      found = a;
+      lo = mid + 1;
+    } else hi = mid - 1;
+  }
+  if (found === undefined) return byLine();
+  const list = doc.unitAnchors.get(found.unit) ?? [];
+  const next = list.find(a => a.at > found.at);
+  const limit = next === undefined ? (doc.units[found.unit]?.length ?? 0) : next.at;
+  let offset = found.at + (target - found.source);
+  if (offset >= limit) {
+    // Past this text: the markup before the unit's next text (that text), the markup closing the unit's
+    // last text on its line (that text's end), or another line (its row).
+    const line = doc.lines.lineAt(target);
+    if (next !== undefined && line === doc.lines.lineAt(next.source)) offset = next.at;
+    else if (line === doc.lines.lineAt(found.source)) offset = Math.max(found.at, limit - 1);
+    else return byLine();
+  }
+  return inRows(found.unit, offset) ?? byLine();
+}
+
 const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** The motions of a VISUAL selection in the rendered document (the shell maps keys to them). */
@@ -1669,15 +2005,21 @@ interface Place {
 /** A place in the rendered document (the mouse's): a layout row and a cluster of its visible text. */
 export type ReaderPoint = Place;
 
-/** A VISUAL selection over one layout's rows: `col` is a cluster of the row's visible text. */
+/** The reading cursor: a place in one layout of one task (`col` is a cluster of the row's visible text). */
+interface ReaderCursor {
+  readonly taskId: number;
+  readonly layout: DocumentLayout;
+  at: Place;
+  /** The display column vertical motions aim for. */
+  goal: number | null;
+}
+
+/** A VISUAL selection over one layout's rows: from `anchor` to the reading cursor, both included. */
 interface ReaderSelection {
   readonly taskId: number;
   readonly layout: DocumentLayout;
   kind: VisualKind;
   anchor: Place;
-  cursor: Place;
-  /** The display column vertical motions aim for. */
-  goal: number | null;
 }
 
 const ordered = (a: Place, b: Place): [Place, Place] =>
@@ -1705,6 +2047,23 @@ export class Reader implements Component {
    * a jump in the preview detaches it until the cursor moves (a new anchor).
    */
   editorCursor: EditorCursor | null = null;
+  /**
+   * The reader has the keyboard and the frame's one cursor marker (the shell
+   * sets it before each render): the reading cursor is painted, with the marker.
+   */
+  focused = false;
+  /** Paint the cursor cell without the keyboard (no marker): Split's other half shows the shared cursor. */
+  shadowCursor = false;
+  /**
+   * The body offset every view shows, set by the shell while another view
+   * leads the cursor (null: this reader leads). The render puts the reading
+   * cursor on its rendered place, once per value and layout, and scrolls to
+   * it unless the preview is following the editor (which scrolls instead).
+   */
+  syncSource: number | null = null;
+  #synced: { readonly source: number; readonly layout: DocumentLayout } | null = null;
+  /** The body offset this reader last reported while leading: following it back is a no-op. */
+  #reported: number | null = null;
   /** The task the preview follows for, the scroll it last set, and the anchor it was detached at. */
   #tracking: { taskId: number; top: number; detached: { anchor: unknown } | null } | null = null;
   readonly #session: TuiSession;
@@ -1718,6 +2077,7 @@ export class Reader implements Component {
   #hits: (Hit & { y: number })[] = [];
   #hitDoc: ParsedDocument | null = null;
   #selection: ReaderSelection | null = null;
+  #cursor: ReaderCursor | null = null;
   #clusters = new WeakMap<Row, readonly string[]>();
   /** The last render's scroll position (the shell paints the body's scrollbar from it). */
   #position: ScrollPosition = { top: 0, total: 0 };
@@ -1747,8 +2107,10 @@ export class Reader implements Component {
     const layout = this.#layout(view, width);
     this.#settle(view, layout, height);
     if (follow !== null) this.#follow(task.id, layout, follow, height);
+    this.#sync(task.id, view.doc, layout, follow === null);
     const top = s.docScroll(task.id);
     this.#position = { top, total: layout.rows.length };
+    const cursor = this.#keepCursor(task.id, layout, top, height);
     const { byUnit } = this.#matches(layout);
     const current = this.#currentMatch(task.id, layout);
     const marked = current === null ? -1 : matchRow(layout, current);
@@ -1761,11 +2123,13 @@ export class Reader implements Component {
         out.push(blank());
         continue;
       }
-      const selected = selection === null ? null : this.#rowSelection(selection, top + i);
+      const selected = selection === null ? null : this.#rowSelection(selection, cursor, top + i);
+      const shown = this.focused || this.shadowCursor;
+      const at = shown && cursor.at.row === top + i ? cursor.at.col : null;
       const painted =
         selected === null
-          ? paintRow(theme, row, width, byUnit, current, top + i === marked, layout.gutter)
-          : paintSelectedRow(theme, row, width, top + i === marked, layout.gutter, selected);
+          ? paintRow(theme, row, width, byUnit, current, top + i === marked, layout.gutter, at, this.focused)
+          : paintSelectedRow(theme, row, width, top + i === marked, layout.gutter, selected, this.focused);
       for (const hit of painted.hits) this.#hits.push({ ...hit, y: i });
       out.push(painted.text);
     }
@@ -1866,6 +2230,7 @@ export class Reader implements Component {
     }
     s.recordJump();
     s.setDocScroll(task.id, target);
+    this.#placeCursor(task.id, layout, target);
     s.redraw();
   }
 
@@ -2016,6 +2381,7 @@ export class Reader implements Component {
     if (row < top || row >= top + this.#shown) {
       s.setDocScroll(taskId, Math.max(0, row - Math.min(2, Math.floor(this.#shown / 3))));
     }
+    this.#placeCursor(taskId, layout, row, colOfUnitOffset(layout.rows[row], match.unit, match.start));
     s.notify("info", `/${this.#query}: match ${index + 1} of ${list.length}${note}`);
     s.redraw();
   }
@@ -2046,9 +2412,50 @@ export class Reader implements Component {
     return this.#matchMemo;
   }
 
-  // ---------- VISUAL: selecting the rendered text ----------
+  // ---------- the reading cursor and VISUAL ----------
 
-  /** VISUAL `v`/`V`: select from the top row on screen, or change a live selection's kind. False without a task. */
+  /** The current task's reading cursor (null without a task): kept on screen by each render. */
+  cursor(): ReaderPoint | null {
+    const task = this.#session.selectedTask();
+    if (task === null) return null;
+    return { ...this.#cursorOf(task.id, this.#ensure(task.id).layout).at };
+  }
+
+  /** The reading cursor as an offset in the task's body text (the editor's offsets); null without a task. */
+  cursorSource(): number | null {
+    const task = this.#session.selectedTask();
+    if (task === null) return null;
+    const { view, layout } = this.#ensure(task.id);
+    return sourceOf(view.doc, layout, this.#cursorOf(task.id, layout).at);
+  }
+
+  /** The reading cursor was reported as body offset `source` (this reader leads): following that value back changes nothing. */
+  syncedTo(source: number): void {
+    this.#reported = source;
+  }
+
+  /** Follow `syncSource` (see it): place the reading cursor at its rendered place, revealing it when `reveal`. */
+  #sync(taskId: number, doc: ParsedDocument, layout: DocumentLayout, reveal: boolean): void {
+    const source = this.syncSource;
+    if (source === null || source === this.#reported) return;
+    if (this.#synced !== null && this.#synced.source === source && this.#synced.layout === layout) return;
+    this.#cursor = { taskId, layout, at: placeOf(doc, layout, source), goal: null };
+    this.#synced = { source, layout };
+    this.#reported = null;
+    if (reveal) this.#reveal(this.#cursor);
+  }
+
+  /** A click: the reading cursor goes to `point` (a place pointAt gave). False without the current layout. */
+  placeCursor(point: ReaderPoint): boolean {
+    const task = this.#session.selectedTask();
+    const layout = task === null ? null : (this.#views.get(task.id)?.layout ?? null);
+    if (task === null || layout === null) return false;
+    this.#cursor = { taskId: task.id, layout, at: point, goal: null };
+    this.#session.redraw();
+    return true;
+  }
+
+  /** VISUAL `v`/`V`: select from the reading cursor, or change a live selection's kind. False without a task. */
   select(kind: VisualKind): boolean {
     const s = this.#session;
     const task = s.selectedTask();
@@ -2057,9 +2464,7 @@ export class Reader implements Component {
     if (live !== null) live.kind = kind;
     else {
       const { layout } = this.#ensure(task.id);
-      const top = Math.max(0, Math.min(s.docScroll(task.id), layout.rows.length - 1));
-      const at = { row: top, col: 0 };
-      this.#selection = { taskId: task.id, layout, kind, anchor: at, cursor: at, goal: null };
+      this.#selection = { taskId: task.id, layout, kind, anchor: this.#cursorOf(task.id, layout).at };
     }
     s.redraw();
     return true;
@@ -2080,15 +2485,7 @@ export class Reader implements Component {
     const top = s.docScroll(task.id);
     const last = Math.max(0, Math.min(layout.rows.length - 1, top + Math.max(1, this.#shown) - 1));
     const row = Math.max(Math.min(top, last), Math.min(last, top + y));
-    const probe: ReaderSelection = {
-      taskId: task.id,
-      layout,
-      kind: "char",
-      anchor: { row, col: 0 },
-      cursor: { row, col: 0 },
-      goal: null,
-    };
-    return { row, col: this.#colAt(probe, row, Math.max(0, x - layout.gutter - MARGIN)) };
+    return { row, col: this.#colAt(layout, row, Math.max(0, x - layout.gutter - MARGIN)) };
   }
 
   /** A mouse selection: VISUAL of `kind` from `anchor` to `cursor` (both included). False without the current layout. */
@@ -2096,7 +2493,8 @@ export class Reader implements Component {
     const task = this.#session.selectedTask();
     const layout = task === null ? null : (this.#views.get(task.id)?.layout ?? null);
     if (task === null || layout === null) return false;
-    this.#selection = { taskId: task.id, layout, kind, anchor, cursor, goal: null };
+    this.#selection = { taskId: task.id, layout, kind, anchor };
+    this.#cursor = { taskId: task.id, layout, at: cursor, goal: null };
     this.#session.redraw();
     return true;
   }
@@ -2105,9 +2503,9 @@ export class Reader implements Component {
   selectWord(point: ReaderPoint): boolean {
     if (!this.selectRange("char", point, point)) return false;
     const selection = this.#selection as ReaderSelection;
-    const { first, last } = wordAt(this.#rowClusters(point.row, selection), point.col);
+    const { first, last } = wordAt(this.#rowClusters(selection.layout, point.row), point.col);
     selection.anchor = { row: point.row, col: first };
-    selection.cursor = { row: point.row, col: last };
+    (this.#cursor as ReaderCursor).at = { row: point.row, col: last };
     return true;
   }
 
@@ -2116,25 +2514,35 @@ export class Reader implements Component {
     return this.#live()?.kind ?? null;
   }
 
+  /** End VISUAL: the selection goes, the reading cursor stays where it is. */
   endSelection(): void {
     if (this.#selection === null) return;
     this.#selection = null;
     this.#session.redraw();
   }
 
-  moveSelection(motion: SelectionMotion, count = 1): void {
-    const selection = this.#live();
-    if (selection === null) return;
-    const rows = selection.layout.rows;
+  /** Move the reading cursor (a live selection follows it); the view follows, a half page or page scrolls with it. */
+  moveCursor(motion: SelectionMotion, count = 1): void {
+    const task = this.#session.selectedTask();
+    if (task === null) return;
+    const { layout } = this.#ensure(task.id);
+    const cursor = this.#cursorOf(task.id, layout);
+    const rows = layout.rows;
     const n = Math.max(1, count);
     const lastRow = Math.max(0, rows.length - 1);
-    const lastCol = (row: number): number => Math.max(0, this.#rowClusters(row, selection).length - 1);
-    let { row, col } = selection.cursor;
+    const lastCol = (row: number): number => Math.max(0, this.#rowClusters(layout, row).length - 1);
+    let { row, col } = cursor.at;
     let goal: number | null = null;
+    let scroll = 0;
     const vertically = (delta: number): void => {
-      goal = selection.goal ?? this.#cellsBefore(selection, row, col);
+      goal = cursor.goal ?? this.#cellsBefore(layout, row, col);
       row = Math.max(0, Math.min(lastRow, row + delta));
-      col = this.#colAt(selection, row, goal);
+      col = this.#colAt(layout, row, goal);
+    };
+    const paged = (delta: number): void => {
+      const from = row;
+      vertically(delta);
+      scroll = row - from;
     };
     const half = Math.max(1, Math.floor(this.#shown / 2));
     switch (motion) {
@@ -2145,16 +2553,16 @@ export class Reader implements Component {
         vertically(-n);
         break;
       case "half-down":
-        vertically(half * n);
+        paged(half * n);
         break;
       case "half-up":
-        vertically(-half * n);
+        paged(-half * n);
         break;
       case "page-down":
-        vertically(Math.max(1, this.#shown) * n);
+        paged(Math.max(1, this.#shown) * n);
         break;
       case "page-up":
-        vertically(-Math.max(1, this.#shown) * n);
+        paged(-Math.max(1, this.#shown) * n);
         break;
       case "left":
         col = Math.max(0, col - n);
@@ -2179,7 +2587,7 @@ export class Reader implements Component {
       case "word-next":
       case "word-prev":
       case "word-end": {
-        const lines: ClusterLines = { count: rows.length, clusters: r => this.#rowClusters(r, selection) };
+        const lines: ClusterLines = { count: rows.length, clusters: r => this.#rowClusters(layout, r) };
         const step = motion === "word-next" ? wordNext : motion === "word-prev" ? wordPrev : wordEnd;
         let place = { line: row, col };
         for (let i = 0; i < n; i++) place = step(lines, place);
@@ -2188,19 +2596,22 @@ export class Reader implements Component {
         break;
       }
     }
-    selection.cursor = { row, col };
-    selection.goal = goal;
-    this.#reveal(selection);
+    cursor.at = { row, col };
+    cursor.goal = goal;
+    // Like vi's Ctrl-d/Ctrl-u: the view scrolls as far as the cursor moved (the render clamps it).
+    if (scroll !== 0) this.#session.setDocScroll(task.id, Math.max(0, this.#session.docScroll(task.id) + scroll));
+    this.#reveal(cursor);
     this.#session.redraw();
   }
 
   /** VISUAL `o`: the cursor goes to the other end. */
   swapSelectionEnds(): void {
     const selection = this.#live();
-    if (selection === null) return;
-    [selection.anchor, selection.cursor] = [selection.cursor, selection.anchor];
-    selection.goal = null;
-    this.#reveal(selection);
+    const cursor = this.#cursor;
+    if (selection === null || cursor === null) return;
+    [selection.anchor, cursor.at] = [cursor.at, selection.anchor];
+    cursor.goal = null;
+    this.#reveal(cursor);
     this.#session.redraw();
   }
 
@@ -2212,12 +2623,13 @@ export class Reader implements Component {
    */
   selectedText(): { text: string; linewise: boolean; rows: number } | null {
     const selection = this.#live();
-    if (selection === null) return null;
-    const [start, end] = ordered(selection.anchor, selection.cursor);
+    const cursor = this.#cursor;
+    if (selection === null || cursor === null) return null;
+    const [start, end] = ordered(selection.anchor, cursor.at);
     const lines: string[] = [];
     for (let row = start.row; row <= end.row; row++) {
-      const clusters = this.#rowClusters(row, selection);
-      const part = this.#rowSelection(selection, row) ?? { from: 0, to: 0 };
+      const clusters = this.#rowClusters(selection.layout, row);
+      const part = this.#rowSelection(selection, cursor, row) ?? { from: 0, to: 0 };
       const text = clusters.slice(part.from, part.to).join("");
       lines.push(part.to >= clusters.length ? text.trimEnd() : text);
     }
@@ -2230,13 +2642,43 @@ export class Reader implements Component {
     const selection = this.#selection;
     if (selection === null) return null;
     const task = this.#session.selectedTask();
-    if (task?.id === selection.taskId && this.#views.get(task.id)?.layout === selection.layout) return selection;
+    if (
+      task?.id === selection.taskId &&
+      this.#views.get(task.id)?.layout === selection.layout &&
+      this.#cursor?.layout === selection.layout
+    ) {
+      return selection;
+    }
     this.#selection = null;
     return null;
   }
 
-  #rowClusters(row: number, selection: ReaderSelection): readonly string[] {
-    const found = selection.layout.rows[row];
+  /** The task's reading cursor on `layout`; a new one (another task, or none yet) starts on the top row on screen. */
+  #cursorOf(taskId: number, layout: DocumentLayout): ReaderCursor {
+    const cursor = this.#cursor;
+    if (cursor !== null && cursor.taskId === taskId && cursor.layout === layout) return cursor;
+    const row = Math.max(0, Math.min(this.#session.docScroll(taskId), layout.rows.length - 1));
+    this.#cursor = { taskId, layout, at: { row, col: 0 }, goal: null };
+    return this.#cursor;
+  }
+
+  /** Keep the reading cursor on the rows on screen: a scroll it did not make (the wheel, a jump) takes it along. */
+  #keepCursor(taskId: number, layout: DocumentLayout, top: number, height: number): ReaderCursor {
+    const cursor = this.#cursorOf(taskId, layout);
+    const last = Math.max(0, layout.rows.length - 1);
+    const row = Math.max(Math.min(top, last), Math.min(last, top + Math.max(1, height) - 1, cursor.at.row));
+    const col = Math.min(cursor.at.col, Math.max(0, this.#rowClusters(layout, row).length - 1));
+    if (row !== cursor.at.row || col !== cursor.at.col) cursor.at = { row, col };
+    return cursor;
+  }
+
+  /** A jump (a heading, a search match, :back): the reading cursor goes to its row and cluster. */
+  #placeCursor(taskId: number, layout: DocumentLayout, row: number, col = 0): void {
+    this.#cursor = { taskId, layout, at: { row, col }, goal: null };
+  }
+
+  #rowClusters(layout: DocumentLayout, row: number): readonly string[] {
+    const found = layout.rows[row];
     if (found === undefined) return [];
     let clusters = this.#clusters.get(found);
     if (clusters === undefined) {
@@ -2247,27 +2689,27 @@ export class Reader implements Component {
   }
 
   /** What of row `row` the selection covers (null: nothing), and the cursor's cluster on it. */
-  #rowSelection(selection: ReaderSelection, row: number): RowSelection | null {
-    const [start, end] = ordered(selection.anchor, selection.cursor);
+  #rowSelection(selection: ReaderSelection, cursor: ReaderCursor, row: number): RowSelection | null {
+    const [start, end] = ordered(selection.anchor, cursor.at);
     if (row < start.row || row > end.row) return null;
-    const count = this.#rowClusters(row, selection).length;
+    const count = this.#rowClusters(selection.layout, row).length;
     const line = selection.kind === "line";
     return {
       from: line || row > start.row ? 0 : start.col,
       to: line || row < end.row ? count : end.col + 1,
-      cursor: row === selection.cursor.row ? selection.cursor.col : null,
+      cursor: row === cursor.at.row ? cursor.at.col : null,
     };
   }
 
-  #cellsBefore(selection: ReaderSelection, row: number, col: number): number {
+  #cellsBefore(layout: DocumentLayout, row: number, col: number): number {
     let cells = 0;
-    for (const cluster of this.#rowClusters(row, selection).slice(0, col)) cells += displayWidth(cluster);
+    for (const cluster of this.#rowClusters(layout, row).slice(0, col)) cells += displayWidth(cluster);
     return cells;
   }
 
   /** The cluster of `row` at display column `cells` (its last one when the row is shorter). */
-  #colAt(selection: ReaderSelection, row: number, cells: number): number {
-    const clusters = this.#rowClusters(row, selection);
+  #colAt(layout: DocumentLayout, row: number, cells: number): number {
+    const clusters = this.#rowClusters(layout, row);
     let used = 0;
     for (let i = 0; i < clusters.length; i++) {
       const w = displayWidth(clusters[i] as string);
@@ -2277,13 +2719,13 @@ export class Reader implements Component {
     return Math.max(0, clusters.length - 1);
   }
 
-  /** Scroll so the selection's cursor row is on screen. */
-  #reveal(selection: ReaderSelection): void {
+  /** Scroll so the reading cursor's row is on screen. */
+  #reveal(cursor: ReaderCursor): void {
     const s = this.#session;
-    const top = s.docScroll(selection.taskId);
-    const row = selection.cursor.row;
-    if (row < top) s.setDocScroll(selection.taskId, row);
-    else if (row >= top + this.#shown) s.setDocScroll(selection.taskId, row - Math.max(1, this.#shown) + 1);
+    const top = s.docScroll(cursor.taskId);
+    const row = cursor.at.row;
+    if (row < top) s.setDocScroll(cursor.taskId, row);
+    else if (row >= top + this.#shown) s.setDocScroll(cursor.taskId, row - Math.max(1, this.#shown) + 1);
   }
 
   // ---------- source disclosure ----------
@@ -2387,12 +2829,25 @@ export class Reader implements Component {
       return old;
     }
     const next = layoutDocument(view.doc, width, this.#source, numbers);
+    const taskId = view.doc.taskId;
+    // The reading cursor keeps its row on screen and its display column on the new layout.
+    const cursor = this.#cursor;
+    const kept =
+      old !== null && cursor !== null && cursor.taskId === taskId && cursor.layout === old
+        ? {
+            offset: cursor.at.row - this.#session.docScroll(taskId),
+            cells: this.#cellsBefore(old, cursor.at.row, cursor.at.col),
+          }
+        : null;
     if (old !== null && view.pending === null) {
-      const taskId = view.doc.taskId;
       const place = placeIn(old, this.#session.docScroll(taskId));
       this.#session.setDocScroll(taskId, resolvePlace(next, place, old.doc === view.doc));
     }
     view.layout = next;
+    if (kept !== null && cursor !== null) {
+      const row = Math.max(0, Math.min(next.rows.length - 1, this.#session.docScroll(taskId) + kept.offset));
+      this.#cursor = { taskId, layout: next, at: { row, col: this.#colAt(next, row, kept.cells) }, goal: cursor.goal };
+    }
     return next;
   }
 
@@ -2417,6 +2872,7 @@ export class Reader implements Component {
           : (layout.headingRows[i] ?? 0);
         s.setDocScroll(taskId, row);
       } else s.setDocScroll(taskId, resolvePlace(layout, pending.place, false));
+      this.#placeCursor(taskId, layout, Math.min(s.docScroll(taskId), layout.rows.length - 1));
     }
     s.setDocScroll(taskId, Math.min(s.docScroll(taskId), maxScroll(layout, height)));
   }

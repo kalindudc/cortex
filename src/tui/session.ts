@@ -566,6 +566,8 @@ export class TuiSession {
   #view: SessionView = "workspace";
   #viewScroll = 0;
   #docScroll = new Map<number, number>();
+  /** The body cursor of each task as an offset in its text: the one position Read, Edit and Split show. */
+  #bodyCursor = new Map<number, number>();
   #heading: { taskId: number; slug: string } | null = null;
   #prompt: CommandLine | null = null;
   /** A live dialog search in the open `/` prompt, and the filter to restore if it is cancelled. */
@@ -1611,6 +1613,16 @@ export class TuiSession {
     this.#viewScroll = Math.max(0, value);
   }
 
+  /** The task's body cursor (a body text offset), or null before any view placed it. */
+  bodyCursor(taskId: number): number | null {
+    return this.#bodyCursor.get(taskId) ?? null;
+  }
+
+  /** The view that has the keyboard reports where its cursor is; the others follow (the shell syncs them). */
+  setBodyCursor(taskId: number, offset: number): void {
+    this.#bodyCursor.set(taskId, Math.max(0, offset));
+  }
+
   docScroll(taskId: number): number {
     return this.#docScroll.get(taskId) ?? 0;
   }
@@ -2311,7 +2323,9 @@ export class TuiSession {
       return null;
     }
     entry.draft = draft;
-    entry.editor = createDocumentEditor(createEditorState(draft.text("body")), state =>
+    // The editor opens at the body cursor Read placed, so i or :edit continues where the reading was.
+    const cursor = this.#bodyCursor.get(entry.taskId) ?? 0;
+    entry.editor = createDocumentEditor(createEditorState(draft.text("body"), { cursor }), state =>
       entry.draft?.set("body", editorText(state)),
     );
     entry.loading = null;
