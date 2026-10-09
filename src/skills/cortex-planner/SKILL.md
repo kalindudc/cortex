@@ -140,6 +140,10 @@ Use the following structure for every plan:
 
 > Ingest the information from this file, implement the Low-Level Tasks, and generate the code that will satisfy the High and Mid-Level Objectives.
 
+## What this plan does and why
+
+[Three to five short paragraphs for the person who approves the plan. Say what is wrong or missing today, what will be possible after the plan, and the one or two design choices that matter, in ordinary words. Name a command or file at most once each; do not list tasks. A reader who stops here must be able to decide whether to approve.]
+
 ## High-Level Objective
 
 - [Goal]
@@ -277,7 +281,7 @@ STOP. Before writing the plan to cortex, complete every item. Do NOT skip this.
    - [ ] Approach decided (not "will try X or Y")
    - [ ] All APIs verified (list files: ___)
    - [ ] Implementation notes are decisive technical facts, not explanatory essays
-   - [ ] High- and Mid-Level Objectives are written for the user who approves the plan ([persistence recipe](../cortex/recipes/persistence.md), section 7)
+   - [ ] "What this plan does and why" and the High- and Mid-Level Objectives are written for the user who approves the plan ([persistence recipe](../cortex/recipes/persistence.md), section 7): complete sentences, every internal term explained the first time, no shorthand invented during the work. Only Implementation Notes and Low-Level Tasks may be written for the implementing agent.
    - [ ] Every planned Low-Level Task is a CREATE or UPDATE operation
    - [ ] Constraint enforcement completed
    - [ ] $SESSION_ID generated and held in working memory

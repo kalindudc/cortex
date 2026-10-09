@@ -150,6 +150,10 @@ Use the following structure. Strip any section that has no content — do NOT sh
 > Question: <one falsifiable sentence>
 > Headline: <one-sentence answer in plain words a teammate outside this project would understand>
 
+## In short
+
+<Two to four short paragraphs for the person who asked. What the problem is, what the answer is, and the main evidence behind it, in ordinary words with every internal term explained the first time. A reader who stops here must understand the conclusion and what it rests on.>
+
 ## Context
 
 - Why this question is being asked (1-3 bullets, link upstream cortex task / Slack thread / incident if any).
@@ -270,7 +274,7 @@ STOP. Before persisting the analysis, complete every item:
 Before `cortex add`, scan every section:
 
 - [ ] Every claim is grounded in a citation — strip or label any naked claim
-- [ ] Written for the person reading ([persistence recipe](../cortex/recipes/persistence.md), section 7): plain headline, defined terms, no agent shorthand
+- [ ] Written for the person reading ([persistence recipe](../cortex/recipes/persistence.md), section 7): the "In short" section, the Implications and the Recommended next steps read as prose a teammate outside the project follows on one pass; the headline uses no term the body has not explained; no shorthand invented during the work (name the thing in ordinary words the first time, then the short name)
 - [ ] Method describes sources and scope — not chronology
 - [ ] Findings are decisive — each one resolves a sub-question, not "I noticed that"
 - [ ] Negative findings exist OR the omission is deliberate

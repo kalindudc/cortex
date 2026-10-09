@@ -93,4 +93,6 @@ People read task bodies and updates in the inbox and the terminal workspace, not
 - Keep identifiers, paths and numbers out of the middle of sentences where you can; put them in code blocks, tables or evidence lines.
 - Use words instead of symbols ("leads to", not →).
 - Leave out agent bookkeeping (confidence tags, finding ids, stage numbers, tool-call counts). When another task matters, say what it is and keep its `@<id>` token, for example "the keepalive analysis (@449)".
+- Do not reuse shorthand you coined while working ("the merge gate", "the self-claim queue"). Say what the thing is in ordinary words the first time ("the rule that a code task cannot be marked done without naming its merged commit"), then use a short name.
+- A summary posted as an update replaces the need to read the body. Lead with what changed and what the reader must decide; leave out how many review rounds or tool calls it took.
 - Let length follow content. When a size limit and clarity conflict, split the document; never squeeze sentences to fit.

@@ -11,7 +11,7 @@ CRITICAL: before using this skill, load the `cortex` skill to ensure the CLI is 
 
 This skill fills the workflow gap between plan creation and PR generation. It takes a plan stored as the body of a cortex task and executes every Low-Level Task systematically -- producing working code on the first pass.
 
-The plan body is read once at the start and is NEVER mutated during execution. Per-task progress, blockers, and the final review handoff are reported as cortex updates so a human supervising several agents can watch the TUI and react. Completion is signalled by transitioning the task's status, not by editing the body.
+Every update you post is read by the person supervising, often on a phone: write it as one or two complete sentences that say what changed and what, if anything, they must decide ([persistence recipe](../cortex/recipes/persistence.md), section 7). The plan body is read once at the start and is NEVER mutated during execution. Per-task progress, blockers, and the final review handoff are reported as cortex updates so a human supervising several agents can watch the TUI and react. Completion is signalled by transitioning the task's status, not by editing the body.
 
 ---
 
