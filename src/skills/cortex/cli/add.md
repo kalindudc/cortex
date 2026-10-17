@@ -19,7 +19,7 @@ cortex add "<title>" [-l <lane>] [-p <priority>] [-b <body> | --body-file <path>
 | `--body-file` | — | — | Read the body from a file. `--body-file -` (or `--body-file=-`) reads stdin. Mutually exclusive with `-b`. ALWAYS prefer this over `-b` for KB-scale markdown (shell escaping is a footgun). |
 | `--status` | `-s` | `open` | One of `draft`, `open`, `review`, `blocked`, `done`. Set the initial status of the task. |
 | `--tags` | `-t` | — | Comma-separated tag names (e.g. `-t "plan,my-feature"`). Auto-creates missing tags. Tag names match `[a-z0-9_@-]{1,32}`. |
-| `--as` | `--author` | — | Optional attribution tag. When set, records the first `created` update so the task isn't anonymous (create + attribute in ONE call). |
+| `--as` | `--author` | `bb-<thread id>` in a bb thread, else — | Optional attribution tag. When set or defaulted, records the first `created` update so the task isn't anonymous (create + attribute in ONE call). |
 | `--json` | — | `false` | Emit the created task as JSON on stdout instead of `[<id>] <title>`. On failure emits `{ "error": { "code", "message" } }` and exits 1. |
 
 ## Examples
@@ -55,7 +55,7 @@ $ generate_plan | cortex add "Plan: X" --body-file - --json
 
 ## Pitfalls
 
-- **Attribution is opt-in.** Without `--as`, `cortex add` is anonymous and the audit trail starts at the first `cortex update --as <id>`; `--as <id>` records the first `created` update in the same call (see [session-id recipe](../recipes/session-id.md)).
+- **Attribution is opt-in outside bb.** Without `--as` and outside a bb thread, `cortex add` is anonymous and the audit trail starts at the first update; `--as <id>` records the first `created` update in the same call (see [session-id recipe](../recipes/session-id.md)).
 - **Do NOT auto-set `--priority` without an explicit user signal.** Most tasks are opt-in metadata containers (plans, research notes, archives). Priority is an urgency annotation; only set it when the user asked you to.
 - `--priority` rejects negatives, decimals, and non-numeric strings. `-p 1.5` or `-p high` exit 1.
 - A title-only task is fine; `--body` is for context that `cortex ls` hides until you open the task (`cortex show`, or the TUI).

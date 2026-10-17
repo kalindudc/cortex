@@ -37,8 +37,8 @@ cortex                                                            # open the ter
 
 ## How you use it
 
-- Agents work through the CLI, usually with `--json`. Every `cortex update` names its author with `--as`, so you
-  can always tell which session did what. `cortex agents install` teaches agents the conventions.
+- Agents work through the CLI, usually with `--json`. A bb thread identifies itself; outside bb, agents use
+  the pi tool or explicit `--as`. `cortex agents install` teaches agents the conventions.
 - A task moves through draft, open, review, blocked and done. Only a move into blocked interrupts you: the
   workspace's status line flashes, and the terminal bell can too.
 - You read, edit and triage in the terminal workspace: plain `cortex`, then `?` for help.

@@ -64,10 +64,10 @@ export async function withExternalProgram(
 }
 
 /**
- * `:resume`: resume the pi session that posted on a task, through the
- * existing `cortex resume <id>` flow on the handed-over terminal. Refuses
+ * `:resume`: resume the pi session or bb thread that posted on a task, through
+ * the existing `cortex resume <id>` flow on the handed-over terminal. Refuses
  * (without taking the terminal) when no update came from a resumable
- * `pi-<uuidv7>` author; otherwise reports how it exited. `command` is the
+ * `pi-<uuidv7>` or `bb-<thread id>` author; otherwise reports how it exited. `command` is the
  * argv that runs this cortex (default: this binary, or bun + its entry).
  */
 export async function resumeTask(
@@ -83,7 +83,7 @@ export async function resumeTask(
   }
   if (resumeCandidates(updates).length === 0) {
     throw new CommandError(
-      `No pi session to resume on @${taskId}: cortex resume needs an update posted by a pi-<session id> author`,
+      `No resumable session on @${taskId}: cortex resume needs an update by a pi-<session id> or bb-<thread id> author`,
     );
   }
   const code = await withExternalProgram(session, [...(deps.command ?? selfCommand()), "resume", String(taskId)], deps);

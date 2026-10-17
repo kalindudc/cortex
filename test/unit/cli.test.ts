@@ -30,6 +30,7 @@ const EXPECTED_SUBCOMMANDS = [
   "stop",
   "reset",
   "resume",
+  "watch",
   "backup",
   "restore",
   "memory",

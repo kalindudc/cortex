@@ -5,6 +5,7 @@ import { withClient } from "../daemon.ts";
 import {
   breadcrumbs,
   checkStaleness,
+  isoDay,
   MEMORY_LIMITS,
   matchingSections,
   memoryLane,
@@ -24,6 +25,7 @@ import type { MemoryStream, MemoryStreamRow } from "../store.ts";
  *   search <query>  ranked recall across lanes (derived FTS5 index; punctuation, paths, URLs and filler ignored)
  *   show <id>       staleness since the last BODY sync + body (section-first when long) + breadcrumb trail
  *   context         the one call a harness makes per prompt: primer + hits (this lane boosted)
+ *   streams         the streams one author posted updates to (e.g. a bb thread's tasks)
  *   lane            the lane of the current checkout (git's common dir)
  *
  * Every read goes through withClient (the verified daemon, or the same
@@ -215,6 +217,50 @@ const context = defineCommand({
   },
 });
 
+const STREAMS_DEFAULT_LIMIT = 20;
+
+const streams = defineCommand({
+  meta: {
+    name: "streams",
+    description: "the streams an author posted updates to, newest activity first, without bodies (use --flag=value)",
+  },
+  args: {
+    author: { type: "string", required: true, valueHint: "tag", description: "exact author tag, e.g. bb-<thread id>" },
+    limit: {
+      type: "string",
+      alias: "n",
+      valueHint: "int",
+      description: `max rows (default ${STREAMS_DEFAULT_LIMIT}, at most 50)`,
+    },
+    json: jsonArg,
+  },
+  async run({ args }) {
+    const json = args.json;
+    const author = args.author.trim();
+    if (!author) emitError(json, new Error("--author must not be blank"));
+    const limit = positiveInt(args.limit, "limit", json) ?? STREAMS_DEFAULT_LIMIT;
+    let rows: MemoryStreamRow[];
+    try {
+      rows = await withClient(client => client.memoryStreams({ author, limit }));
+    } catch (err) {
+      emitError(json, err);
+    }
+    if (json) {
+      printJson(rows);
+      return;
+    }
+    if (rows.length === 0) {
+      console.log(`(no streams with updates by ${author})`);
+      return;
+    }
+    for (const row of rows) {
+      console.log(
+        `[${row.id}] ${row.status} \u00b7 ${row.lane} \u00b7 active ${isoDay(row.activity)} \u00b7 ${row.title}`,
+      );
+    }
+  },
+});
+
 const laneCmd = defineCommand({
   meta: { name: "lane", description: "print this checkout's memory lane (git's common dir; worktrees share it)" },
   run() {
@@ -227,5 +273,5 @@ export default defineCommand({
     name: "memory",
     description: "agent memory: ranked recall, staleness since the last body sync, breadcrumbs, one-call context",
   },
-  subCommands: { search, show, context, lane: laneCmd },
+  subCommands: { search, show, context, streams, lane: laneCmd },
 });

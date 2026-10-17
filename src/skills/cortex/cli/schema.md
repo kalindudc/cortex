@@ -25,7 +25,7 @@ cortex schema --json   # machine-readable model + grammar + commands
   "grammar": {
     "taskId": "positive integer, e.g. 42",
     "tagName": "^[a-z0-9_@-]{1,32}$",
-    "author": "attribution tag: max 80 chars, no newlines; <role>-<8hex> or pi-<uuidv7>",
+    "author": "attribution tag: max 80 chars, no newlines; <role>-<8hex>, pi-<uuidv7> or bb-<thread-id>",
     "refs": "@<taskId> links a task; #<tag> links a tag (in bodies/summaries)",
     "statuses": ["draft","open","review","blocked","done"],
     "severities": ["progress","review","blocked"],

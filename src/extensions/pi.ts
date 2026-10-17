@@ -21,8 +21,9 @@
  * hits, `cortex_recall`, the footer status and `/memory`; both render only
  * through the sibling `./memory-view.ts`, installed beside this file under
  * the same name).
- *   - `cortex_update` wraps `cortex update` with auto-attribution from the
- *     active pi session (`pi-<full-uuidv7>`), resumable via `cortex resume`.
+ *   - `cortex_update` wraps `cortex update` with auto-attribution: the bb
+ *     thread (`bb-<thread id>`) inside bb, otherwise the active pi session
+ *     (`pi-<full-uuidv7>`); both are resumable via `cortex resume`.
  *   - Every session starts with a frozen primer of the repo's memory streams
  *     (plus streams recently active in other lanes); later prompts that ask
  *     for earlier work (a recall cue) surface only NEW relevant streams, from
@@ -59,13 +60,17 @@
  *     ignores a returned `isError`, and `pi.exec` resolves a timeout as
  *     `code: 0, killed: true`.
  *
- * The `cortex update --as <id>` CLI behavior is unchanged. Humans and
- * fallback agents (no pi session) continue to pass `--as` directly.
+ * The CLI defaults its author to the bb thread on its own; outside bb, humans
+ * and fallback agents (no pi session) pass `--as` directly.
  */
 
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { MemoryPanel, memoryStatus, memoryViewText } from "./memory-view.ts";
+
+export function sessionAuthor(sessionId: string, threadId: string | undefined = process.env.BB_THREAD_ID): string {
+  return threadId && /^thr_[0-9a-z]{6,40}$/.test(threadId) ? `bb-${threadId}` : `pi-${sessionId}`;
+}
 
 const MEMORY_TIMEOUT_MS = 3000;
 const RECALL_TIMEOUT_MS = 5000;
@@ -390,7 +395,7 @@ export default function (pi: ExtensionAPI): void {
     const summary = event.compactionEntry?.summary ?? "";
     if (!summary.trim() || roleOf(ctx) !== "writer") return;
     try {
-      const author = `pi-${ctx.sessionManager.getSessionId()}`;
+      const author = sessionAuthor(ctx.sessionManager.getSessionId());
       for (const id of focus.slice(-BREADCRUMB_STREAMS).reverse()) {
         const args = [
           "update",
@@ -451,7 +456,7 @@ export default function (pi: ExtensionAPI): void {
         "memory",
         "context",
         "--json",
-        `--author=pi-${ctx.sessionManager.getSessionId()}`,
+        `--author=${sessionAuthor(ctx.sessionManager.getSessionId())}`,
         `--limit=${reader ? READER_HITS : first ? FIRST_HITS : LATER_HITS}`,
         `--load-hint=${LOAD_HINT}`,
       ];
@@ -593,7 +598,7 @@ export default function (pi: ExtensionAPI): void {
       edited: [...request.edited],
       focus: [...focus].reverse(),
       candidates,
-      author: `pi-${ctx.sessionManager.getSessionId()}`,
+      author: sessionAuthor(ctx.sessionManager.getSessionId()),
     });
     // The arc spins until the turn ends (agent_end).
     saving = true;
@@ -657,7 +662,14 @@ export default function (pi: ExtensionAPI): void {
 
       async execute(_toolCallId, params, signal, _onUpdate, ctx) {
         const sessionId = ctx.sessionManager.getSessionId();
-        const args: string[] = ["update", String(params.task_id), "-m", params.message, "--as", `pi-${sessionId}`];
+        const args: string[] = [
+          "update",
+          String(params.task_id),
+          "-m",
+          params.message,
+          "--as",
+          sessionAuthor(sessionId),
+        ];
         if (params.status !== undefined) {
           args.push("-s", params.status);
         }

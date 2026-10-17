@@ -49,6 +49,7 @@ describe("cortex base skill — leaf files", () => {
     "cli/update.md",
     "cli/serve.md",
     "cli/memory.md",
+    "cli/watch.md",
     "cli/agents.md",
     "recipes/session-id.md",
     "recipes/persistence.md",

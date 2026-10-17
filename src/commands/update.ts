@@ -1,6 +1,7 @@
 import { defineCommand } from "citty";
 import type { PostUpdateRequest } from "../contracts.ts";
 import { withClient } from "../daemon.ts";
+import { authorForBbThread } from "../lib/bbAuthor.ts";
 import { validateAuthorTag, type TaskStatus, type Update } from "../store.ts";
 import { emitError, printJson } from "../output.ts";
 
@@ -39,10 +40,8 @@ export default defineCommand({
     as: {
       type: "string",
       alias: "author",
-      required: true,
       valueHint: "id",
-      description:
-        "REQUIRED attribution tag for this update. Generate once per session via ${ROLE}-$(openssl rand -hex 4); see ~/.agents/skills/cortex/recipes/session-id.md.",
+      description: "author tag; defaults to bb-<thread id> in a bb thread; required otherwise",
     },
     json: {
       type: "boolean",
@@ -59,12 +58,12 @@ export default defineCommand({
     if (args.status && !STATUSES.includes(args.status as TaskStatus)) {
       emitError(json, new Error(`status must be one of ${STATUSES.join(",")}`));
     }
-    // citty `required: true` rejects missing --as at parse time, but we
-    // also validate the value here (defense in depth: matches Store +
-    // server validation, single error format).
+    // Validate the explicit or bb-default tag before contacting the daemon.
     let author: string;
     try {
-      author = validateAuthorTag(args.as);
+      const selected = authorForBbThread(args.as, process.env.BB_THREAD_ID);
+      if (selected === undefined) emitError(json, new Error("--as is required outside a bb thread"));
+      author = validateAuthorTag(selected);
     } catch (err) {
       emitError(json, err);
     }

@@ -12,7 +12,7 @@ Humans usually work in the terminal workspace (TUI): plain `cortex` in an intera
 ## Key Principles
 
 - **Single-user, local-only, no auth.** The daemon listens only on a private Unix socket. Anyone with shell access as your user has full CRUD. Do not expose the socket. There are no bearer tokens.
-- **`cortex update` REQUIRES `--as <id>`.** Generate a session id ONCE at the start of an agent session via the [session-id recipe](recipes/session-id.md), hold it in working memory, and pass it on every update. The CLI rejects updates without it (exit 1).
+- **Every update has an author.** A valid bb thread defaults to `bb-<thread id>`; explicit `--as` wins. Outside bb, use the `cortex_update` tool or the [session-id recipe](recipes/session-id.md). Without either, update exits 1.
 - **No severity flag. Message text describes urgency.** Write `-m "ready for review"` or `-m "blocked on missing API key"` in plain prose. Structured semantics belong in `--status` (`draft`/`open`/`review`/`blocked`/`done`), not in a separate severity field.
 - **Every status change is also an audit-trail row.** Setting `-s` writes both the message AND a `status → <new>` row in the updates table, both attributed to `--as`. Parallel-agent status oscillation (open→blocked→open→blocked) shows up in the inbox as history rather than silently overwriting.
 - **The TUI signals (status-line flash, optional bell) ONLY on transitions into `blocked`.** Routine updates, `done` flips, and review handoffs do NOT interrupt the human: `blocked` is the one signal worth it.
@@ -29,7 +29,8 @@ Humans usually work in the terminal workspace (TUI): plain `cortex` in an intera
 | `cortex update <id> -m <msg> --as <id>` | Post an update on a task; optionally flip status. | [cli/update.md](cli/update.md) |
 | `cortex schema` | Print the data model + command grammar (agent orientation, DB-free). | [schema.md](cli/schema.md) |
 | `cortex doctor` | Report version, db path, daemon state, pending migrations, counts (read-only; never starts a daemon). | [doctor.md](cli/doctor.md) |
-| `cortex memory search\|show\|context\|lane` | Agent memory: ranked recall, staleness since the last body sync, breadcrumbs, one-call context. | [memory.md](cli/memory.md) |
+| `cortex memory search\|show\|context\|streams\|lane` | Agent memory, including author-touched streams. | [memory.md](cli/memory.md) |
+| `cortex watch --json` | Follow changes; refetch after ready or resync. | [watch.md](cli/watch.md) |
 | `cortex tui [id]` | Open the terminal workspace (for humans; needs a TTY). Plain `cortex` in an interactive terminal does the same. | `cortex tui --help` |
 | `cortex serve` | Run this database's daemon (private socket). | [serve.md](cli/serve.md) |
 | `cortex reset` | Stop this database's daemon, wipe the DB (destructive, requires typing `RESET`). | [reset.md](cli/reset.md) |

@@ -29,6 +29,7 @@ const { default: extension, ...helpers } = (await import("../../src/extensions/p
   shouldCheckpoint: (s: Record<string, unknown>) => string | null;
   checkpointPrompt: (input: Record<string, unknown>) => string;
   RECALL_CUE: RegExp;
+  sessionAuthor: (sessionId: string, threadId?: string) => string;
 };
 const { memoryRole, focusFromBash, shouldCheckpoint, checkpointPrompt, RECALL_CUE } = helpers;
 
@@ -56,9 +57,11 @@ const ERROR = "<error>\u2298 memory error</error> <dim>\u00b7 /memory</dim>";
 // The save spinner is the extension's only timer: record intervals instead of running them.
 type Interval = { fn: () => void; ms: number; cleared: boolean };
 let intervals: Interval[] = [];
+const originalBbThreadId = process.env.BB_THREAD_ID;
 const realSetInterval = globalThis.setInterval;
 const realClearInterval = globalThis.clearInterval;
 beforeEach(() => {
+  delete process.env.BB_THREAD_ID;
   intervals = [];
   globalThis.setInterval = ((fn: () => void, ms: number) => {
     intervals.push({ fn, ms, cleared: false });
@@ -70,6 +73,8 @@ beforeEach(() => {
   }) as unknown as typeof clearInterval;
 });
 afterEach(() => {
+  if (originalBbThreadId === undefined) delete process.env.BB_THREAD_ID;
+  else process.env.BB_THREAD_ID = originalBbThreadId;
   globalThis.setInterval = realSetInterval;
   globalThis.clearInterval = realClearInterval;
 });
@@ -506,6 +511,39 @@ describe("cortex_update", () => {
     await expect(update(failing, { task_id: 3, message: "hi" })).rejects.toThrow("error: task 3 not found");
     const killed = harness(() => ({ code: 0, killed: true, stdout: "", stderr: "" }));
     await expect(update(killed, { task_id: 3, message: "hi" })).rejects.toThrow(/timed out or was aborted/);
+  });
+});
+
+describe("bb thread authors", () => {
+  /** Drive the primer, checkpoint, compaction and cortex_update once; return the author each used. */
+  async function authors() {
+    const h = harness(args =>
+      args[0] === "update" ? ok("\u2713 update posted") : args[1] === "show" ? ok("STREAM 5") : context(),
+    );
+    await h.prompt("continue the mouse wheel work");
+    const primer = flag(h.execs[0].args, "author");
+    await h.recall("@5");
+    await h.tool("edit", { path: "src/tui/mouse.ts" });
+    const checkpoint = (await h.settle()).entries[0].content.match(/--as (\S+)/)?.[1];
+    await h.compact("progress summary");
+    const compaction = h.execs.at(-1)?.args.at(-1);
+    await h.tools.cortex_update.execute("call", { task_id: 3, message: "hi" }, undefined, undefined, h.ctx);
+    const tool = h.execs.at(-1)?.args.at(-1);
+    return { primer, checkpoint, compaction, tool };
+  }
+  const all = (author: string) => ({ primer: author, checkpoint: author, compaction: author, tool: author });
+
+  test("a valid BB_THREAD_ID gives bb-<thread id> at every call site", async () => {
+    process.env.BB_THREAD_ID = "thr_2qj8qzdqqr";
+    expect(await authors()).toEqual(all("bb-thr_2qj8qzdqqr"));
+  });
+
+  test("an unset or invalid BB_THREAD_ID keeps the pi session author", async () => {
+    expect(await authors()).toEqual(all("pi-sess-1"));
+    for (const id of ["", "thr_BAD", "thr_abc12", "abc_123456"]) {
+      process.env.BB_THREAD_ID = id;
+      expect(await authors()).toEqual(all("pi-sess-1"));
+    }
   });
 });
 

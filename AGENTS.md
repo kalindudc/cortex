@@ -13,7 +13,7 @@ Spec: <https://agents.md/>. Linter: `pnpm run docs:check`.
 - One binary (`bin/cortex`) bundles the CLI, the TUI and the daemon (HTTP API + SSE over a private Unix socket).
 - Storage is a single SQLite WAL file at `~/.config/cortex/cortex.db` (NOT in this repo).
 - The daemon (`cortex serve`) listens only on a private Unix socket; there is no TCP listener and no auth.
-- Every `cortex update` REQUIRES `--as <session-id>` so multi-agent activity is attributable in the audit trail.
+- Every update has an author: valid `BB_THREAD_ID` defaults to `bb-<thread id>`; explicit `--as` wins; outside bb, update without `--as` fails.
 - The TUI signals ONLY on transitions into `blocked`.
 
 ## 2. Runtime & setup
@@ -70,7 +70,7 @@ One line per rule; the linked doc holds the why. A code comment states its reaso
 - Every file-backed `Store.open` owns its database (lease acquired or handed in via `owner`); non-owners read through `Store.readSnapshot`; commands never open the Store for normal work, they go through `withClient` and release it before any prompt, fzf or launched program ([architecture](docs/architecture.md#the-cli-boundary-withclient)).
 - Daemons are database-scoped: metadata is published only once the listener is ready, only the lease holder recovers stale state, a pid read from metadata is NEVER signalled, control routes (`CONTROL_PATHS` in `src/api.ts`) exist only on the IPC app ([architecture](docs/architecture.md#ownership-and-daemon-lifecycle)).
 - The SSE heartbeat (`DEFAULT_STREAM_LIMITS.heartbeatMs` in `src/server.ts`) MUST stay under Bun.serve's default idle timeout ([architecture](docs/architecture.md#live-sync)).
-- Author tags on `cortex update` follow `<role>-<8 hex>` (legacy fallback) OR `pi-<full-uuidv7>` (when issued via the `cortex_update` pi tool — preferred because pi-attributed updates are resumable).
+- Author tags are `<role>-<8 hex>` (standalone fallback), `pi-<full-uuidv7>` (plain pi), or `bb-<thread id>` (bb). The last two resume via their own harness.
 - `scripts/` are Bun scripts when they need type-checking or stdlib parity (`scripts/check-docs.ts` is the precedent); thin orchestration stays in bash. macOS bash 3.2 must keep working — no associative arrays, no GNU awk extensions.
 - The terminal renders Markdown ONLY through `src/tui/reader.ts` (Mermaid ONLY through `src/tui/diagram.ts`, from escaped source), every stored string escaped by `src/tui/safety.ts` first; pi-tui's Markdown component is not a security boundary ([TUI](docs/tui.md#terminal-safety)).
 - TUI help single sources: `src/tui/commands.ts#COMMANDS`, `src/tui/keys.ts#KEY_ACTIONS`, `src/tui/theme.ts#THEME_TOKENS`, `src/tui/config.ts#SETTING_HELP`; rendered only through `src/tui/help.ts`; `test/unit/tui/commands.test.ts` fixes the list; docs never copy these lists ([TUI](docs/tui.md#help-settings-and-themes)).

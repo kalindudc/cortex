@@ -1,6 +1,7 @@
 import { defineCommand } from "citty";
 import type { CreateTaskRequest } from "../contracts.ts";
 import { withClient } from "../daemon.ts";
+import { authorForBbThread } from "../lib/bbAuthor.ts";
 import { validateAuthorTag, validateTagName, type Task, type TaskStatus } from "../store.ts";
 import { emitError, emitOk, resolveBody } from "../output.ts";
 
@@ -77,8 +78,7 @@ export default defineCommand({
       type: "string",
       alias: "author",
       valueHint: "id",
-      description:
-        "optional attribution tag; when set, records the first 'created' update so the task is not anonymous (create + attribute in one call)",
+      description: "optional attribution tag; defaults to bb-<thread id> in a bb thread; records a 'created' update",
     },
   },
   async run({ args }) {
@@ -98,9 +98,10 @@ export default defineCommand({
     // Validate the optional --as attribution up front (Store + server also
     // validate) so a bad tag fails before we persist a task.
     let author: string | undefined;
-    if (args.as !== undefined) {
+    const selected = authorForBbThread(args.as, process.env.BB_THREAD_ID);
+    if (selected !== undefined) {
       try {
-        author = validateAuthorTag(args.as);
+        author = validateAuthorTag(selected);
       } catch (e) {
         emitError(json, e);
       }

@@ -1,7 +1,8 @@
 # Session ID for parallel agents
 
-`cortex update --as <id>` REQUIRES an author id on every call. There are
-two ways to provide it; pick the first one that applies.
+Every update needs an author. In a bb thread, a valid `BB_THREAD_ID`
+defaults to `bb-<thread id>` unless `--as` is explicit. Outside bb, choose
+the first method below that applies.
 
 ## (1) PREFERRED — the `cortex_update` tool
 
@@ -41,7 +42,7 @@ Set `ROLE` to whatever role you're playing — `planner`, `implementer`,
 ## Why round-trip matters
 
 Updates posted via the `cortex_update` tool carry a `pi-<full-uuidv7>`
-author tag that maps 1:1 onto a pi session file. `cortex resume
+author tag (`bb-<thread id>` inside bb) that maps 1:1 onto its session. `cortex resume
 <task-id>` aggregates these tags and re-opens the chosen session. Updates
 posted via the openssl-fallback recipe are NOT resumable — there is no
 session file to map to. Prefer the tool whenever it's available.
@@ -65,7 +66,7 @@ Two patterns that look tempting but fail in practice:
 
 The robust answer is to keep the id in the agent's own working memory:
 generate once, repeat on every `cortex update`. If you forget, **the
-CLI exits 1 with `Missing required argument: --as`** — the failure is
+CLI exits 1 outside bb with an error naming `--as`** — the failure is
 loud and immediate, never silent.
 
 ## Tag format

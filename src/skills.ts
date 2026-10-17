@@ -35,6 +35,7 @@ import cortexCliTagPath from "./skills/cortex/cli/tag.md" with { type: "file" };
 import cortexCliSchemaPath from "./skills/cortex/cli/schema.md" with { type: "file" };
 import cortexCliDoctorPath from "./skills/cortex/cli/doctor.md" with { type: "file" };
 import cortexCliMemoryPath from "./skills/cortex/cli/memory.md" with { type: "file" };
+import cortexCliWatchPath from "./skills/cortex/cli/watch.md" with { type: "file" };
 import cortexCliAgentsPath from "./skills/cortex/cli/agents.md" with { type: "file" };
 import cortexRecipeSession from "./skills/cortex/recipes/session-id.md" with { type: "file" };
 import cortexRecipePersistence from "./skills/cortex/recipes/persistence.md" with { type: "file" };
@@ -64,6 +65,7 @@ const SKILLS: Record<SkillName, Manifest> = {
     "cli/schema.md": cortexCliSchemaPath,
     "cli/doctor.md": cortexCliDoctorPath,
     "cli/memory.md": cortexCliMemoryPath,
+    "cli/watch.md": cortexCliWatchPath,
     "cli/agents.md": cortexCliAgentsPath,
     "recipes/session-id.md": cortexRecipeSession,
     "recipes/persistence.md": cortexRecipePersistence,

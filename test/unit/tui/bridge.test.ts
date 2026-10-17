@@ -221,7 +221,7 @@ describe(":resume (P10): the existing cortex resume flow on the handed-over term
       }),
     );
     expect(err).toBeInstanceOf(CommandError);
-    expect(err.message).toContain("No pi session to resume on @1");
+    expect(err.message).toContain("No resumable session on @1");
     expect(ran).toBe(0);
     expect(h.order).toEqual([]);
   });
@@ -231,6 +231,6 @@ describe(":resume (P10): the existing cortex resume flow on the handed-over term
     const h = withUpdates([]);
     await h.session.execute("resume");
     expect(h.reads).toEqual([1]);
-    expect(h.session.status?.text).toContain("No pi session to resume on @1");
+    expect(h.session.status?.text).toContain("No resumable session on @1");
   });
 });

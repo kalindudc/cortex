@@ -58,6 +58,9 @@ const ISOLATED_KEYS = [
   "CORTEX_DB",
   "CORTEX_SKILL_DIR",
   "CORTEX_PI_EXTENSION_DIR",
+  // Dropped, never pinned: a bb thread's values would add a stray author or open a real thread.
+  "BB_THREAD_ID",
+  "BB_CLI",
 ] as const;
 
 /**

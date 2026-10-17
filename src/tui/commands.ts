@@ -2072,7 +2072,7 @@ export const COMMANDS: readonly CommandSpec[] = [
     group: "Task",
     usage: ":resume",
     description:
-      "Resume the pi session that posted on this task (cortex resume, which asks when there are several): it gets the terminal until it exits; the daemon keeps running",
+      "Resume the pi session or bb thread that posted on this task (cortex resume asks when there are several): it gets the terminal until it exits; the daemon keeps running",
     run: async (session, argument) => {
       noArgument("resume", argument);
       await resumeTask(session, currentTask(session).id);

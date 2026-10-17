@@ -30,6 +30,7 @@ const subCommands = {
   stop: () => import("./commands/stop.ts").then(m => m.default),
   reset: () => import("./commands/reset.ts").then(m => m.default),
   resume: () => import("./commands/resume.ts").then(m => m.default),
+  watch: () => import("./commands/watch.ts").then(m => m.default),
   backup: () => import("./commands/backup.ts").then(m => m.default),
   restore: () => import("./commands/restore.ts").then(m => m.default),
   memory: () => import("./commands/memory.ts").then(m => m.default),

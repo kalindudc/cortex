@@ -23,8 +23,12 @@ const COMMANDS: { name: string; summary: string }[] = [
   { name: "ls", summary: "list tasks (--json omits body; --full includes it)" },
   { name: "show", summary: "show one task + its updates (--json)" },
   { name: "search", summary: "fuzzy task finder via fzf (--json for scripted use)" },
-  { name: "memory", summary: "agent memory: search|show|context|lane (ranked recall, staleness, breadcrumbs; --json)" },
-  { name: "update", summary: "post an update / change status (--as required, --json)" },
+  {
+    name: "memory",
+    summary: "agent memory: search|show|context|streams|lane (ranked recall, staleness, breadcrumbs; --json)",
+  },
+  { name: "update", summary: "post an update / change status (--as or bb thread, --json)" },
+  { name: "watch", summary: "follow changes and reconnect markers (--json)" },
   { name: "edit", summary: "edit title/body/priority/tags (--json; anchor body edits)" },
   { name: "mv", summary: "move a task to a lane (--json)" },
   { name: "rm", summary: "remove a task (--json, --force)" },
@@ -81,7 +85,7 @@ export default defineCommand({
       grammar: {
         taskId: "positive integer, e.g. 42",
         tagName: TAG_NAME_RE.source,
-        author: "attribution tag: max 80 chars, no newlines; <role>-<8hex> or pi-<uuidv7>",
+        author: "attribution tag: max 80 chars, no newlines; <role>-<8hex>, pi-<uuidv7> or bb-<thread-id>",
         refs: "@<taskId> links a task; #<tag> links a tag (in bodies/summaries)",
         statuses: STATUSES,
         severities: SEVERITIES,
