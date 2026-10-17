@@ -1,4 +1,4 @@
-import { type PluginThreadHeaderActionProps, useBbNavigate } from "@get-bb/plugin-sdk/app";
+import { type PluginThreadHeaderActionProps, useBbNavigate, useSettings } from "@get-bb/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
@@ -7,8 +7,14 @@ import { StatusDot } from "./status";
 
 export const PANEL_ACTION_ID = "cortex";
 
+/** The header task chip, unless the taskChip setting hides it. */
+export function CortexChip(props: PluginThreadHeaderActionProps) {
+  const { values } = useSettings();
+  return values?.taskChip === false ? null : <TaskChip {...props} />;
+}
+
 /** `#<id> · <status>` for the focus task (plain `cortex` without one); opens the Cortex tab. */
-export function CortexChip({ threadId, isCompactViewport }: PluginThreadHeaderActionProps) {
+function TaskChip({ threadId, isCompactViewport }: PluginThreadHeaderActionProps) {
   const { state, error } = useThreadState(threadId);
   const navigate = useBbNavigate();
   const focus = state?.links.find(link => link.id === state.focusTaskId) ?? null;

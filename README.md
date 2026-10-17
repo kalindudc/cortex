@@ -29,7 +29,8 @@ cortex agents install      # agent skills, plus the pi extension and bb plugin w
 ## bb plugin
 
 In bb, the Cortex plugin shows each thread's task in a side-panel tab and a header chip, and gives threads on providers
-other than pi the Cortex memory tools. `cortex agents install` installs it when bb is installed and running (it needs
+other than pi the Cortex memory tools. It also shows each thread's memory in the prompt box and a Memory tab, where
+you can switch memory per thread. `cortex agents install` installs it when bb is installed and running (it needs
 npm); `cortex agents reset` replaces a plugin installed another way. See [bb setup and behavior](docs/bb.md).
 
 ## Quick start

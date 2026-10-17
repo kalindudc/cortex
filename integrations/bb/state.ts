@@ -10,6 +10,7 @@ import {
   STATUSES,
   updateKind,
 } from "./detail";
+import { MEMORY_MODES, type MemoryMode } from "./memory";
 
 export type { CortexAuthor, CortexStatus } from "./detail";
 
@@ -99,13 +100,21 @@ export type CortexState = {
   refreshTask(taskId: number, lane?: string): Promise<void>;
   refreshAll(): Promise<void>;
   primerFor(projectId: string): string | null;
+  /** The task ids of the project's cached primer; [] when nothing is cached. */
+  primerIdsFor(projectId: string): number[];
   laneFor(projectId: string): string | null;
+  /** The thread's own memory mode (plugin metadata), or null to follow the setting. */
+  memoryOverride(threadId: string): Promise<MemoryMode | null>;
+  /** Sets the thread's memory mode; null removes it. */
+  setMemoryOverride(threadId: string, mode: MemoryMode | null): Promise<void>;
+  /** The listed tasks' rows from one bodiless `cortex ls --json`, in the order of `ids`; unknown ids are left out. */
+  taskRows(ids: number[]): Promise<CortexTaskRow[]>;
   /** The thread's project and its checkout when that checkout is on this server's machine. */
   locate(threadId: string): Promise<{ projectId: string; cwd: string | null }>;
 };
 
-/** Realtime channels the server publishes; payloads are `{ threadId }`, `{ taskId }` and null. */
-export type CortexRealtimeChannel = "thread" | "task" | "all";
+/** Realtime channels the server publishes; payloads are `{ threadId }`, `{ taskId }`, null, and for memory `{ threadId }` or null (every thread). */
+export type CortexRealtimeChannel = "thread" | "task" | "all" | "memory";
 
 const taskId = z.number().int().positive();
 const statusSchema = z.enum(STATUSES);
@@ -229,14 +238,20 @@ export const memoryShowSchema = z.object({
   sections: z.array(z.object({ heading: z.string().nullable(), slug: z.string(), text: z.string() })).optional(),
 });
 export type MemoryShow = z.infer<typeof memoryShowSchema>;
-const contextSchema = z.object({ lane: z.string(), primer: z.string() });
+const contextSchema = z.object({ lane: z.string(), primer: z.string(), primerIds: z.array(taskId) });
 
 /** This plugin's thread metadata; each field falls back on its own, so one bad value never wipes the other. */
 const metadataSchema = z.object({
   pinnedTaskId: taskId.nullable().catch(null),
   linkedTaskIds: z.array(taskId).catch([]),
+  memoryMode: z.enum(MEMORY_MODES).nullable().catch(null),
 });
 type Metadata = z.infer<typeof metadataSchema>;
+
+/** The thread's own memory mode in this plugin's thread metadata (untrusted), or null. */
+export function overrideFrom(metadata: unknown): MemoryMode | null {
+  return metadataSchema.parse(metadata ?? {}).memoryMode;
+}
 
 const STATUS_AUDIT = /^status \u2192 /;
 const CACHE_MS = 60_000;
@@ -274,7 +289,7 @@ export function createCortexState(
   const tasks = new Map<string, Cached<TaskEntry>>();
   const titles = new Map<string, Cached<string>>();
   const streams = new Map<string, Cached<Array<z.infer<typeof streamRowSchema>>>>();
-  const primers = new Map<string, { lane: string; primer: string; cwd: string }>();
+  const primers = new Map<string, { lane: string; primer: string; primerIds: number[]; cwd: string }>();
   const warming = new Map<string, Promise<void>>();
   const locks = new Map<string, Promise<unknown>>();
   const pendingLanes = new Set<string>();
@@ -587,9 +602,29 @@ export function createCortexState(
     return { lane, tasks: recent };
   }
 
+  async function memoryOverride(threadId: string): Promise<MemoryMode | null> {
+    return (await readMetadata(threadId)).memoryMode;
+  }
+
+  async function setMemoryOverride(threadId: string, mode: MemoryMode | null): Promise<void> {
+    await serialized(threadId, async () => {
+      if (mode === null) await bb.sdk.threads.updatePluginMetadata({ threadId, remove: ["memoryMode"] });
+      else await bb.sdk.threads.updatePluginMetadata({ threadId, set: { memoryMode: mode } });
+    });
+  }
+
+  async function taskRows(ids: number[]): Promise<CortexTaskRow[]> {
+    if (ids.length === 0) return [];
+    const rows = new Map((await runner.run(["ls", "--json"], z.array(lsRowSchema))).map(row => [row.id, row]));
+    return ids.flatMap(id => {
+      const row = rows.get(id);
+      return row ? [{ id: row.id, title: row.title, lane: row.lane, status: row.status }] : [];
+    });
+  }
+
   async function loadPrimer(projectId: string, cwd: string): Promise<void> {
     const out = await runner.run(["memory", "context", "--json"], contextSchema, { cwd });
-    primers.set(projectId, { lane: out.lane, primer: out.primer, cwd });
+    primers.set(projectId, { lane: out.lane, primer: out.primer, primerIds: out.primerIds, cwd });
   }
 
   async function warmProject(threadId: string): Promise<void> {
@@ -670,8 +705,12 @@ export function createCortexState(
     refreshTask,
     refreshAll,
     primerFor: projectId => primers.get(projectId)?.primer ?? null,
+    primerIdsFor: projectId => primers.get(projectId)?.primerIds ?? [],
     laneFor: projectId => primers.get(projectId)?.lane ?? null,
     locate,
+    memoryOverride,
+    setMemoryOverride,
+    taskRows,
   };
   return state;
 }

@@ -1,13 +1,31 @@
-import { type BbPluginApi, defineRpcContract } from "@get-bb/plugin-sdk";
+import {
+  type BbPluginApi,
+  defineRpcContract,
+  type ExperimentalPluginProviderEnvEntry,
+  type PluginSettingDescriptors,
+} from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import { type CortexRunner, createCortexRunner, verifyCortexFeatures } from "./cli";
 import { STATUSES, splitNote } from "./detail";
+import {
+  createMemoryTracker,
+  effectiveMode,
+  MEMORY_MODES,
+  MEMORY_SETTINGS,
+  type MemoryMode,
+  type MemoryState,
+  type MemoryTracker,
+  memorySetting,
+  memoryStateSchema,
+  memoryViewSchema,
+} from "./memory";
 import {
   type CortexRealtimeChannel,
   type CortexState,
   cliUpdateSchema,
   createCortexState,
   NEUTRAL_CWD,
+  overrideFrom,
   REMOTE_REASON,
   taskDetailSchema,
   taskRowSchema,
@@ -29,6 +47,16 @@ const postNoteInputSchema = threadTaskInputSchema
   });
 const searchInputSchema = z.object({ query: z.string().trim().min(1).max(200) });
 const taskRowsSchema = z.object({ tasks: z.array(taskRowSchema) });
+const taskRowsInputSchema = z.object({ ids: z.array(z.number().int().positive()).max(500) });
+const setMemoryModeInputSchema = threadIdInputSchema.extend({ mode: z.enum(MEMORY_MODES).nullable() });
+/** A report from the Cortex pi extension (src/extensions/pi.ts reportToBb). */
+const memoryReportSchema = z.object({
+  threadId: z.string().regex(THREAD_ID),
+  sentAt: z.number().int().nonnegative(),
+  view: memoryViewSchema,
+});
+const REPORT_MAX_BYTES = 256 * 1024;
+const NOT_PI_REREAD = "Re-reading applies to pi threads; other providers read memory when bb starts their session.";
 
 export const rpcContract = defineRpcContract({
   threadState: { input: threadIdInputSchema, output: threadStateSchema },
@@ -43,6 +71,10 @@ export const rpcContract = defineRpcContract({
     input: threadIdInputSchema,
     output: taskRowsSchema.extend({ lane: z.string().nullable() }),
   },
+  memory: { input: threadIdInputSchema, output: memoryStateSchema },
+  taskRows: { input: taskRowsInputSchema, output: taskRowsSchema },
+  setMemoryMode: { input: setMemoryModeInputSchema, output: memoryStateSchema },
+  refreshMemory: { input: threadIdInputSchema, output: memoryStateSchema },
 });
 
 const doctorSchema = z.object({ author: z.string().min(1).optional() });
@@ -69,22 +101,63 @@ const recallParameters = z.object({
 });
 const updateResultSchema = z.object({ update: cliUpdateSchema, status: z.enum(STATUSES).optional() });
 
-export const USAGE = [
-  "Cortex is the user's task tracker and agent memory. Two tools use it:",
-  "- cortex_update posts an update on a cortex task, credited to this thread. Pass task_id, message (one or two plain sentences on what changed and what it means; no newlines, at most 4,096 characters), and optionally status (draft|open|review|blocked|done) and body (numbers, lists, logs).",
-  '- cortex_recall loads one memory stream ("@<id>", or "@<id>#<section>" for one section) with its staleness check, or searches memory by keywords across every lane, this project first. At most 3 calls per request and never the same query twice.',
-  "Memory is a hint; the code and the user are the truth. When continuing a stream, follow its Next section and honour its Decisions.",
-  'A line ::cortex{id="<id>"} in your reply shows that task as a card the user can open.',
-].join("\n");
+export const SETTINGS = {
+  cortexPath: {
+    type: "string",
+    label: "Cortex executable",
+    description:
+      "Absolute path to the cortex binary. Empty looks on PATH, then ~/bin and ~/.local/bin. Run `bb plugin reload cortex` after changing it.",
+    default: "",
+  },
+  memory: {
+    type: "select",
+    label: "Agent memory",
+    description:
+      "How agents use Cortex memory. Look up only keeps the matching tasks that arrive with a message and the recall tool, and leaves out the memory summary, the automatic save turn and the compaction notes; the agent can still post updates when its instructions say so. A thread's Memory tab can choose differently for that thread. A change applies from a pi thread's next message, and for other providers when bb next starts their session.",
+    options: [...MEMORY_SETTINGS],
+    default: "auto",
+    experimental_optionLabels: {
+      auto: "Automatic: threads you start look up and save; threads started by another thread only look up",
+      write: "Look up and save in every thread",
+      read: "Look up only",
+      off: "Off",
+    },
+  },
+  memoryChip: {
+    type: "boolean",
+    label: "Memory icon",
+    description:
+      "Shows the thread's memory beside the context circle under the prompt box, or in the thread header when that row is not on screen. Hover it for a summary; click it to open the Memory tab.",
+    default: true,
+  },
+  taskChip: { type: "boolean", label: "Task chip in the thread header", default: true },
+} satisfies PluginSettingDescriptors;
+
+const USAGE_TOOLS = "Cortex is the user's task tracker and agent memory. Two tools use it:";
+const USAGE_UPDATE =
+  "- cortex_update posts an update on a cortex task, credited to this thread. Pass task_id, message (one or two plain sentences on what changed and what it means; no newlines, at most 4,096 characters), and optionally status (draft|open|review|blocked|done) and body (numbers, lists, logs).";
+const USAGE_RECALL =
+  '- cortex_recall loads one memory stream ("@<id>", or "@<id>#<section>" for one section) with its staleness check, or searches memory by keywords across every lane, this project first. At most 3 calls per request and never the same query twice.';
+const USAGE_HINT =
+  "Memory is a hint; the code and the user are the truth. When continuing a stream, follow its Next section and honour its Decisions.";
+const USAGE_CARD = 'A line ::cortex{id="<id>"} in your reply shows that task as a card the user can open.';
+
+/** The usage block; without recall (memory off) it describes cortex_update alone. */
+export function usageFor(recall: boolean): string {
+  if (recall) return [USAGE_TOOLS, USAGE_UPDATE, USAGE_RECALL, USAGE_HINT, USAGE_CARD].join("\n");
+  return [USAGE_TOOLS.replace("Two tools use it:", "One tool uses it:"), USAGE_UPDATE, USAGE_CARD].join("\n");
+}
+export const USAGE = usageFor(true);
 
 /** The usage block plus the project's cached primer, within bb's 4,096-character instruction limit. */
-export function instructionsFor(primer: string | null): string {
-  if (!primer) return USAGE;
+export function instructionsFor(primer: string | null, options: { recall: boolean } = { recall: true }): string {
+  const usage = usageFor(options.recall);
+  if (!primer) return usage;
   const open = "\n\n<cortex_memory>\n";
   const close = "\n</cortex_memory>";
-  const room = INSTRUCTIONS_MAX - USAGE.length - open.length - close.length;
+  const room = INSTRUCTIONS_MAX - usage.length - open.length - close.length;
   const body = primer.length <= room ? primer : `${primer.slice(0, room - 1)}\u2026`;
-  return `${USAGE}${open}${body}${close}`;
+  return `${usage}${open}${body}${close}`;
 }
 
 /**
@@ -113,16 +186,14 @@ export async function recall(
 const message = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 export default async function plugin(bb: BbPluginApi): Promise<void> {
-  const settings = bb.settings.define({
-    cortexPath: {
-      type: "string",
-      label: "Cortex executable",
-      description:
-        "Absolute path to the cortex binary. Empty looks on PATH, then ~/bin and ~/.local/bin. Run `bb plugin reload cortex` after changing it.",
-      default: "",
-    },
+  const settings = bb.settings.define(SETTINGS);
+  // configure is synchronous, so it reads the values kept here.
+  let current = await settings.get();
+  settings.onChange(next => {
+    current = next;
+    bb.realtime.publish("memory", null);
   });
-  const { cortexPath } = await settings.get();
+  const { cortexPath } = current;
 
   let runner: CortexRunner;
   try {
@@ -146,6 +217,10 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
       postNote: unavailable,
       searchTasks: unavailable,
       recentTasks: unavailable,
+      memory: unavailable,
+      taskRows: unavailable,
+      setMemoryMode: unavailable,
+      refreshMemory: unavailable,
     });
     return;
   }
@@ -158,15 +233,23 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
     bb.log.warn(`cortex doctor failed, so the Cortex tab is read-only: ${message(err)}`);
   }
   const state = createCortexState(bb, runner, { userAuthor });
+  const tracker = createMemoryTracker(RECALL_BUDGET);
   const publish = (channel: CortexRealtimeChannel, payload: unknown): void => bb.realtime.publish(channel, payload);
-  registerCortexTools(bb, runner, state, publish);
+  registerCortexTools(bb, runner, state, tracker, publish);
 
   bb.agents.configure(context => {
     if (context.provider.id === "pi") return { tools: [], skills: [] };
+    const child = context.thread.parentThreadId !== null;
+    const mode = effectiveMode(memorySetting(current.memory), overrideFrom(context.pluginMetadata), child);
+    // As in the pi extension, only writers get the summary; off also drops recall.
+    const primer = mode === "write" ? state.primerFor(context.project.id) : null;
+    const summary = primer === null ? [] : state.primerIdsFor(context.project.id);
+    const start = { mode, lane: state.laneFor(context.project.id), summary, chars: primer?.length ?? 0 };
+    if (tracker.configured(context.thread.id, start)) publish("memory", { threadId: context.thread.id });
     return {
-      tools: ["cortex_update", "cortex_recall"],
+      tools: mode === "off" ? ["cortex_update"] : ["cortex_update", "cortex_recall"],
       skills: [],
-      instructions: instructionsFor(state.primerFor(context.project.id)),
+      instructions: instructionsFor(primer, { recall: mode !== "off" }),
     };
   });
 
@@ -190,7 +273,94 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
     },
     searchTasks: async ({ query }) => ({ tasks: await state.searchTasks(query) }),
     recentTasks: ({ threadId }) => state.recentTasks(threadId),
+    memory: ({ threadId }) => memoryState(threadId),
+    taskRows: async ({ ids }) => ({ tasks: await state.taskRows(ids) }),
+    setMemoryMode: async ({ threadId, mode }) => {
+      await state.setMemoryOverride(threadId, mode);
+      publish("memory", { threadId });
+      return memoryState(threadId);
+    },
+    refreshMemory: async ({ threadId }) => {
+      const before = await memoryState(threadId);
+      if (!before.pi) throw new Error(NOT_PI_REREAD);
+      const refreshAt = tracker.requestRefresh(threadId);
+      publish("memory", { threadId });
+      return { ...before, refreshAt };
+    },
   });
+
+  async function memoryState(threadId: string): Promise<MemoryState> {
+    const [thread, override] = await Promise.all([bb.sdk.threads.get({ threadId }), state.memoryOverride(threadId)]);
+    const setting = memorySetting(current.memory);
+    const child = thread.parentThreadId !== null;
+    const entry = tracker.get(threadId);
+    return {
+      threadId,
+      pi: thread.providerId === "pi",
+      setting,
+      override,
+      mode: effectiveMode(setting, override, child),
+      child,
+      view: entry?.view ?? null,
+      reportedAt: entry?.at ?? null,
+      refreshAt: tracker.refreshAt(threadId),
+    };
+  }
+
+  // The Cortex pi extension reports each change to its memory view here; the answer carries the last re-read request.
+  bb.http.route("POST", "/memory", async c => {
+    if (Number(c.req.header("content-length") ?? 0) > REPORT_MAX_BYTES) {
+      return c.json({ ok: false, error: "memory report too large" }, 413);
+    }
+    const text = await c.req.text();
+    if (text.length > REPORT_MAX_BYTES) return c.json({ ok: false, error: "memory report too large" }, 413);
+    let body: unknown;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      return c.json({ ok: false, error: "memory report is not JSON" }, 400);
+    }
+    const report = memoryReportSchema.safeParse(body);
+    if (!report.success) return c.json({ ok: false, error: "invalid memory report" }, 400);
+    const { threadId, sentAt, view } = report.data;
+    if (tracker.report(threadId, view, sentAt)) publish("memory", { threadId });
+    return c.json({ refreshAt: tracker.refreshAt(threadId) });
+  });
+
+  // The report address always, and CORTEX_MEMORY only to look up only or turn memory off: the variable is
+  // process-wide and pi's `pi -p` children inherit it, so `write` would make them save too.
+  const reportAddress: ExperimentalPluginProviderEnvEntry = {
+    name: "CORTEX_BB_MEMORY_URL",
+    value: { serverPath: `/api/v1/plugins/${bb.pluginId}/http/memory` },
+    reason: "Where the Cortex pi extension reports this thread's memory to the Cortex plugin",
+  };
+  const memoryEnv = (mode: MemoryMode): ExperimentalPluginProviderEnvEntry[] =>
+    mode === "write"
+      ? [reportAddress]
+      : [reportAddress, { name: "CORTEX_MEMORY", value: mode, reason: "This thread's Cortex memory mode" }];
+  // A changed environment rebuilds the pi session, so a failed lookup repeats the thread's last entries.
+  const lastEnv = new Map<string, ExperimentalPluginProviderEnvEntry[]>();
+  bb.providers.experimental_contributeEnv("pi", async ({ threadId }) => {
+    try {
+      const [thread, override] = await Promise.all([bb.sdk.threads.get({ threadId }), state.memoryOverride(threadId)]);
+      const entries = memoryEnv(effectiveMode(memorySetting(current.memory), override, thread.parentThreadId !== null));
+      lastEnv.set(threadId, entries);
+      return entries;
+    } catch (err) {
+      bb.log.warn(`reading the memory mode of ${threadId} failed, so its environment stays: ${message(err)}`);
+      return lastEnv.get(threadId) ?? memoryEnv(effectiveMode(memorySetting(current.memory), null, false));
+    }
+  });
+
+  bb.events.on("thread.active", ({ thread }) => {
+    if (tracker.nextRequest(thread.id)) publish("memory", { threadId: thread.id });
+  });
+  const forgetMemory = ({ thread }: { thread: { id: string } }): void => {
+    tracker.forget(thread.id);
+    lastEnv.delete(thread.id);
+  };
+  bb.events.on("thread.archived", forgetMemory);
+  bb.events.on("thread.deleted", forgetMemory);
 
   const warm = (threadId: string): void => {
     state.warmProject(threadId).catch(err => bb.log.warn(`primer warmup for ${threadId} failed: ${message(err)}`));
@@ -215,6 +385,7 @@ function registerCortexTools(
   bb: BbPluginApi,
   runner: CortexRunner,
   state: CortexState,
+  tracker: MemoryTracker,
   publish: (channel: CortexRealtimeChannel, payload: unknown) => void,
 ): void {
   // Per thread for the current request: calls made and queries claimed (in flight or answered).
@@ -237,10 +408,19 @@ function registerCortexTools(
       if (params.status !== undefined) args.push(`--status=${params.status}`);
       if (params.body) args.push(`--body=${params.body}`);
       args.push("--json");
-      const out = await runner.run(args, updateResultSchema, { signal: ctx.signal });
+      let out: z.infer<typeof updateResultSchema>;
+      try {
+        out = await runner.run(args, updateResultSchema, { signal: ctx.signal });
+      } catch (err) {
+        tracker.failed(ctx.threadId, message(err));
+        publish("memory", { threadId: ctx.threadId });
+        throw err;
+      }
       state.refreshTask(params.task_id).catch(err => bb.log.warn(`cortex refresh failed: ${message(err)}`));
+      tracker.updated(ctx.threadId, params.task_id);
       publish("thread", { threadId: ctx.threadId });
       publish("task", { taskId: params.task_id });
+      publish("memory", { threadId: ctx.threadId });
       const lines = [`\u2713 update [${out.update.id}] posted on task ${params.task_id}`];
       if (out.status) lines.push(`\u2713 status \u2192 ${out.status}`);
       return lines.join("\n");
@@ -270,10 +450,16 @@ function registerCortexTools(
       entry.claimed.add(key);
       try {
         const { projectId, cwd } = await state.locate(ctx.threadId);
-        return await recall(runner, query, { cwd, lane: state.laneFor(projectId), signal: ctx.signal });
+        const started = Date.now();
+        const text = await recall(runner, query, { cwd, lane: state.laneFor(projectId), signal: ctx.signal });
+        tracker.recalled(ctx.threadId, query, text, Date.now() - started);
+        return text;
       } catch (err) {
+        tracker.failed(ctx.threadId, message(err));
         entry.claimed.delete(key);
         throw err;
+      } finally {
+        publish("memory", { threadId: ctx.threadId });
       }
     },
   });

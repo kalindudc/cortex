@@ -36,7 +36,7 @@ export type FakeFixture = {
   doctorFails?: boolean;
   tasks?: Record<string, FakeTask>;
   streams?: Record<string, Array<{ id: number; title: string; lane: string; status: string; activity: number }>>;
-  context?: { lane: string; primer: string };
+  context?: { lane: string; primer: string; primerIds?: number[] };
   /** `cortex watch --json`: lines (or raw byte chunks) to print, then wait for SIGTERM unless `exitCode` is set. */
   watch?: { lines?: string[]; chunks?: number[][]; exitCode?: number };
   /** Fails every `update` with this message. */
@@ -84,8 +84,14 @@ if (a === "schema") {
   out({ task: taskJson(t), updates: t.updates.map(u => ({ ...u, severity: "progress" })) });
 } else if (a === "memory" && b === "show") {
   const t = taskOf(c);
-  if (!json) { out("TEXT memory show " + c + (flag("section") ? " #" + flag("section") : "") + " cwd=" + process.cwd() + "\n"); process.exit(0); }
   const s = t.staleness || { verdict: "fresh" };
+  if (!json) {
+    // The staleness line in the format of src/memory.ts renderStream.
+    const changed = (s.changed || []).length > 0 ? " \u00b7 changed: " + s.changed.join(", ") : "";
+    out("TEXT memory show " + c + (flag("section") ? " #" + flag("section") : "") + " cwd=" + process.cwd() + "\n" +
+      "staleness: " + s.verdict + " \u00b7 synced 2026-01-01 (1d)" + changed + "\n");
+    process.exit(0);
+  }
   out({
     task: taskJson(t),
     synced: t.synced ?? t.task.created,
@@ -100,7 +106,7 @@ if (a === "schema") {
 } else if (a === "memory" && b === "search") {
   out("TEXT memory search " + c + (flag("boost") ? " boost=" + flag("boost") : "") + "\n");
 } else if (a === "memory" && b === "context") {
-  out({ lane: fixture.context?.lane ?? "lane", primer: fixture.context?.primer ?? "", primerIds: [], terms: [], recent: false, hits: [], hitsText: "" });
+  out({ lane: fixture.context?.lane ?? "lane", primer: fixture.context?.primer ?? "", primerIds: fixture.context?.primerIds ?? [], terms: [], recent: false, hits: [], hitsText: "" });
 } else if (a === "search") {
   const q = (b || "").toLowerCase();
   out(Object.values(fixture.tasks || {}).map(taskJson).filter(t => t.title.toLowerCase().includes(q)));

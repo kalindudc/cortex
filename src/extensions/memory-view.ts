@@ -89,6 +89,26 @@ export type MemoryViewState = {
 /** A stream's current title, status and lane (from `cortex ls --json`). */
 export type StreamInfo = { title: string; status: string; lane: string };
 
+/** The view the Cortex bb plugin receives (integrations/bb/memory.ts mirrors it): no spinner frame, bounded. */
+export type MemoryReport = Omit<MemoryViewState, "frame">;
+/** The most rows and characters a report carries; the plugin's schema allows exactly these. */
+export const REPORT_LIMITS = { rows: 500, focus: 50, text: 2000 } as const;
+
+/** A new, bounded copy of the view (both lists are newest first, so the newest are kept). */
+export function memoryReport(s: MemoryViewState): MemoryReport {
+  return {
+    role: s.role,
+    lane: s.lane,
+    error: s.error.slice(0, REPORT_LIMITS.text),
+    stale: s.stale === null ? null : { id: s.stale.id, detail: s.stale.detail.slice(0, REPORT_LIMITS.text) },
+    saving: s.saving,
+    recallBudget: s.recallBudget,
+    focus: s.focus.slice(0, REPORT_LIMITS.focus),
+    inContext: s.inContext.slice(0, REPORT_LIMITS.rows).map(entry => ({ ...entry })),
+    stats: { ...s.stats },
+  };
+}
+
 type ThemeLike = { fg(color: string, text: string): string; bold(text: string): string };
 
 const PLAIN: ThemeLike = { fg: (_color, text) => text, bold: text => text };

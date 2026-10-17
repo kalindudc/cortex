@@ -75,7 +75,9 @@ The footer holds a quiet memory marker that fills in once memory is in context. 
 a memory call failed (red), the agent is using a stale stream (yellow, with its id), or the automatic save turn is
 running (a spinner). `/memory` opens a panel: health, the streams this session is working on, every stream in
 context and why (session summary, matched your prompt, recalled by the agent) and the session's totals. It ends
-with a legend of the symbols; `r` re-reads memory on the next prompt.
+with a legend of the symbols; `r` re-reads memory on the next prompt. bb does not show pi's footer or `/memory`
+text; with the Cortex bb plugin an icon beside each thread's context circle shows the same states and the panel is
+its Memory tab ([docs/bb.md](bb.md#memory-in-the-prompt-box-and-the-memory-tab)).
 
 Only the session you type into writes memory; headless ones (delegated agents, `pi -p` scripts) only read.
 `CORTEX_MEMORY=write|read|off` overrides that for the whole process.
@@ -157,6 +159,9 @@ pure functions of state and theme in `src/extensions/memory-view.ts`, installed 
   otherwise it needs two content words (`src/extensions/pi.ts#contentWords`, a cheap gate: the CLI's terms decide
   the hits) and either the first prompt or a `src/extensions/pi.ts#RECALL_CUE` match.
   The primer is refetched only after compaction or `/memory refresh`; errors go to the footer, never the prompt.
+- In bb, `src/extensions/pi.ts#reportToBb` sends the view to the Cortex plugin: one awaited report per prompt,
+  bounded by `src/extensions/pi.ts#BB_REPORT_TIMEOUT_MS` and skipped while the last one failed, and one per changed
+  view. It never throws or sets the memory error, and outside bb it makes no call ([docs/bb.md](bb.md#under-the-hood)).
 - `cortex_recall` claims a query before it runs (pi runs one message's tool calls in parallel). Failures throw:
   pi ignores a returned `isError`, and `pi.exec` reports a timeout as a success marked killed.
 - `src/extensions/pi.ts#shouldCheckpoint` (writer only) grants one hidden turn to a completed request that edited

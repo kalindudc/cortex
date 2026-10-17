@@ -10,7 +10,8 @@ import {
 } from "@get-bb/plugin-sdk/testing";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { createFakeCortex, type FakeCortex, type FakeFixture, type FakeTask } from "./fake-cortex";
-import plugin, { instructionsFor, USAGE } from "./server";
+import type { MemoryView } from "./memory";
+import plugin, { instructionsFor, USAGE, usageFor } from "./server";
 import { REMOTE_REASON } from "./state";
 import { routeCortexEvent } from "./watch";
 
@@ -19,6 +20,9 @@ const REMOTE = "thr_bbbbbbbb";
 const OTHER = "thr_cccccccc";
 /** A thread whose title lookup fails. */
 const GONE = "thr_ffffffff";
+/** A top-level pi thread, and a pi thread started by it. */
+const PI = "thr_pppppppp";
+const PI_CHILD = "thr_qqqqqqqq";
 const PROJECT = "proj_1";
 const USER = "kalindu-test";
 
@@ -66,15 +70,19 @@ async function setup(options: { fixture?: FakeFixture; running?: string[]; corte
   const checkout = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "cortex-bb-checkout-")));
   disposers.push(() => fs.rmSync(checkout, { recursive: true, force: true }));
   const metadata = new Map<string, Record<string, unknown>>();
+  /** Threads whose lookup fails from now on. */
+  const broken = new Set<string>();
   const sdk = {
     threads: {
       get: async ({ threadId }: { threadId: string }) => {
-        if (threadId === GONE) throw new Error("HTTP 404: thread not found");
+        if (threadId === GONE || broken.has(threadId)) throw new Error("HTTP 404: thread not found");
         return makeThreadResponse({
           id: threadId,
           projectId: PROJECT,
           title: `Thread ${threadId}`,
           environmentId: threadId === REMOTE ? "env_remote" : "env_local",
+          ...(threadId === PI || threadId === PI_CHILD ? { providerId: "pi" } : {}),
+          ...(threadId === PI_CHILD ? { parentThreadId: PI } : {}),
         });
       },
       getPluginMetadata: async ({ threadId }: { threadId: string }) => metadata.get(threadId) ?? {},
@@ -111,11 +119,14 @@ async function setup(options: { fixture?: FakeFixture; running?: string[]; corte
   await plugin(bb);
   disposers.push(() => harness.lifecycle.dispose());
   const argvs = () => cortex.calls().map(call => call.argv);
-  const resolve = (providerId: string) =>
+  const resolve = (
+    providerId: string,
+    over: { thread?: { id?: string; parentThreadId?: string | null }; pluginMetadata?: Record<string, string> } = {},
+  ) =>
     harness.behavior.resolveAgentConfiguration(
-      makePluginAgentConfigurationContext({ provider: { id: providerId }, project: { id: PROJECT } }),
+      makePluginAgentConfigurationContext({ provider: { id: providerId }, project: { id: PROJECT }, ...over }),
     );
-  return { bb, harness, cortex, checkout, metadata, argvs, resolve };
+  return { bb, harness, cortex, checkout, metadata, broken, argvs, resolve };
 }
 
 const threadSignal = (threadId: string) => ({ channel: "thread", payload: { threadId } });
@@ -223,7 +234,9 @@ describe("cortex_recall", () => {
   test("loads a stream or a section with the CLI's text, run in the thread's checkout", async () => {
     const s = await setup();
     const call = (query: string) => s.harness.behavior.callAgentTool("cortex_recall", { query }, { threadId: THREAD });
-    expect(await call("@4")).toBe(`TEXT memory show 4 cwd=${s.checkout}\n`);
+    expect(await call("@4")).toBe(
+      `TEXT memory show 4 cwd=${s.checkout}\nstaleness: stale \u00b7 synced 2026-01-01 (1d) \u00b7 changed: src/a.ts\n`,
+    );
     expect(await call("@4#next")).toContain("#next");
     expect(s.argvs()).toContainEqual(["memory", "show", "4", "--section=next"]);
   });
@@ -691,5 +704,270 @@ describe("finding tasks", () => {
       [3, false, true],
       [2, true, false],
     ]);
+  });
+});
+
+function memoryView(over: Partial<MemoryView> = {}): MemoryView {
+  return {
+    role: "writer",
+    lane: "cortex",
+    error: "",
+    stale: null,
+    saving: false,
+    recallBudget: 2,
+    focus: [],
+    inContext: [],
+    stats: { prompts: 0, lookups: 0, lastMs: 0, chars: 0, checkpoints: 0, breadcrumbs: 0, silentRuns: 0 },
+    ...over,
+  };
+}
+
+describe("memory", () => {
+  const REPORT_URL: [string, unknown] = ["CORTEX_BB_MEMORY_URL", { serverPath: "/api/v1/plugins/cortex/http/memory" }];
+  const pairs = (entries: Array<{ name: string; value: unknown }>) => entries.map(entry => [entry.name, entry.value]);
+  const env = async (s: Setup, threadId: string) =>
+    pairs(await s.harness.behavior.resolveProviderEnv("pi", { threadId, projectId: PROJECT, hostId: "host_local" }));
+  const rpc = (s: Setup, method: string, input: unknown) =>
+    s.harness.behavior.callRpc(method, input) as Promise<Record<string, any>>;
+  const memory = (s: Setup, threadId: string) => rpc(s, "memory", { threadId });
+  const post = (s: Setup, body: unknown) =>
+    s.harness.behavior.fetchHttp("POST", "/memory", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: typeof body === "string" ? body : JSON.stringify(body),
+    });
+  const memorySignals = (s: Setup) => s.harness.inspection.realtimeSignals.filter(signal => signal.channel === "memory");
+  const names = (tools: Array<{ name: string }>) => tools.map(tool => tool.name).sort();
+
+  test("four settings with their defaults; a change applies to the next configure and environment and signals every thread", async () => {
+    const s = await setup();
+    const descriptors = s.harness.inspection.registrations.settingsDescriptors;
+    expect(Object.keys(descriptors)).toEqual(["cortexPath", "memory", "memoryChip", "taskChip"]);
+    expect(descriptors.memory).toMatchObject({
+      type: "select",
+      label: "Agent memory",
+      options: ["auto", "write", "read", "off"],
+      default: "auto",
+    });
+    expect(descriptors.memoryChip).toMatchObject({ type: "boolean", label: "Memory icon", default: true });
+    expect(descriptors.taskChip).toMatchObject({ type: "boolean", label: "Task chip in the thread header", default: true });
+    await warm(s);
+    expect(await env(s, PI)).toEqual([REPORT_URL]);
+    await s.harness.behavior.setSettings({ memory: "read" });
+    expect(memorySignals(s)).toContainEqual({ channel: "memory", payload: null });
+    expect((await s.resolve("codex")).instructions).toBe(USAGE);
+    expect(await env(s, PI)).toEqual([REPORT_URL, ["CORTEX_MEMORY", "read"]]);
+  });
+
+  test("configure: the summary only when saving, no recall when off, child threads look up only, the thread's choice wins", async () => {
+    const s = await setup();
+    await warm(s);
+    const write = await s.resolve("codex");
+    expect(write.instructions).toContain("<cortex_memory>");
+    expect(names(write.tools)).toEqual(["cortex_recall", "cortex_update"]);
+    const child = await s.resolve("codex", { thread: { parentThreadId: THREAD } });
+    expect(child.instructions).toBe(USAGE);
+    expect(names(child.tools)).toEqual(["cortex_recall", "cortex_update"]);
+
+    await s.harness.behavior.setSettings({ memory: "read" });
+    const read = await s.resolve("codex");
+    expect(read.instructions).toBe(USAGE);
+    expect(names(read.tools)).toEqual(["cortex_recall", "cortex_update"]);
+
+    await s.harness.behavior.setSettings({ memory: "off" });
+    const off = await s.resolve("codex");
+    expect(names(off.tools)).toEqual(["cortex_update"]);
+    expect(off.instructions).toBe(usageFor(false));
+    expect(off.instructions).toContain("One tool uses it:");
+    expect(off.instructions).not.toContain("cortex_recall");
+    expect(off.instructions).not.toContain("Memory is a hint");
+
+    expect((await s.resolve("codex", { pluginMetadata: { memoryMode: "write" } })).instructions).toContain(
+      "<cortex_memory>",
+    );
+    expect(names((await s.resolve("codex", { pluginMetadata: { memoryMode: "always" } })).tools)).toEqual([
+      "cortex_update",
+    ]);
+    const pi = await s.resolve("pi");
+    expect(pi.tools).toEqual([]);
+    expect(pi.instructions ?? "").toBe("");
+  });
+
+  test("pi environment: the report address always, CORTEX_MEMORY only to look up only or turn off, never write", async () => {
+    const s = await setup();
+    expect(await env(s, PI)).toEqual([REPORT_URL]);
+    expect(await env(s, PI_CHILD)).toEqual([REPORT_URL, ["CORTEX_MEMORY", "read"]]);
+    s.metadata.set(PI, { memoryMode: "off" });
+    expect(await env(s, PI)).toEqual([REPORT_URL, ["CORTEX_MEMORY", "off"]]);
+    s.metadata.set(PI_CHILD, { memoryMode: "write" });
+    expect(await env(s, PI_CHILD)).toEqual([REPORT_URL]);
+    s.metadata.delete(PI_CHILD);
+    await s.harness.behavior.setSettings({ memory: "write" });
+    expect(await env(s, PI_CHILD)).toEqual([REPORT_URL]);
+    const entries = await s.harness.behavior.resolveProviderEnv("pi", { threadId: PI, projectId: PROJECT, hostId: "h" });
+    expect(entries.every(entry => entry.reason.length > 0)).toBe(true);
+  });
+
+  test("a failed lookup repeats the thread's last entries, or the setting's for a top-level thread", async () => {
+    const s = await setup();
+    expect(await env(s, PI_CHILD)).toEqual([REPORT_URL, ["CORTEX_MEMORY", "read"]]);
+    s.broken.add(PI_CHILD);
+    await s.harness.behavior.setSettings({ memory: "off" });
+    expect(await env(s, PI_CHILD)).toEqual([REPORT_URL, ["CORTEX_MEMORY", "read"]]);
+    s.broken.add(PI);
+    expect(await env(s, PI)).toEqual([REPORT_URL, ["CORTEX_MEMORY", "off"]]);
+    await s.harness.behavior.setSettings({ memory: "auto" });
+    expect(await env(s, PI)).toEqual([REPORT_URL]);
+    expect(s.harness.inspection.logEntries.some(entry => entry.message.includes("its environment stays"))).toBe(true);
+  });
+
+  test("a valid report is stored and signalled, and its answer carries the last re-read; an older report is ignored", async () => {
+    const s = await setup();
+    const first = await post(s, { threadId: PI, sentAt: 100, view: memoryView({ focus: [1] }) });
+    expect(first.status).toBe(200);
+    expect(await first.json()).toEqual({ refreshAt: 0 });
+    expect(memorySignals(s)).toEqual([{ channel: "memory", payload: { threadId: PI } }]);
+    const stored = await memory(s, PI);
+    expect(stored).toMatchObject({ pi: true, child: false, setting: "auto", override: null, mode: "write", refreshAt: 0 });
+    expect(stored.view).toEqual(memoryView({ focus: [1] }));
+    expect(stored.reportedAt).toBeGreaterThan(0);
+
+    const asked = await rpc(s, "refreshMemory", { threadId: PI });
+    expect(asked.refreshAt).toBeGreaterThan(0);
+    const older = await post(s, { threadId: PI, sentAt: 50, view: memoryView({ focus: [2] }) });
+    expect(older.status).toBe(200);
+    expect(await older.json()).toEqual({ refreshAt: asked.refreshAt });
+    expect((await memory(s, PI)).view.focus).toEqual([1]);
+    expect(memorySignals(s)).toHaveLength(2);
+  });
+
+  test("the route rejects invalid JSON, a bad thread id, an over-long list and a body over 256 KiB, storing nothing", async () => {
+    const s = await setup();
+    const valid = { threadId: PI, sentAt: 1, view: memoryView() };
+    const rows = Array.from({ length: 501 }, (_, i) => ({ id: i + 1, via: "recall" as const }));
+    const cases: Array<[unknown, number]> = [
+      ["{not json", 400],
+      [{ ...valid, threadId: "thread-1" }, 400],
+      [{ ...valid, sentAt: -1 }, 400],
+      [{ ...valid, view: memoryView({ inContext: rows }) }, 400],
+      [{ ...valid, pad: "x".repeat(300 * 1024) }, 413],
+    ];
+    for (const [body, status] of cases) expect((await post(s, body)).status).toBe(status);
+    expect((await memory(s, PI)).view).toBeNull();
+    expect(memorySignals(s)).toEqual([]);
+  });
+
+  test("another provider's view: the summary, recalls, a stale or failed recall, and thread.active clears stale", async () => {
+    const fixture = baseFixture();
+    fixture.context = { lane: "cortex", primer: "PRIMER: [1] open \u00b7 cortex", primerIds: [1, 3] };
+    const s = await setup({ fixture });
+    await warm(s);
+    await s.resolve("codex", { thread: { id: THREAD } });
+    expect(memorySignals(s)).toContainEqual({ channel: "memory", payload: { threadId: THREAD } });
+    const first = await memory(s, THREAD);
+    expect(first).toMatchObject({ pi: false, child: false, mode: "write" });
+    expect(first.view).toEqual(
+      memoryView({
+        recallBudget: 3,
+        inContext: [
+          { id: 3, via: "summary" },
+          { id: 1, via: "summary" },
+        ],
+        stats: { ...memoryView().stats, chars: "PRIMER: [1] open \u00b7 cortex".length },
+      }),
+    );
+
+    const call = (query: string) => s.harness.behavior.callAgentTool("cortex_recall", { query }, { threadId: THREAD });
+    await call("@4");
+    let view = (await memory(s, THREAD)).view;
+    expect(view.stale).toEqual({ id: 4, detail: "changed: src/a.ts" });
+    expect(view.inContext[0]).toEqual({ id: 4, via: "recall" });
+    expect(view.focus).toEqual([4]);
+    expect(view.stats.lookups).toBe(1);
+    await expect(call("@77")).rejects.toThrow(/not found/);
+    view = (await memory(s, THREAD)).view;
+    expect(view.error).toMatch(/task 77 not found/);
+    expect(view.stale?.id).toBe(4);
+
+    await s.harness.behavior.callAgentTool("cortex_update", { task_id: 2, message: "x" }, { threadId: THREAD });
+    view = (await memory(s, THREAD)).view;
+    expect(view.focus).toEqual([2, 4]);
+    expect(view.error).toBe("");
+    await expect(
+      s.harness.behavior.callAgentTool("cortex_update", { task_id: 77, message: "x" }, { threadId: THREAD }),
+    ).rejects.toThrow(/not found/);
+    expect((await memory(s, THREAD)).view.error).toMatch(/task 77 not found/);
+
+    await s.harness.behavior.emitThreadEvent("thread.active", {
+      thread: makeThreadResponse({ id: THREAD, projectId: PROJECT }),
+    });
+    expect((await memory(s, THREAD)).view.stale).toBeNull();
+    await s.harness.behavior.emitThreadEvent("thread.deleted", { thread: makeThreadResponse({ id: THREAD }) });
+    expect((await memory(s, THREAD)).view).toBeNull();
+  });
+
+  test("another provider's view follows its next configure after a mode change, keeping what it recalled", async () => {
+    const s = await setup();
+    await s.resolve("codex", { thread: { id: THREAD } });
+    await s.harness.behavior.callAgentTool("cortex_recall", { query: "@1" }, { threadId: THREAD });
+    expect((await memory(s, THREAD)).view).toMatchObject({ role: "writer", inContext: [{ id: 1, via: "recall" }] });
+    await rpc(s, "setMemoryMode", { threadId: THREAD, mode: "read" });
+    expect(s.metadata.get(THREAD)).toEqual({ memoryMode: "read" });
+    const signals = memorySignals(s).length;
+    // bb passes the thread's plugin metadata to configure.
+    await s.resolve("codex", { thread: { id: THREAD }, pluginMetadata: { memoryMode: "read" } });
+    expect(memorySignals(s)).toHaveLength(signals + 1);
+    const after = await memory(s, THREAD);
+    expect(after).toMatchObject({ override: "read", mode: "read" });
+    expect(after.view).toMatchObject({ role: "reader", inContext: [{ id: 1, via: "recall" }], focus: [1] });
+    await s.resolve("codex", { thread: { id: THREAD }, pluginMetadata: { memoryMode: "read" } });
+    expect(memorySignals(s)).toHaveLength(signals + 1);
+  });
+
+  test("setMemoryMode sets and removes the thread's choice; taskRows runs one ls in id order; re-reading is for pi", async () => {
+    const s = await setup();
+    expect(await rpc(s, "setMemoryMode", { threadId: THREAD, mode: "read" })).toMatchObject({
+      override: "read",
+      mode: "read",
+    });
+    expect(s.metadata.get(THREAD)).toEqual({ memoryMode: "read" });
+    expect(memorySignals(s)).toEqual([{ channel: "memory", payload: { threadId: THREAD } }]);
+    expect(await rpc(s, "setMemoryMode", { threadId: THREAD, mode: null })).toMatchObject({
+      override: null,
+      mode: "write",
+    });
+    expect(s.metadata.get(THREAD)).toEqual({});
+    await rpc(s, "setMemoryMode", { threadId: THREAD, mode: "off" });
+    await rpc(s, "pin", { threadId: THREAD, taskId: 1 });
+    expect(s.metadata.get(THREAD)).toMatchObject({ memoryMode: "off", pinnedTaskId: 1 });
+    await expect(rpc(s, "setMemoryMode", { threadId: THREAD, mode: "save" })).rejects.toThrow();
+
+    const before = s.argvs().length;
+    const rows = await rpc(s, "taskRows", { ids: [4, 99, 1] });
+    expect(rows.tasks).toEqual([
+      { id: 4, title: "Stale one", lane: "cortex", status: "open" },
+      { id: 1, title: "Task 1", lane: "cortex", status: "open" },
+    ]);
+    expect(s.argvs().slice(before)).toEqual([["ls", "--json"]]);
+
+    await expect(rpc(s, "refreshMemory", { threadId: THREAD })).rejects.toThrow(/Re-reading applies to pi threads/);
+    expect(await memory(s, PI)).toMatchObject({ pi: true, view: null, reportedAt: null, refreshAt: 0 });
+    const asked = await rpc(s, "refreshMemory", { threadId: PI });
+    expect(asked.refreshAt).toBeGreaterThan(0);
+    expect((await memory(s, PI)).refreshAt).toBe(asked.refreshAt);
+    expect(await memory(s, PI_CHILD)).toMatchObject({ pi: true, child: true, mode: "read" });
+  });
+
+  test("the memory RPCs explain why when cortex is missing", async () => {
+    const s = await setup({ cortexPath: "/nonexistent/cortex" });
+    const calls: Array<[string, unknown]> = [
+      ["memory", { threadId: THREAD }],
+      ["taskRows", { ids: [1] }],
+      ["setMemoryMode", { threadId: THREAD, mode: null }],
+      ["refreshMemory", { threadId: PI }],
+    ];
+    for (const [method, input] of calls) {
+      await expect(s.harness.behavior.callRpc(method, input)).rejects.toThrow(/Cortex is unavailable/);
+    }
   });
 });

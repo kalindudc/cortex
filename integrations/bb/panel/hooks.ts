@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRealtime, useRpc } from "@get-bb/plugin-sdk/app";
+import type { MemoryState } from "../memory";
 import type { rpcContract } from "../server";
-import type { CortexRealtimeChannel, CortexTaskDetail, CortexThreadState } from "../state";
+import type { CortexRealtimeChannel, CortexTaskDetail, CortexTaskRow, CortexThreadState } from "../state";
+
+/** The most ids one taskRows call takes (its input schema's limit). */
+const TASK_ROWS_MAX = 500;
 
 const TASK_ID = /^[1-9][0-9]{0,8}$/;
 
@@ -70,6 +74,67 @@ export function useThreadState(threadId: string) {
   });
   useChannel("all", () => refetch());
   return { rpc, state, error, accept, refetch };
+}
+
+/** The thread's memory, refetched on its own or every thread's memory signal and on reconnects; the RPC runs no CLI. */
+export function useMemory(threadId: string) {
+  const rpc = useCortexRpc();
+  const [memory, setMemory] = useState<MemoryState | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const latest = useRef(0);
+  const accept = useCallback((next: MemoryState) => {
+    latest.current++;
+    setMemory(next);
+    setError(null);
+  }, []);
+  const refetch = useCallback(() => {
+    const request = ++latest.current;
+    rpc.call("memory", { threadId }).then(
+      next => {
+        if (request !== latest.current) return;
+        setMemory(next);
+        setError(null);
+      },
+      cause => {
+        if (request === latest.current) setError(errorText(cause));
+      },
+    );
+  }, [rpc, threadId]);
+  useEffect(() => {
+    refetch();
+  }, [refetch]);
+  useChannel("memory", payload => {
+    if (payload === null || signalField(payload, "threadId") === threadId) refetch();
+  });
+  useChannel("all", () => refetch());
+  return { memory, error, refetch, accept };
+}
+
+/**
+ * The listed tasks' rows by id, from one taskRows call per distinct set of ids.
+ * Null until the first answer and after a failure, when rows show ids only;
+ * while a new set loads, the last answer stays.
+ */
+export function useTaskRows(ids: readonly number[]): Map<number, CortexTaskRow> | null {
+  const rpc = useCortexRpc();
+  const key = ids.slice(0, TASK_ROWS_MAX).join(",");
+  const [rows, setRows] = useState<Map<number, CortexTaskRow> | null>(null);
+  useEffect(() => {
+    if (key === "") return;
+    let live = true;
+    rpc.call("taskRows", { ids: key.split(",").map(Number) }).then(
+      out => {
+        if (live) setRows(new Map(out.tasks.map(row => [row.id, row])));
+      },
+      () => {
+        if (live) setRows(null);
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [rpc, key]);
+  return rows;
 }
 
 /**
