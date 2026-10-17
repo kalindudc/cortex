@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { Component, OverlayHandle } from "@earendil-works/pi-tui";
+import { bbPluginDir } from "../../../src/bbPlugin.ts";
 import type { CortexClient, DaemonIdentity, WorkspaceSnapshot } from "../../../src/contracts.ts";
 import { listSkills, skillDir } from "../../../src/skills.ts";
 import type { Task } from "../../../src/store.ts";
@@ -12,7 +13,7 @@ import type { Dialog } from "../../../src/tui/dialogs.ts";
 import { DEFAULT_KEYS } from "../../../src/tui/keys.ts";
 import { openPreferences } from "../../../src/tui/preferences.ts";
 import { type OverlayHost, type SessionOptions, type ThemeControl, TuiSession } from "../../../src/tui/session.ts";
-import { CONFIG_ENTRIES, openConfig, runConfig, themeSourceText } from "../../../src/tui/settings.ts";
+import { CONFIG_ENTRIES, installReport, openConfig, runConfig, themeSourceText } from "../../../src/tui/settings.ts";
 import { type ResolvedTheme, resolveTheme } from "../../../src/tui/theme.ts";
 
 // The :config pane is the ONLY writer of tui.toml in the TUI: each change
@@ -43,7 +44,7 @@ const task = (id: number, over: Partial<Task> = {}): Task => ({
 });
 const TASKS: Task[] = [task(1, { title: "b" }), task(2, { title: "a" }), task(3, { title: "c", status: "done" })];
 
-const ENV = ["XDG_CONFIG_HOME", "CORTEX_SKILL_DIR", "CORTEX_PI_EXTENSION_DIR"] as const;
+const ENV = ["XDG_CONFIG_HOME", "CORTEX_SKILL_DIR", "CORTEX_PI_EXTENSION_DIR", "CORTEX_BB_CLI"] as const;
 let saved: Partial<Record<(typeof ENV)[number], string>>;
 let dir: string;
 let toml: string;
@@ -54,6 +55,8 @@ beforeEach(() => {
   process.env.XDG_CONFIG_HOME = path.join(dir, "xdg");
   process.env.CORTEX_SKILL_DIR = path.join(dir, "skills");
   process.env.CORTEX_PI_EXTENSION_DIR = path.join(dir, "pi-extensions");
+  // installAll runs in this process: bb stays off, so the real bb and npm never run.
+  process.env.CORTEX_BB_CLI = "";
   toml = path.join(dir, "tui.toml");
 });
 
@@ -399,7 +402,9 @@ describe("agent integrations", () => {
     await statusMatches(s, /^Installed/);
     for (const name of listSkills()) expect(fs.existsSync(skillFile(name)), name).toBe(true);
     expect(fs.existsSync(path.join(dir, "pi-extensions", "cortex", "index.ts"))).toBe(true);
-    expect(s.status?.text).toBe(`Installed ${listSkills().length} skills and the pi extension`);
+    expect(s.status?.text).toBe(
+      `Installed ${listSkills().length} skills and the pi extension; skipped the bb plugin: bb is turned off (CORTEX_BB_CLI is empty)`,
+    );
   });
 
   test("reset asks first (naming the dirs); n keeps everything, y wipes and reinstalls", async () => {
@@ -423,8 +428,44 @@ describe("agent integrations", () => {
     highlight(s, "agents:reset", "reset");
     s.notify("info", "waiting");
     type("\r", "y");
-    await statusMatches(s, /^Installed \d+ skills and the pi extension$/);
+    await statusMatches(s, /^Installed \d+ skills and the pi extension; skipped the bb plugin/);
     expect(fs.existsSync(stray)).toBe(false);
     for (const name of listSkills()) expect(fs.existsSync(skillFile(name)), name).toBe(true);
+  });
+
+  test("with bb present, reset names the plugin dir and says its settings reset (n runs nothing)", async () => {
+    // A stand-in that would only leave a mark: answering n never runs it.
+    const fakeBb = path.join(dir, "bb");
+    fs.writeFileSync(fakeBb, `#!/bin/sh\ntouch "${dir}/bb-was-run"\n`, { mode: 0o755 });
+    process.env.CORTEX_BB_CLI = fakeBb;
+    const { s, type } = makeSession();
+    openConfig(s);
+    highlight(s, "agents:reset", "reset");
+    type("\r");
+    const confirm = top(s);
+    const message = confirm.spec.kind === "confirm" ? confirm.spec.message.join("\n") : "";
+    expect(message).toContain(bbPluginDir());
+    expect(message).toContain("which resets its settings");
+    type("n");
+    await flush();
+    expect(fs.existsSync(path.join(dir, "bb-was-run"))).toBe(false);
+  });
+
+  test("the status line reports the bb plugin: installed, not running, skipped, failed (as an error)", () => {
+    const base = { skills: [{ name: "cortex", dir: "/s" }], extensions: [{ name: "pi", dir: "/e" }], skipped: [] };
+    expect(installReport({ ...base, bb: { status: "installed", dir: "/d", plugin: { status: "running" } } })).toEqual({
+      level: "info",
+      text: "Installed 1 skill and the pi extension; bb plugin installed",
+    });
+    expect(
+      installReport({ ...base, bb: { status: "reloaded", dir: "/d", plugin: { status: "needs-configuration" } } }).text,
+    ).toBe("Installed 1 skill and the pi extension; bb plugin reloaded but it is needs-configuration");
+    expect(installReport({ ...base, bb: { status: "skipped", reason: "bb not found" } }).text).toBe(
+      "Installed 1 skill and the pi extension; skipped the bb plugin: bb not found",
+    );
+    expect(installReport({ ...base, bb: { status: "failed", dir: "/d", reason: "npm ci failed (exit 1)" } })).toEqual({
+      level: "error",
+      text: "Installed 1 skill and the pi extension; the bb plugin failed: npm ci failed (exit 1)",
+    });
   });
 });

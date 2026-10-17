@@ -2,6 +2,7 @@ import { defineCommand } from "citty";
 import type { PostUpdateRequest } from "../contracts.ts";
 import { withClient } from "../daemon.ts";
 import { authorForBbThread } from "../lib/bbAuthor.ts";
+import { resolveAuthor } from "../lib/userAuthor.ts";
 import { validateAuthorTag, type TaskStatus, type Update } from "../store.ts";
 import { emitError, printJson } from "../output.ts";
 
@@ -21,9 +22,8 @@ export default defineCommand({
     message: {
       type: "string",
       alias: "m",
-      required: true,
       valueHint: "text",
-      description: `short summary, max 4096 chars`,
+      description: "short summary, max 4096 chars (required unless --as-me -s changes only the status)",
     },
     status: {
       type: "string",
@@ -43,6 +43,12 @@ export default defineCommand({
       valueHint: "id",
       description: "author tag; defaults to bb-<thread id> in a bb thread; required otherwise",
     },
+    "as-me": {
+      type: "boolean",
+      default: false,
+      description:
+        "record it as the user's own change, like the TUI: credited to the user, never notifying (for tools acting for the user, not agents)",
+    },
     json: {
       type: "boolean",
       default: false,
@@ -51,6 +57,7 @@ export default defineCommand({
   },
   async run({ args }) {
     const json = args.json;
+    const asMe = args["as-me"] === true;
     const id = Number.parseInt(args.id, 10);
     if (!Number.isFinite(id)) {
       emitError(json, new Error("id must be a number"));
@@ -58,10 +65,22 @@ export default defineCommand({
     if (args.status && !STATUSES.includes(args.status as TaskStatus)) {
       emitError(json, new Error(`status must be one of ${STATUSES.join(",")}`));
     }
-    // Validate the explicit or bb-default tag before contacting the daemon.
+    const status = args.status ? (args.status as TaskStatus) : undefined;
+    if (asMe && args.as !== undefined) emitError(json, new Error("--as-me cannot be combined with --as"));
+    if (args.message === undefined && !(asMe && status)) {
+      emitError(json, new Error("--message is required (only --as-me -s <status> may omit it)"));
+    }
+    if (asMe && args.message === undefined && args.body) {
+      emitError(json, new Error("--body needs --message"));
+    }
+    if (asMe && args.message === undefined && status) {
+      await statusAsMe(id, status, json);
+      return;
+    }
+    // Validate the explicit, bb-default or user tag before contacting the daemon.
     let author: string;
     try {
-      const selected = authorForBbThread(args.as, process.env.BB_THREAD_ID);
+      const selected = asMe ? resolveAuthor() : authorForBbThread(args.as, process.env.BB_THREAD_ID);
       if (selected === undefined) emitError(json, new Error("--as is required outside a bb thread"));
       author = validateAuthorTag(selected);
     } catch (err) {
@@ -69,14 +88,13 @@ export default defineCommand({
     }
     // ONE request: the message row, and with --status the status change
     // plus its `status → x` audit row by the same author, commit together or
-    // not at all. `notify` marks it an attributed agent
-    // change, so a real transition persists its notification.
-    const status = args.status ? (args.status as TaskStatus) : undefined;
+    // not at all. `notify` marks it an attributed agent change, so a real
+    // transition persists its notification; the user's own post never notifies.
     const request: PostUpdateRequest = {
       author,
-      summary: args.message,
+      summary: args.message ?? "",
       body: args.body || null,
-      ...(status ? { status, notify: true } : {}),
+      ...(status ? { status, ...(asMe ? {} : { notify: true }) } : {}),
     };
     let update: Update;
     try {
@@ -92,3 +110,28 @@ export default defineCommand({
     if (status) console.log(`✓ status → ${status}`);
   },
 });
+
+/**
+ * The TUI's own status write: no author, so the daemon credits the user
+ * (GET /api/me) and records no notification. The status route answers with
+ * the task only, so `update` is its `status → x` audit row, found by the
+ * timestamp the write stamped on both.
+ */
+async function statusAsMe(id: number, status: TaskStatus, json: boolean): Promise<void> {
+  let audit: Update | null;
+  try {
+    audit = await withClient(async client => {
+      const { task } = await client.versioned.setStatus(id, { status });
+      const summary = `status \u2192 ${status}`;
+      const rows = (await client.updates(id)).filter(u => u.summary === summary && u.created === task.updated);
+      return rows.reduce<Update | null>((best, u) => (best === null || u.id > best.id ? u : best), null);
+    });
+  } catch (err) {
+    emitError(json, err);
+  }
+  if (json) {
+    printJson({ update: audit, status });
+    return;
+  }
+  console.log(`✓ status → ${status}${audit ? ` (update [${audit.id}])` : ""}`);
+}

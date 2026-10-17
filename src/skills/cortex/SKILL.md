@@ -12,7 +12,7 @@ Humans usually work in the terminal workspace (TUI): plain `cortex` in an intera
 ## Key Principles
 
 - **Single-user, local-only, no auth.** The daemon listens only on a private Unix socket. Anyone with shell access as your user has full CRUD. Do not expose the socket. There are no bearer tokens.
-- **Every update has an author.** A valid bb thread defaults to `bb-<thread id>`; explicit `--as` wins. Outside bb, use the `cortex_update` tool or the [session-id recipe](recipes/session-id.md). Without either, update exits 1.
+- **Every update has an author.** A valid bb thread defaults to `bb-<thread id>`; explicit `--as` wins. Outside bb, use the `cortex_update` tool or the [session-id recipe](recipes/session-id.md). Without either, update exits 1. `--as-me` records a change as the user's own, like the TUI; it is for tools acting for the user (the bb plugin, the user's scripts), and agents never pass it: it hides their status changes from the blocked notification.
 - **No severity flag. Message text describes urgency.** Write `-m "ready for review"` or `-m "blocked on missing API key"` in plain prose. Structured semantics belong in `--status` (`draft`/`open`/`review`/`blocked`/`done`), not in a separate severity field.
 - **Every status change is also an audit-trail row.** Setting `-s` writes both the message AND a `status → <new>` row in the updates table, both attributed to `--as`. Parallel-agent status oscillation (open→blocked→open→blocked) shows up in the inbox as history rather than silently overwriting.
 - **The TUI signals (status-line flash, optional bell) ONLY on transitions into `blocked`.** Routine updates, `done` flips, and review handoffs do NOT interrupt the human: `blocked` is the one signal worth it.
@@ -23,7 +23,7 @@ Humans usually work in the terminal workspace (TUI): plain `cortex` in an intera
 | Command | Description | Docs |
 |---|---|---|
 | `cortex init` | Initialize or migrate the SQLite DB (agent tools: `cortex agents install`). | [init.md](cli/init.md) |
-| `cortex agents install\|reset` | Write the embedded skills, plus the pi extension when pi is present; `reset` wipes them first. | [agents.md](cli/agents.md) |
+| `cortex agents install\|reset` | Write the embedded skills, plus the pi extension when pi is present and the bb plugin when bb is; `reset` wipes them first. | [agents.md](cli/agents.md) |
 | `cortex add <title>` | Create a new task. | [add.md](cli/add.md) |
 | `cortex edit <id>` | Edit a task's title, body, or priority. Body edits prefer anchor-based partial replace. | [edit.md](cli/edit.md) |
 | `cortex update <id> -m <msg> --as <id>` | Post an update on a task; optionally flip status. | [cli/update.md](cli/update.md) |
@@ -52,6 +52,7 @@ Every mutating command (`add`, `edit`, `update`, `mv`, `rm`, `tag add|edit|rm`, 
 
 Tasks double as memory streams across sessions: the body is the current state, updates are breadcrumbs, the lane is the project (derived from the ask; recipes/persistence.md §2).
 Under pi, relevant memory is injected automatically and `cortex_recall` loads a stream with its staleness check.
+In bb with the Cortex plugin, a line `::cortex{id="<id>"}` in your reply shows that task as a card that opens it in the Cortex tab.
 When to read, trust, write and re-sync memory: [recipes/memory.md](recipes/memory.md).
 
 ## Recipes

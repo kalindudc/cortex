@@ -20,9 +20,10 @@ import { daemonSocketPath, runtimeDir } from "../../src/paths.ts";
 const REAL_CONFIG_DIR = path.join(os.homedir(), ".config", "cortex");
 const REAL_DB = path.join(REAL_CONFIG_DIR, "cortex.db");
 
-// The five paths every spawned cortex MUST see pinned (plan @400 N24).
-// Hardcoded, NOT imported from helpers.ts: dropping a key from the helper
-// must fail this guard rather than silently shrink it.
+// The five paths every spawned cortex MUST see pinned (plan @400 N24), plus
+// the sixth pin: CORTEX_BB_CLI="" turns bb off, so no test runs the real bb
+// or npm. Hardcoded, NOT imported from helpers.ts: dropping a key from the
+// helper must fail this guard rather than silently shrink it.
 const PINNED_KEYS = [
   "XDG_CONFIG_HOME",
   "XDG_RUNTIME_DIR",
@@ -30,18 +31,20 @@ const PINNED_KEYS = [
   "CORTEX_SKILL_DIR",
   "CORTEX_PI_EXTENSION_DIR",
 ] as const;
-const POISON: Record<(typeof PINNED_KEYS)[number], string> = {
+const PARENT_KEYS = [...PINNED_KEYS, "CORTEX_BB_CLI"] as const;
+const POISON: Record<(typeof PARENT_KEYS)[number], string> = {
   XDG_CONFIG_HOME: "/tmp/poison-xdg",
   XDG_RUNTIME_DIR: "/tmp/poison-runtime",
   CORTEX_DB: "/tmp/poison-db",
   CORTEX_SKILL_DIR: "/tmp/poison-skill",
   CORTEX_PI_EXTENSION_DIR: "/tmp/poison-ext",
+  CORTEX_BB_CLI: "/tmp/poison-bb",
 };
 
 describe("CLI isolation guard", () => {
   // Snapshot the parent env values up-front so we can restore after the
   // env-scrubbing test pokes them.
-  const originalParentEnv = Object.fromEntries(PINNED_KEYS.map(k => [k, process.env[k]]));
+  const originalParentEnv = Object.fromEntries(PARENT_KEYS.map(k => [k, process.env[k]]));
 
   afterAll(() => {
     for (const [k, v] of Object.entries(originalParentEnv)) {
@@ -67,8 +70,8 @@ describe("CLI isolation guard", () => {
     try {
       let r = await runCli({ args: ["init"], env });
       expect(r.code).toBe(0);
-      r = await runCli({ args: ["agents", "install"], env });
-      expect(r.code).toBe(0);
+      const installed = await runCli({ args: ["agents", "install"], env });
+      expect(installed.code).toBe(0);
       r = await runCli({ args: ["add", "guard-task"], env });
       expect(r.code).toBe(0);
 
@@ -97,17 +100,20 @@ describe("CLI isolation guard", () => {
       expect(skillRoot.startsWith(tmpDir)).toBe(true);
       expect(fs.existsSync(path.join(extRoot, "cortex", "index.ts"))).toBe(true);
       expect(fs.existsSync(path.join(skillRoot, "cortex", "SKILL.md"))).toBe(true);
+      // ... and bb stayed off: no plugin dir, even when the real bb is installed.
+      expect(installed.stdout).toContain("– skipped bb plugin: bb is turned off (CORTEX_BB_CLI is empty)");
+      expect(fs.existsSync(path.join(tmpDir, "cortex", "bb-plugin"))).toBe(false);
     } finally {
       cleanup();
     }
   });
 
-  test("helper env scrubs and re-pins all five isolation paths", () => {
+  test("helper env scrubs and re-pins all five isolation paths, and turns bb off", () => {
     // Poison the parent env BEFORE calling mkTmpEnv. If the helper merely
     // spread + overwrote, an inherited value might persist into the child
     // env (or `??` semantics would let "" win and route to the real
     // config/runtime/skill/extension dirs). We assert defense-in-depth.
-    for (const key of PINNED_KEYS) process.env[key] = POISON[key];
+    for (const key of PARENT_KEYS) process.env[key] = POISON[key];
 
     const { tmpDir, runtimeDir: runtime, env, cleanup } = mkTmpEnv("scrub");
     try {
@@ -115,6 +121,8 @@ describe("CLI isolation guard", () => {
         expect(env[key], `${key} must be pinned`).toBeTruthy();
         expect(env[key], `${key} leaked the inherited value`).not.toBe(POISON[key]);
       }
+      // The sixth pin: an empty CORTEX_BB_CLI turns bb off, whatever the parent set.
+      expect(env.CORTEX_BB_CLI).toBe("");
       // Config/DB/skill/extension paths live under the fresh tmpDir ...
       for (const key of ["XDG_CONFIG_HOME", "CORTEX_DB", "CORTEX_SKILL_DIR", "CORTEX_PI_EXTENSION_DIR"] as const) {
         expect(env[key]?.startsWith(tmpDir), `${key} is not under ${tmpDir}`).toBe(true);

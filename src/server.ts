@@ -1,8 +1,6 @@
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { streamSSE } from "hono/streaming";
 import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import {
   type AddTaskInput,
   BodySearchError,
@@ -40,46 +38,7 @@ import type {
   WriteGuard,
 } from "./contracts.ts";
 import pkg from "../package.json" with { type: "json" };
-
-/**
- * Resolve a sensible default author for posted updates.
- * Cascade (first hit wins):
- *   1. `gh` CLI hosts file (~/.config/gh/hosts.yml) — the GitHub username
- *   2. `git config --global user.name`
- *   3. `os.hostname()` (without trailing .local)
- *   4. literal "me"
- * Cached per-process; UIs fetch via GET /api/me.
- */
-let cachedAuthor: string | null = null;
-function resolveAuthor(): string {
-  if (cachedAuthor) return cachedAuthor;
-  // 1. gh hosts.yml — simple regex, no yaml parser needed.
-  try {
-    const ghHosts = path.join(os.homedir(), ".config", "gh", "hosts.yml");
-    if (fs.existsSync(ghHosts)) {
-      const m = fs.readFileSync(ghHosts, "utf8").match(/^\s+user:\s*(\S+)/m);
-      if (m?.[1]) return (cachedAuthor = m[1]);
-    }
-  } catch {
-    /* fall through */
-  }
-  // 2. git config user.name
-  try {
-    const r = Bun.spawnSync(["git", "config", "--global", "user.name"]);
-    const name = new TextDecoder().decode(r.stdout).trim();
-    if (name) return (cachedAuthor = name);
-  } catch {
-    /* fall through */
-  }
-  // 3. hostname (strip trailing .local for prettier display)
-  try {
-    const h = os.hostname().replace(/\.local$/, "");
-    if (h) return (cachedAuthor = h);
-  } catch {
-    /* fall through */
-  }
-  return (cachedAuthor = "me");
-}
+import { resolveAuthor } from "./lib/userAuthor.ts";
 
 const VERSION = pkg.version;
 const isStatus = (v: string): v is TaskStatus =>

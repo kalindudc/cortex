@@ -15,7 +15,7 @@ import crypto from "node:crypto";
 //   only some of these paths can still reach, or be blocked by, the
 //   developer's real daemon or legacy files.
 //
-// Five env vars MUST always be pinned (plan @400 N24), in order of importance:
+// Six env vars MUST always be pinned (plan @400 N24), in order of importance:
 //   1. XDG_CONFIG_HOME         -- closes the daemon-routing escape hatch
 //   2. CORTEX_DB               -- pins SQLite file even on the no-daemon path
 //   3. XDG_RUNTIME_DIR         -- private 0700 dir for daemon sockets (src/paths.ts
@@ -24,8 +24,12 @@ import crypto from "node:crypto";
 //   4. CORTEX_SKILL_DIR        -- keeps init/reset from clobbering ~/.agents/skills/
 //   5. CORTEX_PI_EXTENSION_DIR -- keeps init/reset from clobbering
 //                                 ~/.pi/agent/extensions/
+//   6. CORTEX_BB_CLI = ""      -- turns bb off, so `agents install|reset` never
+//                                 runs the real bb (or npm) and never moves the
+//                                 user's installed bb plugin; a test that needs
+//                                 bb points it at a fake
 //
-// Defense in depth: this module DELETES every inherited copy of the five
+// Defense in depth: this module DELETES every inherited copy of the six
 // keys from the env it builds before assigning, so a developer with these
 // set in their shell can't make a test silently re-target the wrong place.
 // We never spread + overwrite (an empty-string XDG_CONFIG_HOME from the
@@ -58,6 +62,7 @@ const ISOLATED_KEYS = [
   "CORTEX_DB",
   "CORTEX_SKILL_DIR",
   "CORTEX_PI_EXTENSION_DIR",
+  "CORTEX_BB_CLI",
   // Dropped, never pinned: a bb thread's values would add a stray author or open a real thread.
   "BB_THREAD_ID",
   "BB_CLI",
@@ -84,7 +89,7 @@ export function mkTmpEnv(label: string): {
   const runtimeDir = fs.mkdtempSync(path.join(os.tmpdir(), "cxr-"));
   fs.chmodSync(runtimeDir, 0o700);
 
-  // Build env explicitly: shallow-copy parent env, DELETE the five keys we
+  // Build env explicitly: shallow-copy parent env, DELETE the six keys we
   // care about (so an inherited "" or wrong path can't leak through), then
   // SET them to tmp paths. Spread + overwrite would not erase an inherited
   // empty string, which `?? path.join(homedir(), ".config")` treats as
@@ -96,6 +101,7 @@ export function mkTmpEnv(label: string): {
   env.CORTEX_DB = path.join(tmpDir, "cortex.db");
   env.CORTEX_SKILL_DIR = path.join(tmpDir, "skill");
   env.CORTEX_PI_EXTENSION_DIR = path.join(tmpDir, "ext");
+  env.CORTEX_BB_CLI = "";
   env.NO_COLOR = "1";
 
   const cleanup = () => {

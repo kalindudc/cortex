@@ -17,7 +17,8 @@ const COMMANDS: { name: string; summary: string }[] = [
   { name: "init", summary: "initialize or migrate the database (agent tools: `cortex agents install`)" },
   {
     name: "agents",
-    summary: "agents install|reset: the skills + pi extension (when pi is present); reset wipes first",
+    summary:
+      "agents install|reset: the skills + pi extension (when pi is present) + bb plugin (when bb is); reset wipes first",
   },
   { name: "add", summary: "create a task (--json, --as, --body-file -)" },
   { name: "ls", summary: "list tasks (--json omits body; --full includes it)" },
@@ -27,7 +28,10 @@ const COMMANDS: { name: string; summary: string }[] = [
     name: "memory",
     summary: "agent memory: search|show|context|streams|lane (ranked recall, staleness, breadcrumbs; --json)",
   },
-  { name: "update", summary: "post an update / change status (--as or bb thread, --json)" },
+  {
+    name: "update",
+    summary: "post an update / change status (--as or bb thread, --json; --as-me only for tools acting for the user)",
+  },
   { name: "watch", summary: "follow changes and reconnect markers (--json)" },
   { name: "edit", summary: "edit title/body/priority/tags (--json; anchor body edits)" },
   { name: "mv", summary: "move a task to a lane (--json)" },

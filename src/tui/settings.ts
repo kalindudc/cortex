@@ -15,11 +15,13 @@
 //   shows what the file refused. A refused write changes nothing and is shown.
 // - Agent integrations install (overwrite, add anything new) or reset (y/n,
 //   then wipe and reinstall) through `cortex agents install|reset`'s
-//   installAll, which writes only the skill and extension dirs.
+//   installAll, which writes only the skill, extension and bb plugin dirs
+//   (and registers the bb plugin with bb when bb runs).
 // - `:config <setting> [value]` is the typed form: a bare boolean toggles,
 //   another bare setting opens its picker, `default` (and `theme auto`)
 //   removes the line.
 
+import { bbPluginDir, findBbCli } from "../bbPlugin.ts";
 import { type AgentsResult, installAll } from "../commands/agents.ts";
 import { extensionDir, listExtensions, piDetected } from "../extensions.ts";
 import { listSkills, skillDir } from "../skills.ts";
@@ -239,31 +241,46 @@ function openScrollForm(session: TuiSession, entry: ConfigEntry, current: number
 
 // ---------- agent integrations ----------
 
-function installReport(result: AgentsResult): string {
+/** One status line for an agents install or reset; a failed bb plugin is an error. */
+export function installReport(result: AgentsResult): { level: "info" | "error"; text: string } {
   const skills = `${result.skills.length} skill${result.skills.length === 1 ? "" : "s"}`;
   const pi = result.skipped.find(s => s.name === "pi");
-  return pi === undefined
-    ? `Installed ${skills} and the pi extension`
-    : `Installed ${skills}; skipped pi: ${pi.reason}`;
+  const base =
+    pi === undefined ? `Installed ${skills} and the pi extension` : `Installed ${skills}; skipped pi: ${pi.reason}`;
+  const { bb } = result;
+  if (bb.status === "failed") return { level: "error", text: `${base}; the bb plugin failed: ${bb.reason}` };
+  if (bb.status === "skipped") return { level: "info", text: `${base}; skipped the bb plugin: ${bb.reason}` };
+  const state = bb.plugin && bb.plugin.status !== "running" ? ` but it is ${bb.plugin.status}` : "";
+  const verb = { installed: "installed", reloaded: "reloaded", unchanged: "up to date" }[bb.status];
+  return { level: "info", text: `${base}; bb plugin ${verb}${state}` };
 }
 
 async function install(session: TuiSession): Promise<void> {
-  session.notify("info", installReport(await installAll(false)));
+  const report = installReport(await installAll(false));
+  session.notify(report.level, report.text);
 }
 
 function confirmReset(session: TuiSession): void {
+  const bb = findBbCli().cli !== null;
   const dirs = [
     ...listSkills().map(name => skillDir(name)),
     ...(piDetected() ? listExtensions().map(name => extensionDir(name)) : []),
+    ...(bb ? [bbPluginDir()] : []),
   ];
   showDialog(session, {
     kind: "confirm",
     title: "RESET AGENT INTEGRATIONS",
     label: "reset agents",
-    message: ["Wipe, then reinstall:", ...dirs.map(dir => `  \u2022 ${dir}`), "Hand-edits in these dirs are lost."],
+    message: [
+      "Wipe, then reinstall:",
+      ...dirs.map(dir => `  \u2022 ${dir}`),
+      "Hand-edits in these dirs are lost.",
+      ...(bb ? ["The bb plugin is removed and installed again, which resets its settings."] : []),
+    ],
     yes: "wipes and reinstalls",
     confirm: async () => {
-      session.notify("info", installReport(await installAll(true)));
+      const report = installReport(await installAll(true));
+      session.notify(report.level, report.text);
     },
   });
 }
@@ -274,8 +291,9 @@ const AGENT_ROWS: readonly (DialogRow & { readonly meaning: string })[] = [
     section: AGENTS,
     label: "install or update",
     mark: "   ",
-    detail: "the skills, plus the pi extension when pi is present",
-    meaning: "Write every skill cortex ships, plus the pi extension when pi is present (overwrites; adds anything new)",
+    detail: "the skills, plus the pi extension and bb plugin when present",
+    meaning:
+      "Write every skill cortex ships, plus the pi extension when pi is present and the bb plugin when bb is (overwrites; adds anything new)",
   },
   {
     key: RESET_KEY,
@@ -283,7 +301,8 @@ const AGENT_ROWS: readonly (DialogRow & { readonly meaning: string })[] = [
     label: "reset",
     mark: "   ",
     detail: "wipe their dirs, then install (asks first)",
-    meaning: "Wipe the skill and extension dirs (hand-edits are lost), then install them again",
+    meaning:
+      "Wipe the skill, extension and bb plugin dirs (hand-edits are lost; the bb plugin's settings reset), then install them again",
   },
 ];
 

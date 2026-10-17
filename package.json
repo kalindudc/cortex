@@ -13,6 +13,7 @@
     "test": "pnpm run build && pnpm exec bun test test/unit/ test/integration/",
     "test:unit": "pnpm exec bun test test/unit/",
     "test:integration": "pnpm run build && pnpm exec bun test test/integration/",
+    "test:bb": "npm --prefix integrations/bb test && npm --prefix integrations/bb run typecheck",
     "dev": "bash scripts/dev-cli.sh",
     "deploy": "pnpm run build && rm -rf ~/bin/cortex && cp bin/cortex ~/bin/",
     "style": "node node_modules/@biomejs/biome/bin/biome check --error-on-warnings --write . && pnpm exec tsc",

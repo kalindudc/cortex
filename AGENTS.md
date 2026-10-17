@@ -30,6 +30,7 @@ Every command below is a real script in `package.json` (`docs:check` fails on a 
 - `pnpm test` — full suite: build + `bun test test/unit/ test/integration/`.
 - `pnpm run test:unit` — unit tests only (fast).
 - `pnpm run test:integration` — integration tests against the built binary.
+- `pnpm run test:bb` — tests and typechecks `integrations/bb/`, the independent Node bb plugin that reads only the Cortex CLI (install its npm dependencies first).
 - `pnpm run dev -- <cortex-args>` — run the CLI from source via Bun (no compile step); with no args on a TTY it opens the TUI. Uses the `tmp/dev/` data sandbox unless `CORTEX_DEV_REAL=1` (see `scripts/dev-env.sh`, `scripts/dev-cli.sh`).
 - `pnpm run style` — biome `--write` + `tsc --noEmit`.
 - `pnpm run style:check` — biome + `tsc --noEmit` + `scripts/check-docs.ts`, read-only (CI-friendly).
@@ -44,7 +45,7 @@ Top-level subdirectories of `src/` (hand-written; update in the same PR when you
 
 - src/commands/   — citty subcommands (one file per `cortex <verb>`)
 - src/extensions/   — pi extension(s) embedded as Bun file assets
-- src/lib/   — pure helpers shared by the TUI and CLI (task search/ordering, status constants, time formatting, @id/#tag grammar)
+- src/lib/   — helpers shared by the TUI, CLI and daemon (task search/ordering, status constants, time formatting, @id/#tag grammar, the user's author name)
 - src/skills/   — embedded agent skills (cortex, cortex-planner, cortex-implementer, cortex-research)
 - src/tui/   — pi-tui terminal workspace (app shell + per-TUI session, keys/modes, tui.toml config, themes, safe text, view state)
 
@@ -54,6 +55,7 @@ Other notable single-file modules (curated; the full ownership list is in [docs/
 - `src/args.ts` — argv pre-normalizer run before citty parses: rewrites `--flag -value` into `--flag=-value` for known string flags (citty 0.1.x never consumes a dash-leading token as a flag value).
 - `src/events.ts` — SSE event types + helpers shared by the server and its clients.
 - `src/skills.ts` — resolves embedded skill files for `cortex agents install`.
+- `src/bbPlugin.ts` — installs the bb plugin for `cortex agents install|reset`; its source is embedded by the Bun macro in `src/bbPluginSource.ts`.
 - `src/extensions.ts` — registers the pi extension surface.
 - `src/paths.ts` — central source of truth for `CORTEX_DB` + config paths.
 
@@ -81,7 +83,7 @@ One line per rule; the linked doc holds the why. A code comment states its reaso
 - `tui.toml` and `themes/*.toml` are user-authored: themes are never written, and `tui.toml` is written only by the `:config` pane (`src/tui/settings.ts`) through `src/tui/config.ts#saveSettings`, and by `migrateSettings` (top-level lines, surgically); commands and shortcuts are session-only; an invalid section keeps its defaults and reports to `:messages` ([TUI](docs/tui.md#help-settings-and-themes)).
 - Agent memory: the derived index is created on the first search (never in `migrate()`) and never backed up; never pass raw text to FTS5 MATCH; staleness runs in the CLI process, never the daemon ([memory](docs/memory.md)).
 - The pi extension (`src/extensions/pi.ts`) keeps memory overhead bounded (at most one `cortex memory context` spawn per prompt, a frozen primer, budgeted `cortex_recall`); tool failures THROW; UI renders only through `src/extensions/memory-view.ts` ([memory](docs/memory.md#the-pi-extension)).
-- `cortex init`/`cortex reset` touch ONLY the datastore; agent skills and the pi extension belong to `cortex agents install|reset` (`src/commands/agents.ts`).
+- `cortex init`/`cortex reset` touch ONLY the datastore; agent skills, the pi extension and the bb plugin belong to `cortex agents install|reset` (`src/commands/agents.ts`). The plugin's files are embedded by a Bun macro, never imported, so the root tsc never compiles them.
 - Bundled skills (`src/skills/`) depend on nothing outside cortex: no user skills or agents, and other tools are described by use case, never by name; a user's skills may build on cortex's, never the reverse (`test/unit/skills.test.ts`).
 
 ## 6. Testing
@@ -89,7 +91,7 @@ One line per rule; the linked doc holds the why. A code comment states its reaso
 Two concentric layers; the boundary matters because each makes different I/O assumptions.
 
 - `test/unit/` — `bun:test`, fast, pure in-process, no DOM: `Store.open(":memory:")` (or its own tmp `CORTEX_DB`), routes via `buildApp(store).fetch(new Request(...))`. NEVER spawn `bin/cortex`, import the integration helpers or call `runCli`.
-- Pin `XDG_CONFIG_HOME` / `CORTEX_DB` / `CORTEX_SKILL_DIR` / `CORTEX_PI_EXTENSION_DIR` to a `fs.mkdtempSync` dir BEFORE calling code that reads them, and restore them afterwards (`test/unit/paths.test.ts` shows the pattern). NEVER write to the real `~/.config/cortex`.
+- Pin `XDG_CONFIG_HOME` / `CORTEX_DB` / `CORTEX_SKILL_DIR` / `CORTEX_PI_EXTENSION_DIR` to a `fs.mkdtempSync` dir BEFORE calling code that reads them, and restore them afterwards (`test/unit/paths.test.ts` shows the pattern); set `CORTEX_BB_CLI=""` before anything that may reach `installAll`. NEVER write to the real `~/.config/cortex`, and NEVER run the real bb or npm (fakes: `test/integration/fixtures/fake-bb.ts`).
 - `test/unit/_layout.test.ts` enforces the tier and hermetic rules (a new `src/` file needs tests where behaviour needs them, not a mirror file per source).
 - `test/integration/` — `bun:test` against the COMPILED `bin/cortex` (`pnpm run test:integration` builds it). Every spawn goes through `runCli` or receives the scrubbed env from `mkTmpEnv()` (`test/integration/helpers.ts`); NEVER inherit the parent env.
 - Daemons start through `test/integration/fixtures/daemon.ts` (tracks and reaps every process it spawns; `cortex stop` is instance-bound, so it is safe in a sandbox). `test/integration/isolation.test.ts` is the runtime canary that the real config stays untouched.
@@ -110,6 +112,7 @@ Two concentric layers; the boundary matters because each makes different I/O ass
 - [docs/tui.md](docs/tui.md) — using the terminal workspace, then how it is built and the rules that keep it safe.
 - [docs/memory.md](docs/memory.md) — how agents remember across sessions, then the index, ranking, staleness and the pi extension.
 - [docs/architecture.md](docs/architecture.md) — how the CLI, daemon and storage fit together, live sync, write conflicts, and the invariants.
+- [docs/bb.md](docs/bb.md) — the bb plugin in `integrations/bb/` (its own npm package and Vitest tests): install, what pi and other providers get, the Cortex tab, and its rules.
 - Each doc runs user-first: plain-language sections, then "Under the hood" (how and why, citing `path#Symbol`), then "Rules to keep" (invariants and the test that enforces each).
 - `.agents/skills/docs/SKILL.md` — the `docs` skill that keeps all of the above true (sync, audit).
 - `src/skills/` — the product manual for agents USING cortex; `cortex schema` is the authoritative CLI contract.

@@ -23,8 +23,14 @@ pnpm install --frozen-lockfile
 pnpm run build             # writes bin/cortex
 pnpm run deploy            # optional: rebuild and copy it to ~/bin/cortex
 cortex init                # create ~/.config/cortex/cortex.db
-cortex agents install      # agent skills, plus the pi extension when pi is installed
+cortex agents install      # agent skills, plus the pi extension and bb plugin when installed
 ```
+
+## bb plugin
+
+In bb, the Cortex plugin shows each thread's task in a side-panel tab and a header chip, and gives threads on providers
+other than pi the Cortex memory tools. `cortex agents install` installs it when bb is installed and running (it needs
+npm); `cortex agents reset` replaces a plugin installed another way. See [bb setup and behavior](docs/bb.md).
 
 ## Quick start
 

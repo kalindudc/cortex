@@ -3,6 +3,7 @@ import pkg from "../../package.json" with { type: "json" };
 import { DatabaseNotFoundError, Store } from "../store.ts";
 import { dbPath } from "../paths.ts";
 import { discoverDaemon } from "../daemon.ts";
+import { resolveAuthor } from "../lib/userAuthor.ts";
 import { printJson } from "../output.ts";
 
 /** What doctor knows about the daemon for this database, from discovery alone. */
@@ -37,7 +38,8 @@ function describeDaemon(daemon: DaemonReport): string {
 /**
  * `cortex doctor` — one-call orientation for an agent (or human) landing in a
  * fresh shell. Reports the binary version, database path, whether a daemon
- * serves it, any pending migrations, and coarse row counts.
+ * serves it, any pending migrations, coarse row counts, and the user's author
+ * name (what the TUI and `cortex update --as-me` credit).
  *
  * Strictly read-only: the daemon state comes from discovery (the published
  * metadata, verified over its socket), and the database is read through
@@ -80,6 +82,7 @@ export default defineCommand({
       daemon,
       pendingMigrations: snapshot.pending,
       counts: snapshot.counts,
+      author: resolveAuthor(),
     };
     if (args.json) {
       printJson(report);
@@ -96,5 +99,6 @@ export default defineCommand({
     console.log(`  tasks:      ${report.counts.tasks}`);
     console.log(`  lanes:      ${report.counts.lanes}`);
     console.log(`  tags:       ${report.counts.tags}`);
+    console.log(`  author:     ${report.author} (your changes in the TUI and with --as-me)`);
   },
 });
