@@ -3,8 +3,8 @@ import { type PluginMessageDirectiveProps, useBbNavigate } from "@get-bb/plugin-
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Icon } from "@/components/ui/icon";
-import { PANEL_ACTION_ID } from "./chip";
 import { parseTaskId, useTaskDetail } from "./hooks";
+import { openCortexTab } from "./selection";
 import { STATUS_LABEL, StatusDot } from "./status";
 
 /** `::cortex{id="<id>"}` in an assistant reply: a card that opens the task in the Cortex tab. */
@@ -21,8 +21,7 @@ export function CortexCard({ attributes, message }: PluginMessageDirectiveProps)
     );
   }
   const open = () => {
-    const accepted = navigate.openThreadPanel({ actionId: PANEL_ACTION_ID, title: `Cortex #${taskId}`, params: { taskId } });
-    setDeclined(!accepted);
+    setDeclined(!openCortexTab(navigate, message.threadId, taskId));
   };
   return (
     <Card className="my-2 flex items-center gap-3 px-3 py-2 text-sm">

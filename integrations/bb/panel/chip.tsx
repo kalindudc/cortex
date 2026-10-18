@@ -3,9 +3,8 @@ import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
 import { useThreadState } from "./hooks";
+import { openCortexTab } from "./selection";
 import { StatusDot } from "./status";
-
-export const PANEL_ACTION_ID = "cortex";
 
 /** The header task chip, unless the taskChip setting hides it. */
 export function CortexChip(props: PluginThreadHeaderActionProps) {
@@ -13,7 +12,7 @@ export function CortexChip(props: PluginThreadHeaderActionProps) {
   return values?.taskChip === false ? null : <TaskChip {...props} />;
 }
 
-/** `#<id> · <status>` for the focus task (plain `cortex` without one); opens the Cortex tab. */
+/** `#<id> · <status>` for the focus task (plain `cortex` without one); opens the Cortex tab following it. */
 function TaskChip({ threadId, isCompactViewport }: PluginThreadHeaderActionProps) {
   const { state, error } = useThreadState(threadId);
   const navigate = useBbNavigate();
@@ -32,7 +31,7 @@ function TaskChip({ threadId, isCompactViewport }: PluginThreadHeaderActionProps
       data-tone={focus === null && health === "ok" ? "muted" : health}
       aria-label={`Cortex: ${label}. ${detail}. Open the Cortex tab.`}
       onClick={() => {
-        navigate.openThreadPanel({ actionId: PANEL_ACTION_ID });
+        openCortexTab(navigate, threadId, null);
       }}
       className={cn(
         "h-7 gap-1.5 px-2 font-mono text-xs",

@@ -1,8 +1,9 @@
 import { definePluginApp } from "@get-bb/plugin-sdk/app";
 import { CortexCard } from "./panel/card";
-import { CortexChip, PANEL_ACTION_ID } from "./panel/chip";
+import { CortexChip } from "./panel/chip";
 import { MEMORY_ACTION_ID, MemoryHeaderAction, MemoryPanel } from "./panel/memory";
 import { CortexPanel } from "./panel/panel";
+import { PANEL_ACTION_ID } from "./panel/selection";
 
 export default definePluginApp(app => {
   app.slots.threadPanelAction({

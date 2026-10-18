@@ -15,6 +15,7 @@ import { ActivityTimeline, Composer } from "./activity";
 import { errorText, panelTaskId, useCortexRpc, useTaskDetail, useThreadState } from "./hooks";
 import { MoreMenu, SwitcherMenu, TaskRowLabel, TaskSearchField, useTaskSearch } from "./menus";
 import { BodySections, FreshnessCallout } from "./overview";
+import { selectTask, useSelectedTask } from "./selection";
 import { NextStepButton, STATUS_LABEL, StatusPill } from "./status";
 import { relativeTime } from "./time";
 
@@ -358,13 +359,13 @@ function EmptyPanel({ threadId, onLink }: { threadId: string; onLink: (taskId: n
 export function CortexPanel({ threadId, params }: PluginThreadPanelProps) {
   const thread = useThreadState(threadId);
   const requested = panelTaskId(params);
-  const [chosen, setChosen] = useState<number | null>(null);
+  const chosen = useSelectedTask(threadId);
   const selected = chosen ?? requested ?? thread.state?.focusTaskId ?? null;
   const task = useTaskDetail(threadId, selected);
   const link = async (taskId: number) => {
     try {
       thread.accept(await thread.rpc.call("link", { threadId, taskId }));
-      setChosen(taskId);
+      selectTask(threadId, taskId);
       toast(`Linked #${taskId} to this thread`);
     } catch (cause) {
       toast.error(errorText(cause));
@@ -389,7 +390,7 @@ export function CortexPanel({ threadId, params }: PluginThreadPanelProps) {
         threadId={threadId}
         state={state}
         detail={task.detail}
-        onSelect={setChosen}
+        onSelect={id => selectTask(threadId, id)}
         onLink={id => void link(id)}
         onThread={thread.accept}
         onDetail={task.apply}

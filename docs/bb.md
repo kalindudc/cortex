@@ -44,11 +44,12 @@ notes. Changes reach a provider the next time bb starts its session, never mid-s
 
 ## The Cortex tab and the header chip
 
-Open the tab from the thread's right panel (Cortex) or by clicking the chip in the thread header. Its switcher lists
-the tasks this thread posted updates to, whether through `cortex_update` or `cortex update` in its shell, plus any
-task you linked by search or id. The focus task is the one you pinned, or else the most active one. The chip names
-it as `#<id> · <status>` with its status colour, reads plain `cortex` when the thread has no task, and warns when the
-focus task is blocked or stale. Unlinking removes only a link you added: a task the thread posted to stays listed.
+Open the tab from the thread's right panel (Cortex) or by clicking the chip in the thread header; the chip, a card in
+a reply and a Memory stream each switch the thread's one Cortex tab to their task. Its switcher lists the tasks this
+thread posted updates to, whether through `cortex_update` or `cortex update` in its shell, plus any task you linked
+by search or id. The focus task is the one you pinned, or else the most active one. The chip names it as
+`#<id> · <status>` with its status colour, reads plain `cortex` when the thread has no task, and warns when the focus
+task is blocked or stale. Unlinking removes only a link you added: a task the thread posted to stays listed.
 
 The header shows the task's status, its freshness and, for a plan, how many Low-Level Tasks were reported done.
 Overview splits the body at its `##` headings and folds a long one to a line per section. Activity is the update
@@ -93,11 +94,10 @@ the SDK, portaling Radix components) are type-only development dependencies; zod
 - The binary embeds the plugin through a Bun macro (`src/bbPluginSource.ts#embeddedBbPlugin`), which reads the files
   as text at bundle time, so the root typecheck never compiles them. Why not install from git, or the checkout? Git
   needs the plugin pushed and installs what the remote holds; a checkout path breaks when its branch changes.
-- `./integrations/bb/cli.ts#createCortexRunner` runs each command with `execFile` and an argument array, never a
-  shell, with a short timeout (`./integrations/bb/cli.ts#DEFAULT_TIMEOUT_MS`), the caller's abort signal and typed
-  `./integrations/bb/cli.ts#CortexCliError` failures. JSON output is validated before use, and an `{ error }`
-  envelope fails even on exit 0. `./integrations/bb/cli.ts#verifyCortexFeatures` gates loading on `watch` and
-  author streams.
+- `./integrations/bb/cli.ts#createCortexRunner` runs each command with `execFile` and an argument array, never a shell,
+  with a short timeout (`./integrations/bb/cli.ts#DEFAULT_TIMEOUT_MS`), the caller's abort signal and typed
+  `./integrations/bb/cli.ts#CortexCliError` failures. JSON output is validated before use, and an `{ error }` envelope
+  fails even on exit 0. `./integrations/bb/cli.ts#verifyCortexFeatures` gates loading on `watch` and author streams.
 - `./integrations/bb/state.ts#createCortexState` merges `cortex memory streams --author=bb-<thread>` with the manual
   links kept in this plugin's thread metadata, validated field by field on every read. Pin, link and unlink run one
   at a time per thread. A task's `show` and `memory show` are cached briefly
@@ -109,8 +109,7 @@ the SDK, portaling Radix components) are type-only development dependencies; zod
 - `./integrations/bb/server.ts#instructionsFor` caps usage plus primer at bb's 4,096-character instruction limit.
   The configure callback is synchronous, so a cache miss never runs the CLI.
 - `cortex_recall` returns the text `cortex memory show` or `cortex memory search` prints, as the pi extension does
-  (`./integrations/bb/server.ts#recall`). Why not render it from JSON? That would copy cortex's renderer into the
-  plugin, where it would drift.
+  (`./integrations/bb/server.ts#recall`). Why not render it from JSON? That copies cortex's renderer, which drifts.
 - `./integrations/bb/watch.ts#registerCortexWatch` follows `cortex watch --json` with `spawn`, because `execFile`
   buffers a stream that never ends. `./integrations/bb/watch.ts#routeCortexEvent` drops cached reads before it
   publishes, so a refetch never reads a stale copy.
@@ -120,8 +119,7 @@ the SDK, portaling Radix components) are type-only development dependencies; zod
 - bb ignores a pi extension's footer status, so `src/extensions/pi.ts#reportToBb` posts
   `src/extensions/memory-view.ts#memoryReport` to the plugin's local route: awaited at most once per prompt
   (`src/extensions/pi.ts#BB_REPORT_TIMEOUT_MS`), otherwise only for a changed view, never throwing. Only bb's rpc-mode
-  pi reports, since a `pi -p` in the thread's shell inherits its variables; the answer carries the last re-read
-  request.
+  pi reports, since a `pi -p` in the thread's shell inherits its variables; the answer carries the last re-read request.
 - `./integrations/bb/memory.ts#effectiveMode` picks the mode (the thread's choice, else the setting), which reaches pi
   as `CORTEX_MEMORY` beside the report address (`./integrations/bb/server.ts#memoryEnv`). Why not answer it in the
   report? A plugin that is down would let a child thread save again. `write` is never sent: the variable is
@@ -132,6 +130,9 @@ the SDK, portaling Radix components) are type-only development dependencies; zod
 - The icon is a header action, since bb mounts only its three most-used plugins' prompt-box actions;
   `./integrations/bb/panel/footer.ts#useFooterMount` moves it beside the context circle, as Thread Spend does. It
   never moves a node already there, so two plugins beside the circle never loop.
+- bb names a panel tab by its params, so every opener calls `./integrations/bb/panel/selection.ts#openCortexTab`: it
+  opens the one tab without params, then sets its task in memory shared by every slot, so a reload shows the focus
+  task. Why not a tab per task, as bb's Tasks plugin does? The tab's switcher already lists the thread's tasks.
 - Plan progress copies the Herdr label's rule (`./integrations/bb/detail.ts#planProgress`); the body splitter
   (`./integrations/bb/panel/sections.ts#splitSections`) ignores `##` lines inside fenced code, as in plan bodies.
 
@@ -145,8 +146,8 @@ the SDK, portaling Radix components) are type-only development dependencies; zod
   schema mirrors the extension's: `./integrations/bb/server.test.ts`, `./integrations/bb/memory.test.ts`,
   `test/unit/extensions-memory-view.test.ts`.
 - Only bb's own pi reports, never blocking a prompt past its timeout, throwing or counting as a memory error:
-  `test/unit/extensions-pi.test.ts`. The icon and the chip follow their settings, and the icon never moves a node
-  already in the footer: `./integrations/bb/app.test.tsx`.
+  `test/unit/extensions-pi.test.ts`. The icon and the chip follow their settings, the icon never moves a node already
+  in the footer, and every opener reuses the one Cortex tab: `./integrations/bb/app.test.tsx` (one Cortex tab).
 - Tool failures throw, `cortex_recall` keeps the pi extension's per-request budget, and every tool argument, RPC
   input, metadata value and CLI output is validated: `./integrations/bb/server.test.ts`, `./integrations/bb/cli.test.ts`.
 - Staleness is checked only for a checkout on the bb server's own machine: `./integrations/bb/server.test.ts`.
@@ -156,5 +157,4 @@ the SDK, portaling Radix components) are type-only development dependencies; zod
 - `cortex agents install` never changes the plugin's settings or touches a plugin bb installed from git or npm, and
   no test runs the real bb or npm (`CORTEX_BB_CLI=""` in every test env): `test/integration/cli/agents-bb.test.ts`,
   `test/integration/isolation.test.ts`.
-- `pnpm run test:bb` runs the plugin's tests and typecheck after `npm ci --prefix integrations/bb`; CI does not run
-  it yet.
+- `pnpm run test:bb` runs the plugin's tests and typecheck after `npm ci --prefix integrations/bb`; CI does not run it.

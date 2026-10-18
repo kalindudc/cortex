@@ -28,10 +28,10 @@ import {
   ROLE_LABEL,
 } from "../memory";
 import type { CortexTaskRow } from "../state";
-import { PANEL_ACTION_ID } from "./chip";
 import { useFooterMount } from "./footer";
 import { errorText, useCortexRpc, useMemory, useTaskRows, useThreadState } from "./hooks";
 import { ErrorNotice } from "./panel";
+import { openCortexTab } from "./selection";
 import { STATUS_LABEL, StatusDot } from "./status";
 
 export const MEMORY_ACTION_ID = "cortex-memory";
@@ -393,7 +393,7 @@ export function MemoryPanel({ threadId }: PluginThreadPanelProps): ReactNode {
   const ids = [...new Set([...focus, ...(view?.inContext ?? []).map(entry => entry.id)])];
   const rows = useTaskRows(ids);
   const open = (taskId: number) => {
-    navigate.openThreadPanel({ actionId: PANEL_ACTION_ID, params: { taskId } });
+    openCortexTab(navigate, threadId, taskId);
   };
   if (error !== null) {
     return (

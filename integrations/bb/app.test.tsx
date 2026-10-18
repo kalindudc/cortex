@@ -7,6 +7,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vi
 import type { MemoryState, MemoryView } from "./memory";
 import { FOOTER_SELECTOR, placeInFooter, useFooterMount } from "./panel/footer";
 import { MemorySummary } from "./panel/memory";
+import { selectTask } from "./panel/selection";
 import type { rpcContract } from "./server";
 import type { CortexTaskDetail, CortexThreadState } from "./state";
 
@@ -32,6 +33,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  selectTask(THREAD, null);
   vi.useRealTimers();
 });
 
@@ -857,10 +859,7 @@ describe("Memory tab", () => {
     const row = await slot.findByRole("button", { name: "Open #9 in the Cortex tab" });
     expect(row.textContent).toBe("#9recalled by the agent");
     fireEvent.click(row);
-    expect(slot.inspection.navigateCalls).toContainEqual({
-      method: "openThreadPanel",
-      options: { actionId: "cortex", params: { taskId: 9 } },
-    });
+    expect(slot.inspection.navigateCalls).toContainEqual({ method: "openThreadPanel", options: { actionId: "cortex" } });
   });
 
   test("look up only has its own health line, for pi and for other providers, and no Working on", async () => {
@@ -972,10 +971,7 @@ describe("::cortex card", () => {
     expect(slot.getByText("Open · cortex")).toBeTruthy();
     expect(slot.container.querySelector("[data-status=open]")).toBeTruthy();
     fireEvent.click(slot.getByRole("button", { name: "Open" }));
-    expect(slot.inspection.navigateCalls).toContainEqual({
-      method: "openThreadPanel",
-      options: { actionId: "cortex", title: "Cortex #4", params: { taskId: 4 } },
-    });
+    expect(slot.inspection.navigateCalls).toContainEqual({ method: "openThreadPanel", options: { actionId: "cortex" } });
     expect(slot.queryByText(/could not open/)).toBeNull();
   });
 
@@ -993,5 +989,88 @@ describe("::cortex card", () => {
       expect(slot.inspection.rpcCalls).toEqual([]);
       slot.lifecycle.unmount();
     }
+  });
+});
+
+describe("one Cortex tab", () => {
+  const card = (taskId: number, openThreadPanel: () => boolean = () => true) =>
+    renderSlot(
+      app.messageDirectives[0]!,
+      {
+        attributes: { id: String(taskId) },
+        source: `::cortex{id="${taskId}"}`,
+        message: { id: `msg_${taskId}`, threadId: THREAD, turnId: null, projectId: "proj_1" },
+        openWorkspaceFile: null,
+      },
+      { rpc: handlers(), openThreadPanel },
+    );
+  const memoryTab = () =>
+    renderSlot(
+      app.threadPanelActions[1]!,
+      { threadId: THREAD, params: null as never },
+      {
+        rpc: handlers(threadState(), {
+          memory: () => memoryState({ view: memoryView({ inContext: [{ id: 9, via: "recall" }] }) }),
+        }),
+        openThreadPanel: () => true,
+      },
+    );
+  const chip = () =>
+    renderSlot(
+      app.threadHeaderActions[0]!,
+      { threadId: THREAD, projectId: "proj_1", isCompactViewport: false },
+      { rpc: handlers(), openThreadPanel: () => true },
+    );
+  const opens = (...slots: Array<{ inspection: { navigateCalls: Array<{ method: string }> } }>) =>
+    slots.flatMap(slot => slot.inspection.navigateCalls.filter(call => call.method === "openThreadPanel"));
+
+  test("a card, a Memory stream and the chip switch the open tab instead of opening another", async () => {
+    const tab = panel();
+    expect(await tab.findByRole("heading", { name: "Title 1" })).toBeTruthy();
+
+    const fromCard = card(4);
+    fireEvent.click(await fromCard.findByRole("button", { name: "Open" }));
+    expect(await tab.findByRole("heading", { name: "Title 4" })).toBeTruthy();
+
+    const fromMemory = memoryTab();
+    fireEvent.click(await fromMemory.findByRole("button", { name: "Open #9 in the Cortex tab" }));
+    expect(await tab.findByRole("heading", { name: "Title 9" })).toBeTruthy();
+
+    // The chip names the focus task, so it brings the tab back to following it.
+    const fromChip = chip();
+    fireEvent.click(await fromChip.findByRole("button", { name: /#1 · open/ }));
+    expect(await tab.findByRole("heading", { name: "Title 1" })).toBeTruthy();
+
+    // bb keys a tab by its params and title, so every open must be the same paramless request.
+    const all = opens(fromCard, fromMemory, fromChip);
+    expect(all).toHaveLength(3);
+    for (const call of all) expect(call).toEqual({ method: "openThreadPanel", options: { actionId: "cortex" } });
+  });
+
+  test("a tab bb opens for the click shows the chosen task", async () => {
+    fireEvent.click(await card(4).findByRole("button", { name: "Open" }));
+    const tab = panel();
+    expect(await tab.findByRole("heading", { name: "Title 4" })).toBeTruthy();
+  });
+
+  test("reopening a task after switching away in the tab shows it again", async () => {
+    const tab = panel();
+    await tab.findByRole("heading", { name: "Title 1" });
+    const fromCard = card(4);
+    fireEvent.click(await fromCard.findByRole("button", { name: "Open" }));
+    await tab.findByRole("heading", { name: "Title 4" });
+    await openMenu(tab.getByRole("button", { name: "Thread tasks (2)" }));
+    fireEvent.click(within(await tab.findByRole("menu")).getByText("Second task"));
+    expect(await tab.findByRole("heading", { name: "Title 2" })).toBeTruthy();
+    fireEvent.click(fromCard.getByRole("button", { name: "Open" }));
+    expect(await tab.findByRole("heading", { name: "Title 4" })).toBeTruthy();
+  });
+
+  test("a declined open leaves the tab's task alone", async () => {
+    const tab = panel();
+    await tab.findByRole("heading", { name: "Title 1" });
+    fireEvent.click(await card(4, () => false).findByRole("button", { name: "Open" }));
+    await act(async () => {});
+    expect(tab.getByRole("heading", { name: "Title 1" })).toBeTruthy();
   });
 });
