@@ -213,6 +213,7 @@ function TaskView({
           </button>
           <MoreMenu
             taskId={task.id}
+            body={task.body}
             pinned={pinned}
             listed={listed}
             onPin={() => void togglePin()}

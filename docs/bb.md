@@ -57,8 +57,8 @@ history, newest first, with a line where the body was last synced; an update fro
 Click the status pill to pick any status, or take the next step in one click, with Undo in the toast that follows.
 On Activity you can post a note, optionally changing the status in the same step. Both are recorded as you with
 `cortex update --as-me`, exactly like a change in the terminal workspace: credited to you and notifying nobody. The
-tab never edits a task's body or title; use the terminal workspace for that. A cortex whose `cortex doctor` names no
-`author` predates `--as-me`, so the tab stays read-only and says to update cortex.
+tab never edits a task's body or title; use the terminal workspace for that, or copy the body from the More menu. A
+cortex whose `cortex doctor` names no `author` predates `--as-me`, so the tab stays read-only and says to update it.
 
 An agent can write `::cortex{id="529"}` on its own line in a reply; bb shows it as a card that opens task 529.
 Stale means the files the task cites changed after its body was last brought up to date

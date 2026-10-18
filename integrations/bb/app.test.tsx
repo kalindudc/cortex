@@ -443,12 +443,43 @@ describe("switcher and more menu", () => {
     const unlink = await slot.findByRole("menuitem", { name: /Unlink/ });
     expect(unlink.getAttribute("aria-disabled")).toBe("true");
     expect(unlink.textContent).toContain("posted here");
-    fireEvent.click(slot.getByRole("menuitem", { name: /Copy/ }));
+    fireEvent.click(slot.getByRole("menuitem", { name: /Copy cortex tui 1/ }));
     await waitFor(() => expect(slot.inspection.experimental_clipboardWrites).toEqual([{ text: "cortex tui 1" }]));
     await openMenu(slot.getByRole("button", { name: "More" }));
     fireEvent.click(await slot.findByRole("menuitem", { name: /Pin as focus/ }));
     await waitFor(() => expect(calls(slot, "pin")).toEqual([{ threadId: THREAD, taskId: 1 }]));
     expect(await slot.findByRole("button", { name: /Pinned as this thread's focus/ })).toBeTruthy();
+  });
+
+  test("more: copy the task body as its raw Markdown", async () => {
+    const body = "## Goal\n\n- [ ] ship `it`\n";
+    const slot = panel(handlers(threadState(), { task: () => detail(1, { task: { ...detail(1).task, body } }) }));
+    await openMenu(await slot.findByRole("button", { name: "More" }));
+    fireEvent.click(await slot.findByRole("menuitem", { name: "Copy task body" }));
+    await waitFor(() => expect(slot.inspection.experimental_clipboardWrites).toEqual([{ text: body }]));
+    expect(toast).toHaveBeenCalledWith("Copied the body of #1");
+  });
+
+  test("more: a task with no body offers no body to copy", async () => {
+    for (const body of [null, "  \n"]) {
+      const slot = panel(handlers(threadState(), { task: () => detail(1, { task: { ...detail(1).task, body } }) }));
+      await openMenu(await slot.findByRole("button", { name: "More" }));
+      const copy = await slot.findByRole("menuitem", { name: "Copy task body" });
+      expect(copy.getAttribute("aria-disabled")).toBe("true");
+      cleanup();
+    }
+  });
+
+  test("more: a refused clipboard write says so", async () => {
+    const slot = renderSlot(
+      app.threadPanelActions[0]!,
+      { threadId: THREAD, params: null as never },
+      { rpc: handlers(), experimental_copyToClipboard: () => Promise.resolve(false) },
+    );
+    await openMenu(await slot.findByRole("button", { name: "More" }));
+    fireEvent.click(await slot.findByRole("menuitem", { name: "Copy task body" }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Could not copy to the clipboard."));
+    expect(toast).not.toHaveBeenCalled();
   });
 });
 

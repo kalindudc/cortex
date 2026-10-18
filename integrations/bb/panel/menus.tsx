@@ -181,9 +181,10 @@ export function SwitcherMenu({
   );
 }
 
-/** Pin or unpin, copy the TUI command, and link or unlink. */
+/** Pin or unpin, copy the body or the TUI command, and link or unlink. */
 export function MoreMenu({
   taskId,
+  body,
   pinned,
   listed,
   onPin,
@@ -191,6 +192,7 @@ export function MoreMenu({
   onUnlink,
 }: {
   taskId: number;
+  body: string | null;
   pinned: boolean;
   /** The task's row in the thread's list, or null when it is not linked. */
   listed: { authored: boolean } | null;
@@ -198,10 +200,11 @@ export function MoreMenu({
   onLink: () => void;
   onUnlink: () => void;
 }) {
-  const copy = async () => {
-    const command = `cortex tui ${taskId}`;
-    const copied = await experimental_copyToClipboard({ text: command });
-    if (copied) toast(`Copied: ${command}`);
+  const command = `cortex tui ${taskId}`;
+  const hasBody = body !== null && body.trim() !== "";
+  const copy = async (text: string, done: string) => {
+    const copied = await experimental_copyToClipboard({ text });
+    if (copied) toast(done);
     else toast.error("Could not copy to the clipboard.");
   };
   return (
@@ -220,9 +223,16 @@ export function MoreMenu({
           <Icon name={pinned ? "PinOff" : "Pin"} aria-hidden />
           {pinned ? "Unpin" : "Pin as focus"}
         </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => void copy()}>
+        <DropdownMenuItem
+          onSelect={() => void copy(body ?? "", `Copied the body of #${taskId}`)}
+          disabled={!hasBody}
+        >
+          <Icon name="FileText" aria-hidden />
+          Copy task body
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => void copy(command, `Copied: ${command}`)}>
           <Icon name="Copy" aria-hidden />
-          Copy <span className="font-mono">cortex tui {taskId}</span>
+          Copy <span className="font-mono">{command}</span>
         </DropdownMenuItem>
         {listed === null ? (
           <DropdownMenuItem onSelect={onLink}>
