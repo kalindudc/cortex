@@ -1,8 +1,9 @@
-// NavRail — the navigation rail: Tasks, Search, Lanes, Tags, Backup and
-// Settings are destinations that set `view` and carry aria-current; Settings
-// also asks its search field for focus (openSettings). Filter controls never
-// live here (they stay in WorkspaceFilters). Writing a backup is the Backup
-// panel's (BackupPanel.test.tsx).
+// NavRail — the navigation rail: Tasks, Search, Lanes, Tags, Backup, Agent
+// tools and Settings are destinations that set `view` and carry
+// aria-current; Settings also asks its search field for focus
+// (openSettings). Filter controls never live here (they stay in
+// WorkspaceFilters). Writing a backup is the Backup panel's
+// (BackupPanel.test.tsx), and installing agent tools the Agent tools panel's.
 
 import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
 
@@ -48,7 +49,7 @@ import {
 // assignment and cannot see that click handlers mutate it.
 const currentView = (): string => view.value;
 
-const LABELS = ["Tasks", "Search", "Lanes", "Tags", "Backup", "Settings"];
+const LABELS = ["Tasks", "Search", "Lanes", "Tags", "Backup", "Agent tools", "Settings"];
 
 function button(container: Element, label: string): HTMLButtonElement {
   const found = container.querySelector<HTMLButtonElement>(`button[aria-label='${label}']`);
@@ -73,7 +74,7 @@ describe("NavRail", () => {
     view.value = "tasks";
   });
 
-  test("one labelled navigation landmark with the theme toggle and six labelled items, each once", () => {
+  test("one labelled navigation landmark with the theme toggle and seven labelled items, each once", () => {
     const { container } = render(<NavRail />);
     const nav = container.querySelectorAll("nav.nav-rail");
     expect(nav.length).toBe(1);
@@ -84,7 +85,7 @@ describe("NavRail", () => {
     }
   });
 
-  test("Lanes, Tags, Backup and Tasks set the view and move aria-current, without touching filters", () => {
+  test("Lanes, Tags, Backup, Agent tools and Tasks set the view and move aria-current, without touching filters", () => {
     filters.value = { status: "open", lane: "now", tag: ["bug"] };
     workspaceQuery.value = "needle";
     const { container } = render(<NavRail />);
@@ -103,6 +104,10 @@ describe("NavRail", () => {
     fireEvent.click(button(container, "Backup"));
     expect(currentView()).toBe("backup");
     expect(current()).toEqual(["Backup"]);
+
+    fireEvent.click(button(container, "Agent tools"));
+    expect(currentView()).toBe("agents");
+    expect(current()).toEqual(["Agent tools"]);
 
     fireEvent.click(button(container, "Tasks"));
     expect(currentView()).toBe("tasks");

@@ -36,6 +36,7 @@ function makeFake(): Fake {
       return () => {};
     },
     resume: async () => ({ ok: false, error: "not in this test" }),
+    agents: async () => ({ ok: false, error: "not in this test" }),
     onOpen: () => () => {},
     drafts: {
       report: () => {},

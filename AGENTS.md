@@ -51,7 +51,7 @@ Top-level subdirectories of `src/` (hand-written; update in the same PR when you
 - src/commands/   — citty subcommands (one file per `cortex <verb>`)
 - src/desktop/   — the desktop main process's Node-side half: socket transport, daemon connection, IPC contract and guards, live bridge, UI file lookup, resume and launch links (never imports Electron)
 - src/extensions/   — pi extension(s) embedded as Bun file assets
-- src/lib/   — helpers shared by the CLI, daemon and desktop renderer (task search/ordering, status constants, time formatting, @id/#tag grammar, the user's author name)
+- src/lib/   — helpers shared by the CLI, daemon and desktop renderer (task search/ordering, status constants, time formatting, @id/#tag grammar, the user's author name, agent tool status)
 - src/skills/   — embedded agent skills (cortex, cortex-planner, cortex-implementer, cortex-research)
 - src/ui/   — the desktop renderer, bundled for the browser and loaded only over the app's `cortex://` scheme
 
@@ -81,7 +81,7 @@ One line per rule; the linked doc holds the why. A code comment states its reaso
 - Author tags are `<role>-<8 hex>` (standalone fallback), `pi-<full-uuidv7>` (plain pi), or `bb-<thread id>` (bb). The last two resume via their own harness.
 - `scripts/` are Bun scripts when they need type-checking or stdlib parity (`scripts/check-docs.ts` is the precedent); thin orchestration stays in bash. macOS bash 3.2 must keep working — no associative arrays, no GNU awk extensions.
 - Desktop help single sources: `src/ui/state/settings.ts#SETTINGS`, `src/ui/lib/help.ts#SHORTCUTS` and `src/ui/components/palette/buildCommands.ts#buildCommands`, rendered only by `src/ui/components/panels/SettingsPanel.tsx`, and each setting only by `src/ui/components/panels/SettingRow.tsx`; desktop settings live in the window's `localStorage` and never touch `tui.toml` or `themes/*.toml`; `integrations/desktop/test/settings-help.test.ts` presses every shortcut ([desktop](docs/desktop.md#help-and-settings)).
-- Task-list order is `src/lib/taskOrder.ts#arrangeTasks`, and resume candidates are `src/lib/resume.ts#resumeCandidates`; the desktop resumes only through the checked `cortex:resume` channel, with an argv, never a shell string.
+- Task-list order is `src/lib/taskOrder.ts#arrangeTasks`, and resume candidates are `src/lib/resume.ts#resumeCandidates`; the desktop resumes only through the checked `cortex:resume` channel, with an argv, never a shell string, and runs agent tools only through `cortex:agents`, as one of `src/desktop/agents.ts#AGENTS_ARGV`.
 - Title/body drafts save ONLY through guarded versioned writes; tag membership changes are `versioned.changeTags` deltas, and removing a tag from a task NEVER deletes its definition ([desktop](docs/desktop.md#drafts-and-guarded-writes)).
 - The desktop renderer renders Markdown ONLY through `src/ui/lib/markdown.ts` (`marked` then DOMPurify, failing closed), certified in real Chromium by `integrations/desktop/test/document-safety.test.ts`; a draft is NEVER dropped silently: close, reload and quit go through `src/desktop/draftGuard.ts`, and unsaved text of a deleted task is kept for export ([desktop](docs/desktop.md#document-safety)).
 - Lane/tag picker search (`src/lib/catalogSearch.ts`) NEVER caps results or forces refinement ([desktop](docs/desktop.md#pickers)).

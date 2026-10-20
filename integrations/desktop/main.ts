@@ -1,11 +1,12 @@
 // The Electron main process: thin glue around the Node-side modules in
 // src/desktop/. It serves the UI over cortex://app, connects to the daemon by
 // running the CLI, and answers the renderer's bridge calls after validating
-// each one. Closing, reloading or quitting while the renderer reports
-// unsaved drafts asks first (src/desktop/draftGuard.ts). Quitting leaves the
-// daemon running; the app never signals a pid and never posts shutdown.
+// each one; agent tool checks and installs run the CLI too. Closing,
+// reloading or quitting while the renderer reports unsaved drafts asks first
+// (src/desktop/draftGuard.ts). Quitting leaves the daemon running; the app
+// never signals a pid and never posts shutdown.
 
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import {
@@ -21,6 +22,7 @@ import {
   shell,
   type WebContents,
 } from "electron";
+import { createAgents, type CortexRun } from "../../src/desktop/agents.ts";
 import { startBridge } from "../../src/desktop/bridge.ts";
 import { connectDaemon, type DaemonConnection, resolveCortexBin } from "../../src/desktop/daemon.ts";
 import { deepLinkPath, parseDeepLink } from "../../src/desktop/deepLink.ts";
@@ -49,6 +51,7 @@ const ALLOWED_PERMISSIONS: ReadonlySet<string> = new Set(["notifications", "clip
 /** The daemon is gone and nothing was delivered, so one retry cannot apply a write twice. */
 const DAEMON_GONE: ReadonlySet<string> = new Set(["ECONNREFUSED", "ENOENT"]);
 const RESUME_TIMEOUT_MS = 20_000;
+const AGENTS_MAX_BUFFER = 4 * 1024 * 1024;
 const hidden = process.env.CORTEX_DESKTOP_HIDDEN === "1";
 
 protocol.registerSchemesAsPrivileged([
@@ -162,6 +165,25 @@ function runHarness(program: string, argv: string[]): Promise<{ code: number | n
   });
 }
 
+/** Run the app's own cortex with an argv and no shell, keeping its output even when it fails. */
+function runCortex(argv: readonly string[], timeoutMs: number): Promise<CortexRun> {
+  return new Promise(resolve => {
+    execFile(
+      resolveCortexBin({ env: process.env, packagedResourcesPath }),
+      [...argv],
+      { env: process.env, timeout: timeoutMs, maxBuffer: AGENTS_MAX_BUFFER, encoding: "utf8", shell: false },
+      (err, stdout, stderr) => {
+        if (!err) return resolve({ code: 0, stdout, stderr });
+        const code = typeof err.code === "number" ? err.code : null;
+        const reason = err.killed ? `timed out after ${timeoutMs / 1000}s` : err.message;
+        resolve({ code, stdout, stderr: stderr.trim() ? stderr : reason });
+      },
+    );
+  });
+}
+
+const agents = createAgents({ run: runCortex });
+
 function registerIpc(): void {
   ipcMain.handle(CHANNELS.request, (event, raw: unknown) => {
     assertTrusted(event);
@@ -170,6 +192,10 @@ function registerIpc(): void {
   ipcMain.handle(CHANNELS.resume, (event, raw: unknown) => {
     assertTrusted(event);
     return resume({ updates: readUpdates, run: runHarness, copy: text => clipboard.writeText(text), env: process.env }, raw);
+  });
+  ipcMain.handle(CHANNELS.agents, (event, raw: unknown) => {
+    assertTrusted(event);
+    return agents(raw);
   });
   ipcMain.handle(CHANNELS.attach, event => {
     assertTrusted(event);

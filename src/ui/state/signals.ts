@@ -83,12 +83,14 @@ export const sectionOpen = signal<{ views: boolean; lanes: boolean; tasks: boole
   tasks: true,
 });
 // The navigation rail's destination. "tasks" lists tasks with filters and
-// shows the task document; the others replace the list column (Backup has
-// none) and show their panel in the document's place. Switching never
-// changes the filters, and it is in memory only, so every launch opens on
-// tasks.
-export type View = "tasks" | "search" | "lanes" | "tags" | "backup" | "settings";
+// shows the task document; the others replace the list column (Backup and
+// Agent tools have none) and show their panel in the document's place.
+// Switching never changes the filters, and it is in memory only, so every
+// launch opens on tasks.
+export type View = "tasks" | "search" | "lanes" | "tags" | "backup" | "agents" | "settings";
 export const view = signal<View>("tasks");
+// The views whose panel takes the list column's place too.
+export const LISTLESS_VIEWS: ReadonlySet<View> = new Set<View>(["backup", "agents"]);
 // The views that show the task document and the side panel. Acting on a
 // task from any other view switches to Tasks first; Search keeps its results
 // beside the task it opens.
@@ -186,7 +188,7 @@ export const paletteOpen = signal<boolean>(false);
 export const paletteQuery = signal<string>("");
 // modal kinds: 'confirm-delete' | 'confirm-lane-delete' | 'new-lane' |
 // 'new-tag' | 'confirm-tag-delete' | 'filter-tags' | 'update-detail' |
-// 'render-markdown'
+// 'render-markdown' | 'confirm-agents-reset'
 export const modal = signal<{ kind: string; [k: string]: unknown } | null>(null);
 
 // ---------- misc ----------

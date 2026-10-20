@@ -429,6 +429,11 @@ describe("buildCommands", () => {
     expect(currentView()).toBe("backup");
     view.value = "tasks";
 
+    cmds.find(c => c.id === "agent-tools")?.action?.();
+    expect(cmds.find(c => c.id === "agent-tools")?.label).toBe("Agent tools\u2026");
+    expect(currentView()).toBe("agents");
+    view.value = "tasks";
+
     cmds = buildCommands();
     expect(theme.value).toBe("light");
     cmds.find(c => c.id === "theme-toggle")?.action?.();

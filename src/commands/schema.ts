@@ -18,7 +18,7 @@ const COMMANDS: { name: string; summary: string }[] = [
   {
     name: "agents",
     summary:
-      "agents install|reset: the skills + pi extension (when pi is present) + bb plugin (when bb is); reset wipes first",
+      "agents status|install|reset: the skills + pi extension (when pi is present) + bb plugin (when bb is); status compares, reset wipes first",
   },
   { name: "add", summary: "create a task (--json, --as, --body-file -)" },
   { name: "ls", summary: "list tasks (--json omits body; --full includes it)" },

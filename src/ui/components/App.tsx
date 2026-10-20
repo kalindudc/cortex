@@ -16,8 +16,8 @@
 // views that show the task document (TASK_VIEWS).
 //
 // The main area follows the rail's view: the task document on Tasks and
-// Search, the Lanes, Tags, Backup or Settings panel otherwise. Backup has no
-// list column.
+// Search, the Lanes, Tags, Backup, Agent tools or Settings panel otherwise.
+// Backup and Agent tools have no list column (LISTLESS_VIEWS).
 //
 // The document workspace (ActiveTaskPane) is keyed so drawer/viewport
 // swaps in the sibling slot can never remount it (editor identity, cursor
@@ -33,6 +33,7 @@ import {
   narrowViewport,
   focusReading,
   view,
+  LISTLESS_VIEWS,
   TASK_VIEWS,
 } from "../state/signals.ts";
 import { contextOpen, contextSheetOpen } from "../state/context.ts";
@@ -45,6 +46,7 @@ import { ContextPanel } from "./context/ContextPanel.tsx";
 import { LanePanel } from "./panels/LanePanel.tsx";
 import { TagPanel } from "./panels/TagPanel.tsx";
 import { BackupPanel } from "./panels/BackupPanel.tsx";
+import { AgentsPanel } from "./panels/AgentsPanel.tsx";
 import { SettingsPanel } from "./panels/SettingsPanel.tsx";
 import { ModalRoot } from "./modals/ModalRoot.tsx";
 import { DialogFrame } from "./modals/DialogFrame.tsx";
@@ -55,7 +57,7 @@ export default function App(): VNode {
   const narrow = narrowViewport.value;
   const drawerOpen = narrow && navigationOpen.value;
   const taskView = TASK_VIEWS.has(view.value);
-  const listless = view.value === "backup";
+  const listless = LISTLESS_VIEWS.has(view.value);
   // Focus reading hides the list only on Tasks: every other view needs it.
   const reading = focusReading.value && view.value === "tasks";
   const inline = taskView && !narrow && !focusReading.value && contextOpen.value;
@@ -102,6 +104,8 @@ export default function App(): VNode {
         <TagPanel key="tags" />
       ) : view.value === "backup" ? (
         <BackupPanel key="backup" />
+      ) : view.value === "agents" ? (
+        <AgentsPanel key="agents" />
       ) : view.value === "settings" ? (
         <SettingsPanel key="settings" />
       ) : null}

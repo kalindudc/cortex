@@ -386,6 +386,15 @@ export function buildCommands(): Command[] {
       view.value = "backup";
     },
   });
+  cmds.push({
+    id: "agent-tools",
+    label: "Agent tools\u2026",
+    hint: "",
+    icon: "bot",
+    action: () => {
+      view.value = "agents";
+    },
+  });
 
   // ----- side panel (the same toggle as the task toolbar's button) -----
   const panelShown = contextShown();

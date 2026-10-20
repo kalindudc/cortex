@@ -13,10 +13,10 @@ runs on. This page covers installing it and what it does, then how it is built a
 
 ## Install
 
-`cortex agents install` installs the plugin when bb is installed and running: it writes the plugin's source, which
-ships inside the cortex binary, to `~/.config/cortex/bb-plugin`, installs its dependencies there with npm, and
-registers it with bb. Run it again after upgrading cortex; it changes only what differs. `cortex agents reset` removes
-the plugin from bb first, which also replaces one installed another way and resets its settings.
+`cortex agents install` installs the plugin when bb is installed and running: it writes the plugin's source, which ships
+inside the cortex binary, to `~/.config/cortex/bb-plugin`, installs its dependencies there with npm, and registers it
+with bb. Run it again after upgrading; it changes only what differs, which `cortex agents status` lists.
+`cortex agents reset` first removes it from bb, which also replaces one installed another way and resets its settings.
 
 The plugin has four settings. The Cortex executable (`cortexPath`), left empty, finds `cortex` on your `PATH`, then in
 `~/bin` and `~/.local/bin`; run `bb plugin reload cortex` after changing it. Agent memory is Automatic by default:

@@ -6,6 +6,7 @@ import {
   bbPluginDir,
   bbPluginFiles,
   bbReportLine,
+  differingBbPluginFiles,
   findBbCli,
   needsNpm,
   writeBbPluginFiles,
@@ -96,6 +97,16 @@ describe("writeBbPluginFiles and needsNpm", () => {
     expect(fs.readFileSync(path.join(target, "app.tsx"), "utf8")).toBe(bbPluginFiles()["app.tsx"]);
     expect(fs.existsSync(path.join(target, "node_modules", "zod"))).toBe(true);
     expect(fs.readFileSync(path.join(target, "dist", "app.js"), "utf8")).toBe("built");
+  });
+
+  test("differingBbPluginFiles names every missing or changed file, and nothing once written", () => {
+    const target = path.join(dir, "plugin");
+    expect(differingBbPluginFiles(target).sort()).toEqual(Object.keys(bbPluginFiles()).sort());
+    writeBbPluginFiles(target);
+    expect(differingBbPluginFiles(target)).toEqual([]);
+    fs.appendFileSync(path.join(target, "app.tsx"), "\n// edited");
+    fs.rmSync(path.join(target, "package.json"));
+    expect(differingBbPluginFiles(target).sort()).toEqual(["app.tsx", "package.json"]);
   });
 
   test("npm is needed until a marker for this lockfile exists", () => {

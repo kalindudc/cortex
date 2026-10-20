@@ -14,6 +14,7 @@ import { NewTagModal } from "./NewTagModal.tsx";
 import { TagFilterModal } from "./TagFilterModal.tsx";
 import { UpdateDetailModal } from "./UpdateDetailModal.tsx";
 import { RenderMarkdownModal } from "./RenderMarkdownModal.tsx";
+import { AgentsResetModal } from "./AgentsResetModal.tsx";
 import type { Update } from "../../api/types.ts";
 
 export function ModalRoot(): VNode | null {
@@ -66,6 +67,9 @@ export function ModalRoot(): VNode | null {
   }
   if (m.kind === "render-markdown") {
     return <RenderMarkdownModal taskId={m.taskId as number} close={close} />;
+  }
+  if (m.kind === "confirm-agents-reset") {
+    return <AgentsResetModal close={close} />;
   }
   if (m.kind === "confirm-tag-delete") {
     const tagName = m.name as string;

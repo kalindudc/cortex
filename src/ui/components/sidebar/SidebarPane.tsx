@@ -22,7 +22,7 @@
 //     shows, "+" opens the create modal. Opening them never changes filters.
 //   "search" — SearchList: a search over every task beside the document.
 //   "settings" — SettingsNav: the settings search and the panel's sections.
-//   "backup" — App renders no list column at all.
+//   "backup", "agents" — App renders no list column at all.
 //
 // Task rows are draggable (application/x-cortex-task-id). The header
 // LanePicker remains the click/keyboard/touch alternative for moving tasks.

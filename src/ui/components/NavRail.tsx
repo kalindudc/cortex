@@ -1,10 +1,11 @@
 // NavRail — the app's navigation rail, the first grid column.
 //
-// Tasks, Search, Lanes, Tags, Backup and Settings are destinations: each
-// sets the `view` signal (Settings through openSettings(), which also
-// focuses its search) and is marked aria-current while active, and pressing
-// the active one keeps its view. None of them touches the filters. At
-// <= 900px App mounts this same rail inside the navigation drawer.
+// Tasks, Search, Lanes, Tags, Backup, Agent tools and Settings are
+// destinations: each sets the `view` signal (Settings through
+// openSettings(), which also focuses its search) and is marked aria-current
+// while active, and pressing the active one keeps its view. None of them
+// touches the filters. At <= 900px App mounts this same rail inside the
+// navigation drawer.
 
 import type { VNode } from "preact";
 import { view, type View } from "../state/signals.ts";
@@ -50,6 +51,7 @@ export function NavRail(): VNode {
       <Destination to="lanes" label="Lanes" icon="layers" />
       <Destination to="tags" label="Tags" icon="hash" />
       <Destination to="backup" label="Backup" icon="archive" />
+      <Destination to="agents" label="Agent tools" icon="bot" />
       <span class="grow" aria-hidden="true"></span>
       <ThemeToggle />
       <Destination to="settings" label="Settings" icon="settings" go={openSettings} />

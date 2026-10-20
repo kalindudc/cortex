@@ -54,7 +54,8 @@ cortex                                                            # open the des
 ## How you use it
 
 - Agents work through the CLI, usually with `--json`. A bb thread identifies itself; outside bb, agents use
-  the pi tool or explicit `--as`. `cortex agents install` teaches agents the conventions.
+  the pi tool or explicit `--as`. `cortex agents install` teaches agents the conventions; after an upgrade,
+  `cortex agents status` or the desktop app's Agent tools panel shows what is out of date.
 - A task moves through draft, open, review, blocked and done. Only a move into blocked interrupts you: the
   desktop app shows a system notification.
 - You read, edit and triage in the desktop app: plain `cortex` opens it.

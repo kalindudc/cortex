@@ -26,6 +26,8 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { FilesStatus } from "./lib/agentTools.ts";
+import { compareEmbedded } from "./skills.ts";
 
 // --- pi extension (cortex_update tool) ------------------------------------
 // `with { type: "file" }` is a Bun bundler directive that rewrites the
@@ -149,4 +151,11 @@ export async function writeAllExtensions(): Promise<void> {
   for (const name of listExtensions()) {
     await writeExtension(name);
   }
+}
+
+/** Each shipped extension's installed files compared with this binary's (`cortex agents status`). */
+export async function extensionsStatus(): Promise<FilesStatus[]> {
+  const out: FilesStatus[] = [];
+  for (const name of listExtensions()) out.push(await compareEmbedded(EXTENSIONS[name], name, extensionDir(name)));
+  return out;
 }

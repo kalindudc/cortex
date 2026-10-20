@@ -5,6 +5,7 @@
  */
 
 import type { ConnectionState } from "../contracts.ts";
+import type { AgentsReply, AgentsRequest } from "./agents.ts";
 import type { DeepLink } from "./deepLink.ts";
 import type { ResumeRequest, ResumeResult } from "./resume.ts";
 
@@ -24,6 +25,7 @@ export const CHANNELS = {
   draftsRelease: "cortex:drafts-release",
   draftsReleased: "cortex:drafts-released",
   resume: "cortex:resume",
+  agents: "cortex:agents",
   open: "cortex:open",
 } as const;
 
@@ -79,6 +81,8 @@ export interface CortexBridge {
   onState(listener: (state: ConnectionState) => void): () => void;
   /** Open the bb thread, or copy the pi command, of an author main finds resumable on the task. */
   resume(request: ResumeRequest): Promise<ResumeResult>;
+  /** Check, install or reset the agent tools: main runs `cortex agents <action> --json` and returns its result. */
+  agents(request: AgentsRequest): Promise<AgentsReply>;
   /** A launch link from a second launch of the app: show that task, at that heading. */
   onOpen(listener: (link: DeepLink) => void): () => void;
   drafts: {

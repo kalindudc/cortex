@@ -6,6 +6,7 @@ import {
   listExtensions,
   extensionsRoot,
   extensionDir,
+  extensionsStatus,
   piAgentDir,
   piDetected,
   writeExtension,
@@ -145,5 +146,19 @@ describe("writeExtension / writeAllExtensions — error + path-resolution branch
     } finally {
       fs.rmSync(envDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("extensionsStatus", () => {
+  test("missing, installed, then outdated when a file differs", async () => {
+    process.env[ENV_KEY] = tmpDir;
+    const dir = path.join(tmpDir, "cortex");
+    expect(await extensionsStatus()).toEqual([
+      { name: "pi", dir, state: "missing", differs: ["index.ts", "memory-view.ts"] },
+    ]);
+    await writeAllExtensions();
+    expect(await extensionsStatus()).toEqual([{ name: "pi", dir, state: "installed", differs: [] }]);
+    fs.writeFileSync(path.join(dir, "memory-view.ts"), "// replaced");
+    expect(await extensionsStatus()).toEqual([{ name: "pi", dir, state: "outdated", differs: ["memory-view.ts"] }]);
   });
 });

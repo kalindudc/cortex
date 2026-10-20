@@ -29,7 +29,7 @@ describe("boot", () => {
     }));
     expect(probe).toEqual({
       origin: "cortex://app",
-      bridge: ["attach", "drafts", "onFrame", "onOpen", "onState", "request", "resume"],
+      bridge: ["agents", "attach", "drafts", "onFrame", "onOpen", "onState", "request", "resume"],
       drafts: ["export", "onRelease", "onSaveAll", "report"],
       require: "undefined",
       process: "undefined",

@@ -2,7 +2,15 @@ import { test, expect, describe, beforeAll, afterAll } from "bun:test";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
-import { writeSkill, listSkills, skillsRoot, skillDir, type SkillName } from "../../src/skills.ts";
+import {
+  writeSkill,
+  writeAllSkills,
+  listSkills,
+  skillsRoot,
+  skillDir,
+  skillsStatus,
+  type SkillName,
+} from "../../src/skills.ts";
 import { writeExtension, listExtensions } from "../../src/extensions.ts";
 
 // All shipped skills are embedded in the cortex binary and self-installed at
@@ -63,6 +71,36 @@ describe("cortex base skill — leaf files", () => {
       const abs = path.join(dir, rel);
       expect(fs.existsSync(abs)).toBe(true);
       expect(fs.statSync(abs).size).toBeGreaterThan(200);
+    }
+  });
+});
+
+// `cortex agents status`: installed files compared with the embedded ones.
+describe("skillsStatus", () => {
+  test("missing, then installed, then outdated naming each changed or deleted file; extra files are ignored", async () => {
+    const prev = process.env.CORTEX_SKILL_DIR;
+    const root = path.join(tmpDir, "status-root");
+    try {
+      process.env.CORTEX_SKILL_DIR = root;
+      const states = async () => (await skillsStatus()).map(s => [s.name, s.state, s.differs] as const);
+      expect((await skillsStatus()).map(s => s.name)).toEqual(listSkills());
+      for (const [, state] of await states()) expect(state).toBe("missing");
+
+      await writeAllSkills();
+      fs.writeFileSync(path.join(root, "cortex", "notes.md"), "not shipped");
+      for (const s of await skillsStatus()) {
+        expect(s).toEqual({ name: s.name, dir: path.join(root, s.name), state: "installed", differs: [] });
+      }
+
+      fs.appendFileSync(path.join(root, "cortex-planner", "SKILL.md"), "\nhand edit");
+      fs.rmSync(path.join(root, "cortex", "cli", "agents.md"));
+      const byName = new Map((await skillsStatus()).map(s => [s.name, s]));
+      expect(byName.get("cortex-planner")).toMatchObject({ state: "outdated", differs: ["SKILL.md"] });
+      expect(byName.get("cortex")).toMatchObject({ state: "outdated", differs: ["cli/agents.md"] });
+      expect(byName.get("cortex-research")?.state).toBe("installed");
+    } finally {
+      if (prev === undefined) delete process.env.CORTEX_SKILL_DIR;
+      else process.env.CORTEX_SKILL_DIR = prev;
     }
   });
 });

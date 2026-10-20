@@ -1,15 +1,14 @@
 ---
-budget: 170
+budget: 172
 sources: [src/commands/app.ts, src/desktop/, src/ui/, src/lib/catalogSearch.ts, src/lib/refGrammar.ts, src/lib/slug.ts,
   integrations/desktop/]
 ---
 
 # The desktop app
 
-The desktop app is where you read, edit and triage tasks while your agents work through the CLI. It is an Electron
-window over the same daemon and database the CLI uses, so every agent write shows up in it live. This page explains
-how to open and use it, then how it is built and which rules keep it safe. See also [architecture](architecture.md)
-and [memory](memory.md).
+The desktop app is where you read, edit and triage tasks while your agents work through the CLI: an Electron window over
+the same daemon and database the CLI uses, so every agent write shows up in it live. This page covers using it, then how
+it is built and the rules that keep it safe; see also [architecture](architecture.md) and [memory](memory.md).
 
 ## Opening it
 
@@ -21,12 +20,12 @@ and [memory](memory.md).
 
 ## Using it
 
-- The rail on the left switches between Tasks, Search, Lanes, Tags and Backup, and holds the theme switch and Settings.
-  The task list beside it filters by status, lane and tag. Its order line sets the sort, its direction and the
-  grouping; a group header folds its tasks away, Collapse all and Expand all fold every group, and the folds are kept.
-  Each status has a shape as well as a colour: a dashed ring for draft, a ring for open, a half-filled ring for review,
-  a bar for blocked and a check for done. The document shows a task in Read, Edit or Split view, with Document and
-  Activity tabs (every update, and a composer).
+- The rail on the left switches between Tasks, Search, Lanes, Tags, Backup and Agent tools, and holds the theme switch
+  and Settings. The task list beside it filters by status, lane and tag. Its order line sets the sort, its direction and
+  the grouping; a group header folds its tasks away, Collapse all and Expand all fold every group, and the folds are
+  kept. Each status has a shape as well as a colour: a dashed ring for draft, a ring for open, a half-filled ring for
+  review, a bar for blocked and a check for done. The document shows a task in Read, Edit or Split view, with Document
+  and Activity tabs (every update, and a composer).
 - The side panel on the right has three tabs. Details shows the task's properties, its authors with Resume buttons and
   its related tasks. Inbox lists notifications and this window's errors, filtered by All, Unread or Blocked. Outline
   lists the document's headings in Read and Split views, and a click scrolls to one. The toolbar's panel button shows
@@ -38,6 +37,8 @@ and [memory](memory.md).
   its tasks (by status for a lane) and deletes it: a lane only when empty and not `now`, a tag keeping its tasks.
 - The Backup panel writes a backup, shows the last one and its folder, and sets how many backups to keep. Restore stays
   in the terminal: quit the app, run `cortex stop`, then `cortex restore <file>` (`--dry-run` first previews).
+- The Agent tools panel checks the skills, pi extension and bb plugin against this cortex, installs them, and resets
+  them after asking. Opened from the Dock, it may not find npm for a first bb plugin install: use `cortex app`.
 - The Settings panel (Mod+, or the rail) searches every setting, command and shortcut, and sets the appearance, density
   (one or two lines per task), sort and direction, grouping, done tasks, document mode, the blocked alert and backup
   retention; About shows the version, database, daemon and author. The app never reads `tui.toml` or `themes/*.toml`.
@@ -97,7 +98,7 @@ happened to each of its commands: where it went in the app, or why it was droppe
 | Reading cursor, motions, visual selection, registers | Dropped by the user's choice. Instead: ordinary text selection, the system clipboard and the editor's own keys |
 | `tui.toml` key bindings and profiles | Dropped by the user's choice. Instead: fixed shortcuts, all listed in the Settings panel |
 | User-authored TOML themes | Dropped by the user's choice. Instead: the four built-in appearances |
-| Agent integration install and reset | Dropped by the user's choice. Instead: `cortex agents install` and `cortex agents reset` in a terminal |
+| Agent integration install and reset | The Agent tools panel in the rail: a status check, Install, and Reset with a confirmation |
 
 ## Under the hood
 
@@ -109,7 +110,8 @@ reimplementing daemon ownership, and forwards the live stream to each window thr
 renderer (`src/ui/`) loads only `cortex://app`, runs sandboxed with context isolation, and sees only `window.cortex`
 from `integrations/desktop/preload.ts`. Main checks every bridge call with `src/desktop/guard.ts#parseBridgeRequest`:
 the sender's origin, the method, a path under `/api/`, and never a daemon control path. There is no TCP port; the
-daemon is reached only over its Unix socket, from main.
+daemon is reached only over its Unix socket, from main. For agent tools the renderer names only an action, and
+`src/desktop/agents.ts#createAgents` runs that action's fixed `cortex agents` argv, one install or reset at a time.
 
 ### Live sync
 
@@ -158,7 +160,7 @@ One set of sources describes the app: `src/ui/state/settings.ts#SETTINGS`, `src/
 ## Rules to keep
 
 - The renderer never reaches the store, the CLI client or a Node module, and main validates every bridge call:
-  `test/unit/ui/browser-graph.test.ts`, `test/unit/desktop/guard.test.ts`.
+  `test/unit/ui/browser-graph.test.ts`, `test/unit/desktop/guard.test.ts`, `test/unit/desktop/agents.test.ts`.
 - Markdown and diagrams render only through `src/ui/lib/markdown.ts`, failing closed:
   `integrations/desktop/test/document-safety.test.ts`.
 - Drafts save only through guarded writes and are never dropped silently; removing a tag keeps its definition:

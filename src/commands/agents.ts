@@ -2,25 +2,29 @@ import { defineCommand } from "citty";
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
-import { type BbResult, bbPluginDir, bbReportLine, findBbCli, installBbPlugin } from "../bbPlugin.ts";
-import { extensionDir, listExtensions, piDetected, writeAllExtensions } from "../extensions.ts";
+import pkg from "../../package.json" with { type: "json" };
+import { bbPluginDir, bbPluginStatus, bbReportLine, findBbCli, installBbPlugin } from "../bbPlugin.ts";
+import { extensionDir, extensionsStatus, listExtensions, piDetected, writeAllExtensions } from "../extensions.ts";
+import { type AgentsResult, type AgentsStatus, type FilesStatus, suggestion } from "../lib/agentTools.ts";
 import { emitError, printJson } from "../output.ts";
-import { listSkills, skillDir, writeAllSkills } from "../skills.ts";
+import { listSkills, skillDir, skillsStatus, writeAllSkills } from "../skills.ts";
 
 /**
- * `cortex agents install|reset` — the agent tooling, split from the
+ * `cortex agents status|install|reset` — the agent tooling, split from the
  * datastore (`cortex init`/`cortex reset` never touch it). Skills
  * (`~/.agents/skills`, harness-neutral) are always written; the pi extension
  * only when pi is detected (`piDetected`), and the bb plugin only when bb is
  * found and running (src/bbPlugin.ts); every skip is reported.
  *
+ *   status   compare what is installed with what this binary ships; writes nothing
  *   install  overwrite in place (extra files in the dirs are kept)
  *   reset    wipe every cortex-owned skill/extension dir, remove the bb
  *            plugin and its dir, then install (drops files stranded by an
  *            upgrade, and hand-edits)
  *
- * Both touch only `skillDir(name)`, `extensionDir(name)` and `bbPluginDir()`
- * (plus bb's own record of the plugin) and never open the database.
+ * They touch only `skillDir(name)`, `extensionDir(name)` and `bbPluginDir()`
+ * (plus bb's own record of the plugin) and never open the database. The
+ * desktop app runs them as `--json` children (src/desktop/agents.ts).
  */
 
 const CONFIRM = "RESET";
@@ -30,13 +34,6 @@ const jsonArg = {
   type: "boolean" as const,
   default: false,
   description: "emit the result as JSON instead of the human lines",
-};
-
-export type AgentsResult = {
-  skills: { name: string; dir: string }[];
-  extensions: { name: string; dir: string }[];
-  skipped: { name: string; reason: string }[];
-  bb: BbResult;
 };
 
 /** Resolves "" on EOF so a closed stdin aborts instead of exiting silently. */
@@ -80,6 +77,50 @@ export async function installAll(wipe: boolean): Promise<AgentsResult> {
   return { ...result, bb: await installBbPlugin({ wipe }) };
 }
 
+/** What is installed, compared with this binary's files; the same detection as `installAll`. */
+export async function agentsStatus(): Promise<AgentsStatus> {
+  const skills = await skillsStatus();
+  const pi = piDetected();
+  const extensions = pi ? await extensionsStatus() : [];
+  const skipped = pi ? [] : [{ name: "pi", reason: PI_MISSING }];
+  const bb = await bbPluginStatus();
+  return { version: pkg.version, skills, extensions, skipped, bb, suggest: suggestion({ skills, extensions, bb }) };
+}
+
+function filesLine(kind: string, f: FilesStatus): string {
+  if (f.state === "installed") return `✓ ${kind} → ${f.dir}`;
+  if (f.state === "missing") return `✗ ${kind} not installed → ${f.dir}`;
+  const n = f.differs.length;
+  return `! ${kind} differs from this version (${n} file${n === 1 ? "" : "s"}) → ${f.dir}`;
+}
+
+function bbStatusLine(bb: AgentsStatus["bb"]): string {
+  const plugin = bb.plugin;
+  const state = plugin ? ` (${plugin.status}${plugin.statusDetail ? `: ${plugin.statusDetail}` : ""})` : "";
+  const cortexPath = plugin?.cortexPath ? ` · runs cortex at ${plugin.cortexPath}` : "";
+  switch (bb.state) {
+    case "installed":
+      return `✓ bb plugin → ${bb.dir}${state}${cortexPath}`;
+    case "outdated":
+      return `! bb plugin needs updating: ${bb.reason} → ${bb.dir}${state}`;
+    case "missing":
+      return `✗ bb plugin not installed → ${bb.dir}`;
+    case "foreign":
+      return `! ${bb.reason}`;
+    case "skipped":
+      return `– bb plugin: ${bb.reason}`;
+  }
+}
+
+function reportStatus(status: AgentsStatus): void {
+  for (const s of status.skills) console.log(filesLine(`skill ${s.name}`, s));
+  for (const e of status.extensions) console.log(filesLine(`${e.name} extension`, e));
+  for (const { name, reason } of status.skipped) console.log(`– ${name} extension: ${reason}`);
+  console.log(bbStatusLine(status.bb));
+  if (status.suggest === "none") console.log(`✓ every agent tool matches cortex ${status.version}`);
+  else console.log(`→ run \`cortex agents ${status.suggest}\``);
+}
+
 function report(result: AgentsResult): void {
   for (const { name, dir } of result.skills) console.log(`✓ skill ${name} → ${dir}`);
   for (const { name, dir } of result.extensions) console.log(`✓ ${name} extension → ${path.join(dir, "index.ts")}`);
@@ -98,6 +139,24 @@ function finish(result: AgentsResult, json: boolean, done?: string): void {
   }
   if (result.bb.status === "failed") process.exit(1);
 }
+
+const status = defineCommand({
+  meta: {
+    name: "status",
+    description: "compare the installed skills, pi extension and bb plugin with this cortex's; writes nothing",
+  },
+  args: { json: jsonArg },
+  async run({ args }) {
+    let result: AgentsStatus;
+    try {
+      result = await agentsStatus();
+    } catch (err) {
+      emitError(args.json, err);
+    }
+    if (args.json) printJson(result);
+    else reportStatus(result);
+  },
+});
 
 const install = defineCommand({
   meta: {
@@ -160,6 +219,9 @@ const reset = defineCommand({
 });
 
 export default defineCommand({
-  meta: { name: "agents", description: "install or reset cortex's agent skills, pi extension and bb plugin" },
-  subCommands: { install, reset },
+  meta: {
+    name: "agents",
+    description: "check, install or reset cortex's agent skills, pi extension and bb plugin",
+  },
+  subCommands: { status, install, reset },
 });

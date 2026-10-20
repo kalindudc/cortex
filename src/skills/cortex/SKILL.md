@@ -23,7 +23,7 @@ Humans usually work in the desktop app: plain `cortex` in an interactive termina
 | Command | Description | Docs |
 |---|---|---|
 | `cortex init` | Initialize or migrate the SQLite DB (agent tools: `cortex agents install`). | [init.md](cli/init.md) |
-| `cortex agents install\|reset` | Write the embedded skills, plus the pi extension when pi is present and the bb plugin when bb is; `reset` wipes them first. | [agents.md](cli/agents.md) |
+| `cortex agents status\|install\|reset` | Check, or write, the embedded skills, plus the pi extension when pi is present and the bb plugin when bb is; `reset` wipes them first. | [agents.md](cli/agents.md) |
 | `cortex add <title>` | Create a new task. | [add.md](cli/add.md) |
 | `cortex edit <id>` | Edit a task's title, body, or priority. Body edits prefer anchor-based partial replace. | [edit.md](cli/edit.md) |
 | `cortex update <id> -m <msg> --as <id>` | Post an update on a task; optionally flip status. | [cli/update.md](cli/update.md) |

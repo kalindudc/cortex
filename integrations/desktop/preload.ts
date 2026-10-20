@@ -3,6 +3,7 @@
 
 import { contextBridge, type IpcRendererEvent, ipcRenderer } from "electron";
 import type { ConnectionState } from "../../src/contracts.ts";
+import type { AgentsReply } from "../../src/desktop/agents.ts";
 import type { DeepLink } from "../../src/desktop/deepLink.ts";
 import {
   type BridgeFrame,
@@ -27,6 +28,7 @@ const bridge: CortexBridge = {
   onFrame: listener => subscribe<BridgeFrame>(CHANNELS.frame, listener),
   onState: listener => subscribe<ConnectionState>(CHANNELS.state, listener),
   resume: request => ipcRenderer.invoke(CHANNELS.resume, request) as Promise<ResumeResult>,
+  agents: request => ipcRenderer.invoke(CHANNELS.agents, request) as Promise<AgentsReply>,
   onOpen: listener => subscribe<DeepLink>(CHANNELS.open, listener),
   drafts: {
     report: state => ipcRenderer.send(CHANNELS.draftsState, state),

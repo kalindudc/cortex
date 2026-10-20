@@ -16,6 +16,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { embeddedBbPlugin } from "./bbPluginSource.ts" with { type: "macro" };
+import type { BbPluginState, BbResult, BbStatus } from "./lib/agentTools.ts";
 import { configDir } from "./paths.ts";
 
 const FILES: Record<string, string> = embeddedBbPlugin();
@@ -31,6 +32,7 @@ const NPM_TIMEOUT_MS = 600_000;
 const OUTPUT_TAIL_CHARS = 1_500;
 
 export const BB_NOT_RUNNING = "bb is installed but not running; start bb, then run `cortex agents install` again";
+const BB_NOT_RUNNING_STATUS = "bb is installed but not running; start bb to check the plugin";
 
 /** The embedded plugin files, relative path to content. */
 export function bbPluginFiles(): Readonly<Record<string, string>> {
@@ -82,16 +84,6 @@ export function findBbCli(
   if (executable(launcher)) return { cli: launcher };
   return { cli: null, reason: "bb not found" };
 }
-
-export type BbResult = {
-  status: "installed" | "reloaded" | "unchanged" | "skipped" | "failed";
-  dir?: string;
-  reason?: string;
-  /** The source bb had the plugin installed from before this install moved it. */
-  from?: string;
-  /** What bb reports after the install; `cortexPath` is the plugin's setting, shown, never changed. */
-  plugin?: { status: string; statusDetail?: string; cortexPath?: string };
-};
 
 type Run = { code: number; output: string };
 
@@ -196,6 +188,19 @@ export function writeBbPluginFiles(dir: string = bbPluginDir()): { changed: stri
   return { changed };
 }
 
+/** The embedded files that are missing from `dir` or differ there. */
+export function differingBbPluginFiles(dir: string = bbPluginDir()): string[] {
+  return Object.entries(FILES)
+    .filter(([rel, content]) => {
+      try {
+        return fs.readFileSync(path.join(dir, rel), "utf8") !== content;
+      } catch {
+        return true;
+      }
+    })
+    .map(([rel]) => rel);
+}
+
 /** Whether `npm ci` must run: no successful install yet, or one for another lockfile. */
 export function needsNpm(dir: string = bbPluginDir()): boolean {
   const lock = FILES["package-lock.json"] ?? "";
@@ -276,11 +281,47 @@ export async function installBbPlugin(opts: { wipe: boolean }): Promise<BbResult
 
   const after = await listPlugin(cli);
   if (!after) return { status: "failed", dir, reason: "bb does not list the plugin after installing it" };
-  const cortexPath = await cortexPathSetting(cli);
-  const plugin: NonNullable<BbResult["plugin"]> = { status: after.status };
-  if (after.status !== "running" && after.statusDetail) plugin.statusDetail = after.statusDetail;
-  if (cortexPath !== undefined) plugin.cortexPath = cortexPath;
+  const plugin = await pluginState(cli, after);
   return { status, dir, ...(from === undefined ? {} : { from }), plugin };
+}
+
+async function pluginState(cli: string, entry: Entry): Promise<BbPluginState> {
+  const cortexPath = await cortexPathSetting(cli);
+  const plugin: BbPluginState = { status: entry.status };
+  if (entry.status !== "running" && entry.statusDetail) plugin.statusDetail = entry.statusDetail;
+  if (cortexPath !== undefined) plugin.cortexPath = cortexPath;
+  return plugin;
+}
+
+/**
+ * The plugin compared with what `installBbPlugin` would leave, read-only:
+ * bb is only asked for its plugin list and the plugin's settings.
+ */
+export async function bbPluginStatus(): Promise<BbStatus> {
+  const dir = bbPluginDir();
+  const found = findBbCli();
+  if (found.cli === null) return { state: "skipped", reason: found.reason };
+  const entry = await listPlugin(found.cli);
+  if (entry === undefined) return { state: "skipped", reason: BB_NOT_RUNNING_STATUS };
+  if (entry === null) return { state: "missing", dir };
+  if (!entry.source.startsWith("path:")) {
+    return {
+      state: "foreign",
+      dir,
+      reason: `the bb plugin is installed from ${entry.source}; \`cortex agents reset\` replaces it`,
+    };
+  }
+  const issues: string[] = [];
+  const installedDir = entry.rootDir ?? entry.source.slice("path:".length);
+  if (realpath(installedDir) !== realpath(dir)) issues.push(`bb runs it from ${installedDir}`);
+  const differs = differingBbPluginFiles(dir).length;
+  if (differs > 0) issues.push(`${differs === 1 ? "1 file differs" : `${differs} files differ`} from this version`);
+  if (needsNpm(dir)) issues.push("its dependencies are not installed for this version");
+  if (entry.status !== "running") issues.push(`bb reports it ${entry.status}`);
+  const plugin = await pluginState(found.cli, entry);
+  return issues.length === 0
+    ? { state: "installed", dir, plugin }
+    : { state: "outdated", dir, reason: issues.join("; "), plugin };
 }
 
 /** One line for the human report. */

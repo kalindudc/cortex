@@ -24,7 +24,12 @@ function setup(label: string, initial: Partial<FakeBbState> = {}) {
   const dir = path.join(base.tmpDir, "cortex", "bb-plugin");
   const install = (...extra: string[]) => runCli({ args: ["agents", "install", ...extra], env });
   const reset = (...extra: string[]) => runCli({ args: ["agents", "reset", "--force", ...extra], env });
-  return { ...base, env, fake, dir, install, reset };
+  const status = async () => {
+    const r = await runCli({ args: ["agents", "status", "--json"], env });
+    expect(r.code, r.stderr).toBe(0);
+    return JSON.parse(r.stdout) as { bb: Record<string, unknown>; suggest: string };
+  };
+  return { ...base, env, fake, dir, install, reset, status };
 }
 
 /** The bb and npm calls, as `bb plugin list` / `npm ci ...` strings with the plugin dir shown as <dir>. */
@@ -314,5 +319,71 @@ describe("cortex agents install: the bb plugin", () => {
     expect(r.code, r.stderr).toBe(0);
     expect(JSON.parse(r.stdout).bb.status).toBe("installed");
     expect(calls(s.fake, s.dir)).toEqual(INSTALL_CALLS);
+  });
+});
+
+describe("cortex agents status: the bb plugin", () => {
+  test("only asks bb: missing before an install, installed after, with its settings shown", async () => {
+    const s = setup("bb-status", { settings: { cortexPath: "/opt/cortex/bin/cortex" } });
+    expect((await s.status()).bb).toEqual({ state: "missing", dir: s.dir });
+    expect(calls(s.fake, s.dir)).toEqual(["bb plugin list --json"]);
+    expect(fs.existsSync(s.dir)).toBe(false);
+
+    expect((await s.install()).code).toBe(0);
+    s.fake.clearCalls();
+    const after = await s.status();
+    expect(after.bb).toEqual({
+      state: "installed",
+      dir: s.dir,
+      plugin: { status: "running", cortexPath: "/opt/cortex/bin/cortex" },
+    });
+    expect(after.suggest).toBe("none");
+    expect(calls(s.fake, s.dir)).toEqual(["bb plugin list --json", "bb plugin config cortex --json"]);
+  });
+
+  test("outdated says what install would change: files, dependencies, the path bb runs, a stopped plugin", async () => {
+    const s = setup("bb-status-outdated");
+    expect((await s.install()).code).toBe(0);
+    fs.appendFileSync(path.join(s.dir, "app.tsx"), "\n// a hand edit");
+    fs.rmSync(path.join(s.dir, "node_modules"), { recursive: true });
+    const other = "/Users/someone/src/cortex/integrations/bb";
+    s.fake.setState({
+      plugin: { id: "cortex", source: `path:${other}`, rootDir: other, status: "error", statusDetail: "build failed" },
+    });
+    s.fake.clearCalls();
+    const out = await s.status();
+    expect(out.bb).toEqual({
+      state: "outdated",
+      dir: s.dir,
+      reason: `bb runs it from ${other}; 1 file differs from this version; its dependencies are not installed for this version; bb reports it error`,
+      plugin: { status: "error", statusDetail: "build failed" },
+    });
+    expect(out.suggest).toBe("install");
+    expect(calls(s.fake, s.dir).some(c => !c.startsWith("bb plugin list") && !c.startsWith("bb plugin config"))).toBe(
+      false,
+    );
+  });
+
+  test("a plugin from git suggests reset; bb not running is skipped", async () => {
+    const s = setup("bb-status-git", {
+      plugin: {
+        id: "cortex",
+        source: "git:github.com/kalindudc/cortex",
+        rootDir: "/bb/plugins/cortex",
+        status: "running",
+        statusDetail: null,
+      },
+    });
+    expect((await s.install()).code).toBe(0);
+    const out = await s.status();
+    expect(out.bb).toMatchObject({ state: "foreign", dir: s.dir });
+    expect(String(out.bb.reason)).toContain("installed from git:github.com/kalindudc/cortex");
+    expect(out.suggest).toBe("reset");
+
+    s.fake.setState({ reachable: false });
+    expect((await s.status()).bb).toEqual({
+      state: "skipped",
+      reason: "bb is installed but not running; start bb to check the plugin",
+    });
   });
 });

@@ -22,6 +22,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { FilesStatus } from "./lib/agentTools.ts";
 
 // --- Base cortex skill ---------------------------------------------------
 import cortexSkillMd from "./skills/cortex/SKILL.md" with { type: "file" };
@@ -136,4 +137,38 @@ export async function writeAllSkills(): Promise<void> {
   for (const name of listSkills()) {
     await writeSkill(name);
   }
+}
+
+/**
+ * Compare the files in `dir` with an embedded manifest (relative path to
+ * embedded blob path): `missing` when none of them is there. Files the
+ * manifest does not name are not looked at. Shared with src/extensions.ts.
+ */
+export async function compareEmbedded(
+  manifest: Readonly<Record<string, string>>,
+  name: string,
+  dir: string,
+): Promise<FilesStatus> {
+  const differs: string[] = [];
+  let present = 0;
+  for (const [rel, embedPath] of Object.entries(manifest)) {
+    let current: Buffer;
+    try {
+      current = fs.readFileSync(path.join(dir, rel));
+    } catch {
+      differs.push(rel);
+      continue;
+    }
+    present++;
+    if (!current.equals(await Bun.file(embedPath).bytes())) differs.push(rel);
+  }
+  const state = present === 0 ? "missing" : differs.length > 0 ? "outdated" : "installed";
+  return { name, dir, state, differs };
+}
+
+/** Each shipped skill's installed files compared with this binary's (`cortex agents status`). */
+export async function skillsStatus(): Promise<FilesStatus[]> {
+  const out: FilesStatus[] = [];
+  for (const name of listSkills()) out.push(await compareEmbedded(SKILLS[name], name, skillDir(name)));
+  return out;
 }

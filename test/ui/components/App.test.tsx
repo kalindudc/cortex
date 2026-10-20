@@ -245,7 +245,7 @@ describe("App", () => {
     expect(container.querySelector(".context-panel")).not.toBeNull();
   });
 
-  test("Tags and Backup show their panels; Backup has no list column", () => {
+  test("Tags, Backup and Agent tools show their panels; Backup and Agent tools have no list column", () => {
     view.value = "tags";
     const { container } = render(<App />);
     expect(container.querySelector("section.tag-panel")).not.toBeNull();
@@ -254,6 +254,12 @@ describe("App", () => {
       view.value = "backup";
     });
     expect(container.querySelector("section.backup-panel")).not.toBeNull();
+    expect(container.querySelector(".sidebar-pane")).toBeNull();
+    expect(container.querySelector(".contents")?.classList.contains("no-list")).toBe(true);
+    act(() => {
+      view.value = "agents";
+    });
+    expect(container.querySelector("section.agents-panel")).not.toBeNull();
     expect(container.querySelector(".sidebar-pane")).toBeNull();
     expect(container.querySelector(".contents")?.classList.contains("no-list")).toBe(true);
   });

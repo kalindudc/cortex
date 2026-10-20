@@ -135,6 +135,66 @@ describe("cortex agents install", () => {
   });
 });
 
+describe("cortex agents status", () => {
+  test("before and after install: missing, then installed; it writes nothing and never opens the database", async () => {
+    const { env, skillRoot, extRoot, cleanup } = mkAgentsEnv("agents-status");
+    try {
+      let r = await runCli({ args: ["agents", "status", "--json"], env });
+      expect(r.code, r.stderr).toBe(0);
+      let out = JSON.parse(r.stdout);
+      expect(Object.keys(out).sort()).toEqual(["bb", "extensions", "skills", "skipped", "suggest", "version"]);
+      expect(out.skills.map((s: { name: string; state: string }) => [s.name, s.state])).toEqual(
+        EXPECTED_SKILLS.map(name => [name, "missing"]),
+      );
+      expect(out.extensions).toEqual([
+        { name: "pi", dir: path.join(extRoot, "cortex"), state: "missing", differs: ["index.ts", "memory-view.ts"] },
+      ]);
+      expect(out.bb).toEqual({ state: "skipped", reason: "bb is turned off (CORTEX_BB_CLI is empty)" });
+      expect(out.suggest).toBe("install");
+      expect(fs.existsSync(skillRoot)).toBe(false);
+      expect(fs.existsSync(extRoot)).toBe(false);
+      expect(fs.existsSync(env.CORTEX_DB ?? "")).toBe(false);
+
+      r = await runCli({ args: ["agents", "status"], env });
+      expect(r.stdout).toContain(`✗ skill cortex not installed → ${path.join(skillRoot, "cortex")}`);
+      expect(r.stdout).toContain("– bb plugin: bb is turned off (CORTEX_BB_CLI is empty)");
+      expect(r.stdout.trim().endsWith("→ run `cortex agents install`")).toBe(true);
+
+      expect((await runCli({ args: ["agents", "install"], env })).code).toBe(0);
+      out = JSON.parse((await runCli({ args: ["agents", "status", "--json"], env })).stdout);
+      for (const s of [...out.skills, ...out.extensions]) expect(s.state).toBe("installed");
+      expect(out.suggest).toBe("none");
+      r = await runCli({ args: ["agents", "status"], env });
+      expect(r.stdout).toContain(`✓ skill cortex → ${path.join(skillRoot, "cortex")}`);
+      expect(r.stdout).toContain(`✓ every agent tool matches cortex ${out.version}`);
+
+      fs.appendFileSync(skillFile(skillRoot, "cortex-research"), "\nhand edit");
+      r = await runCli({ args: ["agents", "status"], env });
+      expect(r.stdout).toContain(
+        `! skill cortex-research differs from this version (1 file) → ${path.join(skillRoot, "cortex-research")}`,
+      );
+      expect(fs.existsSync(env.CORTEX_DB ?? "")).toBe(false);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("pi absent: the extension is reported as skipped, and no ~/.pi is created", async () => {
+    const { tmpDir, env: base, cleanup } = mkAgentsEnv("agents-status-nopi");
+    try {
+      const { env, home } = withoutPi(base, tmpDir);
+      const out = JSON.parse((await runCli({ args: ["agents", "status", "--json"], env })).stdout);
+      expect(out.extensions).toEqual([]);
+      expect(out.skipped).toEqual([{ name: "pi", reason: expect.stringContaining("pi not found") }]);
+      expect(fs.existsSync(path.join(home, ".pi"))).toBe(false);
+      const text = await runCli({ args: ["agents", "status"], env });
+      expect(text.stdout).toContain("– pi extension: pi not found");
+    } finally {
+      cleanup();
+    }
+  });
+});
+
 describe("cortex agents reset confirmation", () => {
   test("--json without --force refuses with a JSON error and removes nothing", async () => {
     const { env, skillRoot, cleanup } = mkAgentsEnv("agents-json");

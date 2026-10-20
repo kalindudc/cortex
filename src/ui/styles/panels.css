@@ -1,4 +1,4 @@
-/* ---------- full panels (Lanes, Tags, Backup) ----------
+/* ---------- full panels (Lanes, Tags, Backup, Agent tools) ----------
    A panel takes the document's grid area (layout.css .panel-view): a 44px
    head with the breadcrumb and its actions, then a scrolling body with one
    centred 720px column of titled cards. A card holds rows of a label (a
@@ -67,8 +67,8 @@
 /* The Backup panel: the status card, its result line and the restore steps. */
 .backup-status { padding: 16px; }
 .backup-status .btn-primary { height: 32px; }
-.backup-icon { display: grid; place-items: center; flex-shrink: 0; width: 40px; height: 40px; border-radius: 10px; background: var(--accent-tint); color: var(--accent); }
-.backup-icon .icon { width: 18px; height: 18px; }
+.backup-icon, .agents-icon { display: grid; place-items: center; flex-shrink: 0; width: 40px; height: 40px; border-radius: 10px; background: var(--accent-tint); color: var(--accent); }
+.backup-icon .icon, .agents-icon .icon { width: 18px; height: 18px; }
 .panel-row-label .backup-last-detail { margin-top: 2px; font-size: 11.5px; }
 .backup-result { font-size: 12.5px; }
 .backup-ok, .backup-ok .panel-row-label b { color: var(--ok); }
@@ -80,6 +80,22 @@
 .panel-callout ol { margin: 6px 0 8px; padding-left: 18px; color: var(--text-content); }
 .panel-callout li { margin: 3px 0; }
 .panel-callout .btn { height: 26px; padding: 0 10px; border-color: var(--border-strong); font-size: var(--fs-2); }
+
+/* The Agent tools panel: the summary card (its icon tile is the Backup
+   panel's), one row per tool with a state badge, and the reset callout. */
+.agents-summary { padding: 16px; }
+.agents-summary .btn { height: 32px; }
+.agents-badge { flex-shrink: 0; padding: 2px 9px; border-radius: 10px; font-size: var(--fs-2); white-space: nowrap; }
+.agents-ok { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); }
+.agents-warn { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
+.agents-off { background: var(--tint); color: var(--text-3); }
+.agents-outcome, .agents-check-error { font-size: 12.5px; }
+.agents-outcome-info { color: var(--ok); }
+.agents-outcome-error, .agents-check-error { color: var(--err); }
+.agents-reset p { margin-bottom: 8px; }
+.agents-reset-dirs { margin: 0; padding-left: 18px; color: var(--text-content); font-size: 12px; }
+.agents-reset-dirs li { margin: 2px 0; overflow-wrap: anywhere; }
+.agents-reset-dirs .mono, .panel-row-label .agents-detail code, .agents-reason code { font-family: var(--font-mono); }
 
 /* ---------- settings rows ----------
    SettingRow (panels/SettingRow.tsx) is the one renderer of a setting: a
