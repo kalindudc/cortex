@@ -12,7 +12,7 @@ it is built and the rules that keep it safe; see also [architecture](architectur
 
 ## Opening it
 
-- `pnpm run desktop:dist` builds the app into `integrations/desktop/dist/`; install it the usual way for your system.
+- `pnpm run desktop:dist` builds the app into `integrations/desktop/dist/`, and `pnpm run deploy` installs it on this machine (Linux: the AppImage into `~/Applications`).
 - Plain `cortex` in an interactive terminal opens it, and so does `cortex app [id] [--heading <slug>]`, opening that
   task at that heading. When the app is not installed, `cortex app` names the build command and exits non-zero.
 - The app finds the daemon for your database, or starts one, and quitting the app leaves that daemon running.

@@ -21,7 +21,7 @@ cortex builds from source with pnpm. Bun comes in as a dev dependency, so there 
 ```bash
 pnpm install --frozen-lockfile
 pnpm run build             # writes bin/cortex
-pnpm run deploy            # optional: rebuild and copy it to ~/bin/cortex
+pnpm run deploy            # optional: install the CLI and desktop app locally
 cortex init                # create ~/.config/cortex/cortex.db
 cortex agents install      # agent skills, plus the pi extension and bb plugin when installed
 ```

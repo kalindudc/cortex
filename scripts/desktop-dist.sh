@@ -2,8 +2,9 @@
 # desktop-dist.sh — `pnpm run desktop:dist`: package the desktop app for this
 # OS into integrations/desktop/dist/ (macOS: a dmg and a zip for arm64 and
 # x64; Linux: an AppImage and a deb for the host architecture). It installs
-# nothing. CORTEX_DESKTOP_ARCHS (space separated, e.g. "arm64") narrows the
-# architectures.
+# nothing; `pnpm run deploy` installs what this produces (the AppImage on
+# Linux, the dmg's .app on macOS). CORTEX_DESKTOP_ARCHS (space separated, e.g.
+# "arm64") narrows the architectures.
 #
 # Each package carries the cortex binary built for its own architecture,
 # bin/cortex-<os>-<arch>. A native `pnpm run build` (and so `pnpm test`)

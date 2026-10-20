@@ -21,7 +21,7 @@
     "test:integration": "pnpm run build && pnpm exec bun test test/integration/",
     "test:bb": "npm --prefix integrations/bb test && npm --prefix integrations/bb run typecheck",
     "dev": "bash scripts/dev-cli.sh",
-    "deploy": "pnpm run build && rm -rf ~/bin/cortex && cp bin/cortex ~/bin/",
+    "deploy": "bash scripts/deploy.sh",
     "style": "node node_modules/@biomejs/biome/bin/biome check --error-on-warnings --write . && pnpm exec tsc",
     "style:check": "node node_modules/@biomejs/biome/bin/biome check --error-on-warnings . && pnpm exec tsc --noEmit && pnpm exec bun scripts/check-docs.ts",
     "docs:check": "pnpm exec bun scripts/check-docs.ts"

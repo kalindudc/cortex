@@ -39,7 +39,7 @@ Every command below is a real script in `package.json` (`docs:check` fails on a 
 - `pnpm run style` — biome `--write` + `tsc --noEmit`.
 - `pnpm run style:check` — biome + `tsc --noEmit` + `scripts/check-docs.ts`, read-only (CI-friendly).
 - `pnpm run docs:check` — `scripts/check-docs.ts`: doc budgets, cited paths and `path#Symbol`s, links and scripts; `--base <ref>` also warns on docs whose sources changed since `<ref>`.
-- `pnpm run deploy` — local install: rebuild + copy to `~/bin/cortex`.
+- `pnpm run deploy` — local install: rebuild the CLI to `~/bin/cortex` and install the newest `desktop:dist` package on this machine (`scripts/deploy.sh`).
 - `pnpm run desktop:dist` — package the desktop app for this OS into `integrations/desktop/dist/` (`scripts/desktop-dist.sh`; `CORTEX_DESKTOP_ARCHS=arm64` builds one macOS architecture; installs nothing).
 
 ## 4. Architecture map
