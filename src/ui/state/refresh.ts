@@ -21,9 +21,9 @@
 //     and out-of-order frames are dropped;
 //   - `notification.changed` refetches the notifications, and an answer
 //     overtaken by newer notification state is ignored;
-//   - ONLY the explicit `task.blocked` transition raises the desktop alert:
-//     never a snapshot, a reconnect or a task.updated frame whose task is
-//     (still) blocked.
+//   - ONLY the explicit `task.blocked` transition raises the desktop alert,
+//     and only while the blocked alert setting is on: never a snapshot, a
+//     reconnect or a task.updated frame whose task is (still) blocked.
 // There is no replay: the daemon keeps no event history, so reconnecting
 // always resnapshots rather than claiming missed frames are redelivered.
 //
@@ -45,6 +45,7 @@ import type { Notification } from "../api/types.ts";
 import { tasks, lanes, tags, updates, relatedTasks, relatedLoading, relatedError, liveState } from "./signals.ts";
 import { notifications } from "./notifications.ts";
 import { activeTask } from "./computed.ts";
+import { blockedAlert } from "./settings.ts";
 import { pruneTaskDrafts } from "../lib/useTaskDraft.ts";
 
 // Monotonic request generation for Related fetches. A publication is valid
@@ -285,6 +286,7 @@ function applyNotificationFrame(frame: NotificationFrame): void {
 
 /** Desktop alert for an explicit transition into blocked, never inferred from task snapshots. */
 function alertBlocked(transition: BlockedTransition): void {
+  if (blockedAlert.peek() === "off") return;
   const Desktop = globalThis.Notification;
   if (typeof Desktop === "undefined") return;
   if (Desktop.permission === "granted") {

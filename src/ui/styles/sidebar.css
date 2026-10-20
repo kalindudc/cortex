@@ -1,30 +1,39 @@
 /* Navigation hierarchy: identity, one filter surface, readable task rows,
    then persistent management/system tools. */
-.sidebar-brand { display: flex; align-items: center; gap: 9px; padding: 22px 18px 18px; flex-shrink: 0; }
-.sidebar-brand strong { font-size: 18px; letter-spacing: -.03em; font-weight: 650; }
-.brand-mark { display: inline-grid; place-items: center; width: 25px; height: 25px; border-radius: 7px; background: var(--accent); color: var(--accent-on); font: 700 19px/1 var(--font-mono); flex-shrink: 0; }
-.workspace-local { margin-left: auto; padding: 2px 6px; border-radius: var(--r-1); background: var(--tint); color: var(--text-2); font-size: 10px; }
-.workspace-filters { display: flex; flex-direction: column; flex-shrink: 0; gap: 10px; padding: 0 14px 16px; border-bottom: 1px solid var(--border); }
-.ws-search-label { color: var(--text-2); font-size: 11px; margin-bottom: -5px; }
-.ws-search { display: flex; align-items: center; gap: 7px; min-height: 36px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--r-2); background: var(--bg); color: var(--text-2); }
+/* The navigation rail. Destinations mark aria-current="page" with a stronger
+   tint and an accent marker on the rail's left edge (items sit 8px in). */
+.nav-rail { grid-area: rail; display: flex; flex-direction: column; align-items: center; gap: 4px; min-height: 0; padding: 10px 0 8px; overflow: hidden auto; background: var(--panel); border-right: 1px solid var(--border); }
+.nav-rail .btn-icon { width: 36px; height: 36px; border-radius: var(--r-3); color: var(--text-3); }
+.nav-rail .btn-icon:hover { background: var(--tint); color: var(--text); }
+.nav-rail .btn-icon[aria-current="page"] { background: var(--tint-strong); color: var(--text); }
+.nav-rail .btn-icon[aria-current="page"]::before { content: ""; position: absolute; left: -8px; top: 9px; bottom: 9px; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent); }
+.nav-rail .icon { width: 18px; height: 18px; }
+.nav-rail .grow { flex: 1 0 auto; }
+.brand-mark { display: inline-grid; place-items: center; width: 28px; height: 28px; margin-bottom: 10px; border-radius: var(--r-3); background: var(--accent); color: var(--accent-on); font: 700 16px/1 var(--font-mono); flex-shrink: 0; }
+.nav-rail-sep { width: 20px; height: 1px; margin: 6px 0; background: var(--border); flex-shrink: 0; }
+/* Inside the narrow drawer the same rail is a wrapping row above the list. */
+.nav-drawer-body .nav-rail { flex-direction: row; gap: 2px; padding: 10px 10px 8px; border-right: 0; border-bottom: 1px solid var(--border); flex-shrink: 0; overflow: visible; }
+.nav-drawer-body .nav-rail .btn-icon { width: 44px; height: 44px; }
+.nav-drawer-body .nav-rail .btn-icon[aria-current="page"]::before,
+.nav-drawer-body .nav-rail .brand-mark,
+.nav-drawer-body .nav-rail-sep,
+.nav-drawer-body .nav-rail .grow { display: none; }
+/* The list column's filters: one field, then a row of pill chips that wraps
+   to a second line when the column is too narrow for all five. */
+.workspace-filters { display: flex; flex-direction: column; flex-shrink: 0; gap: 7px; padding: 7px 12px 10px; border-bottom: 1px solid var(--border); }
+.ws-search { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 0 8px 0 10px; border: 1px solid var(--border); border-radius: var(--r-3); background: var(--bg); color: var(--text-2); }
 .ws-search:focus-within { border-color: var(--info); outline: 2px solid var(--info); outline-offset: 1px; }
-.ws-search input { width: 100%; min-width: 0; padding: 7px 0; border: 0; border-radius: 0; background: transparent; font: 12px/1.5 var(--font-sans); color: var(--text); }
+.ws-search input { width: 100%; min-width: 0; padding: 4px 0; border: 0; border-radius: 0; background: transparent; font: var(--fs-3)/1.5 var(--font-sans); color: var(--text); }
 .ws-search input:focus { outline: none; box-shadow: none; }
 .ws-search input::placeholder { color: var(--text-2); }
-.ws-controls { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
-.ws-select { display: flex; flex-direction: column; gap: 5px; min-width: 0; color: var(--text-2); font-size: 11px; }
-.ws-filter-trigger { display: flex; align-items: center; justify-content: space-between; gap: 6px; width: 100%; min-width: 0; min-height: var(--control-height); padding: 0 9px; border: 1px solid var(--border); border-radius: var(--r-2); background: var(--bg); font: 12px/1.5 var(--font-sans); color: var(--text-2); text-align: left; }
-.ws-filter-trigger > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ws-filter-trigger > .icon { flex-shrink: 0; }
-.ws-filter-trigger:hover, .ws-filter-trigger.active { border-color: var(--border-strong); color: var(--text); }
-.ws-filter-actions { display: flex; align-items: center; gap: 8px; }
-.ws-tags-button, .ws-done-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: var(--control-height); padding: 0 9px; border: 1px solid var(--border); border-radius: var(--r-2); color: var(--text-2); background: var(--bg); font: 12px/1.5 var(--font-sans); }
-.ws-tags-button { min-width: 84px; border-radius: var(--r-pill); }
-.ws-done-button { flex: 1; background: transparent; border-color: transparent; }
-.ws-tags-button:hover, .ws-done-button:hover { background: var(--tint); color: var(--text); }
-.ws-tags-button.active, .ws-done-button.active { border-color: var(--border-strong); color: var(--text); background: var(--tint); }
+.ws-chips { display: flex; flex-wrap: wrap; gap: 5px; min-width: 0; }
+.ws-chip { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; height: 24px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--r-pill); background: transparent; color: var(--text-2); font: var(--fs-2)/1 var(--font-sans); white-space: nowrap; }
+.ws-chip > span { overflow: hidden; text-overflow: ellipsis; }
+.ws-chip > .icon { width: 12px; height: 12px; flex-shrink: 0; }
+.ws-chip:not(:disabled):hover { border-color: var(--border-strong); color: var(--text); }
+.ws-chip.active, .ws-chip[aria-expanded="true"], .ws-chip.active:hover, .ws-chip[aria-expanded="true"]:hover { border-color: transparent; background: var(--accent-tint); color: var(--accent); }
+.ws-chip:disabled { opacity: .45; cursor: default; }
 .ws-filter-count { font-size: 10px; }
-.ws-filter-trigger[aria-expanded="true"], .ws-tags-button[aria-expanded="true"] { border-color: var(--accent); background: var(--accent-tint); color: var(--text); box-shadow: 0 0 0 1px var(--accent-tint); }
 .ws-filter-trigger[aria-expanded="true"] > .icon { transform: rotate(180deg); }
 
 /* Sidebar-owned, nonmodal attached panels. No fixed viewport sheet, portal,
@@ -53,14 +62,6 @@
 .sidebar-filter-option:focus-visible { outline: none; background: var(--accent-tint); box-shadow: inset 2px 0 0 var(--accent); color: var(--text); }
 .sidebar-filter-option[aria-selected="true"] { color: var(--text); }
 .sidebar-filter-check { display: inline-flex; align-items: center; width: 14px; flex-shrink: 0; color: var(--accent); }
-.ws-filter-foot { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-.ws-search-hint { color: var(--text-2); font: 10px/1.5 var(--font-mono); }
-.ws-clear { min-height: 24px; padding: 2px 4px; color: var(--text-2); font-size: 11px; border-radius: var(--r-1); }
-.ws-clear:not(:disabled):hover { color: var(--text); background: var(--tint); }
-.ws-clear:disabled { opacity: .45; cursor: default; }
-.pane-system .sidebar-manage { width: auto; gap: 6px; padding: 0 8px; font: 12px/1.5 var(--font-sans); }
-.sidebar-back { display: inline-flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; margin-bottom: 4px; padding: 4px 8px; border-radius: var(--r-2); font: 12px/1.5 var(--font-sans); color: var(--text-2); }
-.sidebar-back:hover { background: var(--tint); color: var(--text); }
 
 /* ---------- transient 'Move to lane' drop tray ----------
    Mounted ONLY while a task drag is active. Pinned to the bottom of the
@@ -98,68 +99,27 @@
   color: var(--text);
 }
 
-/* ---------- lane row ----------
-   Trailing slot (.lane-row-trail) holds BOTH .lane-count and .lane-edit-btn
-   in a single relative-positioned container. The count is the default
-   visible content; the edit button is absolutely positioned over the same
-   slot and fades in on hover, replacing the count. This way the edit btn
-   does NOT consume row width when not hovered (the column auto-sizes to the
-   count width), and the swap is a smooth opacity crossfade. */
+/* ---------- lane and tag rows ----------
+   One row per lane (colour square, name, the "default" label on `now`) or
+   per tag (its pill), with the count at the right edge. The whole row
+   selects the entry the Lanes or Tags panel shows (.selected). */
 .lane-row {
-  display: grid; grid-template-columns: 8px 1fr auto;
-  align-items: center; gap: 8px;
-  width: 100%; padding: 6px 10px; border-radius: var(--r-2);
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; min-width: 0; padding: 6px 10px; border-radius: var(--r-2);
   color: var(--text-2); text-align: left;
   transition: background var(--dur-2) var(--ease), color var(--dur-2) var(--ease);
   position: relative;
 }
 .lane-row:hover { background: var(--tint); color: var(--text); }
-.lane-row.selected { background: var(--tint); color: var(--text); }
-.lane-row .lane-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-3); }
-.lane-row .lane-count { font-size: var(--fs-2); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.lane-row.selected { background: var(--tint-strong); color: var(--text); }
+.lane-row .lane-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-3); }
+.lane-row .lane-count { margin-left: auto; padding-left: 6px; font-size: var(--fs-2); color: var(--text-3); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.lane-row .lane-default { flex-shrink: 0; padding: 0 5px; border: 1px solid var(--border-strong); border-radius: var(--r-1); color: var(--text-3); font: 10px/1.5 var(--font-mono); }
 .lane-row.dragover { background: var(--accent-tint); color: var(--text); }
 .lane-color {
   width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0;
   background: var(--border-strong);
 }
-.lane-row-trail {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-end;
-  min-width: 22px;
-  height: 18px;
-}
-.lane-row-trail .lane-count {
-  transition: opacity var(--dur-2) var(--ease);
-}
-.lane-edit-btn {
-  position: absolute;
-  inset: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 100%;
-  padding: 0;
-  border: 0;
-  border-radius: var(--r-1);
-  background: transparent;
-  color: var(--text-3);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--dur-2) var(--ease), color var(--dur-2) var(--ease), background var(--dur-1) var(--ease);
-}
-.lane-row:hover .lane-edit-btn,
-.lane-row.selected .lane-edit-btn {
-  opacity: 1;
-  pointer-events: auto;
-}
-.lane-row:hover .lane-row-trail .lane-count,
-.lane-row.selected .lane-row-trail .lane-count {
-  opacity: 0;
-}
-.lane-edit-btn:hover { color: var(--text); background: var(--tint-strong); }
 
 /* Task priority chip — small monospace badge after the title.
    In list rows it stays a static <span> badge (PriorityChip) — NOT a
@@ -219,7 +179,8 @@ button.priority-chip:hover { background: var(--tint-strong, var(--accent-tint));
   box-shadow: 0 0 0 3px var(--accent-tint);
 }
 
-/* Color swatch grid for lane edit modal */
+/* Colour swatch grid: the new-lane and new-tag dialogs and the Lanes and
+   Tags panels (panels.css sizes it for a panel row). */
 .color-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; }
 .color-swatch {
   width: 100%; aspect-ratio: 1; border-radius: var(--r-2);
@@ -237,55 +198,99 @@ button.priority-chip:hover { background: var(--tint-strong, var(--accent-tint));
    width:100% so the row spans the full sidebar width regardless of how short
    the task title is — otherwise <button>'s default inline-block sizing makes
    each row only as wide as its content, leaving the priority chip and
-   hover/active background ragged across the column. */
+   hover/active background ragged across the column.
+   Two short lines: the status glyph, the title and the trail (priority and
+   age) share the first; the id and tags span the second. .task-row-main is
+   display:contents so both of its lines sit in the row's own grid. */
 .task-row {
-  display: grid; grid-template-columns: 14px 1fr auto;
-  align-items: start; gap: 8px;
-  width: 100%; min-height: 58px;
-  padding: 10px; border-radius: var(--r-2);
+  display: grid; grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: center; column-gap: 8px; row-gap: 1px;
+  width: 100%;
+  padding: 6px 10px; border-radius: var(--r-2);
   color: var(--text-2);
   transition: background var(--dur-2) var(--ease), color var(--dur-2) var(--ease);
   cursor: pointer;
   text-align: left;
 }
 .task-row:hover { background: var(--tint); color: var(--text); }
-.task-row.active { background: var(--tint); color: var(--text); box-shadow: inset 3px 0 0 var(--accent); }
-.task-row > .dot { margin-top: 5px; }
-.task-row > .priority-chip { margin-top: 2px; }
-/* The order line and group headers (taskArrangement). Headers are not rows:
-   they are not buttons, and next/previous task skip them. */
-.sidebar-pane .section-body > .meta.task-order { padding: 2px 12px 6px; }
+.task-row.active { background: var(--tint-strong); color: var(--text); }
+/* The order line and group headers (taskArrangement). The order line opens
+   the sort and group panel. Headers are not rows: each folds its tasks away
+   and back, and next/previous task skip them. */
+.sidebar-pane .section-body > .meta.task-order {
+  display: flex; align-items: center; gap: 4px; margin: 0; padding: 0 0 4px;
+}
+/* Collapse all and Expand all, at the end of the order line. */
+.task-order-folds { display: inline-flex; gap: 2px; margin-left: auto; }
+.task-order-folds .btn-icon { width: 24px; height: 24px; color: var(--text-3); }
+.task-order-folds .btn-icon:hover { color: var(--text); }
+.task-order-folds .btn-icon:disabled, .task-order-folds .btn-icon:disabled:hover {
+  opacity: 0.35; cursor: default; background: transparent; color: var(--text-3);
+}
+.task-order-trigger {
+  display: inline-flex; align-items: center; gap: 4px; max-width: 100%;
+  padding: 2px 6px; border-radius: var(--r-2);
+  color: var(--text-3); font: 11.5px/1.5 var(--font-sans); text-align: left;
+}
+.task-order-trigger > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-order-trigger > .icon { flex-shrink: 0; transition: transform var(--dur-2) var(--ease); }
+.task-order-trigger:hover { background: var(--tint); color: var(--text); }
+.task-order-trigger[aria-expanded="true"] { background: var(--accent-tint); color: var(--text); }
+.task-order-trigger[aria-expanded="true"] > .icon { transform: rotate(180deg); }
 .task-group-header {
-  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
-  padding: 10px 10px 4px;
-  color: var(--text-3); font: 600 var(--fs-1)/1.4 var(--font-sans);
+  display: flex; align-items: center; gap: 7px; width: 100%;
+  margin-top: 4px; padding: 6px 10px 4px; border-radius: var(--r-2);
+  color: var(--text-3); font: 600 var(--fs-1)/1.4 var(--font-sans); text-align: left;
   text-transform: uppercase; letter-spacing: 0.04em;
 }
+.task-group-header:hover { background: var(--tint); color: var(--text-2); }
+.task-group-header > .icon { flex-shrink: 0; transition: transform var(--dur-2) var(--ease); }
+.task-group-header.folded > .icon { transform: rotate(-90deg); }
+.task-group-header > .lane-color { width: 8px; height: 8px; border-radius: 2px; }
 .task-group-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.task-row-main { display: flex; flex-direction: column; min-width: 0; gap: 4px; }
-.task-row .task-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font: 500 12px/1.5 var(--font-sans); overflow-wrap: anywhere; }
-.task-row-meta { display: flex; align-items: center; gap: 5px; color: var(--text-2); font: 10px/1.5 var(--font-sans); }
-.task-row-meta .num { font-family: var(--font-mono); }
+.task-group-count { margin-left: auto; font-weight: 500; }
+/* The Sort, Direction and Group settings inside the attached panel: each
+   label above its control, so the narrow panel never squeezes the words. */
+.sidebar-order { display: flex; flex-direction: column; padding: 4px 0; }
+.sidebar-order .setting-row { flex-direction: column; align-items: stretch; gap: 6px; padding: 10px 12px; }
+.sidebar-order .setting-select, .sidebar-order .setting-segmented { width: 100%; }
+.sidebar-order .seg-option { flex: 1; justify-content: center; }
+.task-row-main { display: contents; }
+.task-row .task-title { grid-column: 2; grid-row: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 13px/1.5 var(--font-sans); }
+.task-row.active .task-title { font-weight: 500; }
+.task-row-meta { grid-column: 2 / 4; grid-row: 2; display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap; color: var(--text-2); font: 11px/1.5 var(--font-sans); }
+.task-row-meta .num { flex-shrink: 0; font-family: var(--font-mono); }
+.task-row-tag { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-3); }
+.task-row-trail { grid-column: 3; grid-row: 1; display: inline-flex; align-items: center; gap: 5px; }
+.task-row-time { color: var(--text-3); font-size: var(--fs-1); font-variant-numeric: tabular-nums; }
 
-/* ===== Tag-row layout override (within unified SidebarPane Tags section) =====
-   Base .lane-row is `display: grid; grid-template-columns: 8px 1fr auto auto`,
-   designed for `.lane-color | .lane-name | .lane-count | .lane-edit-btn`.
-   When the first child is a TagPill (variable width) instead of an 8px
-   color square, the grid clamps the pill to 8px and the text overflows.
-   The :has(> .tag-pill) selector targets exactly the tag-row variant
-   without needing a second class on the row — the pill itself is the
-   discriminator. (Used to be `.pane-tags .lane-row` when TagsPane existed.) */
-.sidebar-pane .lane-row:has(> .tag-pill) {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  grid-template-columns: none;
-  min-width: 0;
-}
-.sidebar-pane .lane-row:has(> .tag-pill) .lane-count { color: var(--text-3); font-size: var(--fs-2); }
-/* Tag-row variant uses flex (no grid auto-column to push the trail right),
-   so the trail wrapper needs margin-left:auto to anchor at the right edge. */
-.sidebar-pane .lane-row:has(> .tag-pill) .lane-row-trail { margin-left: auto; }
+/* Compact density (the Density setting) keeps one line per task: the id and
+   tags line is hidden and the row is shorter. */
+:root[data-density="compact"] .task-row { padding-top: 4px; padding-bottom: 4px; }
+:root[data-density="compact"] .task-row-meta { display: none; }
+
+/* The Search and Settings list columns: a 44px top holding the search field,
+   then the results or the section links. */
+.list-top { display: flex; align-items: center; flex-shrink: 0; min-height: 44px; padding: 0 12px; }
+.list-top > .ws-search { flex: 1; min-width: 0; }
+.settings-nav-list { display: flex; flex-direction: column; gap: 1px; padding: 6px; border-top: 1px solid var(--border); overflow-y: auto; }
+.settings-nav-item { display: flex; align-items: center; gap: 9px; width: 100%; height: 30px; padding: 0 10px; border-radius: var(--r-2); color: var(--text-2); font-size: var(--fs-3); text-align: left; white-space: nowrap; }
+.settings-nav-item:hover { background: var(--tint); color: var(--text); }
+.settings-nav-item > .icon { flex-shrink: 0; }
+.search-field { min-height: 36px; }
+.search-field input { font-size: 14px; }
+.search-meta { flex-shrink: 0; margin: 0; padding: 2px 12px 8px; color: var(--text-3); font-size: 11.5px; }
+.search-meta code { font: 11px var(--font-mono); color: var(--text-2); }
+.search-results { flex: 1 1 auto; min-height: 0; padding: 0 6px 8px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+.search-empty { margin: 0; padding: 6px; }
+.search-row { display: flex; flex-direction: column; width: 100%; min-width: 0; padding: 8px 10px; border-radius: var(--r-3); color: var(--text-2); text-align: left; }
+.search-row:hover, .search-row.cursor { background: var(--tint); }
+.search-row[aria-current="page"] { background: var(--tint-strong); }
+.search-row-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.search-row-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: 13px; }
+.search-row-id { flex-shrink: 0; color: var(--text-3); font: 11px var(--font-mono); }
+.search-row-excerpt { display: -webkit-box; margin: 3px 0 0 20px; overflow: hidden; color: var(--text-3); font-size: var(--fs-2); -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.search-row mark.search-hit { color: var(--text); background: color-mix(in srgb, var(--accent) 30%, transparent); }
 
 /* Long tag-name handling in the sidebar tag list. Base .tag-pill is
    white-space:nowrap + flex-shrink:0 (correct for popovers and headers).
@@ -344,7 +349,20 @@ button.priority-chip:hover { background: var(--tint-strong, var(--accent-tint));
    Tasks section eyebrow + show-all-tasks button row). The .section-toggle
    button inside SectionHeader brings its own padding (defined later). */
 .sidebar-pane .pane-section > .section-head { padding: 12px 14px 6px; }
+/* The task list's header lines up with the filter field above it and sits
+   close to its order line. */
+.sidebar-pane .pane-section.section-tasks > .section-head { padding: 0; }
+.section-tasks .section-toggle { padding: 8px 10px 4px 12px; }
+.section-tasks .section-trailing .btn-icon { width: 28px; height: 28px; }
 .sidebar-pane .section-body > .meta { padding: 8px 12px; line-height: 1.6; }
+/* The Lanes and Tags lists' head: title, count and "+", then the search
+   field, over a rule (the mockup's list top). */
+.sidebar-pane .pane-section > .section-head.list-head { display: flex; flex-direction: column; gap: 8px; padding: 8px 10px 10px 14px; border-bottom: 1px solid var(--border); }
+.list-head .row { gap: 6px; }
+.list-head .btn-icon { width: 28px; height: 28px; }
+.list-title { margin: 0; color: var(--text); font: 600 var(--fs-3)/1.5 var(--font-sans); }
+.list-search { min-height: 30px; margin-right: 4px; border-radius: var(--r-3); background: var(--bg); }
+.list-search input { padding: 4px 0; font-size: var(--fs-3); }
 
 /* ---------- selected-tag token strip ----------
    Lives INSIDE .workspace-filters. Renders nothing (component returns
@@ -390,12 +408,16 @@ button.priority-chip:hover { background: var(--tint-strong, var(--accent-tint));
 
 @media (max-width: 900px) {
   .ws-search { min-height: 44px; }
-  .ws-filter-trigger, .ws-tags-button, .ws-done-button, .ws-clear { min-height: 44px; }
+  .ws-chip { min-height: 44px; }
   .sidebar-filter-option, .sidebar-filter-head .btn-icon, .catalog-search-field input { min-height: 44px; }
   .sidebar-filter-head .btn-icon { min-width: 44px; }
   .sidebar-filter-head { padding-top: 0; padding-bottom: 0; }
-  .pane-system .btn-icon, .sidebar-back { min-width: 44px; min-height: 44px; }
+  .nav-rail button { min-width: 44px; min-height: 44px; }
   .sidebar-pane .lane-row { min-height: 44px; }
+  .task-group-header, .task-order-trigger { min-height: 44px; }
+  .task-order-folds .btn-icon { width: 44px; height: 44px; }
+  .settings-nav-item { height: 44px; }
+  .search-row { min-height: 44px; }
   .filter-chip .x { width: 32px; height: 32px; }
 }
 

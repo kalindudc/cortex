@@ -98,7 +98,8 @@ export function TagsHeaderChip({ task }: { task: Task }): VNode {
         onClick={open}
         {...tip("Add tags to this task")}
       >
-        <Icon name="plus" size={13} />
+        <Icon name="plus" size={12} />
+        <span>Tag</span>
       </button>
       {error.value != null ? (
         <span class="tags-error" role="alert">

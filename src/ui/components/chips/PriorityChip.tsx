@@ -149,7 +149,7 @@ export function PriorityChipButton({ task }: { task: Task }): VNode {
         editing.value = true;
       }}
     >
-      <span class="prop-label">Priority:</span>
+      <span class="prop-label visually-hidden">Priority:</span>
       <span class="prop-value">P{task.priority}</span>
     </button>
   );

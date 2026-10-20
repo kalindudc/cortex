@@ -30,6 +30,8 @@ SLICES=(
   tooltip
   inbox
   notifications
+  context
+  panels
   active
   document
   motion

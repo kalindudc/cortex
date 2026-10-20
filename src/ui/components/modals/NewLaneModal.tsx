@@ -1,7 +1,7 @@
 // NewLaneModal — create a new lane (name + optional color + sort).
 //
-// Mirrors LaneEditModal's visual shape so creation and editing feel like
-// the same surface. Differences from edit mode:
+// Uses the lane panel's fields (name, colour, position) in a short dialog.
+// Differences from the panel:
 //   - Name input starts empty and is required (Save disabled when blank).
 //   - No "Delete lane" affordance.
 //   - Save calls api.addLane (returns the created Lane).

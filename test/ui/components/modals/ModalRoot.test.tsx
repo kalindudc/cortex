@@ -3,8 +3,8 @@
 
 import { describe, test, expect, mock, beforeEach } from "bun:test";
 
-// LaneEditModal / TagEditModal pull lanes/tags signals and useSignal; render
-// the real ones — but stub api so close-on-save doesn't hit fetch.
+// The create and confirm dialogs render for real; stub the api so their
+// actions never reach the bridge.
 mock.module("../../../../src/ui/api/client.ts", () => ({
   api: {
     editLane: mock(() => Promise.resolve({})),
@@ -24,7 +24,7 @@ import {
   navigationOpen,
   draggedTaskId,
   sidebarFilter,
-  sidebarMode,
+  view,
   focusReading,
   narrowViewport,
 } from "../../../../src/ui/state/signals.ts";
@@ -39,7 +39,7 @@ describe("ModalRoot", () => {
     navigationOpen.value = false;
     draggedTaskId.value = null;
     sidebarFilter.value = null;
-    sidebarMode.value = "main";
+    view.value = "tasks";
     focusReading.value = false;
     narrowViewport.value = false;
   });
@@ -54,21 +54,6 @@ describe("ModalRoot", () => {
     const { container } = render(<ModalRoot />);
     expect(container.querySelector(".modal")).toBeTruthy();
     expect(container.textContent).toContain("Delete task");
-  });
-
-  test("routes 'lane-edit' kind to LaneEditModal", () => {
-    lanes.value = [{ name: "now", color: null, sort: 0 }];
-    modal.value = { kind: "lane-edit", name: "now" };
-    const { container } = render(<ModalRoot />);
-    // LaneEditModal renders a heading "Edit lane".
-    expect(container.textContent).toContain("Edit lane");
-  });
-
-  test("routes 'tag-edit' kind to TagEditModal", () => {
-    tags.value = [{ name: "bug", color: null, created: 0, task_count: 0 }];
-    modal.value = { kind: "tag-edit", name: "bug" };
-    const { container } = render(<ModalRoot />);
-    expect(container.textContent).toContain("Edit tag");
   });
 
   test("routes 'confirm-lane-delete' kind to the lane delete confirmation modal", () => {
@@ -113,7 +98,7 @@ describe("ModalRoot", () => {
   test("legacy filter-tags redirects to the sidebar without mounting a dialog or closing its drawer", () => {
     narrowViewport.value = true;
     navigationOpen.value = true;
-    sidebarMode.value = "tags";
+    view.value = "tags";
     focusReading.value = true;
     modal.value = { kind: "filter-tags" };
     const { container } = render(<ModalRoot />);
@@ -121,29 +106,15 @@ describe("ModalRoot", () => {
     expect(modal.value).toBeNull();
     expect(sidebarFilter.value).toBe("tags");
     expect(navigationOpen.value).toBe(true);
-    expect(sidebarMode.peek()).toBe("main");
+    expect(view.peek()).toBe("tasks");
     expect(focusReading.value).toBe(false);
   });
 
   // ---- every actual modal kind rides the ONE DialogFrame ----
   const KINDS: Array<{ value: { kind: string; [k: string]: unknown }; name: string; setup?: () => void }> = [
     { value: { kind: "confirm-delete", id: 7 }, name: "Delete task" },
-    {
-      value: { kind: "lane-edit", name: "now" },
-      name: "Edit lane",
-      setup: () => {
-        lanes.value = [{ name: "now", color: null, sort: 0 }];
-      },
-    },
     { value: { kind: "new-lane" }, name: "New lane" },
     { value: { kind: "new-tag" }, name: "New tag" },
-    {
-      value: { kind: "tag-edit", name: "bug" },
-      name: "Edit tag",
-      setup: () => {
-        tags.value = [{ name: "bug", color: null, created: 0, task_count: 0 }];
-      },
-    },
     { value: { kind: "confirm-lane-delete", name: "next" }, name: "Delete lane" },
     { value: { kind: "confirm-tag-delete", name: "bug", taskCount: 2 }, name: "Delete tag" },
     { value: { kind: "render-markdown", taskId: 1 }, name: "Task document" },

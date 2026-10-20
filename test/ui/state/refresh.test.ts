@@ -101,6 +101,7 @@ import {
   liveState,
 } from "../../../src/ui/state/signals.ts";
 import { notifications } from "../../../src/ui/state/notifications.ts";
+import { blockedAlert } from "../../../src/ui/state/settings.ts";
 import type { Task, RelatedTasks, Notification, Update } from "../../../src/ui/api/types.ts";
 import type { TaskStateSnapshot, WorkspaceSnapshot } from "../../../src/contracts.ts";
 import { act, render } from "@testing-library/preact";
@@ -731,6 +732,7 @@ describe("state/refresh blocked-transition alerts (N12)", () => {
     live?.detach();
     live = null;
     g.Notification = original;
+    blockedAlert.value = "on";
   });
 
   test("edits of an already-blocked task never alert; each transition alerts exactly once", async () => {
@@ -795,6 +797,31 @@ describe("state/refresh blocked-transition alerts (N12)", () => {
     await settle();
     expect(FakeNotification.shown).toEqual([]);
     expect(FakeNotification.requestPermission).toHaveBeenCalledTimes(1);
+  });
+
+  test("with the alert turned off, a task.blocked frame neither alerts nor requests permission", async () => {
+    blockedAlert.value = "off";
+    live = liveSource();
+    const s = live;
+    s.ready("e1:1");
+    await settle();
+    workspaceCalls[0].resolve(snapshot("e1:1", [603]));
+    await settle();
+    s.send("task.blocked", "e1:2", transition(603, "open"));
+    await settle();
+    expect(FakeNotification.shown).toEqual([]);
+    FakeNotification.permission = "default";
+    s.send("task.blocked", "e1:3", transition(603, "review"));
+    await settle();
+    expect(FakeNotification.shown).toEqual([]);
+    expect(FakeNotification.requestPermission).not.toHaveBeenCalled();
+
+    // Turning it back on restores the alert.
+    blockedAlert.value = "on";
+    FakeNotification.permission = "granted";
+    s.send("task.blocked", "e1:4", transition(603, "open"));
+    await settle();
+    expect(FakeNotification.shown.length).toBe(1);
   });
 });
 

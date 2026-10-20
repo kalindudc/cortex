@@ -20,7 +20,8 @@ import { LanePicker } from "../../../src/ui/components/pickers/LanePicker.tsx";
 import { TagPicker } from "../../../src/ui/components/pickers/TagPicker.tsx";
 import { SidebarFilterPanel } from "../../../src/ui/components/sidebar/SidebarFilterPanel.tsx";
 import { TagFilterPanel } from "../../../src/ui/components/sidebar/TagFilterPanel.tsx";
-import { filters, lanePopover, lanes, tags, tagsPopover, tasks } from "../../../src/ui/state/signals.ts";
+import { SidebarPane } from "../../../src/ui/components/sidebar/SidebarPane.tsx";
+import { filters, lanePopover, lanes, tags, tagsPopover, tasks, view } from "../../../src/ui/state/signals.ts";
 import type { Task } from "../../../src/ui/api/types.ts";
 
 const COUNT = 1000;
@@ -63,6 +64,7 @@ describe("catalog search is never capped", () => {
     tags.value = [];
     tagsPopover.value = false;
     lanePopover.value = false;
+    view.value = "tasks";
   });
 
   test("TagPicker lists every tag before anything is typed, and typing only filters", () => {
@@ -118,5 +120,22 @@ describe("catalog search is never capped", () => {
     expect(container.querySelectorAll(".tag-filter-row").length).toBe(1);
     fireEvent.input(search, { target: { value: "" } });
     expect(container.querySelectorAll(".tag-filter-row").length).toBe(COUNT + 1);
+  });
+
+  test("the Lanes and Tags lists show every entry, and typing only filters", () => {
+    for (const [v, label, needle] of [
+      ["lanes", "Find a lane", "lane-0042"],
+      ["tags", "Find a tag", "entry-0042"],
+    ] as const) {
+      view.value = v;
+      const { container, unmount } = render(<SidebarPane />);
+      expect(container.querySelectorAll(".lane-row").length).toBe(COUNT);
+      const search = input(container, `input[aria-label="${label}"]`);
+      fireEvent.input(search, { target: { value: needle } });
+      expect(container.querySelectorAll(".lane-row").length).toBe(1);
+      fireEvent.input(search, { target: { value: "" } });
+      expect(container.querySelectorAll(".lane-row").length).toBe(COUNT);
+      unmount();
+    }
   });
 });

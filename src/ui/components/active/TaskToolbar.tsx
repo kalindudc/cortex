@@ -1,12 +1,15 @@
 // Persistent workspace chrome, separate from the document's title/metadata.
 // All task mutations retain the existing API + confirmation paths; body-mode
 // changes go through the workspace controller, never a new draft owner.
+// TaskDocument hands in its Document / Activity tablist (`tabs`), which sits
+// right after the breadcrumb so the task takes one header row.
 import type { VNode } from "preact";
 import type { Task } from "../../api/types.ts";
 import { api } from "../../api/client.ts";
 import { tryApi } from "../../api/errors.ts";
 import { STATUS_LABEL, nextStatusFor, nextActionLabel } from "../../../lib/constants.ts";
 import {
+  lanes,
   modal,
   statusPopover,
   taskActionsPopover,
@@ -16,9 +19,10 @@ import {
   type ReaderMode,
 } from "../../state/signals.ts";
 import { togglePopover } from "../../state/popovers.ts";
+import { contextShown, contextTab, hideContext, showContext } from "../../state/context.ts";
 import { requestMode } from "../../state/workspace.ts";
 import { tip } from "../../state/tooltip.ts";
-import { modeShortcutHint, modeShortcutAria, modeShortcutPrefix, modeShortcutDigit } from "../../lib/keys.ts";
+import { modeShortcutHint, modeShortcutAria, modeShortcutDigit } from "../../lib/keys.ts";
 import { Icon } from "../Icon.tsx";
 import { StatusPopover } from "../chips/StatusPopover.tsx";
 
@@ -28,21 +32,23 @@ const MODES: Array<{ id: ReaderMode; label: string }> = [
   { id: "split", label: "Split" },
 ];
 
-export function TaskToolbar({ task }: { task: Task }): VNode {
+export function TaskToolbar({ task, tabs }: { task: Task; tabs?: VNode }): VNode {
   const next = nextStatusFor(task.status);
+  const panelShown = contextShown();
+  const panelLabel = panelShown ? "Hide the side panel" : "Show the side panel";
+  const laneColor = lanes.value.find(l => l.name === task.lane)?.color ?? null;
   return (
     <div class="workspace-toolbar" role="toolbar" aria-label="Task toolbar">
       <div class="workspace-toolbar-leading">
         <div class="workspace-breadcrumb">
-          <span>cortex</span>
-          <span aria-hidden="true">/</span>
-          <span>Tasks</span>
+          <span class="lane-color" style={laneColor ? `background: ${laneColor}` : ""} aria-hidden="true"></span>
+          <span>{task.lane}</span>
+          <Icon name="chevronRight" size={12} />
+          <span class="num">@{task.id}</span>
         </div>
+        {tabs}
         {tab.value === "document" ? (
           <fieldset class="doc-mode-switch" aria-label="Body view mode">
-            <span class="mode-switch-super" aria-hidden="true" {...tip("Hold this, then press 1/2/3")}>
-              {modeShortcutPrefix()}
-            </span>
             {MODES.map(mode => (
               <button
                 key={mode.id}
@@ -136,6 +142,16 @@ export function TaskToolbar({ task }: { task: Task }): VNode {
             </div>
           ) : null}
         </div>
+        <button
+          type="button"
+          class="btn-icon side-panel-toggle"
+          aria-label={panelLabel}
+          aria-pressed={panelShown}
+          onClick={() => (panelShown ? hideContext() : showContext(contextTab.value))}
+          {...tip(panelLabel)}
+        >
+          <Icon name="panelRight" size={16} />
+        </button>
       </div>
     </div>
   );

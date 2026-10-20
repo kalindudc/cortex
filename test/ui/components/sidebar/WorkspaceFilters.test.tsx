@@ -58,6 +58,23 @@ describe("WorkspaceFilters", () => {
     expect(container.querySelector(".filter-chip-add")).toBeNull();
   });
 
+  test("one field, then one chip row: Status, Lane, Tags, Done and Clear, in that order", () => {
+    const { container } = render(<WorkspaceFilters />);
+    expect(container.querySelector<HTMLInputElement>("input[aria-label='Search tasks']")?.placeholder).toBe(
+      "Filter tasks",
+    );
+    const chips = Array.from(container.querySelectorAll(".ws-chips > button"));
+    expect(chips.map(c => c.getAttribute("aria-label"))).toEqual([
+      "Status filter",
+      "Lane filter",
+      "Filter by tags",
+      "Show done tasks too",
+      "Clear all filters",
+    ]);
+    expect(chips.map(c => c.textContent)).toEqual(["Status", "Lane", "Tags", "Done", "Clear"]);
+    expect(container.textContent).not.toContain("@id \u00b7 @title");
+  });
+
   test("typing in the search input writes workspaceQuery", () => {
     const { container } = render(<WorkspaceFilters />);
     const input = container.querySelector<HTMLInputElement>("input[aria-label='Search tasks']");

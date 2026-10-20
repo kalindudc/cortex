@@ -25,13 +25,13 @@ describe("the main loop in a real window", () => {
   test("create a task, tag it, move it, filter to it and post an update", async () => {
     const { page } = desktop;
 
-    await page.locator('button[aria-label="Manage lanes"]').click();
+    await page.locator('button[aria-label="Lanes"]').click();
     await page.locator('button[aria-label="New lane"]').click();
     const laneName = page.locator('input[placeholder="lane name"]');
     await laneName.fill("later");
     await page.getByRole("button", { name: "Create", exact: true }).click();
     await page.locator(".lane-row", { hasText: "later" }).waitFor();
-    await page.locator('button[aria-label="Back to tasks"]').click();
+    await page.locator('button[aria-label="Tasks"]').click();
 
     await page.locator('button[aria-label="New task"]').click();
     await page.locator(".task-row").first().waitFor();

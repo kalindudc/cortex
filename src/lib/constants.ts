@@ -48,3 +48,7 @@ export const LANE_COLORS: ReadonlyArray<string | null> = [
 // regex in lockstep with the server-side one — if you change one, change both.
 export const TAG_NAME_RE = /^[a-z0-9_@-]{1,32}$/;
 export const isValidTagName = (s: unknown): boolean => typeof s === "string" && TAG_NAME_RE.test(s.trim());
+
+// The title of the notification a backup writes. The desktop's Backup panel
+// reads the last backup from it without importing the Node-only backup module.
+export const BACKUP_NOTIFICATION_TITLE = "Backup created";

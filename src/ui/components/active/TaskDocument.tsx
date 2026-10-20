@@ -5,7 +5,7 @@
 //
 // Lifetimes:
 //   - The editor mounts LAZILY on first Edit/Split, then stays mounted but
-//     hidden across Read and Activity/Related/Authors passes — cursor,
+//     hidden across Read and Activity passes — cursor,
 //     undo history and pending edits survive. Keyed ONLY by the draft's
 //     external-body replacement epoch (the parent keys by task id).
 //   - The reader renders the CURRENT LOCAL DRAFT: immediately on Read
@@ -16,10 +16,12 @@
 //     restored on return (heading + offset when possible, else clamped
 //     scroll offset).
 //
-// One APG tablist governs Document / Activity / Related / Authors; the
-// Read/Edit/Split switch is a pressed-state button group, NOT a second
-// tablist. Task context (Activity/Related/Authors) renders through
-// the existing InboxPane.
+// One APG tablist governs Document / Activity, rendered inside the task
+// toolbar; the Read/Edit/Split switch is a pressed-state button group, NOT
+// a second tablist. Activity renders through the Activity view
+// (ActivityPane). The headings of the shown document are published to
+// `docOutline` for the side panel's Outline tab, whose clicks come back
+// through `pendingHeadingFragment` (the one path that scrolls to a heading).
 
 import type { VNode } from "preact";
 import { useEffect, useRef } from "preact/hooks";
@@ -32,19 +34,20 @@ import {
   pendingBodyFocus,
   pendingReaderFocus,
   pendingHeadingFragment,
-  narrowViewport,
   updates,
 } from "../../state/signals.ts";
+import { docOutline } from "../../state/context.ts";
 import { requestMode } from "../../state/workspace.ts";
 import { useTaskDraft } from "../../lib/useTaskDraft.ts";
 import { resolveHeadingId } from "../../lib/markdown.ts";
+import { tablistKeyHandler } from "../../lib/tablist.ts";
 import type { MdEditorHandle } from "./MdEditor.tsx";
 import { TaskHeader } from "./TaskHeader.tsx";
 import { TaskToolbar } from "./TaskToolbar.tsx";
 import { EditableTaskBody } from "./EditableTaskBody.tsx";
 import { ExternalChangeBanner } from "./ExternalChangeBanner.tsx";
 import { MarkdownView, type MarkdownHeading } from "./MarkdownView.tsx";
-import { InboxPane } from "../inbox/InboxPane.tsx";
+import { ActivityPane } from "./ActivityPane.tsx";
 import { Icon } from "../Icon.tsx";
 
 // ---------------------------------------------------------------------------
@@ -58,11 +61,9 @@ interface ReadingPosition {
 }
 const readingPositions = new Map<number, ReadingPosition>();
 
-const TABS: Array<{ id: "document" | "updates" | "related" | "authors"; label: string }> = [
+const TABS: Array<{ id: "document" | "updates"; label: string }> = [
   { id: "document", label: "Document" },
   { id: "updates", label: "Activity" },
-  { id: "related", label: "Related" },
-  { id: "authors", label: "Authors" },
 ];
 
 export function TaskDocument({ task }: { task: Task }): VNode {
@@ -114,8 +115,7 @@ export function TaskDocument({ task }: { task: Task }): VNode {
     pendingReaderFocus.value = null;
     // A newer overlay action may have happened before this render. Never
     // take its focus; no animation completion or timeout is involved.
-    if (document.querySelector("dialog[open], .popover[data-pop], .sidebar-filter-panel, .notif-drawer[data-pop]"))
-      return;
+    if (document.querySelector("dialog[open], .popover[data-pop], .sidebar-filter-panel")) return;
     readerRef.current?.focus({ preventScroll: true });
   }, [readerVisible, pendingReaderFocus.value, task.id]);
 
@@ -167,6 +167,11 @@ export function TaskDocument({ task }: { task: Task }): VNode {
     headings.value = h;
     if (!h.some(heading => heading.id === activeHeading.peek())) activeHeading.value = h[0]?.id ?? null;
   };
+  // Publish from an effect, never from a cleanup: writing a subscribed
+  // signal on the unmount path crashes preact's render queue.
+  useEffect(() => {
+    docOutline.value = { taskId: task.id, headings: readerVisible ? headings.value : [], active: activeHeading.value };
+  }, [task.id, readerVisible, headings.value, activeHeading.value]);
 
   // URL heading fragment: consume only on its owning task, once the
   // corresponding Markdown source has completed DOM post-processing.
@@ -229,65 +234,46 @@ export function TaskDocument({ task }: { task: Task }): VNode {
 
   const emptyBody = draft.body.trim().length === 0;
 
-  // APG tablist keyboard: Left/Right/Home/End move FOCUS among the
-  // tabs (roving tabindex, wrapping); Enter/Space ACTIVATE the focused tab
-  // (manual activation — arrowing through never churns panels). The
-  // handler lives on the tablist so a tab that is not selected can still
-  // be focused and activated by keyboard.
   const tablistRef = useRef<HTMLDivElement>(null);
-  const onTablistKey = (e: KeyboardEvent): void => {
-    const list = tablistRef.current;
-    if (!list) return;
-    const tabs = Array.from(list.querySelectorAll<HTMLButtonElement>("[role='tab']"));
-    const idx = tabs.indexOf(e.target as HTMLButtonElement);
-    if (idx === -1) return;
-    let next = -1;
-    if (e.key === "ArrowRight") next = (idx + 1) % tabs.length;
-    else if (e.key === "ArrowLeft") next = (idx - 1 + tabs.length) % tabs.length;
-    else if (e.key === "Home") next = 0;
-    else if (e.key === "End") next = tabs.length - 1;
-    else if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault(); // a button would also click on keyup — activate once
-      tab.value = TABS[idx].id;
-      return;
-    }
-    if (next === -1) return;
-    e.preventDefault();
-    tabs[next].focus();
-  };
+  const onTablistKey = tablistKeyHandler(
+    () => tablistRef.current,
+    i => {
+      tab.value = TABS[i].id;
+    },
+  );
 
   return (
-    <div
-      class={`task-document mode-${mode}${readerVisible && mode === "read" && headings.value.length > 1 ? " has-outline" : ""}`}
-    >
-      <TaskToolbar task={task} />
-      <div class="doc-topbar">
-        <div class="doc-tabs" role="tablist" aria-label="Task content" ref={tablistRef} onKeyDown={onTablistKey}>
-          {TABS.map(t => (
-            <button
-              key={t.id}
-              type="button"
-              role="tab"
-              id={`doc-tab-${t.id}`}
-              aria-label={t.label}
-              aria-selected={currentTab === t.id}
-              aria-controls={`doc-panel-${t.id === "document" ? "document" : "context"}`}
-              tabIndex={currentTab === t.id ? 0 : -1}
-              class={currentTab === t.id ? "active" : ""}
-              onClick={() => {
-                tab.value = t.id;
-              }}
-            >
-              <span>{t.label}</span>
-              {t.id === "updates" && (updates.value[task.id]?.length ?? 0) > 0 ? (
-                <span class="tab-count num" aria-hidden="true">
-                  {updates.value[task.id].length}
-                </span>
-              ) : null}
-            </button>
-          ))}
-        </div>
-      </div>
+    <div class={`task-document mode-${mode}`}>
+      <TaskToolbar
+        task={task}
+        tabs={
+          <div class="doc-tabs" role="tablist" aria-label="Task content" ref={tablistRef} onKeyDown={onTablistKey}>
+            {TABS.map(t => (
+              <button
+                key={t.id}
+                type="button"
+                role="tab"
+                id={`doc-tab-${t.id}`}
+                aria-label={t.label}
+                aria-selected={currentTab === t.id}
+                aria-controls={`doc-panel-${t.id === "document" ? "document" : "context"}`}
+                tabIndex={currentTab === t.id ? 0 : -1}
+                class={currentTab === t.id ? "active" : ""}
+                onClick={() => {
+                  tab.value = t.id;
+                }}
+              >
+                <span>{t.label}</span>
+                {t.id === "updates" && (updates.value[task.id]?.length ?? 0) > 0 ? (
+                  <span class="tab-count num" aria-hidden="true">
+                    {updates.value[task.id].length}
+                  </span>
+                ) : null}
+              </button>
+            ))}
+          </div>
+        }
+      />
       <div class="doc-page">
         <TaskHeader task={task} draft={draft} />
         {draft.external.body != null ? (
@@ -354,41 +340,16 @@ export function TaskDocument({ task }: { task: Task }): VNode {
               </div>
             ) : null}
           </div>
-          {readerVisible && mode === "read" && headings.value.length > 1 ? (
-            <nav class="doc-outline" aria-label="Document outline">
-              {/* Desktop: an always-open rail (the summary is inert via CSS).
-                Narrow: the SAME markup becomes an in-document
-                disclosure, collapsed by default — no second outline
-                implementation. */}
-              <details class="doc-outline-details" open={!narrowViewport.value}>
-                <summary class="doc-outline-title">{narrowViewport.value ? "Outline" : "On this page"}</summary>
-                {headings.value.map(h => (
-                  <button
-                    key={h.id}
-                    type="button"
-                    class={`doc-outline-link level-${h.level}`}
-                    aria-current={activeHeading.value === h.id ? "location" : undefined}
-                    onClick={() => {
-                      activeHeading.value = h.id;
-                      readerRef.current?.querySelector(`#${CSS.escape(h.id)}`)?.scrollIntoView({ block: "start" });
-                    }}
-                  >
-                    {h.text}
-                  </button>
-                ))}
-              </details>
-            </nav>
-          ) : null}
         </div>
 
         <div
           class="doc-context"
           id="doc-panel-context"
           role="tabpanel"
-          aria-labelledby={`doc-tab-${currentTab === "document" ? "updates" : currentTab}`}
+          aria-labelledby="doc-tab-updates"
           hidden={currentTab === "document"}
         >
-          {currentTab !== "document" ? <InboxPane /> : null}
+          {currentTab !== "document" ? <ActivityPane /> : null}
         </div>
       </div>
     </div>

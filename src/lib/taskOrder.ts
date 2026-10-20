@@ -1,6 +1,6 @@
 // The task list's order, used by the desktop
-// renderer: nine sorts (a leading `-` reverses the key; ties always break by
-// ascending id) and three groupings (a header per lane, in lane-catalog
+// renderer: six sort fields, each ascending or descending (a leading `-`
+// reverses the key; ties always break by ascending id) and three groupings (a header per lane, in lane-catalog
 // order, or per status, draft to done). A search ignores both and keeps the
 // relevance ranking in one flat list. Pure: the renderer bundles this file.
 
@@ -9,33 +9,30 @@ import { STATUS, STATUS_LABEL } from "./constants.ts";
 import type { TaskSearchResult } from "./fuzzy.ts";
 import { orderTasks } from "./taskView.ts";
 
-/** The task list's orders: a leading `-` reverses one; ties always break by ascending id. */
-export const TASK_SORTS = [
-  "id",
-  "-id",
-  "title",
-  "-title",
-  "lane",
-  "status",
-  "priority",
-  "updated",
-  "-updated",
-] as const;
-export type TaskSort = (typeof TASK_SORTS)[number];
+/** The fields the task list sorts by. */
+export const SORT_FIELDS = ["id", "title", "lane", "status", "priority", "updated"] as const;
+export type SortField = (typeof SORT_FIELDS)[number];
+/** A sort field, ascending, or descending with a leading `-`; ties always break by ascending id. */
+export type TaskSort = SortField | `-${SortField}`;
+/** Every order: each field ascending, then descending. */
+export const TASK_SORTS: readonly TaskSort[] = SORT_FIELDS.flatMap(f => [f, `-${f}` as const]);
+
+export const isDescending = (sort: TaskSort): boolean => sort.startsWith("-");
+export const sortField = (sort: TaskSort): SortField => (isDescending(sort) ? sort.slice(1) : sort) as SortField;
+export const sortOf = (field: SortField, descending: boolean): TaskSort => (descending ? `-${field}` : field);
+/** A sort in words for the list's order line: "title", or "title descending". */
+export const describeSort = (sort: TaskSort): string => (isDescending(sort) ? `${sortField(sort)} descending` : sort);
 /** The task list's groupings: a header row per lane or status. */
 export const TASK_GROUPS = ["none", "lane", "status"] as const;
 export type TaskGroup = (typeof TASK_GROUPS)[number];
 
-export const SORT_HELP: Readonly<Record<TaskSort, string>> = {
-  id: "ascending task id (the default)",
-  "-id": "newest task first",
-  title: "title, A to Z (numbers in order)",
-  "-title": "title, Z to A",
+export const SORT_HELP: Readonly<Record<SortField, string>> = {
+  id: "task id (the default)",
+  title: "title, with numbers in order (task-2 before task-12)",
   lane: "lane order, then id",
   status: "draft, open, review, blocked, done",
-  priority: "P0 first, unset last",
-  updated: "least recently updated first",
-  "-updated": "most recently updated first",
+  priority: "P0 to P3, tasks without a priority always last",
+  updated: "time of the last update",
 };
 
 export const GROUP_HELP: Readonly<Record<TaskGroup, string>> = {
@@ -87,8 +84,8 @@ const compareTitles = (a: Task, b: Task): number =>
   a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: "base" });
 
 function sortRanked(list: readonly Task[], sort: TaskSort, rank: LaneRank): Task[] {
-  const desc = sort.startsWith("-");
-  const key = (desc ? sort.slice(1) : sort) as "id" | "title" | "lane" | "status" | "priority" | "updated";
+  const desc = isDescending(sort);
+  const key = sortField(sort);
   const compare = (a: Task, b: Task): number => {
     switch (key) {
       case "id":
@@ -109,6 +106,8 @@ function sortRanked(list: readonly Task[], sort: TaskSort, rank: LaneRank): Task
     }
   };
   return [...list].sort((a, b) => {
+    // Tasks without a priority stay last in both directions.
+    if (key === "priority" && (a.priority === null) !== (b.priority === null)) return a.priority === null ? 1 : -1;
     const primary = compare(a, b);
     if (primary !== 0) return desc ? -primary : primary;
     return a.id - b.id;
@@ -151,8 +150,8 @@ function groupRanked(
 /**
  * `list` in a sort order (a new array): id, title (natural), lane (the
  * catalog order), status (draft, open, review, blocked, done), priority (P0
- * first, unset last) or updated; a leading `-` reverses the key. Ties always
- * break by ascending id.
+ * first) or updated; a leading `-` reverses the key. Ties always break by
+ * ascending id, and tasks without a priority sort last either way.
  */
 export function sortTasks(list: readonly Task[], sort: TaskSort, lanes: readonly Lane[] = []): Task[] {
   return sortRanked(list, sort, laneRanks(lanes));
@@ -165,6 +164,13 @@ export function groupTasks(
   lanes: readonly Lane[] = [],
 ): { rows: Task[]; groups: TaskListGroup[] } {
   return groupRanked(sorted, group, laneRanks(lanes));
+}
+
+/** The rows a reader sees: `arrangement`'s rows without those of its collapsed groups (by group key). */
+export function listedRows(arrangement: TaskArrangement, collapsed: readonly string[]): Task[] {
+  if (arrangement.groups.length === 0 || collapsed.length === 0) return [...arrangement.rows];
+  const hidden = new Set(collapsed);
+  return arrangement.groups.flatMap(g => (hidden.has(g.key) ? [] : arrangement.rows.slice(g.start, g.start + g.count)));
 }
 
 /**

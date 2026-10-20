@@ -1,0 +1,166 @@
+/* ---------- full panels (Lanes, Tags, Backup) ----------
+   A panel takes the document's grid area (layout.css .panel-view): a 44px
+   head with the breadcrumb and its actions, then a scrolling body with one
+   centred 720px column of titled cards. A card holds rows of a label (a
+   bold name over a muted line) and its control. */
+.panel-view { background: var(--bg); min-width: 0; overflow: hidden; }
+.panel-head { display: flex; align-items: center; gap: 10px; flex-shrink: 0; min-height: 44px; padding: 0 10px 0 18px; border-bottom: 1px solid var(--border); }
+.panel-head .btn { height: 28px; font-size: 12.5px; }
+.panel-crumb { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--text-2); font-size: 12.5px; white-space: nowrap; }
+.panel-crumb > .icon { color: var(--text-3); }
+.panel-crumb b { overflow: hidden; text-overflow: ellipsis; color: var(--text); font-weight: 500; }
+.panel-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 26px 48px 40px; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+.panel-inner { max-width: 720px; margin: 0 auto; }
+.panel-title { display: flex; align-items: center; gap: 10px; min-width: 0; margin: 0 0 4px; color: var(--text); font: 650 22px/1.3 var(--font-sans); letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.panel-title-swatch { width: 14px; height: 14px; border-radius: var(--r-1); }
+.panel-title .tag-pill { font-size: var(--fs-3); }
+.panel-lede { margin: 0 0 18px; color: var(--text-2); font-size: var(--fs-3); }
+.panel-card-title { margin: 20px 0 8px; color: var(--text); font: 600 var(--fs-3)/1.4 var(--font-sans); }
+.panel-card { margin-bottom: 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
+.panel-card-pad { padding: 16px; }
+.panel-row { display: flex; align-items: center; gap: 14px; padding: 11px 16px; border-top: 1px solid var(--border); }
+.panel-row:first-child { border-top: 0; }
+.panel-row-top { align-items: flex-start; }
+.panel-row-label { flex: 1; min-width: 0; }
+.panel-row-label b { display: block; color: var(--text); font-size: var(--fs-3); font-weight: 500; }
+.panel-row-label > span { display: block; margin-top: 1px; color: var(--text-3); font-size: var(--fs-2); }
+.panel-row-foot { justify-content: flex-end; gap: 8px; border-radius: 0 0 10px 10px; background: color-mix(in srgb, var(--bg) 40%, transparent); }
+.panel-input { width: 260px; height: 30px; padding: 0 10px; border-color: var(--border-strong); border-radius: 7px; font-size: var(--fs-3); }
+.panel-input-number { width: 80px; }
+.panel-view .mono { font-family: var(--font-mono); overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }
+.panel-view code { font: 12px var(--font-mono); color: var(--text-content); -webkit-user-select: text; user-select: text; }
+.panel-empty-line { margin: 0; padding: 6px; }
+
+/* Buttons: a quiet text button for Discard, a primary button that stays
+   accent-coloured (dimmed) while there is nothing to save, and a danger
+   button that reads red at rest (misc.css's .btn-danger only tints on
+   hover) and dimmed while disabled. */
+.btn-ghost { border-color: transparent; }
+.panel-view .btn-primary:disabled, .panel-view .btn-primary:disabled:hover { background: var(--accent); color: var(--accent-on); }
+.panel-view .btn-danger, .panel-view .btn-danger:disabled, .panel-view .btn-danger:disabled:hover { color: var(--err); border-color: color-mix(in srgb, var(--err) 45%, transparent); }
+
+/* The colour picker in a panel row: 16 fixed 24px swatches in two rows. */
+.panel-card .color-grid { grid-template-columns: repeat(8, 24px); gap: 7px; flex-shrink: 0; }
+.panel-card .color-swatch { width: 24px; border-width: 1px; border-color: color-mix(in srgb, var(--text) 8%, transparent); }
+.panel-card .color-swatch:hover { transform: none; }
+.panel-card .color-swatch.selected { border-color: transparent; outline: 2px solid var(--text); outline-offset: 2px; }
+
+/* The Lanes panel's tasks by status: one bar segment per status, its width
+   by count and its colour the status shape's, over a legend of shapes. */
+.breakdown-bar { display: flex; height: 8px; overflow: hidden; border-radius: 4px; background: var(--tint); }
+.breakdown-seg { display: block; flex: 0 0 0; height: 100%; }
+.breakdown-draft { background: var(--text-3); }
+.breakdown-open { background: var(--info); }
+.breakdown-review { background: var(--warn); }
+.breakdown-blocked { background: var(--err); }
+.breakdown-done { background: var(--ok); }
+.breakdown-legend { display: flex; flex-wrap: wrap; gap: 14px; margin: 10px 0 0; padding: 0; list-style: none; color: var(--text-2); font-size: var(--fs-2); }
+.breakdown-legend li { display: inline-flex; align-items: center; gap: 6px; }
+
+/* The Tags panel's tasks: one button per task (shape, @id, title). */
+.panel-task-list { padding: 6px 10px; }
+.panel-task { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; padding: 6px; border-radius: var(--r-2); color: var(--text-content); font-size: var(--fs-3); text-align: left; }
+.panel-task:hover { background: var(--tint); color: var(--text); }
+.panel-task-id { flex-shrink: 0; color: var(--text-3); font: 11px var(--font-mono); }
+.panel-task-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The Backup panel: the status card, its result line and the restore steps. */
+.backup-status { padding: 16px; }
+.backup-status .btn-primary { height: 32px; }
+.backup-icon { display: grid; place-items: center; flex-shrink: 0; width: 40px; height: 40px; border-radius: 10px; background: var(--accent-tint); color: var(--accent); }
+.backup-icon .icon { width: 18px; height: 18px; }
+.panel-row-label .backup-last-detail { margin-top: 2px; font-size: 11.5px; }
+.backup-result { font-size: 12.5px; }
+.backup-ok, .backup-ok .panel-row-label b { color: var(--ok); }
+.backup-ok .panel-row-label b { font-weight: 400; }
+.backup-ok .panel-row-label b .mono { font-size: 12px; }
+.backup-failed { color: var(--err); }
+.panel-callout { padding: 12px 14px; border-radius: 9px; background: var(--tint); color: var(--text-2); font-size: 12.5px; }
+.panel-callout p { margin: 0; }
+.panel-callout ol { margin: 6px 0 8px; padding-left: 18px; color: var(--text-content); }
+.panel-callout li { margin: 3px 0; }
+.panel-callout .btn { height: 26px; padding: 0 10px; border-color: var(--border-strong); font-size: var(--fs-2); }
+
+/* ---------- settings rows ----------
+   SettingRow (panels/SettingRow.tsx) is the one renderer of a setting: a
+   row of a card in the Settings panel and the Backup panel, its label and
+   one line of meaning on the left and its control on the right. Appearance
+   puts its preview cards under the label, across the card. */
+.setting-row { display: flex; align-items: center; gap: 14px; padding: 11px 16px; border-top: 1px solid var(--border); }
+.setting-row:first-child { border-top: 0; }
+.setting-row-cards { display: block; }
+.setting-label { display: flex; flex: 1; flex-direction: column; min-width: 0; }
+.setting-name { color: var(--text); font-size: var(--fs-3); font-weight: 500; }
+.setting-meaning { margin-top: 1px; color: var(--text-3); font-size: var(--fs-2); }
+.setting-meaning::first-letter { text-transform: uppercase; }
+.setting-select { flex-shrink: 0; min-width: 128px; height: 28px; padding: 0 8px; border-color: var(--border-strong); border-radius: 7px; background: var(--bg); font-size: 12.5px; }
+
+/* The native radios of the segmented control and the cards stay focusable
+   but invisible; their label shows the state. Each sits at its label's
+   centre, since a card's rounded, clipped corner would hide it from a click. */
+.seg-option input, .theme-card input { position: absolute; top: 50%; left: 50%; width: 1px; height: 1px; margin: 0; padding: 0; border: 0; opacity: 0; }
+.setting-segmented { display: inline-flex; flex-shrink: 0; gap: 2px; padding: 2px; border-radius: 8px; background: var(--tint); }
+.seg-option { position: relative; display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: 6px; color: var(--text-2); font-size: 12px; cursor: pointer; }
+.seg-option:hover { color: var(--text); }
+.seg-option:has(input:checked) { background: var(--bg); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, .25); }
+.seg-option:has(input:focus-visible), .theme-card:has(input:focus-visible) { outline: 2px solid var(--info); outline-offset: 1px; }
+
+/* The switch: choices[1] (on) fills the track with the accent. */
+.setting-switch { position: relative; flex-shrink: 0; width: 32px; height: 18px; padding: 0; border: 0; border-radius: 9px; background: var(--tint-strong); cursor: pointer; }
+.setting-switch-thumb { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--text-2); transition: left var(--dur-2) var(--ease); }
+.setting-switch[aria-checked="true"] { background: var(--accent); }
+.setting-switch[aria-checked="true"] .setting-switch-thumb { left: 16px; background: var(--accent-on); }
+.setting-switch:focus-visible { outline: 2px solid var(--info); outline-offset: 2px; }
+
+/* Appearance cards: a small preview of each palette (a side column and
+   three text lines). The previews show the other appearances whatever the
+   window's own, so their colours repeat tokens.css's --bg, --panel and
+   --text for each appearance; system shows the light and dark halves. */
+.setting-cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+.theme-card { position: relative; display: block; overflow: hidden; border: 1px solid var(--border); border-radius: 9px; cursor: pointer; }
+.theme-card:has(input:checked) { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-tint); }
+.theme-preview { --pv-bg: #f6f2ec; --pv-panel: #efe9dd; --pv-text: #2c2820; display: grid; grid-template-columns: 28px 1fr; height: 58px; background: var(--pv-bg); }
+.theme-card[data-value="system"] .theme-preview { --pv-panel: rgba(128, 128, 128, .28); --pv-text: #888; background: linear-gradient(90deg, #f6f2ec 50%, #1d1f24 50%); }
+.theme-card[data-value="dark"] .theme-preview { --pv-bg: #1d1f24; --pv-panel: #24262b; --pv-text: #dadbe0; }
+.theme-card[data-value="high-contrast"] .theme-preview { --pv-bg: #000; --pv-panel: #0c0c0c; --pv-text: #fff; }
+.theme-preview i { display: block; }
+.theme-preview-side { background: var(--pv-panel); }
+.theme-preview-lines { padding: 9px 10px; }
+.theme-preview-lines i { height: 5px; margin-top: 4px; border-radius: 3px; background: var(--pv-text); opacity: .35; }
+.theme-preview-lines i:first-child { width: 70%; height: 6px; margin-top: 0; opacity: .85; }
+.theme-preview-lines i:nth-child(2) { width: 90%; margin-top: 6px; }
+.theme-preview-lines i:last-child { width: 55%; }
+.theme-name { display: flex; align-items: center; justify-content: space-between; padding: 6px 9px; border-top: 1px solid var(--border); color: var(--text); font-size: 12px; }
+.theme-name .icon { color: var(--accent); }
+
+/* ---------- the Settings panel ----------
+   A section per settings group, then Shortcuts and Commands (a title and
+   its keys in a key cap), and About (a list of what the app is connected
+   to). SettingsNav's links scroll each section's heading to the top. */
+.settings-panel .panel-body { padding-top: 18px; }
+.settings-section { scroll-margin-top: 18px; }
+.settings-section:first-of-type .panel-card-title { margin-top: 0; }
+.settings-empty { margin: 0; padding: 8px 0; }
+.help-row { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 8px 16px; border-top: 1px solid var(--border); color: var(--text-content); font-size: 12.5px; }
+.help-row:first-child { border-top: 0; }
+.help-title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.help-keys { flex-shrink: 0; color: var(--text-3); font-size: var(--fs-2); white-space: nowrap; }
+.help-keys .kbd { font-size: 11px; }
+.about-list { margin: 0; }
+.about-list dt { flex-shrink: 0; width: 96px; color: var(--text-2); font-size: var(--fs-3); }
+.about-list dd { flex: 1; min-width: 0; margin: 0; color: var(--text); font-size: var(--fs-3); overflow-wrap: anywhere; }
+.about-list dd.mono { font-size: 12px; }
+
+@media (max-width: 900px) {
+  .panel-body { padding: 18px 16px 32px; }
+  .setting-row { flex-wrap: wrap; }
+  .setting-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .seg-option, .setting-select { min-height: 44px; }
+  .help-row { flex-wrap: wrap; }
+  .panel-row { flex-wrap: wrap; }
+  .panel-input { width: 100%; }
+  .panel-input-number { width: 120px; }
+  .panel-view .btn, .panel-task { min-height: 44px; }
+  .panel-card .color-grid { grid-template-columns: repeat(8, 32px); }
+  .panel-card .color-swatch { width: 32px; }
+}

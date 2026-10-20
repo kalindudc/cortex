@@ -10,8 +10,8 @@
 // biome's `useValidAnchor` passes — `href="#"` would not. The click
 // handler always `preventDefault`s, so the URL never actually changes;
 // the fragment is purely a stable selector for tooling. `stopPropagation`
-// keeps the surrounding row's onClick (e.g. open-update-detail in
-// InboxPane) from also firing.
+// keeps the surrounding row's onClick (e.g. an update card's toggle in the
+// Activity view, ActivityPane) from also firing.
 //
 // Visible labels match the source verbatim (`@123`, `#tag`) since the
 // bracketless grammar already produces a readable string.

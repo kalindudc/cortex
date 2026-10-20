@@ -18,7 +18,7 @@ import { MarkdownView } from "../active/MarkdownView.tsx";
 import { DialogFrame } from "./DialogFrame.tsx";
 
 export function UpdateDetailModal({ update, close }: { update: Update; close: () => void }): VNode {
-  // Severity dot mirrors InboxPane verbatim so the visual stays unified.
+  // Severity dot mirrors the Activity view (ActivityPane) verbatim so the visual stays unified.
   const severityClass = `dot dot-status-${update.severity === "blocked" ? "blocked" : update.severity === "review" ? "review" : "open"}`;
   const hasBody = !!update.body && update.body.trim().length > 0;
   return (
@@ -27,7 +27,7 @@ export function UpdateDetailModal({ update, close }: { update: Update; close: ()
         <div class="row" style="gap:10px; align-items:center">
           <span class="avatar">{initial(update.author)}</span>
           <div class="meta" style="display:flex; align-items:center; gap:6px">
-            <span class={severityClass} style="width:6px; height:6px"></span>
+            <span class={severityClass}></span>
             <span>{update.author}</span>
             <span>&middot;</span>
             <span>{fmtTime(update.created)}</span>

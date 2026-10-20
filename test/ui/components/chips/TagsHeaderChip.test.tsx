@@ -100,7 +100,7 @@ describe("TagsHeaderChip", () => {
     const { container } = render(<TagsHeaderChip task={{ ...fx, tags: [] }} />);
     const add = container.querySelector<HTMLButtonElement>("button[aria-label='Add tags']");
     if (!add) throw new Error("expected Add-tags affordance");
-    expect(add.textContent?.trim()).toBe("");
+    expect(add.textContent?.trim()).toBe("Tag");
     expect(add.querySelector("svg")).not.toBeNull();
     fireEvent.click(add);
     expect(tagsPopover.value).toBe(true);
@@ -109,7 +109,7 @@ describe("TagsHeaderChip", () => {
   test("picker mount gate: TagPicker appears only while the popover is open", () => {
     const { container, rerender } = render(<TagsHeaderChip task={fx} />);
     expect(container.querySelector(".tag-picker")).toBeNull();
-    // The same plus-only Add tags control is present with attached tags.
+    // The same "+ Tag" Add tags control is present with attached tags.
     const add = container.querySelector<HTMLButtonElement>("button[aria-label='Add tags']");
     if (!add) throw new Error("expected Add-tags affordance");
     expect(container.textContent).not.toContain("Edit tags");

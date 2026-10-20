@@ -9,14 +9,11 @@ import { clearWorkspaceTransientState } from "../../state/workspace.ts";
 import { DialogFrame } from "./DialogFrame.tsx";
 import { api } from "../../api/client.ts";
 import { tryApi } from "../../api/errors.ts";
-import { LaneEditModal } from "./LaneEditModal.tsx";
-import { TagEditModal } from "./TagEditModal.tsx";
 import { NewLaneModal } from "./NewLaneModal.tsx";
 import { NewTagModal } from "./NewTagModal.tsx";
 import { TagFilterModal } from "./TagFilterModal.tsx";
 import { UpdateDetailModal } from "./UpdateDetailModal.tsx";
 import { RenderMarkdownModal } from "./RenderMarkdownModal.tsx";
-import { SettingsModal } from "./SettingsModal.tsx";
 import type { Update } from "../../api/types.ts";
 
 export function ModalRoot(): VNode | null {
@@ -55,9 +52,6 @@ export function ModalRoot(): VNode | null {
       </DialogFrame>
     );
   }
-  if (m.kind === "lane-edit") {
-    return <LaneEditModal name={m.name as string} close={close} />;
-  }
   if (m.kind === "new-lane") {
     return <NewLaneModal close={close} />;
   }
@@ -67,14 +61,8 @@ export function ModalRoot(): VNode | null {
   if (m.kind === "filter-tags") {
     return <TagFilterModal close={close} />;
   }
-  if (m.kind === "tag-edit") {
-    return <TagEditModal name={m.name as string} close={close} />;
-  }
   if (m.kind === "update-detail") {
     return <UpdateDetailModal update={m.update as Update} close={close} />;
-  }
-  if (m.kind === "settings") {
-    return <SettingsModal close={close} />;
   }
   if (m.kind === "render-markdown") {
     return <RenderMarkdownModal taskId={m.taskId as number} close={close} />;

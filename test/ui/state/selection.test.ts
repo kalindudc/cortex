@@ -9,7 +9,7 @@
 import { describe, test, expect, beforeEach } from "bun:test";
 import { tasks, filters, selectedId, showAllTasks, workspaceQuery } from "../../../src/ui/state/signals.ts";
 import { moveSelection } from "../../../src/ui/state/selection.ts";
-import { taskSort } from "../../../src/ui/state/settings.ts";
+import { collapsedGroups, taskGroup, taskSort } from "../../../src/ui/state/settings.ts";
 import type { Task } from "../../../src/ui/api/types.ts";
 
 const mkTask = (id: number, title: string, over: Partial<Task> = {}): Task => ({
@@ -34,6 +34,8 @@ describe("state/selection moveSelection", () => {
     showAllTasks.value = false;
     workspaceQuery.value = "";
     taskSort.value = "id";
+    taskGroup.value = "none";
+    collapsedGroups.value = { lane: [], status: [] };
   });
 
   test("empty visible list → no-op", () => {
@@ -122,5 +124,16 @@ describe("state/selection moveSelection", () => {
     selectedId.value = 1;
     moveSelection(1);
     expect(selectedId.value).toBe(3); // beta (done) skipped
+  });
+
+  test("next and previous skip the rows of a folded group", () => {
+    taskGroup.value = "status";
+    tasks.value = [mkTask(1, "a", { status: "draft" }), mkTask(2, "b"), mkTask(3, "c", { status: "review" })];
+    collapsedGroups.value = { lane: [], status: ["open"] };
+    selectedId.value = 1;
+    moveSelection(1);
+    expect(selectedId.value).toBe(3);
+    moveSelection(-1);
+    expect(selectedId.value).toBe(1);
   });
 });

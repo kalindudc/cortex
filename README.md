@@ -73,7 +73,7 @@ The reference lives in the program, so it is always current:
 - `cortex --help` and `cortex <command> --help`: every command and flag.
 - `cortex schema`: the data model and the command grammar, written for agents.
 - `cortex doctor`: version, database path, daemon state and pending migrations, without changing anything.
-- In the desktop app, the help view: every command, shortcut and setting.
+- In the desktop app, the Settings panel: every command, shortcut and setting.
 
 ## Development
 

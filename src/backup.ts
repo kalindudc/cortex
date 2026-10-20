@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import type { AddNotificationInput, Store } from "./store.ts";
 import { backupsDir } from "./paths.ts";
+import { BACKUP_NOTIFICATION_TITLE } from "./lib/constants.ts";
 import pkg from "../package.json" with { type: "json" };
 
 export type BackupStats = {
@@ -346,7 +347,7 @@ export function backupNotificationInput(opts: {
     task_id: null,
     author: opts.author ?? null,
     status: "done",
-    title: "Backup created",
+    title: BACKUP_NOTIFICATION_TITLE,
     message: `${opts.outPath} (${opts.bytes} bytes; ${opts.stats.tasks} tasks, ${opts.stats.updates} updates)`,
   };
 }

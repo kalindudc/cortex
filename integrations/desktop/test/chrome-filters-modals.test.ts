@@ -143,8 +143,8 @@ describe("sidebar filters", () => {
     await expect.poll(() => clear.isDisabled(), POLL).toBe(true);
     expect(await page.locator(".filter-chip").count()).toBe(0);
     expect(await page.locator('input[aria-label="Search tasks"]').inputValue()).toBe("");
-    expect(await statusFilter(page).textContent()).toContain("All statuses");
-    expect(await laneFilter(page).textContent()).toContain("All lanes");
+    expect(await statusFilter(page).textContent()).toContain("Status");
+    expect(await laneFilter(page).textContent()).toContain("Lane");
     expect(await page.locator(".status-bar .filter-summary").textContent()).toBe("All tasks");
   });
 
@@ -161,7 +161,7 @@ describe("sidebar filters", () => {
     const laneSearch = page.getByRole("searchbox", { name: "Search lanes", exact: true });
     await laneSearch.fill("QUE 0059");
     await expect.poll(() => page.getByRole("option").count(), POLL).toBe(2);
-    expect(await laneFilter(page).textContent()).toContain("All lanes");
+    expect(await laneFilter(page).textContent()).toContain("Lane");
     await page.keyboard.press("Escape");
 
     await tagsFilter(page).click();
@@ -182,7 +182,7 @@ describe("sidebar filters", () => {
 describe("lane and tag management", () => {
   test("the new lane modal focuses its name, traps Tab, and returns focus to the trigger", async () => {
     const { page } = desktop;
-    await page.locator('button[aria-label="Manage lanes"]').click();
+    await page.locator('button[aria-label="Lanes"]').click();
     const trigger = page.locator('button[aria-label="New lane"]');
     await trigger.click();
     const dialog = page.locator('dialog[aria-label="New lane"][open]');
@@ -209,23 +209,25 @@ describe("lane and tag management", () => {
     expect((await desktop.cortex(["lane", "ls", "--json"])).includes("next")).toBe(false);
   });
 
-  test("a lane can be created, renamed and deleted from its modals", async () => {
+  test("a lane is created in its dialog, then renamed and deleted in the Lanes panel", async () => {
     const { page } = desktop;
-    await page.locator('button[aria-label="Manage lanes"]').click();
+    await page.locator('button[aria-label="Lanes"]').click();
     await page.locator('button[aria-label="New lane"]').click();
     await page.locator("dialog[open] input").first().fill("soon");
     await page.getByRole("button", { name: "Create", exact: true }).click();
     await page.locator(".lane-row .lane-name", { hasText: /^soon$/ }).waitFor();
     await expect.poll(async () => (await desktop.cortex(["lane", "ls", "--json"])).includes('"soon"'), POLL).toBe(true);
 
+    const panel = page.locator(".lane-panel");
     await page.locator(".lane-row", { hasText: "soon" }).click();
-    const name = page.locator('dialog[aria-label="Edit lane"] input').first();
-    await name.fill("sooner");
-    await page.locator("dialog[open] button.btn-primary", { hasText: "Save" }).click();
+    await panel.locator(".panel-title", { hasText: /^soon$/ }).waitFor();
+    await panel.locator('input[aria-label="Lane name"]').fill("sooner");
+    await panel.getByRole("button", { name: "Save changes", exact: true }).click();
     await page.locator(".lane-row .lane-name", { hasText: /^sooner$/ }).waitFor();
+    // The panel follows the rename.
+    await panel.locator(".panel-title", { hasText: /^sooner$/ }).waitFor();
 
-    await page.locator(".lane-row", { hasText: "sooner" }).click();
-    await page.getByRole("button", { name: "Delete lane", exact: true }).click();
+    await panel.getByRole("button", { name: "Delete lane", exact: true }).click();
     await page.locator("dialog[open] button.btn-primary", { hasText: "Delete lane" }).click();
     await page.locator(".lane-row", { hasText: "sooner" }).waitFor({ state: "detached" });
     const lanes = await desktop.cortex(["lane", "ls", "--json"]);
@@ -233,9 +235,9 @@ describe("lane and tag management", () => {
     expect(lanes.includes("soon")).toBe(false);
   });
 
-  test("a tag can be created, edited and deleted from its modals", async () => {
+  test("a tag is created in its dialog, then renamed and deleted in the Tags panel", async () => {
     const { page } = desktop;
-    await page.locator('button[aria-label="Manage tags"]').click();
+    await page.locator('button[aria-label="Tags"]').click();
     await page.locator('button[aria-label="New tag"]').click();
     const dialog = page.locator('dialog[aria-label="New tag"][open]');
     const name = dialog.locator("input").first();
@@ -247,14 +249,15 @@ describe("lane and tag management", () => {
     const row = page.locator(".lane-row").filter({ has: page.locator(".tag-pill", { hasText: /^release-train$/ }) });
     await row.waitFor();
 
+    const panel = page.locator(".tag-panel");
     await row.click();
-    await page.locator('dialog[aria-label="Edit tag"] input').first().fill("release");
-    await page.locator("dialog[open] button.btn-primary", { hasText: "Save" }).click();
+    await panel.locator('input[aria-label="Tag name"]').fill("release");
+    await panel.getByRole("button", { name: "Save changes", exact: true }).click();
     const renamed = page.locator(".lane-row").filter({ has: page.locator(".tag-pill", { hasText: /^release$/ }) });
     await renamed.waitFor();
+    await panel.locator(".panel-title .tag-pill", { hasText: /^release$/ }).waitFor();
 
-    await renamed.click();
-    await page.getByRole("button", { name: "Delete tag", exact: true }).click();
+    await panel.getByRole("button", { name: "Delete tag", exact: true }).click();
     await page.locator('dialog[aria-label="Delete tag"] button.btn-primary').click();
     await renamed.waitFor({ state: "detached" });
     const tags = await desktop.cortex(["tag", "ls", "--json"]);
@@ -267,11 +270,13 @@ describe("lane and tag management", () => {
     await waitForRow(page, "blocked one");
     await statusFilter(page).click();
     await page.getByRole("option", { name: "Blocked", exact: true }).click();
-    await page.locator('button[aria-label="Manage tags"]').click();
-    await page.locator(".section-head .eyebrow", { hasText: "Manage tags" }).waitFor();
-    await page.locator('button[aria-label="Back to tasks"]').click();
-    await page.locator('button[aria-label="Manage lanes"]').click();
-    await page.locator('button[aria-label="Back to tasks"]').click();
+    await page.locator('button[aria-label="Tags"]').click();
+    await page.locator(".sidebar-pane .list-title", { hasText: /^Tags$/ }).waitFor();
+    const tasksItem = page.locator('button[aria-label="Tasks"]');
+    await tasksItem.click();
+    expect(await tasksItem.getAttribute("aria-current")).toBe("page");
+    await page.locator('button[aria-label="Lanes"]').click();
+    await tasksItem.click();
     await page.locator(".section-toggle .section-label", { hasText: "Tasks" }).waitFor();
     expect(await statusFilter(page).textContent()).toContain("Blocked");
   });
@@ -287,7 +292,7 @@ describe("lane and tag management", () => {
       .poll(async () => (await listTasks(desktop)).find(t => t.id === id)?.tags, POLL)
       .toEqual([]);
 
-    await page.locator('button[aria-label="Manage tags"]').click();
+    await page.locator('button[aria-label="Tags"]').click();
     await page
       .locator(".lane-row")
       .filter({ has: page.locator(".tag-pill", { hasText: /^keeper$/ }) })

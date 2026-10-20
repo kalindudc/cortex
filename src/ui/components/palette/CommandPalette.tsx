@@ -9,38 +9,19 @@ import type { JSX, VNode } from "preact";
 import { useEffect, useRef } from "preact/hooks";
 import { useSignal } from "@preact/signals";
 
-import { paletteOpen, paletteQuery, tasks, selectedId, tab } from "../../state/signals.ts";
+import { paletteOpen, paletteQuery, tasks, selectedId, tab, view, TASK_VIEWS } from "../../state/signals.ts";
 import { showError } from "../../api/errors.ts";
 import { Icon } from "../Icon.tsx";
 import { PriorityChip } from "../chips/PriorityChip.tsx";
 import { buildCommands, type Command } from "./buildCommands.ts";
 import { DialogFrame } from "../modals/DialogFrame.tsx";
 import { searchTasks } from "../../../lib/fuzzy.ts";
+import { renderHighlightedText } from "../../lib/highlight.tsx";
 import type { Task } from "../../api/types.ts";
 
 interface Scope {
   title: string;
   cmds: Command[];
-}
-
-function renderHighlightedText(
-  text: string,
-  ranges: Array<{ start: number; end: number }> = [],
-): Array<string | VNode> {
-  if (ranges.length === 0) return [text];
-  const chunks: Array<string | VNode> = [];
-  let cursor = 0;
-  ranges.forEach((range, i) => {
-    if (range.start > cursor) chunks.push(text.slice(cursor, range.start));
-    chunks.push(
-      <mark class="search-hit" key={`${range.start}-${range.end}-${i}`}>
-        {text.slice(range.start, range.end)}
-      </mark>,
-    );
-    cursor = range.end;
-  });
-  if (cursor < text.length) chunks.push(text.slice(cursor));
-  return chunks;
 }
 
 export function CommandPalette(): VNode {
@@ -108,7 +89,8 @@ export function CommandPalette(): VNode {
     // — the outside-filter notice explains any mismatch. Reveal the
     // Document tab explicitly: the per-task default effect only fires on
     // task CHANGES, and re-selecting the current task should also land on
-    // the document.
+    // the document, on the Tasks view.
+    if (!TASK_VIEWS.has(view.value)) view.value = "tasks";
     selectedId.value = task.id;
     tab.value = "document";
     paletteOpen.value = false;

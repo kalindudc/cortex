@@ -20,7 +20,7 @@ const editTask = mock(() => Promise.resolve({}));
 const setMemory = mock((_id: number, _body: { excluded: boolean }) => Promise.resolve({}));
 // state/refresh.ts registers a top-level `effect()` that watches activeTask
 // and calls api.updates(id) every time the selected task changes. Other test
-// files (e.g. InboxPane) cause refresh.ts to be loaded earlier in the same
+// files (e.g. ActivityPane) cause refresh.ts to be loaded earlier in the same
 // process, which registers that effect with our mocked api. Seeding tasks +
 // selectedId in a test here therefore triggers api.updates() — so the stub
 // must include it (along with anything else the refresh layer might touch).
@@ -52,7 +52,7 @@ import {
   readerMode,
   preferredReaderMode,
   tab,
-  sidebarMode,
+  view,
   postUpdateOpen,
   postUpdateFocusRequest,
   pendingBodyFocus,
@@ -62,18 +62,22 @@ import {
   navigationOpen,
   narrowViewport,
   focusReading,
+  selectedLane,
+  selectedTag,
 } from "../../../../src/ui/state/signals.ts";
 import type { Task, Lane } from "../../../../src/ui/api/types.ts";
 import type { TagWithCount } from "../../../../src/ui/api/client.ts";
 import { appearance, setTheme, theme } from "../../../../src/ui/state/theme.ts";
-import { taskGroup, taskSort } from "../../../../src/ui/state/settings.ts";
+import { collapsedGroups, taskGroup, taskSort } from "../../../../src/ui/state/settings.ts";
 import { updates } from "../../../../src/ui/state/signals.ts";
 import { notice } from "../../../../src/ui/state/notice.ts";
+import { contextOpen, contextTab } from "../../../../src/ui/state/context.ts";
 
 // Widening readers — TS narrows signal .value literals after assignment.
 const currentMode = (): string => readerMode.value;
 const currentTab = (): string => tab.value;
-const currentSidebarMode = (): string => sidebarMode.value;
+const currentView = (): string => view.value;
+const currentContextTab = (): string => contextTab.value;
 const currentModal = (): { kind: string; [key: string]: unknown } | null => modal.value;
 
 function task(over: Partial<Task> = {}): Task {
@@ -190,15 +194,30 @@ describe("buildCommands", () => {
     expect(postUpdateFocusRequest.value).toBe(before + 1);
   });
 
+  test("side-panel hides or shows the side panel at its last tab, like the toolbar button", () => {
+    contextOpen.value = true;
+    contextTab.value = "outline";
+    const hide = buildCommands().find(c => c.id === "side-panel");
+    expect(hide?.label).toBe("Hide the side panel");
+    hide?.action?.();
+    expect(contextOpen.value).toBe(false);
+    const show = buildCommands().find(c => c.id === "side-panel");
+    expect(show?.label).toBe("Show the side panel");
+    show?.action?.();
+    expect(contextOpen.value).toBe(true);
+    expect(currentContextTab()).toBe("outline");
+    contextTab.value = "details";
+  });
+
   test("management commands enter the explicit sidebar modes without touching filters", () => {
     filters.value = { status: "open", lane: "now", tag: ["bug"] };
     const cmds = buildCommands();
     cmds.find(c => c.id === "manage-lanes")?.action?.();
-    expect(currentSidebarMode()).toBe("lanes");
+    expect(currentView()).toBe("lanes");
     cmds.find(c => c.id === "manage-tags")?.action?.();
-    expect(currentSidebarMode()).toBe("tags");
+    expect(currentView()).toBe("tags");
     expect(filters.value).toEqual({ status: "open", lane: "now", tag: ["bug"] });
-    sidebarMode.value = "main";
+    view.value = "tasks";
   });
 
   test("active-task commands only appear when there is an active task", () => {
@@ -302,14 +321,14 @@ describe("buildCommands", () => {
     for (const narrow of [false, true]) {
       narrowViewport.value = narrow;
       focusReading.value = true;
-      sidebarMode.value = "lanes";
+      view.value = "lanes";
       const cmd = buildCommands().find(c => c.id === "filter-tags-modal");
       if (!cmd) throw new Error("expected filter-tags-modal command");
       cmd.action?.();
       expect(modal.value).toBeNull();
       expect(paletteOpen.value).toBe(false);
       expect(sidebarFilter.value).toBe("tags");
-      expect(currentSidebarMode()).toBe("main");
+      expect(currentView()).toBe("tasks");
       expect(focusReading.value).toBe(false);
       expect(navigationOpen.value).toBe(narrow);
     }
@@ -381,12 +400,13 @@ describe("buildCommands", () => {
     tags.value = [tag({ name: "bug" })];
     let cmds = buildCommands();
 
-    cmds
-      .find(c => c.id === "edit-lane")
-      ?.submenu?.()[1]
-      ?.action?.();
-    expect(currentModal()).toEqual({ kind: "lane-edit", name: "next" });
-    modal.value = null;
+    const laneEntry = cmds.find(c => c.id === "edit-lane")?.submenu?.()[1];
+    expect(laneEntry?.id).toBe("lane-open-next");
+    laneEntry?.action?.();
+    expect(currentModal()).toBeNull();
+    expect(selectedLane.value).toBe("next");
+    expect(currentView()).toBe("lanes");
+    view.value = "tasks";
     cmds
       .find(c => c.id === "delete-lane")
       ?.submenu?.()[0]
@@ -396,16 +416,43 @@ describe("buildCommands", () => {
     cmds.find(c => c.id === "new-lane")?.action?.();
     expect(currentModal()).toEqual({ kind: "new-lane" });
     modal.value = null;
-    cmds
-      .find(c => c.id === "edit-tag")
-      ?.submenu?.()[0]
-      ?.action?.();
-    expect(currentModal()).toEqual({ kind: "tag-edit", name: "bug" });
+    const tagEntry = cmds.find(c => c.id === "edit-tag")?.submenu?.()[0];
+    expect(tagEntry?.id).toBe("tag-open-bug");
+    tagEntry?.action?.();
+    expect(currentModal()).toBeNull();
+    expect(selectedTag.value).toBe("bug");
+    expect(currentView()).toBe("tags");
+    view.value = "tasks";
+
+    cmds.find(c => c.id === "backup")?.action?.();
+    expect(cmds.find(c => c.id === "backup")?.label).toBe("Backup\u2026");
+    expect(currentView()).toBe("backup");
+    view.value = "tasks";
 
     cmds = buildCommands();
     expect(theme.value).toBe("light");
     cmds.find(c => c.id === "theme-toggle")?.action?.();
     expect(theme.value).toBe("dark");
+  });
+
+  test("Collapse all and Expand all exist only while the list shows groups", () => {
+    tasks.value = [task({ id: 1, lane: "now" }), task({ id: 2, lane: "later" })];
+    const ids = () => buildCommands().map(c => c.id);
+    expect(ids()).not.toContain("collapse-groups");
+    taskGroup.value = "lane";
+    try {
+      const cmds = buildCommands();
+      expect(cmds.find(c => c.id === "collapse-groups")?.label).toBe("Collapse all lanes");
+      cmds.find(c => c.id === "collapse-groups")?.action?.();
+      expect([...collapsedGroups.value.lane].sort()).toEqual(["later", "now"]);
+      cmds.find(c => c.id === "expand-groups")?.action?.();
+      expect(collapsedGroups.value.lane).toEqual([]);
+      taskGroup.value = "status";
+      expect(buildCommands().find(c => c.id === "expand-groups")?.label).toBe("Expand all statuses");
+    } finally {
+      taskGroup.value = "none";
+      collapsedGroups.value = { lane: [], status: [] };
+    }
   });
 
   test("settings commands: sort and group, appearance, and the settings pane", () => {
@@ -417,22 +464,28 @@ describe("buildCommands", () => {
     const entries = sortGroup?.submenu?.() ?? [];
     expect(entries.map(e => e.id)).toEqual([
       "sort-id",
-      "sort--id",
       "sort-title",
-      "sort--title",
       "sort-lane",
       "sort-status",
       "sort-priority",
       "sort-updated",
-      "sort--updated",
+      "sort-ascending",
+      "sort-descending",
       "group-none",
       "group-lane",
       "group-status",
     ]);
-    expect(entries.filter(e => e.hint === "current").map(e => e.id)).toEqual(["sort-id", "group-none"]);
+    expect(entries.filter(e => e.hint === "current").map(e => e.id)).toEqual([
+      "sort-id",
+      "sort-ascending",
+      "group-none",
+    ]);
+    entries.find(e => e.id === "sort-descending")?.action?.();
+    expect(String(taskSort.value)).toBe("-id");
+    // A field keeps the direction.
     entries.find(e => e.id === "sort-title")?.action?.();
     entries.find(e => e.id === "group-status")?.action?.();
-    expect(String(taskSort.value)).toBe("title");
+    expect(String(taskSort.value)).toBe("-title");
     expect(String(taskGroup.value)).toBe("status");
     taskSort.value = "id";
     taskGroup.value = "none";
@@ -447,8 +500,12 @@ describe("buildCommands", () => {
     looks.find(e => e.id === "appearance-high-contrast")?.action?.();
     expect(appearance.value).toBe("high-contrast");
 
-    cmds.find(c => c.id === "settings")?.action?.();
-    expect(currentModal()).toEqual({ kind: "settings" });
+    const settings = cmds.find(c => c.id === "settings");
+    expect(settings?.label).toBe("Settings");
+    settings?.action?.();
+    expect(currentView()).toBe("settings");
+    expect(currentModal()).toBeNull();
+    view.value = "tasks";
   });
 
   test("memory-off and memory-on write through versioned.setMemory with the terminal's notices", async () => {
@@ -500,5 +557,36 @@ describe("buildCommands", () => {
     const resume = buildCommands().find(c => c.id === "resume-session");
     expect(resume?.submenu?.().map(e => e.id)).toEqual(["resume-bb-thr_2qj8qzdqqr"]);
     updates.value = {};
+  });
+
+  test("resuming a session from the palette shows the side panel's Details", async () => {
+    tasks.value = [task({ id: 5 })];
+    selectedId.value = 5;
+    updates.value = {
+      5: [
+        { id: 1, task_id: 5, author: "bb-thr_2qj8qzdqqr", summary: "s", body: null, severity: "progress", created: 1 },
+      ],
+    };
+    contextOpen.value = false;
+    contextTab.value = "inbox";
+    const resumeIpc = mock(() =>
+      Promise.resolve({ ok: true, harness: "bb", author: "bb-thr_2qj8qzdqqr", command: "" }),
+    );
+    const bridge = window as unknown as { cortex?: unknown };
+    const saved = bridge.cortex;
+    bridge.cortex = { resume: resumeIpc };
+    try {
+      const entry = buildCommands()
+        .find(c => c.id === "resume-session")
+        ?.submenu?.()
+        .find(e => e.id === "resume-bb-thr_2qj8qzdqqr");
+      await entry?.action?.();
+      expect(currentContextTab()).toBe("details");
+      expect(contextOpen.value).toBe(true);
+      expect(resumeIpc).toHaveBeenCalledWith({ taskId: 5, author: "bb-thr_2qj8qzdqqr" });
+    } finally {
+      bridge.cortex = saved;
+      updates.value = {};
+    }
   });
 });

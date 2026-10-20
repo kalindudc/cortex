@@ -55,8 +55,8 @@ mark.search-hit {
    present but quiet — the row label is what the user is reading. */
 .palette-row > .icon.rotate-90-ccw { color: var(--text-3); }
 
-/* Chevron rotation utilities. The ICONS table only has chevronDown; we
-   rotate that single SVG instead of carrying chevronRight / chevronLeft. */
+/* Chevron rotation utilities: the palette rotates chevronDown for its
+   submenu and back affordances. */
 .icon.rotate-90-ccw { transform: rotate(-90deg); }
 .icon.rotate-90-cw  { transform: rotate(90deg); }
 .palette-row.active,
@@ -73,10 +73,3 @@ mark.search-hit {
   .palette-row { min-height: 44px; }
   .palette-input { flex-shrink: 0; }
 }
-
-/* Search-result rows reuse .palette-row but carry a status dot inline. */
-.palette-row .dot {
-  width: 8px; height: 8px; border-radius: 50%;
-  flex-shrink: 0;
-}
-

@@ -1,7 +1,8 @@
 // The task list's sort and grouping in a real window: the default ascending
-// id order, every sort and grouping chosen from the palette's "Sort and
-// group…", relevance while searching, and the choice surviving a reload and
-// a relaunch on the same Electron profile.
+// id order, every sort field both ways and every grouping chosen from the
+// palette's "Sort and group…" and from the list's own order line, folding one
+// group or all of them, relevance while searching, and the choices surviving
+// a reload and a relaunch on the same Electron profile.
 
 import type { Page } from "playwright-core";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
@@ -64,6 +65,14 @@ async function seed(): Promise<Record<string, number>> {
 
 const at = (...ids: number[]) => ids.map(id => `@${id}`);
 
+/** Chooses `sort` from the palette: its field, then its direction. */
+async function sortBy(page: Page, sort: string): Promise<void> {
+  const descending = sort.startsWith("-");
+  await runCommand(page, "Sort and group", `sort-${descending ? sort.slice(1) : sort}`);
+  await runCommand(page, "Sort and group", descending ? "sort-descending" : "sort-ascending");
+}
+const sortLine = (sort: string) => `Sorted by ${sort.startsWith("-") ? `${sort.slice(1)} descending` : sort}`;
+
 describe("task-list order", () => {
   test("defaults to ascending id; each sort and grouping from the palette reorders the list", async () => {
     const { page } = desktop;
@@ -81,15 +90,19 @@ describe("task-list order", () => {
       ["title", [alpha, beta, t2, t12]],
       ["-title", [t12, t2, beta, alpha]],
       ["lane", [alpha, beta, t12, t2]],
+      ["-lane", [t12, t2, alpha, beta]],
       ["status", [t2, beta, t12, alpha]],
+      ["-status", [alpha, t12, beta, t2]],
       ["priority", [t2, beta, t12, alpha]],
+      // Reversed, a task without a priority still comes last.
+      ["-priority", [t12, beta, t2, alpha]],
       ["updated", byUpdated],
       ["-updated", byUpdatedDesc],
       ["id", [t12, alpha, t2, beta]],
     ];
     for (const [sort, expected] of sorts) {
-      await runCommand(page, "Sort and group", `sort-${sort}`);
-      await expect.poll(() => orderLine(page), POLL).toBe(`Sorted by ${sort}`);
+      await sortBy(page, sort);
+      await expect.poll(() => orderLine(page), POLL).toBe(sortLine(sort));
       expect(await listed(page)).toEqual(at(...expected));
     }
 
@@ -126,18 +139,18 @@ describe("task-list order", () => {
 
   test("the choice survives a reload and a relaunch on the same profile", async () => {
     await seed();
-    await runCommand(desktop.page, "Sort and group", "sort--title");
+    await sortBy(desktop.page, "-title");
     await runCommand(desktop.page, "Sort and group", "group-lane");
-    await expect.poll(() => orderLine(desktop.page), POLL).toBe("Sorted by -title, grouped by lane");
+    await expect.poll(() => orderLine(desktop.page), POLL).toBe("Sorted by title descending, grouped by lane");
 
     await desktop.page.reload();
     await waitForDashboard(desktop.page);
-    await expect.poll(() => orderLine(desktop.page), POLL).toBe("Sorted by -title, grouped by lane");
+    await expect.poll(() => orderLine(desktop.page), POLL).toBe("Sorted by title descending, grouped by lane");
 
     desktop = await desktop.relaunch();
     await waitForDashboard(desktop.page);
     await waitForLive(desktop.page);
-    await expect.poll(() => orderLine(desktop.page), POLL).toBe("Sorted by -title, grouped by lane");
+    await expect.poll(() => orderLine(desktop.page), POLL).toBe("Sorted by title descending, grouped by lane");
     await expect.poll(() => listed(desktop.page), POLL).toEqual([
       "now 2",
       "@4",
@@ -145,6 +158,54 @@ describe("task-list order", () => {
       "later 2",
       "@1",
       "@3",
+    ]);
+  });
+
+  test("the list's order line sets sort and grouping, and a folded lane stays folded after a relaunch", async () => {
+    const { page } = desktop;
+    const { t12, alpha, t2, beta } = await seed();
+    await page.locator("#sidebar-filter-order-trigger").click();
+    const panel = page.locator("#sidebar-filter-order-panel");
+    await panel.locator("#setting-group").selectOption("lane");
+    // Each field once; the direction is its own control.
+    expect(await panel.locator("#setting-sort option").allTextContents()).toEqual([
+      "id",
+      "title",
+      "lane",
+      "status",
+      "priority",
+      "updated",
+    ]);
+    await panel.locator('#setting-direction input[value="desc"]').check();
+    await expect.poll(() => orderLine(page), POLL).toBe("Sorted by id descending, grouped by lane");
+    // The panel stays open across the choices; Escape closes it.
+    expect(await panel.count()).toBe(1);
+    await page.keyboard.press("Escape");
+    await panel.waitFor({ state: "detached" });
+    expect(await listed(page)).toEqual(["now 2", ...at(beta, alpha), "later 2", ...at(t2, t12)]);
+
+    // Collapse all, then Expand all, then fold one lane.
+    await page.locator('button[aria-label="Collapse all lanes"]').click();
+    await expect.poll(() => listed(page), POLL).toEqual(["now 2", "later 2"]);
+    expect(await page.locator('button[aria-label="Collapse all lanes"]').isDisabled()).toBe(true);
+    await page.locator('button[aria-label="Expand all lanes"]').click();
+    await expect.poll(() => listed(page), POLL).toEqual(["now 2", ...at(beta, alpha), "later 2", ...at(t2, t12)]);
+    await page.locator("button.task-group-header", { hasText: "later" }).click();
+    await expect.poll(() => listed(page), POLL).toEqual(["now 2", ...at(beta, alpha), "later 2"]);
+    expect(await page.locator("button.task-group-header", { hasText: "later" }).getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+
+    desktop = await desktop.relaunch();
+    await waitForDashboard(desktop.page);
+    await waitForLive(desktop.page);
+    await expect.poll(() => listed(desktop.page), POLL).toEqual(["now 2", ...at(beta, alpha), "later 2"]);
+    await desktop.page.locator("button.task-group-header", { hasText: "later" }).click();
+    await expect.poll(() => listed(desktop.page), POLL).toEqual([
+      "now 2",
+      ...at(beta, alpha),
+      "later 2",
+      ...at(t2, t12),
     ]);
   });
 });

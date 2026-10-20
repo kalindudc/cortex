@@ -1,23 +1,30 @@
 /* ---------- layout ---------- */
-/* 2-column × 2-row main grid: navigation sidebar + the document
-   workspace; row 2 is the app-wide status bar spanning both columns. Task
-   context (Activity/Related/Authors) lives INSIDE the workspace tablist,
-   not in a third column. */
+/* 4-column × 2-row main grid: the navigation rail, the list column, the
+   document workspace and a context column; row 2 is the app-wide status
+   bar spanning all four. Column widths are variables so a modifier such
+   as focus reading collapses a column by zeroing its width, without
+   rewriting the template. The context column is 0px unless App marks the
+   side panel inline (`.ctx-open`). */
 main {
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
+  --rail-w: 52px;
+  --list-w: 296px;
+  --ctx-w: 0px;
+  grid-template-columns: var(--rail-w) var(--list-w) minmax(0, 1fr) var(--ctx-w);
   grid-template-rows: minmax(0, 1fr) auto;
   grid-template-areas:
-    "lanes active"
-    "status status";
+    "rail lanes active ctx"
+    "status status status status";
   height: 100dvh;
   overflow: hidden;
 }
-main:has(> .focus-reading) {
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-areas: "active" "status";
+main:has(> .focus-reading),
+main:has(> .no-list) {
+  --list-w: 0px;
 }
+main:has(> .ctx-open) { --ctx-w: 300px; }
 .status-bar { grid-area: status; }
+.context-panel { grid-area: ctx; }
 .pane { overflow: auto; display: flex; flex-direction: column; min-height: 0; }
 /* Sidebar pane: one scrolling task section under a fixed filter surface.
    The pane is a fixed flex column; .sidebar-body stacks WorkspaceFilters
@@ -79,22 +86,30 @@ main:has(> .focus-reading) {
   min-width: 0;
   overflow: hidden;
 }
-/* InboxPane now renders INSIDE the document workspace (context tab) — it
-   keeps its own class for inbox.css but must not paint a second panel
-   surface or grid placement there. */
+/* A panel (Lanes, Tags, Backup) takes the document's place while App keeps
+   the document mounted but hidden. .pane's display:flex would beat the
+   hidden attribute, hence the explicit rule. */
+.pane-active[hidden] { display: none; }
+.panel-view { grid-area: active; }
+/* The Activity view (ActivityPane) renders INSIDE the document workspace
+   (the Activity tab); it keeps its .pane-inbox class for inbox.css but must
+   not paint a second panel surface or grid placement there. */
 .pane-inbox { background: transparent; }
 
 
 /* ---------- narrow viewports ----------
-   <= 900px: ONE column. The sidebar is no longer inline — App renders it
-   inside the labeled navigation drawer (DialogFrame, modal.css) opened from
-   the mobile bar. The status bar keeps its own row. No page-level
-   horizontal scrolling: every pane owns its overflow. The 900px breakpoint
-   is the same query state/workspace.ts feeds into narrowViewport, so the
-   component tree and the grid can never disagree. */
+   <= 900px: ONE column. The rail and the list are no longer inline — App
+   renders them inside the labeled navigation drawer (DialogFrame,
+   modal.css) opened from the mobile bar. The status bar keeps its own
+   row. No page-level horizontal scrolling: every pane owns its overflow.
+   The 900px breakpoint is the same query state/workspace.ts feeds into
+   narrowViewport, so the component tree and the grid can never disagree. */
 .mobile-bar { display: none; }
 @media (max-width: 900px) {
   main {
+    --rail-w: 0px;
+    --list-w: 0px;
+    --ctx-w: 0px;
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto 1fr auto;
     grid-template-areas:

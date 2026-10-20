@@ -1,37 +1,12 @@
-/* ---------- notification drawer ----------
-   Right-anchored slide-in panel mounted by App() when notificationsOpen
-   is true. Uses tokens only — no hard-coded colors — so theme switches
-   propagate without re-styling. */
-.notif-drawer {
-  position: fixed;
-  top: 0;
-  right: 0;
-  /* Same token as StatusBar: also respects its larger mobile targets. */
-  bottom: var(--status-height);
-  width: 360px;
-  max-width: 90vw;
-  background: var(--panel);
-  border-left: 1px solid var(--border);
-  box-shadow: var(--shadow-cmd);
-  display: flex;
-  flex-direction: column;
-  z-index: 250;
-}
-
-.notif-head {
-  display: flex;
-  align-items: center;
-  gap: var(--s-2);
-  padding: var(--s-3) var(--s-4);
-  border-bottom: 1px solid var(--border);
-}
-
+/* ---------- notification rows ----------
+   The rows, row controls and footer of the side panel's Inbox tab
+   (components/context/InboxTab.tsx) and the status bar's bell. The panel's
+   own layout lives in context.css. Uses tokens only — no hard-coded colors
+   — so theme switches propagate without re-styling. */
 .notif-list {
   list-style: none;
   margin: 0;
   padding: 0;
-  overflow-y: auto;
-  flex: 1;
 }
 
 .notif-row {
@@ -45,7 +20,7 @@
 /* Unread vs read affordances. Unread keeps the full-strength title
    weight + an accent pip in the meta line; read dims the summary,
    drops the title to the standard 500 weight, and softens the row
-   background so the unread cluster at the top of the drawer reads as
+   background so the unread cluster at the top of the Inbox reads as
    the active foreground. */
 .notif-row.is-read { background: color-mix(in oklab, var(--panel) 92%, transparent); }
 .notif-row.is-read .summary { color: var(--text-2); }
@@ -112,23 +87,12 @@
   padding: var(--s-2) var(--s-2) 0 0;
 }
 .notif-row-controls .hint-button { margin: 0; }
-.notif-head .hint-button, .notif-row-controls .hint-button { display: inline-flex; align-items: center; justify-content: center; width: var(--control-height); height: var(--control-height); color: var(--text-2); border-radius: var(--r-2); }
-.notif-head .hint-button:hover, .notif-row-controls .hint-button:hover { background: var(--tint); color: var(--text); }
+.notif-row-controls .hint-button { display: inline-flex; align-items: center; justify-content: center; width: var(--control-height); height: var(--control-height); color: var(--text-2); border-radius: var(--r-2); }
+.notif-row-controls .hint-button:hover { background: var(--tint); color: var(--text); }
 @media (max-width: 900px) {
-  .notif-head .hint-button, .notif-row-controls .hint-button, .notif-bell { min-width: 44px; min-height: 44px; }
+  .notif-row-controls .hint-button, .notif-bell { min-width: 44px; min-height: 44px; }
   .notif-foot .hint-button { min-height: 44px; }
 }
-
-/* Left-edge accent stripe so a glance at the drawer reveals row type.
-   Persisted notifications mirror their status' dot color via
-   .notif-status-* (one per TaskStatus). Ephemeral local errors keep
-   .notif-kind-error (red) — errors have no status field. */
-.notif-status-draft   { box-shadow: inset 3px 0 0 var(--info); }
-.notif-status-open    { box-shadow: inset 3px 0 0 var(--text-3); }
-.notif-status-review  { box-shadow: inset 3px 0 0 var(--warn); }
-.notif-status-blocked { box-shadow: inset 3px 0 0 var(--err); }
-.notif-status-done    { box-shadow: inset 3px 0 0 var(--ok); }
-.notif-kind-error     { box-shadow: inset 3px 0 0 var(--err); }
 
 .notif-foot {
   display: flex;
@@ -144,7 +108,7 @@
    without a footer-specific rule these read as plain inline text. We add a
    subtle 1px border + small padding + accent-tint hover so they read as
    clickable without looking like primary CTAs — same restrained palette as
-   the rest of the drawer chrome. Tokens only, so theme switches
+   the rest of the Inbox chrome. Tokens only, so theme switches
    propagate without re-styling. */
 .notif-foot .hint-button {
   padding: 4px 10px;

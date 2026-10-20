@@ -44,30 +44,24 @@ dialog.dialog-frame::backdrop { background: rgba(0, 0, 0, .32); }
 .modal-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; padding-top: 4px; }
 .modal--wide { max-width: 760px; overflow: hidden; }
 .modal--render-markdown { max-width: 960px; }
-/* Settings and help: one search over settings, commands and shortcuts. */
-.settings-modal { max-width: 640px; }
-.settings-search { width: 100%; }
-.settings-section { display: flex; flex-direction: column; gap: 8px; }
-.settings-section h3 { margin: 0; color: var(--text); font: 600 var(--fs-3)/1.4 var(--font-sans); }
-.setting-row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 4px 12px; }
-.setting-label { color: var(--text); }
-.setting-control { display: flex; gap: 8px; }
-.setting-help { grid-column: 1 / -1; margin: 0; }
-.help-rows { margin: 0; display: flex; flex-direction: column; gap: 6px; }
-.help-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
-.help-row dt { color: var(--text); }
-.help-row dd { margin: 0; }
 .update-body { flex: 1 1 auto; min-height: 0; overflow: auto; scrollbar-width: thin; }
 .update-body .markdown-view { margin: 0 auto; }
 
-/* One navigation identity inside the left sheet, with its close button
-   aligned to the brand rather than another stacked application header. */
+/* The left sheet holds the rail (as a row) above the list. The rail keeps
+   clear of the absolutely positioned close button instead of stacking
+   another application header. */
 dialog.dialog-frame--sheet { --dialog-top: 0px; --dialog-bottom: 0px; padding: 0; align-items: stretch; justify-content: flex-start; }
 .nav-drawer-body { position: relative; width: min(320px, calc(100vw - 24px)); height: 100dvh; min-width: 0; display: flex; flex-direction: column; background: var(--panel); border-right: 1px solid var(--border); box-shadow: var(--shadow-cmd); }
 .nav-drawer-head { position: absolute; top: 14px; right: 10px; display: flex; z-index: 1; }
-.nav-drawer-body .sidebar-brand { padding-right: 64px; }
-.nav-drawer-body .workspace-local { display: none; }
+.nav-drawer-body .nav-rail { padding-right: 64px; flex-wrap: wrap; }
 .nav-drawer-body .pane-lanes { flex: 1 1 auto; min-height: 0; height: auto; border-right: 0; }
+/* The side panel's sheet opens from the right, mirroring the navigation
+   drawer; its close button sits in the panel's tab row. */
+dialog.ctx-sheet { justify-content: flex-end; }
+.ctx-sheet-body { position: relative; width: min(320px, calc(100vw - 24px)); height: 100dvh; min-width: 0; display: flex; flex-direction: column; background: var(--panel); border-left: 1px solid var(--border); box-shadow: var(--shadow-cmd); }
+.ctx-sheet-body .context-panel { flex: 1 1 auto; min-height: 0; border-left: 0; }
+.ctx-sheet-body .ctx-head { padding-right: 56px; }
+.ctx-sheet-close { position: absolute; top: 0; right: 6px; z-index: 1; width: 44px; height: 44px; }
 @media (max-height: 560px), (max-width: 900px) {
   dialog.dialog-frame { --dialog-top: 12px; --dialog-bottom: 12px; padding-left: 12px; padding-right: 12px; }
   dialog.dialog-frame--sheet { --dialog-top: 0px; --dialog-bottom: 0px; padding: 0; }

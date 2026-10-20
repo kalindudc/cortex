@@ -15,8 +15,9 @@ mock.module("../../../../src/ui/api/client.ts", () => ({
   },
 }));
 import { TaskToolbar } from "../../../../src/ui/components/active/TaskToolbar.tsx";
-import { modeShortcutDigit, modeShortcutPrefix } from "../../../../src/ui/lib/keys.ts";
+import { modeShortcutDigit } from "../../../../src/ui/lib/keys.ts";
 import {
+  lanes,
   readerMode,
   preferredReaderMode,
   tab,
@@ -25,6 +26,7 @@ import {
   statusPopover,
   taskActionsPopover,
 } from "../../../../src/ui/state/signals.ts";
+import { contextOpen, contextTab } from "../../../../src/ui/state/context.ts";
 import type { Task } from "../../../../src/ui/api/types.ts";
 const task: Task = {
   id: 11,
@@ -41,6 +43,7 @@ const task: Task = {
 
 describe("TaskToolbar", () => {
   beforeEach(() => {
+    lanes.value = [];
     preferredReaderMode.value = "read";
     readerMode.value = "read";
     tab.value = "document";
@@ -48,11 +51,14 @@ describe("TaskToolbar", () => {
     modal.value = null;
     statusPopover.value = false;
     taskActionsPopover.value = false;
+    contextOpen.value = true;
+    contextTab.value = "details";
     setStatus.mockClear();
   });
   afterEach(() => {
     focusReading.value = false;
     preferredReaderMode.value = "read";
+    contextOpen.value = true;
   });
 
   test("one named toolbar and a native, labeled mode group; mode changes never write a task", () => {
@@ -65,12 +71,20 @@ describe("TaskToolbar", () => {
     expect(view.container.querySelector(".task-title-display")).toBeNull();
   });
 
-  test("the chord modifier appears once and each button carries only its digit, without changing names or clicks", () => {
+  test("the breadcrumb shows the task's lane and @id", () => {
+    lanes.value = [{ name: "cortex", color: "#ff8800", sort: 0 }];
     const view = render(<TaskToolbar task={task} />);
-    const supers = view.container.querySelectorAll(".mode-switch-super");
-    expect(supers.length).toBe(1);
-    expect(supers[0]?.textContent).toBe(modeShortcutPrefix());
-    expect(supers[0]?.getAttribute("aria-hidden")).toBe("true");
+    const crumb = view.container.querySelector(".workspace-breadcrumb");
+    expect(crumb?.textContent).toBe("cortex@11");
+    expect(crumb?.querySelector(".num")?.textContent).toBe("@11");
+    const swatch = crumb?.querySelector<HTMLElement>(".lane-color");
+    expect(swatch?.getAttribute("aria-hidden")).toBe("true");
+    expect(swatch?.getAttribute("style")).toContain("#ff8800");
+  });
+
+  test("no chord chip: each button carries only its digit and keeps its full chord in aria-keyshortcuts", () => {
+    const view = render(<TaskToolbar task={task} />);
+    expect(view.container.querySelector(".mode-switch-super")).toBeNull();
     for (const [mode, label] of [
       ["read", "Read"],
       ["edit", "Edit"],
@@ -79,6 +93,7 @@ describe("TaskToolbar", () => {
       const button = view.getByRole("button", { name: label, exact: true });
       // Only the digit is repeated per button; the full combo is never inlined.
       expect(button.textContent).toBe(`${label}${modeShortcutDigit(mode)}`);
+      expect(button.getAttribute("aria-keyshortcuts")).toContain(`Alt+${modeShortcutDigit(mode)}`);
       const digit = button.querySelector(".mode-switch-digit");
       expect(digit?.getAttribute("aria-hidden")).toBe("true");
       if (!digit) throw new Error(`Missing ${label} digit`);
@@ -102,6 +117,39 @@ describe("TaskToolbar", () => {
     expect(focusReading.peek()).toBe(true);
     fireEvent.click(view.getByRole("button", { name: "Show navigation", exact: true }));
     expect(focusReading.peek()).toBe(false);
+    expect(setStatus).not.toHaveBeenCalled();
+  });
+
+  test("the tabs it is handed render right after the breadcrumb", () => {
+    const view = render(
+      <TaskToolbar
+        task={task}
+        tabs={
+          <div role="tablist" aria-label="Task content">
+            <button type="button" role="tab">
+              Document
+            </button>
+          </div>
+        }
+      />,
+    );
+    const crumb = view.container.querySelector(".workspace-breadcrumb");
+    const list = view.getByRole("tablist", { name: "Task content" });
+    expect(crumb?.nextElementSibling).toBe(list);
+    expect(view.getByRole("tab", { name: "Document" })).toBeTruthy();
+  });
+
+  test("the side panel toggle flips contextOpen and names what it will do", () => {
+    const view = render(<TaskToolbar task={task} />);
+    const hide = view.getByRole("button", { name: "Hide the side panel", exact: true });
+    expect(hide.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(hide);
+    expect(contextOpen.peek()).toBe(false);
+    const show = view.getByRole("button", { name: "Show the side panel", exact: true });
+    expect(show.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(show);
+    expect(contextOpen.peek()).toBe(true);
+    expect(contextTab.peek()).toBe("details");
     expect(setStatus).not.toHaveBeenCalled();
   });
 

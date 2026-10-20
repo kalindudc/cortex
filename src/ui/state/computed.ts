@@ -4,12 +4,24 @@
 // themselves live in lib/taskView.ts (pure functions); this module only wires them to the signals.
 
 import { computed, type ReadonlySignal } from "@preact/signals";
-import type { Task, Update } from "../api/types.ts";
-import { tasks, filters, lanes, selectedId, showAllTasks, updates, workspaceQuery } from "./signals.ts";
-import { taskGroup, taskSort } from "./settings.ts";
+import type { Lane, Task, Update } from "../api/types.ts";
+import {
+  tasks,
+  filters,
+  lanes,
+  tags,
+  selectedId,
+  selectedLane,
+  selectedTag,
+  showAllTasks,
+  updates,
+  workspaceQuery,
+  type TagWithCount,
+} from "./signals.ts";
+import { collapsedGroups, collapsedKeys, taskGroup, taskSort } from "./settings.ts";
 import type { TaskSearchResult } from "../../lib/fuzzy.ts";
 import { type Candidate, resumeCandidates } from "../../lib/resume.ts";
-import { arrangeTasks, type TaskArrangement } from "../../lib/taskOrder.ts";
+import { arrangeTasks, listedRows, type TaskArrangement } from "../../lib/taskOrder.ts";
 import { UNTAGGED, filterTasks, gateDone, includesDone, pickActiveTask, searchPool } from "../../lib/taskView.ts";
 
 // The "filter to untagged tasks" sentinel (defined in lib/taskView.ts).
@@ -63,6 +75,13 @@ export const taskArrangement: ReadonlySignal<TaskArrangement> = computed(() =>
   arrangeTasks(visibleTasks.value, searchResults.value, taskSort.value, taskGroup.value, lanes.value),
 );
 export const orderedVisibleTasks: ReadonlySignal<Task[]> = computed(() => taskArrangement.value.rows);
+// The rows the list shows: the arrangement without its folded groups. Next and
+// Previous step through these; the outside-filter notice still asks
+// orderedVisibleTasks, because a task in a folded group is within the filters.
+export const listedTasks: ReadonlySignal<Task[]> = computed(() => {
+  const arrangement = taskArrangement.value;
+  return listedRows(arrangement, collapsedKeys(arrangement.group, collapsedGroups.value));
+});
 
 // Legacy alias retained while call sites migrate. Delete once nothing
 // imports tasksInLane (search src/ for remaining references after the
@@ -129,3 +148,21 @@ export const taskAuthors: ReadonlySignal<TaskAuthor[]> = computed(() => {
   }
   return Array.from(acc.values()).sort((a, b) => b.last_seen - a.last_seen);
 });
+
+// Lanes in list order (position, then name) and tags by name: the order of
+// the Lanes and Tags lists.
+export const sortedLanes: ReadonlySignal<Lane[]> = computed(() =>
+  [...lanes.value].sort((a, b) => a.sort - b.sort || a.name.localeCompare(b.name)),
+);
+export const sortedTags: ReadonlySignal<TagWithCount[]> = computed(() =>
+  [...tags.value].sort((a, b) => a.name.localeCompare(b.name)),
+);
+// The lane and tag the Lanes and Tags panels show: the selection while it
+// exists, else the first entry, so a rename by another client or a delete
+// never leaves a blank panel. null only when there are none.
+export const shownLane: ReadonlySignal<Lane | null> = computed(
+  () => sortedLanes.value.find(l => l.name === selectedLane.value) ?? sortedLanes.value[0] ?? null,
+);
+export const shownTag: ReadonlySignal<TagWithCount | null> = computed(
+  () => sortedTags.value.find(t => t.name === selectedTag.value) ?? sortedTags.value[0] ?? null,
+);

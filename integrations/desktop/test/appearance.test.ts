@@ -1,4 +1,4 @@
-// The four appearances in a real window: each chosen in the settings pane,
+// The four appearances in a real window: each chosen in the Settings panel,
 // "system" following the system preference live, high-contrast text at 7:1
 // or more on every surface, and the choice surviving a relaunch.
 
@@ -21,7 +21,10 @@ afterEach(async () => {
 });
 
 const POLL = { timeout: 10_000, interval: 50 };
-const SELECT = "#setting-appearance";
+// The appearance cards: a radiogroup of one native radio per appearance.
+const CARDS = "#setting-appearance";
+const pick = (page: Page, value: string) => page.locator(`${CARDS} input[value="${value}"]`).check();
+const picked = (page: Page) => page.locator(`${CARDS} input:checked`).inputValue();
 
 const rootState = (page: Page) =>
   page.evaluate(() => ({
@@ -38,7 +41,12 @@ function setSystem(desktop: DesktopApp, scheme: "light" | "dark"): Promise<void>
 
 async function openSettings(page: Page): Promise<void> {
   await page.keyboard.press(`${MOD}+Comma`);
-  await page.locator(SELECT).waitFor();
+  await page.locator(CARDS).waitFor();
+}
+
+async function closeSettings(page: Page): Promise<void> {
+  await page.locator('.nav-rail button[aria-label="Tasks"]').click();
+  await page.locator(CARDS).waitFor({ state: "detached" });
 }
 
 /** WCAG 2 contrast ratios of the text tokens over the surface tokens, as the page resolves them. */
@@ -65,11 +73,11 @@ function contrastRatios(page: Page): Promise<Record<string, number>> {
 }
 
 describe("appearance", () => {
-  test("each appearance applies from the settings pane, and system follows the OS live", async () => {
+  test("each appearance applies from the Settings panel, and system follows the OS live", async () => {
     const { page } = desktop;
     await setSystem(desktop, "light");
     await openSettings(page);
-    expect(await page.locator(SELECT).inputValue()).toBe("system");
+    expect(await picked(page)).toBe("system");
     await expect.poll(() => rootState(page), POLL).toEqual({ theme: "light", contrast: null });
 
     await setSystem(desktop, "dark");
@@ -77,38 +85,41 @@ describe("appearance", () => {
     await setSystem(desktop, "light");
     await expect.poll(() => rootState(page), POLL).toEqual({ theme: "light", contrast: null });
 
-    await page.locator(SELECT).selectOption("dark");
+    await pick(page, "dark");
     await expect.poll(() => rootState(page), POLL).toEqual({ theme: "dark", contrast: null });
     // An explicit choice no longer follows the OS.
     await setSystem(desktop, "dark");
     await setSystem(desktop, "light");
     expect(await rootState(page)).toEqual({ theme: "dark", contrast: null });
 
-    await page.locator(SELECT).selectOption("light");
+    await pick(page, "light");
     await expect.poll(() => rootState(page), POLL).toEqual({ theme: "light", contrast: null });
 
-    await page.locator(SELECT).selectOption("high-contrast");
+    await pick(page, "high-contrast");
     await expect.poll(() => rootState(page), POLL).toEqual({ theme: "dark", contrast: "high" });
     const ratios = await contrastRatios(page);
     for (const [pair, ratio] of Object.entries(ratios)) {
       expect(ratio, pair).toBeGreaterThanOrEqual(7);
     }
 
-    await page.locator(SELECT).selectOption("system");
+    await pick(page, "system");
     await expect.poll(() => rootState(page), POLL).toEqual({ theme: "light", contrast: null });
     await setSystem(desktop, "dark");
     await expect.poll(() => rootState(page), POLL).toEqual({ theme: "dark", contrast: null });
+    // The choice stays applied after leaving the panel.
+    await closeSettings(page);
+    expect(await rootState(page)).toEqual({ theme: "dark", contrast: null });
   });
 
   test("the choice survives a relaunch", async () => {
     await openSettings(desktop.page);
-    await desktop.page.locator(SELECT).selectOption("high-contrast");
+    await pick(desktop.page, "high-contrast");
     await expect.poll(() => rootState(desktop.page), POLL).toEqual({ theme: "dark", contrast: "high" });
 
     desktop = await desktop.relaunch();
     await waitForDashboard(desktop.page);
     expect(await rootState(desktop.page)).toEqual({ theme: "dark", contrast: "high" });
     await openSettings(desktop.page);
-    expect(await desktop.page.locator(SELECT).inputValue()).toBe("high-contrast");
+    expect(await picked(desktop.page)).toBe("high-contrast");
   });
 });

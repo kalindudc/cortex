@@ -134,6 +134,7 @@ import {
   pendingHeadingFragment,
   narrowViewport,
 } from "../../../../src/ui/state/signals.ts";
+import { docOutline } from "../../../../src/ui/state/context.ts";
 import type { Task } from "../../../../src/ui/api/types.ts";
 import type { EditTaskRequest, TaskStateSnapshot, TaskWriteResult, Versions } from "../../../../src/contracts.ts";
 
@@ -206,12 +207,12 @@ describe("TaskDocument", () => {
     expect(postUpdMock).toHaveBeenCalledTimes(0);
   });
 
-  test("one content tablist: Document / Activity / Related / Authors", () => {
+  test("one content tablist: Document / Activity", () => {
     const { container } = render(<TaskDocument task={task()} />);
     const tabs = Array.from(container.querySelectorAll("[role='tablist'] [role='tab']")).map(t =>
       t.textContent?.trim(),
     );
-    expect(tabs).toEqual(["Document", "Activity", "Related", "Authors"]);
+    expect(tabs).toEqual(["Document", "Activity"]);
   });
 
   test("Edit mounts the editor; returning to Read HIDES it without unmounting", async () => {
@@ -296,25 +297,19 @@ describe("TaskDocument", () => {
     expect(container.querySelector(".md-editor")).not.toBeNull();
   });
 
-  test("outline lists document headings and navigates on click", async () => {
-    const scrolls: string[] = [];
-    const orig = Element.prototype.scrollIntoView;
-    Element.prototype.scrollIntoView = function (this: Element) {
-      scrolls.push(this.id);
-    };
-    try {
-      const { container } = render(<TaskDocument task={task()} />);
-      // Two settles: MarkdownView's effect reports headings, then the
-      // outline renders from the headings signal.
-      await tick();
-      await tick();
-      const links = Array.from(container.querySelectorAll<HTMLButtonElement>(".doc-outline button"));
-      expect(links.map(l => l.textContent?.trim())).toEqual(["Alpha", "Beta"]);
-      fireEvent.click(links[1]);
-      expect(scrolls).toEqual(["task-5-beta"]);
-    } finally {
-      Element.prototype.scrollIntoView = orig;
-    }
+  test("Read publishes the task's headings to docOutline", async () => {
+    render(<TaskDocument task={task()} />);
+    // Two settles: MarkdownView's effect reports headings, then the
+    // publishing effect runs on the new headings.
+    await tick();
+    await tick();
+    const outline = docOutline.value;
+    expect(outline?.taskId).toBe(5);
+    expect(outline?.headings.map(h => [h.id, h.text, h.level])).toEqual([
+      ["task-5-alpha", "Alpha", 1],
+      ["task-5-beta", "Beta", 2],
+    ]);
+    expect(outline?.active).toBe("task-5-alpha");
   });
 
   test("a task-keyed URL fragment scrolls the rendered heading then is consumed", async () => {
@@ -440,26 +435,27 @@ describe("TaskDocument", () => {
   test("tablist keyboard: Left/Right/Home/End move focus (roving), Enter/Space activate", async () => {
     const { container } = render(<TaskDocument task={task()} />);
     const tabs = Array.from(container.querySelectorAll<HTMLButtonElement>("[role='tablist'] [role='tab']"));
-    const [doc, activity, related, authors] = tabs;
+    const [doc, activity] = tabs;
+    expect(tabs.length).toBe(2);
     const currentTab = (): string => tab.value;
     doc.focus();
     fireEvent.keyDown(doc, { key: "ArrowRight" });
     expect(document.activeElement).toBe(activity);
     expect(currentTab()).toBe("document"); // manual activation: focus only
-    fireEvent.keyDown(activity, { key: "End" });
-    expect(document.activeElement).toBe(authors);
-    fireEvent.keyDown(authors, { key: "ArrowRight" }); // wraps
+    fireEvent.keyDown(activity, { key: "ArrowRight" }); // wraps
     expect(document.activeElement).toBe(doc);
     fireEvent.keyDown(doc, { key: "ArrowLeft" }); // wraps back
-    expect(document.activeElement).toBe(authors);
-    fireEvent.keyDown(authors, { key: "Home" });
+    expect(document.activeElement).toBe(activity);
+    fireEvent.keyDown(activity, { key: "Home" });
     expect(document.activeElement).toBe(doc);
-    fireEvent.keyDown(related, { key: "Enter" });
-    await tick();
-    expect(currentTab()).toBe("related");
-    fireEvent.keyDown(activity, { key: " " });
+    fireEvent.keyDown(doc, { key: "End" });
+    expect(document.activeElement).toBe(activity);
+    fireEvent.keyDown(activity, { key: "Enter" });
     await tick();
     expect(currentTab()).toBe("updates");
+    fireEvent.keyDown(doc, { key: " " });
+    await tick();
+    expect(currentTab()).toBe("document");
     // Roving tabindex: only the selected tab is in the Tab sequence.
     const inSequence = Array.from(container.querySelectorAll("[role='tab']")).filter(
       t => t.getAttribute("tabindex") === "0",
@@ -482,19 +478,16 @@ describe("TaskDocument", () => {
     expect(container.querySelector(".md-editor")?.hasAttribute("hidden")).toBe(true);
   });
 
-  test("outline is an in-document disclosure on narrow viewports and an open rail on desktop", async () => {
-    const { container, rerender } = render(<TaskDocument task={task()} />);
+  test("Edit publishes none, and the document renders no outline of its own", async () => {
+    const { container } = render(<TaskDocument task={task()} />);
     await tick();
     await tick();
-    const desktop = container.querySelector<HTMLDetailsElement>(".doc-outline details");
-    if (!desktop) throw new Error("expected outline disclosure element");
-    expect(desktop.open).toBe(true);
-    narrowViewport.value = true;
-    rerender(<TaskDocument task={task()} />);
+    expect(docOutline.value?.headings.length).toBe(2);
+    fireEvent.click(modeButton(container, "Edit"));
     await tick();
-    const narrow = container.querySelector<HTMLDetailsElement>(".doc-outline details");
-    expect(narrow?.open).toBe(false);
-    expect(narrow?.querySelector("summary")?.textContent).toContain("Outline");
+    expect(docOutline.value).toEqual({ taskId: 5, headings: [], active: "task-5-alpha" });
+    expect(container.querySelector(".doc-outline")).toBeNull();
+    expect(container.querySelector(".has-outline")).toBeNull();
   });
 
   test("mode buttons expose pressed state(buttons, not a second tablist)", () => {

@@ -18,7 +18,7 @@
 //   - test/ui/state/url.popstate.test.ts    — Back/Forward via popstate
 
 import { describe, test, expect, beforeEach, spyOn } from "bun:test";
-import { selectedId, filters, workspaceQuery, pendingHeadingFragment } from "../../../src/ui/state/signals.ts";
+import { selectedId, filters, workspaceQuery, pendingHeadingFragment, view } from "../../../src/ui/state/signals.ts";
 
 // happy-dom defaults the document location to `about:blank`, an opaque
 // origin where History.replaceState/pushState silently no-op (pathname
@@ -35,7 +35,8 @@ import { selectedId, filters, workspaceQuery, pendingHeadingFragment } from "../
 selectedId.value = null;
 window.history.replaceState(null, "", "/task/42");
 // @ts-expect-error — cache-bust query suffix has no .d.ts; runtime-only.
-await import("../../../src/ui/state/url.ts?b=url-test");
+const loaded = await import("../../../src/ui/state/url.ts?b=url-test");
+const urlModule = loaded as typeof import("../../../src/ui/state/url.ts");
 // Read through .peek() so TS doesn't narrow .value to `null` based on the
 // reset above — the dynamic import re-seeds selectedId before this line.
 const seededAfterImport: number | null = selectedId.peek();
@@ -91,6 +92,16 @@ describe("state/url", () => {
     selectedId.value = null;
     expect(window.location.pathname).toBe("/");
     expect(pendingHeadingFragment.value).toBeNull();
+  });
+
+  test("a launch link for the task already open returns to Tasks from the Lanes view", () => {
+    const currentView = (): string => view.value;
+    selectedId.value = 7;
+    view.value = "lanes";
+    urlModule.openTask(7, null);
+    expect(selectedId.value).toBe(7);
+    expect(window.location.pathname).toBe("/task/7");
+    expect(currentView()).toBe("tasks");
   });
 });
 

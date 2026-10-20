@@ -33,13 +33,16 @@ import {
   postUpdateFocusRequest,
   narrowViewport,
   selectedId,
-  sidebarMode,
+  view,
+  TASK_VIEWS,
   sidebarFilter,
   type SidebarFilter,
   focusReading,
   paletteOpen,
+  settingsFocusRequest,
 } from "./signals.ts";
 import { activeTask } from "./computed.ts";
+import { contextSheetOpen } from "./context.ts";
 import { closeAllPopovers, closeSidebarFilter } from "./popovers.ts";
 
 // Versioned preference key. Bump the suffix if the stored semantics ever
@@ -120,23 +123,32 @@ if (typeof window !== "undefined" && typeof window.matchMedia === "function") {
   narrowViewport.value = mq.matches;
   const onChange = (e: MediaQueryListEvent): void => {
     narrowViewport.value = e.matches;
-    // Leaving the narrow layout drops the drawer: the sidebar is inline again.
-    if (!e.matches) navigationOpen.value = false;
+    // Leaving the narrow layout drops the drawer and the side panel's sheet:
+    // the sidebar is inline again, and the panel follows its own open state.
+    if (!e.matches) {
+      navigationOpen.value = false;
+      contextSheetOpen.value = false;
+    }
   };
   if (typeof mq.addEventListener === "function") mq.addEventListener("change", onChange);
 }
 
 // ONE reset path. Metadata/drag state belongs to a task; the navigation
-// drawer and sidebar filters belong to a filtering session. Explicit task
-// navigation or deliberate retargeting clears both. A fallback task change
-// clears only task-owned state, so live filtering never dismisses itself.
-// focusReading is a sticky reading preference, not transient state.
+// drawer, the side panel's sheet and sidebar filters belong to a filtering
+// session. Explicit task navigation or deliberate retargeting clears both. A
+// fallback task change clears only task-owned state, so live filtering never
+// dismisses itself. focusReading and the inline side panel are sticky
+// preferences, not transient state.
 export function clearWorkspaceTransientState({ preserveSidebar = false }: { preserveSidebar?: boolean } = {}): boolean {
-  let changed = draggedTaskId.peek() != null || (!preserveSidebar && navigationOpen.peek());
+  let changed =
+    draggedTaskId.peek() != null || (!preserveSidebar && (navigationOpen.peek() || contextSheetOpen.peek()));
   batch(() => {
     pendingReaderFocus.value = null;
     draggedTaskId.value = null;
-    if (!preserveSidebar) navigationOpen.value = false;
+    if (!preserveSidebar) {
+      navigationOpen.value = false;
+      contextSheetOpen.value = false;
+    }
     if (closeAllPopovers({ preserveSidebar })) changed = true;
   });
   return changed;
@@ -149,17 +161,30 @@ export function revealSidebarFilter(kind: SidebarFilter): void {
   batch(() => {
     clearWorkspaceTransientState();
     paletteOpen.value = false;
-    sidebarMode.value = "main";
+    view.value = "tasks";
     focusReading.value = false;
     navigationOpen.value = narrowViewport.peek();
     sidebarFilter.value = kind;
   });
 }
 
+// One entry to the Settings panel (Mod+,, the rail and the palette): the
+// panel's search field lives in the list column, which a narrow window shows
+// only in the navigation drawer, so that opens too; the counter asks the
+// field to take focus.
+export function openSettings(): void {
+  batch(() => {
+    clearWorkspaceTransientState();
+    view.value = "settings";
+    navigationOpen.value = narrowViewport.peek();
+    settingsFocusRequest.value = settingsFocusRequest.peek() + 1;
+  });
+}
+
 // A hidden/unmounted navigation surface cannot retain an open filter.
 // Do this in state, never from a component's unmount cleanup.
 effect(() => {
-  if (sidebarMode.value !== "main" || (narrowViewport.value ? !navigationOpen.value : focusReading.value)) {
+  if (view.value !== "tasks" || (narrowViewport.value ? !navigationOpen.value : focusReading.value)) {
     closeSidebarFilter();
   }
 });
@@ -168,7 +193,9 @@ effect(() => {
 // default. Track EXPLICIT selection separately from
 // activeTask's fallback: tag/query/status/lane changes may replace that
 // fallback without constituting navigation. Even explicitly selecting the
-// current fallback closes navigation; same-task data churn does not.
+// current fallback closes navigation; same-task data churn does not. An
+// explicit selection from a panel (palette, launch link, history, a panel's
+// task button) also returns to the Tasks view.
 let lastTaskId: number | null = null;
 let lastSelection = selectedId.peek();
 effect(() => {
@@ -176,6 +203,7 @@ effect(() => {
   const id = activeTask.value?.id ?? null;
   const navigated = selection !== lastSelection;
   lastSelection = selection;
+  if (navigated && !TASK_VIEWS.has(view.peek())) view.value = "tasks";
   if (id === lastTaskId) {
     if (navigated) clearWorkspaceTransientState();
     return;
@@ -189,12 +217,13 @@ effect(() => {
 });
 
 // Explicit user body-mode choice: update the browser preference and reveal
-// the Document tab. Optional one-shot focus request routes to
+// the Document tab (on the Tasks view). Optional one-shot focus request routes to
 // the title input or the body editor of the ACTIVE task; consumed by
 // TaskHeader / TaskDocument after they can actually focus the target.
 export function requestMode(mode: ReaderMode, focus?: "title" | "body" | "reader"): void {
   const at = activeTask.value;
   batch(() => {
+    if (!TASK_VIEWS.has(view.peek())) view.value = "tasks";
     preferredReaderMode.value = mode;
     readerMode.value = mode;
     tab.value = "document";
@@ -211,6 +240,7 @@ export function requestMode(mode: ReaderMode, focus?: "title" | "body" | "reader
 export function requestPostUpdate(): void {
   if (activeTask.value == null) return;
   batch(() => {
+    if (!TASK_VIEWS.has(view.peek())) view.value = "tasks";
     // Retarget lower transient layers before revealing Activity. Palette and
     // modal are higher overlays and are handled by their caller/global key
     // guard; this action owns workspace drawer/drag/popover cleanup.

@@ -1,20 +1,23 @@
-// StatusBar — app-wide footer row (row 2 of the main grid, spans all 3 cols).
+// StatusBar — app-wide footer row (row 2 of the main grid, spans every column).
 //
 // Read-only summary computed from signals:
-//   Left:   filter summary text reflecting filters.value (status / lane / tag),
-//           then the latest notice (state/notice.ts), if any.
-//   Middle: counts — `N shown` (visibleTasks), plus `N blocked` and
-//           `N in review` chips when nonzero.
-//   Right:  the connection indicator (liveState), the notifications bell
-//           and the palette hint via kbd("P") from lib/keys.ts.
+//   Left:   the connection indicator (liveState), the filter summary text
+//           reflecting filters.value (status / lane / tag), then the latest
+//           notice (state/notice.ts), if any.
+//   Right:  counts — `N shown` (visibleTasks), plus `N blocked` and
+//           `N in review` when nonzero, each led by its status shape — then
+//           the notifications bell and the palette hint via kbd("P") from
+//           lib/keys.ts.
 //
-// No interactivity beyond hover tooltips on the count chips.
+// The bell shows or hides the side panel at Inbox; the palette hint opens
+// the palette. Otherwise only hover tooltips on the count chips.
 
 import type { VNode } from "preact";
 import { filters, paletteOpen, workspaceQuery } from "../state/signals.ts";
 import { visibleTasks, blockedTasks, UNTAGGED } from "../state/computed.ts";
 import { tasks as allTasks } from "../state/signals.ts";
-import { notificationsOpen, unreadCount } from "../state/notifications.ts";
+import { unreadCount } from "../state/notifications.ts";
+import { toggleContext } from "../state/context.ts";
 import { notice } from "../state/notice.ts";
 import { kbd } from "../lib/keys.ts";
 import { tip } from "../state/tooltip.ts";
@@ -43,6 +46,7 @@ export function StatusBar(): VNode {
 
   return (
     <div class="status-bar">
+      <ConnectionIndicator />
       <span class="filter-summary">{describeFilters(f, workspaceQuery.value)}</span>
       {/* Always mounted, so screen readers announce each notice as it appears. */}
       <span class="status-notice" role="status">
@@ -54,30 +58,25 @@ export function StatusBar(): VNode {
           {shown} shown
         </span>
         {blocked > 0 ? (
-          <span class="num" {...tip("Tasks currently blocked across all filters")}>
-            {" · "}
+          <span class="num status-count-blocked" {...tip("Tasks currently blocked across all filters")}>
+            <span class="dot dot-status-blocked" aria-hidden="true"></span>
             {blocked} blocked
           </span>
         ) : null}
         {inReview > 0 ? (
           <span class="num" {...tip("Tasks awaiting review across all filters")}>
-            {" · "}
+            <span class="dot dot-status-review" aria-hidden="true"></span>
             {inReview} in review
           </span>
         ) : null}
       </span>
-      <ConnectionIndicator />
-      {/* Notifications drawer trigger. Bell + unread badge mirrors the
-          status-counts language above (numeric chip). data-pop opts the
-          button out of the document-level outside-click close handler so
-          this click can toggle the drawer without it being closed in the
-          same event flow (the drawer body also carries data-pop). */}
+      {/* The side panel's Inbox trigger. Bell + unread badge mirrors the
+          status-counts language above (numeric chip). */}
       <button
         type="button"
         class="notif-bell"
-        data-pop
         aria-label="Notifications"
-        onClick={() => (notificationsOpen.value = !notificationsOpen.value)}
+        onClick={() => toggleContext("inbox")}
         {...tip("Notifications")}
       >
         <Icon name="bell" size={14} />

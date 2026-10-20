@@ -11,6 +11,10 @@
 //
 // Unsaved text of deleted tasks is listed above the task or the empty state,
 // in every state, so it can always be exported.
+//
+// App keeps this pane mounted while a panel (Lanes, Tags, Backup) is shown
+// and only hides it, so an open editor keeps its cursor, undo history and
+// unsaved text.
 
 import type { VNode } from "preact";
 
@@ -21,11 +25,11 @@ import { Icon } from "../Icon.tsx";
 import { TaskDocument } from "./TaskDocument.tsx";
 import { OrphanDrafts } from "./OrphanDrafts.tsx";
 
-export function ActiveTaskPane(): VNode {
+export function ActiveTaskPane({ hidden = false }: { hidden?: boolean }): VNode {
   const at = activeTask.value;
   if (!at)
     return (
-      <section class="pane pane-active">
+      <section class="pane pane-active" hidden={hidden}>
         <OrphanDrafts />
         <div class="empty">
           <Icon name="checkCircle" size={32} />
@@ -40,7 +44,7 @@ export function ActiveTaskPane(): VNode {
   const outside = !orderedVisibleTasks.value.some(t => t.id === at.id);
 
   return (
-    <section class="pane pane-active">
+    <section class="pane pane-active" hidden={hidden}>
       <OrphanDrafts />
       {outside ? (
         <div class="outside-filter-notice" role="status">

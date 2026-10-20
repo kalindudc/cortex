@@ -1,4 +1,4 @@
-// lib/help.ts — the desktop help registry the settings pane renders.
+// lib/help.ts — the desktop help registry the Settings panel renders.
 
 import { describe, expect, test } from "bun:test";
 import { buildCommands } from "../../../src/ui/components/palette/buildCommands.ts";
@@ -46,6 +46,17 @@ describe("helpRows", () => {
     expect(other?.detail).toContain("Ctrl + ,");
   });
 
+  test("shortcut rows carry their keys and where they work; command rows carry their hint", () => {
+    const all = rows(true);
+    const settings = all.find(r => r.section === "Shortcuts" && r.id === "settings");
+    expect(settings?.title).toBe("Open settings");
+    expect(settings?.keys).toBe("⌘ + ,");
+    expect(settings?.where).toBe("anywhere");
+    const command = all.find(r => r.section === "Commands" && r.id === "settings");
+    expect(command?.title).toBe("Settings");
+    expect(command?.keys).toBe(buildCommands().find(c => c.id === "settings")?.hint);
+  });
+
   test("a submenu root shows as its label", () => {
     expect(rows().find(r => r.id === "sort-group")?.title).toBe("Sort and group…");
   });
@@ -61,13 +72,11 @@ describe("filterHelp", () => {
   test("matching is a literal, case-insensitive substring over the whole row", () => {
     const all = rows();
     // A choice's help text (detail), not the title.
-    expect(filterHelp(all, "NEWEST TASK").map(r => r.id)).toEqual(["sort"]);
+    expect(filterHelp(all, "NEWEST TASK").map(r => r.id)).toEqual(["direction"]);
     // Keys are part of the row.
     expect(filterHelp(all, "⌘ + [").map(r => r.id)).toEqual(["history-back"]);
     // Regex characters are literal.
     expect(filterHelp(all, "a.*z")).toEqual([]);
-    expect(filterHelp(all, "settings and help").map(r => r.section)).toEqual(
-      expect.arrayContaining(["Commands", "Shortcuts"]),
-    );
+    expect(filterHelp(all, "settings").map(r => r.section)).toEqual(expect.arrayContaining(["Commands", "Shortcuts"]));
   });
 });

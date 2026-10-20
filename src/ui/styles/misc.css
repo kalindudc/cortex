@@ -103,17 +103,6 @@ input:disabled { opacity: 0.5; cursor: not-allowed; }
 .pane-section { padding: 16px; }
 .pane-section + .pane-section { padding-top: 0; }
 
-/* App-level navigation tools at the foot of the sidebar. Management,
-   theme and backup stay available without competing with task filtering. */
-.pane-system {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 10px 12px;
-  border-top: 1px solid var(--border);
-  flex-wrap: wrap;
-}
 /* Active variant for icon-only buttons that carry persistent state
    (tag-filter button when at least one tag is selected). Subtle accent
    wash so it reads as "on" without competing with selected-row contrast. */
@@ -168,29 +157,32 @@ input:disabled { opacity: 0.5; cursor: not-allowed; }
   border-radius: var(--r-1);
 }
 
-/* App-wide status bar (row 2 of the main grid, spans all 3 columns).
-   Read-only summary: filter description on the left, counts in the middle,
-   palette hint on the right. Tabular numerals so jittery counts don't
-   shift sibling text. */
+/* App-wide status bar (row 2 of the main grid, spans every column).
+   Read-only summary: the connection state and filter description on the
+   left, then the counts, the bell and the palette hint on the right.
+   Tabular numerals so jittery counts don't shift sibling text. */
 .status-bar {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
   height: var(--status-height);
   min-width: 0;
-  padding: 0 12px;
+  padding: 0 8px 0 12px;
   border-top: 1px solid var(--border);
   background: var(--panel);
   color: var(--text-3);
   font-size: var(--fs-1);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .status-bar .grow { flex: 1; }
 .status-bar .filter-summary { color: var(--text-2); min-width: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status-bar .status-notice { color: var(--text-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.status-bar .status-counts { display: inline-flex; gap: 4px; white-space: nowrap; font-size: 10px; }
+.status-bar .status-counts { display: inline-flex; align-items: center; gap: 10px; white-space: nowrap; color: var(--text-2); }
+.status-bar .status-counts > span { display: inline-flex; align-items: center; gap: 5px; }
+.status-bar .status-count-blocked { color: var(--err); }
 .status-bar .hint { display: inline-flex; align-items: center; gap: 4px; }
-.status-bar .conn { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.status-bar .conn { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; color: var(--text-2); }
 .status-bar .conn::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--warn); }
 .status-bar .conn[data-state="live"]::before { background: var(--ok); }
 .status-bar .conn[data-state="stale"]::before { background: var(--err); }

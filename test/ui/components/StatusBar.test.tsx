@@ -12,6 +12,7 @@ import { filters, tasks, showAllTasks, workspaceQuery, liveState } from "../../.
 import { tooltipState } from "../../../src/ui/state/tooltip.ts";
 import { UNTAGGED } from "../../../src/ui/state/computed.ts";
 import { notice, showNotice } from "../../../src/ui/state/notice.ts";
+import { contextOpen, contextShown, contextTab } from "../../../src/ui/state/context.ts";
 import type { Task } from "../../../src/ui/api/types.ts";
 
 function task(over: Partial<Task> = {}): Task {
@@ -36,6 +37,19 @@ describe("StatusBar", () => {
     tasks.value = [];
     showAllTasks.value = false;
     workspaceQuery.value = "";
+  });
+
+  test("leads with the connection state and the summary; blocked and in-review counts carry their shapes", () => {
+    tasks.value = [task({ id: 1, status: "blocked" }), task({ id: 2, status: "review" }), task({ id: 3 })];
+    const { container } = render(<StatusBar />);
+    const order = Array.from(container.querySelector(".status-bar")?.children ?? []).map(el => el.classList[0]);
+    expect(order).toEqual(["conn", "filter-summary", "status-notice", "grow", "status-counts", "notif-bell", "hint"]);
+    const counts = Array.from(container.querySelectorAll(".status-counts > span"));
+    expect(counts.map(el => el.textContent)).toEqual(["3 shown", "1 blocked", "1 in review"]);
+    expect(counts[0]?.querySelector(".dot")).toBeNull();
+    expect(counts[1]?.classList.contains("status-count-blocked")).toBe(true);
+    expect(counts[1]?.querySelector(".dot.dot-status-blocked")?.getAttribute("aria-hidden")).toBe("true");
+    expect(counts[2]?.querySelector(".dot.dot-status-review")?.getAttribute("aria-hidden")).toBe("true");
   });
 
   test("filter summary reads 'All tasks' when no filters set", () => {
@@ -181,6 +195,24 @@ describe("connection indicator", () => {
     });
     expect(conn()?.getAttribute("data-state")).toBe("stale");
     expect(conn()?.textContent).toBe("stale \u00b7 reconnecting");
+  });
+});
+
+describe("StatusBar bell", () => {
+  test("the bell opens the side panel at Inbox, and a second press hides it", () => {
+    contextOpen.value = false;
+    contextTab.value = "details";
+    const { getByRole } = render(<StatusBar />);
+    const bell = getByRole("button", { name: "Notifications" });
+    expect(bell.hasAttribute("data-pop")).toBe(false);
+    fireEvent.click(bell);
+    expect(contextShown()).toBe(true);
+    expect(contextTab.peek()).toBe("inbox");
+    fireEvent.click(bell);
+    expect(contextShown()).toBe(false);
+    expect(contextTab.peek()).toBe("inbox");
+    contextOpen.value = true;
+    contextTab.value = "details";
   });
 });
 

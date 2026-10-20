@@ -68,10 +68,10 @@ afterEach(async () => {
 });
 
 async function openAuthors(page: Page): Promise<void> {
-  await page.getByRole("tab", { name: "Authors" }).click();
-  await page.locator(".authors-table").waitFor();
+  await page.getByRole("tab", { name: "Details" }).click();
+  await page.locator(".author-list").waitFor();
   // The three authors arrive over the live stream.
-  await expect.poll(() => page.locator(".authors-table tbody tr").count(), POLL).toBe(3);
+  await expect.poll(() => page.locator(".author-row").count(), POLL).toBe(3);
 }
 
 const status = (page: Page) => page.locator(".resume-outcome[role=status]").textContent();
@@ -81,7 +81,7 @@ describe("resume", () => {
   test("Resume shows on bb and pi authors only; bb opens the thread, pi copies the command", async () => {
     const { page } = desktop;
     await openAuthors(page);
-    const buttons = page.locator(".authors-table button", { hasText: "Resume" });
+    const buttons = page.locator(".author-list button", { hasText: "Resume" });
     expect(await buttons.evaluateAll(els => els.map(el => el.getAttribute("aria-label")))).toEqual(
       expect.arrayContaining([`Resume ${BB}`, `Resume ${PI}`]),
     );

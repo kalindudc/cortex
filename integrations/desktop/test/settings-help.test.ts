@@ -1,7 +1,7 @@
-// The settings and help pane in a real window: opening it with Mod+, and
-// from the palette, one search across settings, commands and shortcuts,
-// every setting changing in place and surviving a relaunch, and every listed
-// shortcut pressed for its visible effect (back and forward included).
+// The Settings panel in a real window: opening it with Mod+, and from the
+// palette, one search across settings, commands and shortcuts, every setting
+// changing in place and surviving a relaunch, and every listed shortcut
+// pressed for its visible effect (back and forward included).
 
 import type { Page } from "playwright-core";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
@@ -22,8 +22,9 @@ afterEach(async () => {
 });
 
 const POLL = { timeout: 10_000, interval: 50 };
-const PANE = 'dialog[aria-label="Settings and help"][open]';
-const SEARCH = `${PANE} input[type="search"]`;
+const PANE = ".settings-panel";
+// The search field lives in the list column beside the panel.
+const SEARCH = 'input[aria-label="Search settings, commands and shortcuts"]';
 const TITLE = ".task-header .task-title-display";
 const isFocused = (page: Page, selector: string) =>
   page.locator(selector).evaluate(el => el === document.activeElement);
@@ -35,19 +36,34 @@ async function openSettings(page: Page): Promise<void> {
 }
 
 async function closeSettings(page: Page): Promise<void> {
-  await page.keyboard.press("Escape");
+  await page.locator('.nav-rail button[aria-label="Tasks"]').click();
   await page.locator(PANE).waitFor({ state: "detached" });
 }
 
-/** The ids shown in one section of the pane. */
+/** The settings shown in the panel, or the ids shown in its Commands or Shortcuts section. */
 function sectionIds(page: Page, section: "Settings" | "Commands" | "Shortcuts"): Promise<string[]> {
   return page.evaluate(
     ([pane, name]) =>
-      Array.from(
-        document.querySelectorAll(`${pane} section[aria-label="${name}"] [data-help-id], ${pane} section[aria-label="${name}"] [data-setting]`),
-      ).map(el => el.getAttribute("data-help-id") ?? el.getAttribute("data-setting") ?? ""),
+      name === "Settings"
+        ? Array.from(document.querySelectorAll(`${pane} [data-setting]`)).map(el => el.getAttribute("data-setting") ?? "")
+        : Array.from(document.querySelectorAll(`${pane} section[aria-label="${name}"] [data-help-id]`)).map(
+            el => el.getAttribute("data-help-id") ?? "",
+          ),
     [PANE, section] as const,
   );
+}
+
+/** Choose `value` for setting `key` with whatever control it has: a select, radios (segmented or cards) or a switch. */
+async function choose(page: Page, key: string, value: string): Promise<void> {
+  const control = page.locator(`${PANE} #setting-${key}`);
+  const kind = await control.evaluate(el => (el.tagName === "SELECT" ? "select" : el.getAttribute("role")));
+  if (kind === "select") await control.selectOption(value);
+  else if (kind === "radiogroup") await control.locator(`input[value="${value}"]`).check();
+  else if ((await page.locator(`${PANE} [data-setting="${key}"]`).getAttribute("data-value")) !== value) {
+    expect(kind).toBe("switch");
+    await control.click();
+  }
+  await expect.poll(() => page.locator(`${PANE} [data-setting="${key}"]`).getAttribute("data-value"), POLL).toBe(value);
 }
 
 async function openTask(page: Page, title: string): Promise<void> {
@@ -68,11 +84,21 @@ async function bodyOf(id: number): Promise<string> {
   return shown.task.body ?? "";
 }
 
-describe("settings and help pane", () => {
+describe("the Settings panel", () => {
   test("opens with Mod+, and from the palette, and one search filters all three sections", async () => {
     const { page } = desktop;
     await openSettings(page);
-    expect(await sectionIds(page, "Settings")).toEqual(["appearance", "sort", "group", "done", "mode"]);
+    expect(await sectionIds(page, "Settings")).toEqual([
+      "appearance",
+      "density",
+      "sort",
+      "direction",
+      "group",
+      "done",
+      "mode",
+      "alert",
+      "backup",
+    ]);
     expect((await sectionIds(page, "Commands")).length).toBeGreaterThan(5);
     expect(await sectionIds(page, "Shortcuts")).toContain("settings");
 
@@ -95,8 +121,9 @@ describe("settings and help pane", () => {
     await page.locator(`${PANE} .settings-empty`, { hasText: "No setting, command or shortcut matches" }).waitFor();
     await closeSettings(page);
 
-    await runCommand(page, "settings and help");
-    await page.locator(SEARCH).waitFor();
+    await runCommand(page, "settings");
+    await page.locator(PANE).waitFor();
+    await expect.poll(() => isFocused(page, SEARCH), POLL).toBe(true);
     await closeSettings(page);
   });
 
@@ -110,22 +137,23 @@ describe("settings and help pane", () => {
     expect(await page.locator("button.task-row", { hasText: "finished one" }).count()).toBe(0);
 
     await openSettings(page);
-    const choose = (key: string, value: string) => page.locator(`${PANE} #setting-${key}`).selectOption(value);
-    await choose("appearance", "dark");
-    await choose("sort", "-id");
-    await choose("group", "status");
-    await choose("done", "show");
-    await choose("mode", "split");
+    await choose(page, "appearance", "dark");
+    await choose(page, "density", "compact");
+    await choose(page, "sort", "title");
+    await choose(page, "direction", "desc");
+    await choose(page, "group", "status");
+    await choose(page, "done", "show");
+    await choose(page, "mode", "split");
+    await choose(page, "alert", "off");
+    await choose(page, "backup", "10");
     await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme), POLL).toBe("dark");
-    await expect.poll(() => page.locator(".task-order").textContent(), POLL).toBe("Sorted by -id, grouped by status");
-    await waitForRow(page, "finished one");
-    // The Default button puts one setting back and is disabled at its default.
-    const resetGroup = page.locator(PANE).getByRole("button", { name: "Reset Group to its default" });
-    await resetGroup.click();
-    await expect.poll(() => page.locator(".task-order").textContent(), POLL).toBe("Sorted by -id");
-    expect(await resetGroup.isDisabled()).toBe(true);
-    await choose("group", "status");
+    await expect.poll(() => page.evaluate(() => document.documentElement.dataset.density), POLL).toBe("compact");
+    // The list column shows the settings sections while the panel is open.
     await closeSettings(page);
+    await expect.poll(() => page.locator(".task-order").textContent(), POLL).toBe("Sorted by title descending, grouped by status");
+    await waitForRow(page, "finished one");
+    // Compact density keeps one line per task.
+    expect(await page.locator("button.task-row .task-row-meta").first().isVisible()).toBe(false);
     // The document mode applies to the next task opened.
     await openTask(page, "open one");
     expect(await modePressed(page, "Split")).toBe("true");
@@ -135,20 +163,30 @@ describe("settings and help pane", () => {
     await waitForDashboard(next);
     await waitForLive(next);
     await openSettings(next);
-    const values = await next.evaluate(pane =>
-      Object.fromEntries(
-        Array.from(document.querySelectorAll<HTMLSelectElement>(`${pane} select`)).map(s => [s.id, s.value]),
-      ),
-    PANE);
+    const values = await next.evaluate(
+      pane =>
+        Object.fromEntries(
+          Array.from(document.querySelectorAll(`${pane} [data-setting]`)).map(row => [
+            row.getAttribute("data-setting"),
+            row.getAttribute("data-value"),
+          ]),
+        ),
+      PANE,
+    );
     expect(values).toEqual({
-      "setting-appearance": "dark",
-      "setting-sort": "-id",
-      "setting-group": "status",
-      "setting-done": "show",
-      "setting-mode": "split",
+      appearance: "dark",
+      density: "compact",
+      sort: "title",
+      direction: "desc",
+      group: "status",
+      done: "show",
+      mode: "split",
+      alert: "off",
+      backup: "10",
     });
     await closeSettings(next);
     expect(await next.evaluate(() => document.documentElement.dataset.theme)).toBe("dark");
+    expect(await next.evaluate(() => document.documentElement.dataset.density)).toBe("compact");
     await waitForRow(next, "finished one");
     await openTask(next, "open one");
     expect(await modePressed(next, "Split")).toBe("true");
@@ -175,8 +213,9 @@ describe("settings and help pane", () => {
         await page.locator(".palette-input").waitFor({ state: "detached" });
       },
       escape: async () => {
-        await openSettings(page);
-        await closeSettings(page);
+        await openPalette(page, "KeyK");
+        await page.keyboard.press("Escape");
+        await page.locator(".palette-input").waitFor({ state: "detached" });
       },
       settings: async () => {
         await openSettings(page);

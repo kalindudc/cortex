@@ -1,13 +1,20 @@
-/* ---------- status dot + pill ---------- */
+/* ---------- status dot + pill ----------
+   Every status has a shape as well as a colour, so states read without
+   colour: draft a dashed ring, open a ring, review a ring with its right
+   half filled, blocked a disc with a bar, done a disc with a check. The
+   marks are drawn in --bg so they cut through the filled disc. */
 .dot {
-  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
-  background: currentColor; flex-shrink: 0;
+  position: relative; display: inline-block; flex-shrink: 0;
+  box-sizing: border-box; width: 12px; height: 12px; border-radius: 50%;
+  border: 1.6px solid currentColor;
 }
-.dot-status-draft  { color: var(--info); }
-.dot-status-open    { color: var(--text-3); }
-.dot-status-review  { color: var(--warn); }
-.dot-status-blocked { color: var(--err); }
-.dot-status-done    { color: var(--ok); }
+.dot-status-draft   { color: var(--text-3); border-style: dashed; }
+.dot-status-open    { color: var(--info); }
+.dot-status-review  { color: var(--warn); padding: 1.5px; background: linear-gradient(90deg, transparent 50%, currentColor 50%) content-box; }
+.dot-status-blocked { color: var(--err); background: currentColor; }
+.dot-status-done    { color: var(--ok); background: currentColor; }
+.dot-status-blocked::after { content: ""; position: absolute; left: 1.4px; right: 1.4px; top: 50%; height: 2px; margin-top: -1px; border-radius: 1px; background: var(--bg); }
+.dot-status-done::after { content: ""; position: absolute; left: 2.4px; top: 0.6px; width: 3px; height: 5.5px; border: solid var(--bg); border-width: 0 1.6px 1.6px 0; transform: rotate(45deg); }
 
 .status-pill {
   display: inline-flex; align-items: center; gap: 6px;

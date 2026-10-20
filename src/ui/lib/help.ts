@@ -1,6 +1,6 @@
 // lib/help.ts — The desktop's help registry: every keyboard shortcut
-// (SHORTCUTS), plus the rows the settings and help pane renders from the
-// settings (state/settings.ts#SETTINGS), the palette's root commands
+// (SHORTCUTS), plus the rows the Settings panel renders from the settings
+// (state/settings.ts#SETTINGS), the palette's root commands
 // (components/palette/buildCommands.ts) and the shortcuts. Search is a
 // literal, case-insensitive substring over a row's whole text.
 
@@ -49,7 +49,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
     where: "forms",
   },
   { id: "escape", keys: () => "Esc", description: "Close the palette, dialog or popover", where: "anywhere" },
-  { id: "settings", keys: chord(","), description: "Open settings and help", where: "anywhere" },
+  { id: "settings", keys: chord(","), description: "Open settings", where: "anywhere" },
   { id: "history-back", keys: chord("["), description: "Back to the task opened before", where: "anywhere" },
   { id: "history-forward", keys: chord("]"), description: "Forward to the next task opened", where: "anywhere" },
   {
@@ -72,6 +72,10 @@ export interface HelpRow {
   readonly id: string;
   readonly title: string;
   readonly detail: string;
+  /** A shortcut's keys or a command's hint, shown in a key cap beside the title. */
+  readonly keys?: string;
+  /** Where a shortcut works, shown after its keys. */
+  readonly where?: string;
 }
 
 export function helpRows(input: {
@@ -88,7 +92,7 @@ export function helpRows(input: {
     }),
   );
   const commands = input.commands.map(
-    (c): HelpRow => ({ section: "Commands", id: c.id, title: c.label, detail: c.hint ?? "" }),
+    (c): HelpRow => ({ section: "Commands", id: c.id, title: c.label, detail: c.hint ?? "", keys: c.hint }),
   );
   const shortcuts = SHORTCUTS.map(
     (s): HelpRow => ({
@@ -96,6 +100,8 @@ export function helpRows(input: {
       id: s.id,
       title: s.description,
       detail: `${s.keys(input.mac)}, ${WHERE[s.where]}`,
+      keys: s.keys(input.mac),
+      where: WHERE[s.where],
     }),
   );
   return [...settings, ...commands, ...shortcuts];

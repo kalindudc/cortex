@@ -47,7 +47,7 @@ import App from "./components/App.tsx";
 import { connectLive } from "./state/refresh.ts";
 import { startCloseGuard } from "./lib/closeGuard.ts";
 import { openTask } from "./state/url.ts";
-import { clearWorkspaceTransientState, requestPostUpdate, requestMode } from "./state/workspace.ts";
+import { clearWorkspaceTransientState, openSettings, requestPostUpdate, requestMode } from "./state/workspace.ts";
 import { activeTask } from "./state/computed.ts";
 import { IS_MAC, matchModeShortcut } from "./lib/keys.ts";
 import {
@@ -64,7 +64,7 @@ import {
   taskActionsPopover,
 } from "./state/signals.ts";
 import { closeAllPopovers, closeSidebarFilter } from "./state/popovers.ts";
-import { notificationsOpen } from "./state/notifications.ts";
+import { contextSheetOpen } from "./state/context.ts";
 // Side-effect import: applies the stored appearance (else the system's) before
 // first paint, persisting nothing, so "system" keeps following the OS.
 import "./state/theme.ts";
@@ -118,8 +118,8 @@ if (typeof Notification !== "undefined" && Notification.permission === "default"
 // (the first connect, each page reload and each automatic reconnect) snapshots
 // GET /api/workspace; frames are applied only past the snapshot's cursor
 // and a burst coalesces into one follow-up snapshot; resync, gaps and new
-// epochs resnapshot; notification rows/invalidations update the bell
-// drawer; and ONLY the explicit task.blocked transition raises the desktop
+// epochs resnapshot; notification rows/invalidations update the side
+// panel's Inbox; and ONLY the explicit task.blocked transition raises the desktop
 // alert, never a task.updated frame whose task happens to be blocked. It
 // listens for every name in src/events.ts EVENT_KINDS, so a new server
 // event kind cannot be forgotten here. Its listeners are registered before
@@ -140,9 +140,9 @@ document.addEventListener("click", (e: MouseEvent) => {
 
 // ---------- global keyboard shortcuts ----------
 // No single-key hotkeys (they hijack typing in inputs). Only meta-modified
-// (every one is a lib/help.ts SHORTCUTS row, listed in the help pane):
+// (every one is a lib/help.ts SHORTCUTS row, listed in the Settings panel):
 //   ⌘/Ctrl + P  or  ⌘/Ctrl + K   -> toggle command palette
-//   ⌘/Ctrl + ,                   -> settings and help
+//   ⌘/Ctrl + ,                   -> the Settings panel
 //   ⌘/Ctrl + [  or  ⌘/Ctrl + ]   -> back / forward through opened tasks
 //   ⌘/Ctrl + /                   -> reveal Activity + focus its inline composer
 //   ⌘/Ctrl + Enter               -> post the update (works while focused in textarea)
@@ -182,7 +182,7 @@ window.addEventListener("keydown", (e: KeyboardEvent) => {
       lanePopover.peek() ||
       tagsPopover.peek() ||
       taskActionsPopover.peek() ||
-      notificationsOpen.peek()
+      contextSheetOpen.peek()
     )
       return;
     requestMode(mode, mode === "read" ? "reader" : "body");
@@ -210,11 +210,10 @@ window.addEventListener("keydown", (e: KeyboardEvent) => {
     return;
   }
 
-  // Settings and help from anywhere (Mod+,).
+  // The Settings panel from anywhere (Mod+,).
   if (meta && (e.key === "," || e.code === "Comma")) {
     e.preventDefault();
-    clearWorkspaceTransientState();
-    modal.value = { kind: "settings" };
+    openSettings();
     return;
   }
 

@@ -16,7 +16,6 @@ import {
   sidebarFilter,
   type SidebarFilter,
 } from "./signals.ts";
-import { notificationsOpen } from "./notifications.ts";
 
 // Only deliberate dismissal (selection / Done / Escape) restores focus.
 // Outside clicks and navigation MUST leave focus with the clicked target.
@@ -52,14 +51,6 @@ export function closeAllPopovers({ preserveSidebar = false }: { preserveSidebar?
   }
   if (taskActionsPopover.peek()) {
     taskActionsPopover.value = false;
-    closed = true;
-  }
-  // The notification drawer follows the same close-on-outside-click +
-  // close-on-Esc + mutual-exclusion contract as the chip popovers, so it
-  // joins the same cascade. Drawer body + bell trigger both carry
-  // data-pop so the outside-click handler in dashboard.tsx skips them.
-  if (notificationsOpen.peek()) {
-    notificationsOpen.value = false;
     closed = true;
   }
   return closed;

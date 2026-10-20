@@ -31,6 +31,9 @@ import {
   clearAllFilters,
   hasActiveFilters,
   sidebarFilter,
+  view,
+  narrowViewport,
+  settingsFocusRequest,
 } from "../../../src/ui/state/signals.ts";
 import {
   QUERY_KEY,
@@ -40,7 +43,9 @@ import {
   requestMode,
   requestPostUpdate,
   clearWorkspaceTransientState,
+  openSettings,
 } from "../../../src/ui/state/workspace.ts";
+import { contextOpen, contextSheetOpen } from "../../../src/ui/state/context.ts";
 import type { Task } from "../../../src/ui/api/types.ts";
 
 // Widening readers: TS narrows a signal's .value literal type after a
@@ -79,10 +84,13 @@ function reset(): void {
   readerMode.value = "read";
   tab.value = "document";
   navigationOpen.value = false;
+  contextSheetOpen.value = false;
+  contextOpen.value = true;
   draggedTaskId.value = null;
   sidebarFilter.value = null;
   postUpdateOpen.value = false;
   pendingTitleFocus.value = null;
+  view.value = "tasks";
 }
 
 describe("workspace preference parsing (W3)", () => {
@@ -197,6 +205,73 @@ describe("requestPostUpdate (A3 state contract)", () => {
   });
 });
 
+describe("acting on a task returns to the Tasks view", () => {
+  beforeEach(reset);
+  // Widening reader, as above: the panel views are set directly in each test.
+  const currentView = (): string => view.value;
+
+  test("Mod+/ (requestPostUpdate) from the Tags view", () => {
+    tasks.value = [mkTask(3)];
+    selectedId.value = 3;
+    view.value = "tags";
+    requestPostUpdate();
+    expect(currentView()).toBe("tasks");
+    expect(currentTab()).toBe("updates");
+  });
+
+  test("a mode shortcut (requestMode) from the Backup view", () => {
+    view.value = "backup";
+    requestMode("edit");
+    expect(currentView()).toBe("tasks");
+  });
+
+  test("selecting another task from the Lanes view; a fallback change does not", () => {
+    tasks.value = [mkTask(1, { status: "open" }), mkTask(2, { status: "blocked" })];
+    view.value = "lanes";
+    filters.value = { status: "blocked", lane: null, tag: [] }; // the fallback moves to task 2
+    expect(currentView()).toBe("lanes");
+    selectedId.value = 1;
+    expect(currentView()).toBe("tasks");
+  });
+});
+
+describe("openSettings", () => {
+  beforeEach(reset);
+  afterEach(() => {
+    narrowViewport.value = false;
+    navigationOpen.value = false;
+    view.value = "tasks";
+  });
+  const currentView = (): string => view.value;
+
+  test("shows the Settings view, asks its field for focus and keeps the drawer closed on a wide window", () => {
+    draggedTaskId.value = 4;
+    const before = settingsFocusRequest.value;
+    openSettings();
+    expect(currentView()).toBe("settings");
+    expect(settingsFocusRequest.value).toBe(before + 1);
+    expect(navigationOpen.value).toBe(false);
+    expect(draggedTaskId.value).toBeNull();
+    // Each call asks again, so a second Mod+, refocuses the field.
+    openSettings();
+    expect(settingsFocusRequest.value).toBe(before + 2);
+  });
+
+  test("opens the navigation drawer on a narrow window, where the search field lives", () => {
+    narrowViewport.value = true;
+    openSettings();
+    expect(currentView()).toBe("settings");
+    expect(navigationOpen.value).toBe(true);
+  });
+
+  test("selecting a task from Settings returns to Tasks", () => {
+    tasks.value = [mkTask(1), mkTask(2)];
+    openSettings();
+    selectedId.value = 2;
+    expect(currentView()).toBe("tasks");
+  });
+});
+
 describe("clearWorkspaceTransientState", () => {
   beforeEach(reset);
 
@@ -243,6 +318,24 @@ describe("clearWorkspaceTransientState", () => {
     expect(sidebarFilter.value).toBeNull();
   });
 
+  test("the side panel's sheet closes with the drawer, never under preserveSidebar, and the inline panel stays", () => {
+    contextSheetOpen.value = true;
+    expect(clearWorkspaceTransientState({ preserveSidebar: true })).toBe(false);
+    expect(contextSheetOpen.value).toBe(true);
+    expect(clearWorkspaceTransientState()).toBe(true);
+    expect(contextSheetOpen.value).toBe(false);
+    expect(contextOpen.value).toBe(true);
+  });
+
+  test("opening a task closes the sheet; a fallback task change keeps it", () => {
+    tasks.value = [mkTask(1, { status: "open" }), mkTask(2, { status: "blocked" })];
+    contextSheetOpen.value = true;
+    filters.value = { status: "blocked", lane: null, tag: [] }; // fallback moves to task 2
+    expect(contextSheetOpen.value).toBe(true);
+    selectedId.value = 2;
+    expect(contextSheetOpen.value).toBe(false);
+  });
+
   test("deliberate resets close sidebar filters even without a task change", () => {
     sidebarFilter.value = "lane";
     expect(clearWorkspaceTransientState()).toBe(true);
@@ -277,7 +370,7 @@ describe("browser body-mode preference", () => {
       selectedId.value = 1;
       requestMode(mode);
       expect(localStorage.getItem(READER_MODE_KEY)).toBe(mode);
-      tab.value = "authors";
+      tab.value = "updates";
       selectedId.value = 2;
       expect(currentMode()).toBe(mode);
       expect(currentTab()).toBe("document");

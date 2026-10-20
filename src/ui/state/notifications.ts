@@ -1,6 +1,6 @@
-// Notifications drawer state — server-persisted feed + ephemeral local
-// errors. Drives the bell-trigger badge in StatusBar plus the right-anchored
-// slide-in NotificationDrawer.
+// Notifications state — server-persisted feed + ephemeral local errors.
+// Drives the bell-trigger badge in StatusBar, the Inbox tab's badge and the
+// side panel's Inbox tab (components/context/InboxTab.tsx).
 //
 // Two parallel sources, merged for rendering:
 //
@@ -22,7 +22,7 @@
 //      server to write to) and surfacing stale errors after a reload
 //      would be misleading.
 //
-// The drawer renders both via a tagged-union `merged` computed signal
+// The Inbox renders both via a tagged-union `merged` computed signal
 // sorted newest-first. Persisted rows have positive ids (DB
 // AUTOINCREMENT); ephemeral rows have negative ids (counter starting at
 // -1). The id sign is the discriminator for read/dismiss routing — no
@@ -43,12 +43,11 @@ export interface LocalError {
   read: boolean;
 }
 
-/** Tagged union for the merged feed the drawer renders. */
+/** Tagged union for the merged feed the Inbox renders. */
 export type MergedRow = { kind: "notif"; row: Notification } | { kind: "error"; row: LocalError };
 
 export const notifications: Signal<Notification[]> = signal<Notification[]>([]);
 export const localErrors: Signal<LocalError[]> = signal<LocalError[]>([]);
-export const notificationsOpen: Signal<boolean> = signal<boolean>(false);
 
 // Negative id counter for ephemeral local errors. KISS: id sign is the
 // persisted-vs-ephemeral discriminator. Server ids are positive
@@ -58,7 +57,7 @@ let nextLocalId = -1;
 /** Merged feed of persisted notifications and ephemeral local errors,
  *  sorted UNREAD-FIRST and then newest-first within each read-state
  *  group. The unread-first ordering keeps fresh attention-worthy items
- *  pinned to the top of the drawer even after a user marks them read,
+ *  pinned to the top of the Inbox even after a user marks them read,
  *  so historical context drops below the fold rather than mixing in
  *  with what still needs eyes. Both `created` (notif) and `ts` (error)
  *  are Date.now() millisecond values. */
@@ -119,7 +118,7 @@ export function markRead(id: number): void {
 /** Flip a read entry back to unread. Mirror of markRead — routes by id
  *  sign, optimistic local mutation, fire-and-forget API call. The
  *  unread-first sort in `merged` will re-pin the row to the top of the
- *  drawer on the next render. */
+ *  Inbox on the next render. */
 export function markUnread(id: number): void {
   if (id > 0) {
     notifications.value = notifications.value.map(n => (n.id === id && n.read ? { ...n, read: false } : n));

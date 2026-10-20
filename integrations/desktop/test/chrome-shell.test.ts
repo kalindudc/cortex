@@ -1,5 +1,6 @@
 // The shell around the document in a real window: the theme toggle, the
-// notification drawer, backup, and the Activity, Authors and Related tabs.
+// status shapes, the side panel's Inbox, backup, the Activity tab, and the
+// side panel's Details (authors and related tasks).
 
 import fs from "node:fs";
 import path from "node:path";
@@ -54,18 +55,34 @@ describe("theme", () => {
   });
 });
 
+describe("status shapes", () => {
+  test("a draft row's dot is a dashed ring and a done row's dot draws a check", async () => {
+    const { page } = desktop;
+    await addTask(desktop, "shape draft", { status: "draft" });
+    await addTask(desktop, "shape done", { status: "done" });
+    await waitForRow(page, "shape draft");
+    // Done tasks are hidden from the list by default.
+    await page.locator('button[aria-label="Show done tasks too"]').click();
+    await waitForRow(page, "shape done");
+    const draft = page.locator("button.task-row", { hasText: "shape draft" }).locator(".dot");
+    const done = page.locator("button.task-row", { hasText: "shape done" }).locator(".dot");
+    expect(await draft.evaluate(el => getComputedStyle(el).borderTopStyle)).toBe("dashed");
+    expect(await done.evaluate(el => getComputedStyle(el, "::after").content)).not.toBe("none");
+  });
+});
+
 describe("notifications", () => {
   test("a task added from the CLI raises the badge, and dismissing its row clears both; no desktop alert", async () => {
     const { page } = desktop;
     await recordAlerts(page);
     await waitForLive(page);
     await addTask(desktop, "notify me");
-    // The new task becomes the fallback active task, which closes open drawers; let that settle first.
+    // The new task becomes the fallback active task; let its row settle first.
     await waitForRow(page, "notify me");
     await page.locator(".notif-badge").waitFor();
 
     await page.locator('button[aria-label="Notifications"]').click();
-    const row = page.locator(".notif-row", { hasText: "notify me" });
+    const row = page.locator(".context-panel .notif-row", { hasText: "notify me" });
     await row.waitFor();
     await row.hover();
     await row.locator(".notif-dismiss").click();
@@ -76,25 +93,24 @@ describe("notifications", () => {
 });
 
 describe("backup", () => {
-  test("Back up now reports a path under the test's config directory", async () => {
+  test("the Backup panel's Back up now reports a path under the test's config directory", async () => {
     const { page } = desktop;
-    await page.locator('button[aria-label="Back up now"]').click();
-    await page.locator('button[aria-label="Back up now"].btn-icon-active').waitFor();
-    await page.mouse.move(0, 0);
-    await page.locator('button[aria-label="Back up now"]').hover();
-    const tip = page.locator(".tooltip-visible");
-    await tip.waitFor();
-    const text = (await tip.textContent()) ?? "";
-    expect(text.startsWith("Backup saved to ")).toBe(true);
-    const saved = fs.realpathSync(text.slice("Backup saved to ".length));
+    await page.locator('button[aria-label="Backup"]').click();
+    await page.locator('.backup-panel button[aria-label="Back up now"]').click();
+    const result = page.locator(".backup-panel .backup-result");
+    await result.waitFor();
+    expect(((await result.textContent()) ?? "").startsWith("Backup saved to ")).toBe(true);
+    const saved = fs.realpathSync(((await result.locator(".mono").textContent()) ?? "").trim());
     const config = fs.realpathSync(desktop.env.XDG_CONFIG_HOME as string);
     expect(saved.startsWith(config + path.sep)).toBe(true);
     expect(fs.existsSync(saved)).toBe(true);
+    // The backup's notification becomes the last backup.
+    await page.locator(".backup-panel .backup-last", { hasText: /^Last backup / }).waitFor();
   });
 });
 
-describe("Activity, Authors and Related", () => {
-  test("a posted update shows once, a seeded body expands, Authors lists both authors", async () => {
+describe("Activity, and Authors and Related in Details", () => {
+  test("a posted update shows once, a seeded body expands, Details lists both authors", async () => {
     const { page } = desktop;
     const id = await addTask(desktop, "activity target");
     await openTask("activity target");
@@ -123,12 +139,12 @@ describe("Activity, Authors and Related", () => {
     const composerAuthor = shown.updates.find(u => u.summary === "from the composer")?.author;
     expect(composerAuthor).toBeTruthy();
 
-    await page.getByRole("tab", { name: "Authors" }).click();
-    await page.locator(".authors-table").waitFor();
+    await page.getByRole("tab", { name: "Details" }).click();
+    await page.locator(".author-list").waitFor();
     await expect
-      .poll(async () => (await page.locator(".authors-table tbody tr").allTextContents()).join("|"), POLL)
+      .poll(async () => (await page.locator(".author-list .author-row").allTextContents()).join("|"), POLL)
       .toContain("probe-1234abcd");
-    const authors = (await page.locator(".authors-table tbody tr").allTextContents()).join("|");
+    const authors = (await page.locator(".author-list .author-row").allTextContents()).join("|");
     expect(authors).toContain(composerAuthor as string);
   });
 
@@ -138,7 +154,7 @@ describe("Activity, Authors and Related", () => {
     await addTask(desktop, "the referrer", { body: `Follows up on @${id}.` });
     await openTask("referenced target");
 
-    await page.getByRole("tab", { name: "Related" }).click();
+    await page.getByRole("tab", { name: "Details" }).click();
     const section = page.locator(".related-section", { hasText: "Referenced by" });
     await section.locator(".related-row", { hasText: "the referrer" }).waitFor();
   });

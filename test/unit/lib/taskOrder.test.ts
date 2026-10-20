@@ -6,11 +6,17 @@ import { STATUS_LABEL } from "../../../src/lib/constants.ts";
 import { searchPool } from "../../../src/lib/taskView.ts";
 import {
   arrangeTasks,
+  describeSort,
   GROUP_HELP,
   groupTasks,
+  isDescending,
   isTaskGroup,
   isTaskSort,
+  listedRows,
+  SORT_FIELDS,
   SORT_HELP,
+  sortField,
+  sortOf,
   sortTasks,
   TASK_GROUPS,
   TASK_SORTS,
@@ -52,9 +58,13 @@ describe("sortTasks", () => {
     expect(by("-title")).toEqual([3, 1, 4, 5, 2]);
     // Catalog order (now, later), then unknown lanes by name (alpha, zeta).
     expect(by("lane")).toEqual([4, 5, 3, 2, 1]);
+    expect(by("-lane")).toEqual([1, 2, 3, 4, 5]);
     expect(by("status")).toEqual([4, 5, 1, 2, 3]);
+    expect(by("-status")).toEqual([3, 2, 1, 5, 4]);
     // P0 first, unset last; equal priorities by ascending id.
     expect(by("priority")).toEqual([4, 2, 3, 1, 5]);
+    // Reversed, tasks without a priority still come last.
+    expect(by("-priority")).toEqual([2, 3, 4, 1, 5]);
     expect(by("updated")).toEqual([4, 5, 3, 1, 2]);
     // Reversed key, ties (1 and 2 at 50) still ascending id.
     expect(by("-updated")).toEqual([1, 2, 3, 5, 4]);
@@ -139,6 +149,26 @@ describe("arrangeTasks", () => {
   });
 });
 
+describe("listedRows", () => {
+  test("drops the rows of folded groups and keeps the rest in order", () => {
+    const arranged = arrangeTasks(POOL, null, "id", "lane", LANES);
+    const lanes = arranged.groups.map(g => g.key);
+    expect(lanes).toEqual(["now", "later", "alpha", "zeta"]);
+    expect(ids(listedRows(arranged, []))).toEqual(ids(arranged.rows));
+    const withoutLater = listedRows(arranged, ["later"]);
+    expect(withoutLater.some(t => t.lane === "later")).toBe(false);
+    expect(ids(withoutLater)).toEqual(ids(arranged.rows.filter(t => t.lane !== "later")));
+    expect(listedRows(arranged, lanes)).toEqual([]);
+  });
+
+  test("an ungrouped or searched list ignores folds", () => {
+    const flat = arrangeTasks(POOL, null, "id", "none", LANES);
+    expect(ids(listedRows(flat, ["now"]))).toEqual(ids(flat.rows));
+    const searched = arrangeTasks(POOL, searchPool(POOL, "task"), "id", "lane", LANES);
+    expect(ids(listedRows(searched, ["now"]))).toEqual(ids(searched.rows));
+  });
+});
+
 describe("guards and help", () => {
   test("isTaskSort and isTaskGroup accept exactly the lists", () => {
     for (const s of TASK_SORTS) expect(isTaskSort(s)).toBe(true);
@@ -149,8 +179,21 @@ describe("guards and help", () => {
     }
   });
 
-  test("every order and grouping has help text", () => {
-    expect(Object.keys(SORT_HELP).sort()).toEqual([...TASK_SORTS].sort());
+  test("every field sorts both ways, and a sort splits into its field and direction", () => {
+    expect(TASK_SORTS).toEqual(SORT_FIELDS.flatMap(f => [f, `-${f}` as const]));
+    for (const f of SORT_FIELDS) {
+      for (const descending of [false, true]) {
+        const sort = sortOf(f, descending);
+        expect(sortField(sort)).toBe(f);
+        expect(isDescending(sort)).toBe(descending);
+      }
+    }
+    expect(describeSort("title")).toBe("title");
+    expect(describeSort("-id")).toBe("id descending");
+  });
+
+  test("every sort field and grouping has help text", () => {
+    expect(Object.keys(SORT_HELP).sort()).toEqual([...SORT_FIELDS].sort());
     expect(Object.keys(GROUP_HELP).sort()).toEqual([...TASK_GROUPS].sort());
   });
 });

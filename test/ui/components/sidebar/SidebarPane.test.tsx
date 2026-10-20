@@ -1,7 +1,7 @@
-// SidebarPane — the workspace navigation column: the
-// system bar, ONE WorkspaceFilters surface, and the task list. Lane/tag
-// MANAGEMENT are explicit sidebar modes ('Manage lanes' / 'Manage tags')
-// with their own panes; opening them never changes filters. During an
+// SidebarPane — the list column: ONE WorkspaceFilters surface and the
+// task list. The Lanes and Tags views (opened from the rail) list their
+// entries beside their panels; a row selects the entry, and opening them
+// never changes filters. During an
 // actual task drag a transient 'Move to lane' tray appears — it is a
 // drop surface, not a filter list.
 
@@ -34,7 +34,7 @@ mock.module("../../../../src/ui/api/client.ts", () => ({
   },
 }));
 
-import { render, fireEvent } from "@testing-library/preact";
+import { act, render, fireEvent } from "@testing-library/preact";
 import { SidebarPane } from "../../../../src/ui/components/sidebar/SidebarPane.tsx";
 import {
   tasks,
@@ -42,7 +42,7 @@ import {
   tags,
   filters,
   sectionOpen,
-  sidebarMode,
+  view,
   selectedId,
   showAllTasks,
   workspaceQuery,
@@ -51,9 +51,12 @@ import {
   paletteOpen,
   statusPopover,
   sidebarFilter,
+  selectedLane,
+  selectedTag,
+  navigationOpen,
 } from "../../../../src/ui/state/signals.ts";
 import type { Task, Lane } from "../../../../src/ui/api/types.ts";
-import { taskGroup, taskSort } from "../../../../src/ui/state/settings.ts";
+import { collapsedGroups, taskGroup, taskSort } from "../../../../src/ui/state/settings.ts";
 
 function task(over: Partial<Task> = {}): Task {
   return {
@@ -87,12 +90,16 @@ describe("SidebarPane", () => {
     workspaceQuery.value = "";
     taskSort.value = "id";
     taskGroup.value = "none";
+    collapsedGroups.value = { lane: [], status: [] };
     draggedTaskId.value = null;
     modal.value = null;
     paletteOpen.value = false;
     statusPopover.value = false;
     sidebarFilter.value = null;
-    sidebarMode.value = "main";
+    view.value = "tasks";
+    selectedLane.value = null;
+    selectedTag.value = null;
+    navigationOpen.value = false;
   });
 
   test("main mode renders WorkspaceFilters + Tasks section; no Views/Lanes filter sections", () => {
@@ -148,6 +155,100 @@ describe("SidebarPane", () => {
     expect(container.querySelector(".task-order")?.textContent).toBe("Sorted by id, grouped by lane");
   });
 
+  test("a group header folds its rows away and back, and the fold is kept per grouping", () => {
+    lanes.value = [lane({ name: "now", sort: 0 }), lane({ name: "later", sort: 1 })];
+    tasks.value = [task({ id: 1, lane: "later" }), task({ id: 2, lane: "now" }), task({ id: 3, lane: "later" })];
+    taskGroup.value = "lane";
+    const { container } = render(<SidebarPane />);
+    const header = (label: string) =>
+      Array.from(container.querySelectorAll<HTMLButtonElement>("button.task-group-header")).find(
+        el => el.querySelector(".task-group-label")?.textContent === label,
+      );
+    const listed = () => Array.from(container.querySelectorAll(".task-row .num")).map(el => el.textContent);
+    expect(header("later")?.getAttribute("aria-expanded")).toBe("true");
+
+    fireEvent.click(header("later") as HTMLButtonElement);
+    expect(listed()).toEqual(["@2"]);
+    expect(header("later")?.getAttribute("aria-expanded")).toBe("false");
+    // The folded header still shows its count.
+    expect(header("later")?.querySelector(".task-group-count")?.textContent).toBe("2");
+    expect(collapsedGroups.value).toEqual({ lane: ["later"], status: [] });
+
+    // Another grouping has its own folds.
+    act(() => {
+      taskGroup.value = "status";
+    });
+    expect(listed()).toEqual(["@1", "@2", "@3"]);
+    act(() => {
+      taskGroup.value = "lane";
+    });
+    expect(listed()).toEqual(["@2"]);
+    fireEvent.click(header("later") as HTMLButtonElement);
+    expect(listed()).toEqual(["@2", "@1", "@3"]);
+  });
+
+  test("the order line opens the sort and group panel, whose choices change the list", () => {
+    tasks.value = [task({ id: 1 }), task({ id: 2 })];
+    const { container } = render(<SidebarPane />);
+    const trigger = container.querySelector<HTMLButtonElement>("#sidebar-filter-order-trigger");
+    if (!trigger) throw new Error("expected the order trigger");
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(trigger);
+    expect(sidebarFilter.value).toBe("order");
+    const panel = container.querySelector("#sidebar-filter-order-panel");
+    expect(panel?.querySelector("h2")?.textContent).toBe("Sort and group");
+    expect(
+      Array.from(panel?.querySelectorAll("[data-setting]") ?? []).map(el => el.getAttribute("data-setting")),
+    ).toEqual(["sort", "direction", "group"]);
+    // Each field is listed once; the direction is its own control.
+    const sort = panel?.querySelector<HTMLSelectElement>("#setting-sort");
+    if (!sort) throw new Error("expected the sort select");
+    expect(Array.from(sort.options).map(o => o.value)).toEqual([
+      "id",
+      "title",
+      "lane",
+      "status",
+      "priority",
+      "updated",
+    ]);
+    const descending = panel?.querySelector<HTMLInputElement>('#setting-direction input[value="desc"]');
+    if (!descending) throw new Error("expected the descending radio");
+    fireEvent.click(descending);
+    expect(taskSort.value).toBe("-id");
+    expect(Array.from(container.querySelectorAll(".task-row .num")).map(el => el.textContent)).toEqual(["@2", "@1"]);
+    // A choice keeps the panel open: sort, direction and group are chosen together.
+    expect(sidebarFilter.value).toBe("order");
+    expect(container.querySelector(".task-order")?.textContent).toBe("Sorted by id descending");
+  });
+
+  test("Collapse all and Expand all fold every shown group, and only show while the list is grouped", () => {
+    lanes.value = [lane({ name: "now", sort: 0 }), lane({ name: "later", sort: 1 })];
+    tasks.value = [task({ id: 1, lane: "later" }), task({ id: 2, lane: "now" }), task({ id: 3, lane: "later" })];
+    const { container } = render(<SidebarPane />);
+    const button = (label: string) => container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+    const listed = () => Array.from(container.querySelectorAll(".task-row .num")).map(el => el.textContent);
+    expect(button("Collapse all lanes")).toBeNull();
+
+    act(() => {
+      taskGroup.value = "lane";
+    });
+    expect(button("Expand all lanes")?.disabled).toBe(true);
+    fireEvent.click(button("Collapse all lanes") as HTMLButtonElement);
+    expect(listed()).toEqual([]);
+    expect(container.querySelectorAll('button.task-group-header[aria-expanded="false"]').length).toBe(2);
+    expect(button("Collapse all lanes")?.disabled).toBe(true);
+    fireEvent.click(button("Expand all lanes") as HTMLButtonElement);
+    expect(listed()).toEqual(["@2", "@1", "@3"]);
+
+    act(() => {
+      taskGroup.value = "status";
+    });
+    expect(button("Collapse all lanes")).toBeNull();
+    fireEvent.click(button("Collapse all statuses") as HTMLButtonElement);
+    expect(listed()).toEqual([]);
+    expect(collapsedGroups.value).toEqual({ lane: [], status: ["open"] });
+  });
+
   test("task list follows orderedVisibleTasks: natural title order (task-2 before task-12)", () => {
     taskSort.value = "title";
     tasks.value = [
@@ -173,6 +274,24 @@ describe("SidebarPane", () => {
     expect(titles).toEqual(["needle title", "zzz"]);
     expect(container.querySelector(".task-order")?.textContent).toBe("Sorted by relevance");
     expect(container.querySelector(".task-group-header")).toBeNull();
+  });
+
+  test("a task row shows a labelled status glyph, its id, tags and age, and no status word", () => {
+    tasks.value = [
+      task({ id: 4, title: "compact", status: "review", tags: ["bug", "ui"], updated: Date.now() - 3 * 3_600_000 }),
+    ];
+    const { container } = render(<SidebarPane />);
+    const row = container.querySelector<HTMLButtonElement>(".task-row");
+    if (!row) throw new Error("expected a task row");
+    const glyph = row.querySelector(".dot.dot-status-review");
+    expect(glyph?.getAttribute("role")).toBe("img");
+    expect(glyph?.getAttribute("aria-label")).toBe("In review");
+    expect(row.querySelector(".num")?.textContent).toBe("@4");
+    expect(Array.from(row.querySelectorAll(".task-row-tag")).map(el => el.textContent)).toEqual(["#bug", "#ui"]);
+    expect(row.querySelector(".task-row-trail .priority-chip")?.textContent).toBe("P3");
+    expect(row.querySelector(".task-row-trail .task-row-time")?.textContent).toBe("3h");
+    expect(row.textContent).not.toContain("In review");
+    expect(row.textContent).not.toContain("·");
   });
 
   test("clicking a task row selects it", () => {
@@ -233,47 +352,93 @@ describe("SidebarPane", () => {
 
   // ---- management modes ----
 
-  test("sidebarMode='tags' renders the 'Manage tags' pane without changing filters", () => {
+  test("view='tags' renders the Tags list without changing filters", () => {
     filters.value = { status: "open", lane: "now", tag: ["bug"] };
-    sidebarMode.value = "tags";
+    view.value = "tags";
     tags.value = [{ name: "bug", color: null, created: 0, task_count: 2 }];
     const { container } = render(<SidebarPane />);
-    expect(container.querySelector(".section-head .eyebrow")?.textContent).toBe("Manage tags");
-    expect(container.querySelector('button[aria-label="New tag"]')).not.toBeNull();
+    expect(container.querySelector(".section-head h1")?.textContent).toBe("Tags");
+    expect(container.querySelectorAll('button[aria-label="New tag"]').length).toBe(1);
     // Opening management never changes filters.
     expect(filters.value).toEqual({ status: "open", lane: "now", tag: ["bug"] });
   });
 
-  test("tags mode '+' button dispatches the new-tag modal; row click opens tag-edit", () => {
-    sidebarMode.value = "tags";
-    tags.value = [{ name: "bug", color: null, created: 0, task_count: 2 }];
+  test("tags: '+' opens the new-tag modal; a row selects its tag, marks it and closes the drawer", () => {
+    view.value = "tags";
+    tags.value = [
+      { name: "bug", color: null, created: 0, task_count: 2 },
+      { name: "alpha", color: null, created: 0, task_count: 0 },
+    ];
+    navigationOpen.value = true;
     const { container } = render(<SidebarPane />);
     fireEvent.click(container.querySelector<HTMLButtonElement>('button[aria-label="New tag"]') as HTMLButtonElement);
     expect(modal.value).toEqual({ kind: "new-tag" });
-    const row = container.querySelector<HTMLButtonElement>(".lane-row");
-    if (!row) throw new Error("expected a tag row");
-    fireEvent.click(row);
-    expect(modal.value).toEqual({ kind: "tag-edit", name: "bug" });
+    modal.value = null;
+    const rows = () => Array.from(container.querySelectorAll<HTMLButtonElement>(".lane-row"));
+    // Sorted by name; with no selection the first tag is the one shown.
+    expect(rows().map(r => r.querySelector(".tag-pill")?.textContent)).toEqual(["alpha", "bug"]);
+    expect(rows()[0]?.getAttribute("aria-current")).toBe("true");
+    fireEvent.click(rows()[1] as HTMLButtonElement);
+    expect(selectedTag.value).toBe("bug");
+    expect(modal.value).toBeNull();
+    expect(navigationOpen.value).toBe(false);
+    expect(rows()[1]?.classList.contains("selected")).toBe(true);
+    expect(rows()[0]?.getAttribute("aria-current")).toBeNull();
   });
 
-  test("sidebarMode='lanes' renders the 'Manage lanes' pane: new-lane + lane-edit dispatch, no filtering", () => {
+  test("view='lanes' renders the Lanes list: '+' opens new-lane, a row selects its lane, no filtering", () => {
     filters.value = { status: null, lane: "now", tag: [] };
-    sidebarMode.value = "lanes";
-    lanes.value = [lane({ name: "now" }), lane({ name: "later" })];
+    view.value = "lanes";
+    lanes.value = [lane({ name: "now" }), lane({ name: "later", sort: 1 })];
+    tasks.value = [task({ id: 1, lane: "later" }), task({ id: 2, lane: "later", status: "done" })];
     const { container } = render(<SidebarPane />);
-    expect(container.querySelector(".section-head .eyebrow")?.textContent).toBe("Manage lanes");
+    expect(container.querySelector(".section-head h1")?.textContent).toBe("Lanes");
 
     fireEvent.click(container.querySelector<HTMLButtonElement>('button[aria-label="New lane"]') as HTMLButtonElement);
     expect(modal.value).toEqual({ kind: "new-lane" });
+    modal.value = null;
 
-    const row = Array.from(container.querySelectorAll<HTMLButtonElement>(".lane-row")).find(
-      b => b.querySelector(".lane-name")?.textContent === "later",
-    );
-    if (!row) throw new Error("expected a 'later' lane row");
-    fireEvent.click(row);
-    expect(modal.value).toEqual({ kind: "lane-edit", name: "later" });
+    const rowFor = (name: string) =>
+      Array.from(container.querySelectorAll<HTMLButtonElement>(".lane-row")).find(
+        b => b.querySelector(".lane-name")?.textContent === name,
+      );
+    expect(rowFor("now")?.querySelector(".lane-default")?.textContent).toBe("default");
+    expect(rowFor("now")?.getAttribute("aria-current")).toBe("true");
+    // Counts stay "not done".
+    expect(rowFor("later")?.querySelector(".lane-count")?.textContent).toBe("1");
+    fireEvent.click(rowFor("later") as HTMLButtonElement);
+    expect(selectedLane.value).toBe("later");
+    expect(modal.value).toBeNull();
+    expect(rowFor("later")?.getAttribute("aria-current")).toBe("true");
     // Management rows never touch filters.
     expect(filters.value.lane).toBe("now");
+  });
+
+  test("the lane and tag searches narrow the rows", () => {
+    view.value = "lanes";
+    lanes.value = [lane({ name: "now" }), lane({ name: "later", sort: 1 }), lane({ name: "research", sort: 2 })];
+    const { container, unmount } = render(<SidebarPane />);
+    const find = container.querySelector<HTMLInputElement>('input[aria-label="Find a lane"]') as HTMLInputElement;
+    fireEvent.input(find, { target: { value: "LA" } });
+    expect(Array.from(container.querySelectorAll(".lane-row .lane-name")).map(n => n.textContent)).toEqual(["later"]);
+    fireEvent.input(find, { target: { value: "zzz" } });
+    expect(container.querySelectorAll(".lane-row").length).toBe(0);
+    expect(container.querySelector(".section-body .meta")?.textContent).toBe("no lane matches");
+    unmount();
+
+    view.value = "tags";
+    tags.value = [
+      { name: "bug", color: null, created: 0, task_count: 2 },
+      { name: "plan", color: null, created: 0, task_count: 1 },
+    ];
+    const tagsView = render(<SidebarPane />);
+    const findTag = tagsView.container.querySelector<HTMLInputElement>(
+      'input[aria-label="Find a tag"]',
+    ) as HTMLInputElement;
+    fireEvent.input(findTag, { target: { value: "pl" } });
+    expect(Array.from(tagsView.container.querySelectorAll(".lane-row .tag-pill")).map(n => n.textContent)).toEqual([
+      "plan",
+    ]);
   });
 
   // ---- drag & drop ----

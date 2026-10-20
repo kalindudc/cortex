@@ -23,18 +23,29 @@ import {
   filters,
   tab,
   pendingTitleFocus,
+  selectedLane,
+  selectedTag,
 } from "../../state/signals.ts";
 import { createUntitledTask } from "../../lib/createTask.ts";
 import { closeAllPopovers } from "../../state/popovers.ts";
+import { contextShown, contextTab, hideContext, showContext } from "../../state/context.ts";
 import { moveSelection } from "../../state/selection.ts";
-import { requestMode, requestPostUpdate, revealSidebarFilter } from "../../state/workspace.ts";
-import { sidebarMode } from "../../state/signals.ts";
+import { openSettings, requestMode, requestPostUpdate, revealSidebarFilter } from "../../state/workspace.ts";
+import { view } from "../../state/signals.ts";
 import { theme, toggleTheme } from "../../state/theme.ts";
-import { SETTINGS, taskGroup, taskSort } from "../../state/settings.ts";
-import { activeTask, resumeCandidatesForTask } from "../../state/computed.ts";
+import { collapseGroups, expandAllGroups, SETTINGS, taskGroup, taskSort } from "../../state/settings.ts";
+import { activeTask, resumeCandidatesForTask, taskArrangement } from "../../state/computed.ts";
 import { resumeSession } from "../../lib/resume.ts";
 import { setTaskMemory } from "../../lib/memory.ts";
-import { GROUP_HELP, SORT_HELP, TASK_GROUPS, TASK_SORTS } from "../../../lib/taskOrder.ts";
+import {
+  GROUP_HELP,
+  isDescending,
+  SORT_FIELDS,
+  SORT_HELP,
+  sortField,
+  sortOf,
+  TASK_GROUPS,
+} from "../../../lib/taskOrder.ts";
 import { api } from "../../api/client.ts";
 import { STATUS, STATUS_LABEL } from "../../../lib/constants.ts";
 import { kbd, modeShortcutHint } from "../../lib/keys.ts";
@@ -269,11 +280,14 @@ export function buildCommands(): Command[] {
       icon: "eye",
       submenu: () =>
         lanes.value.map(l => ({
-          id: `lane-edit-${l.name}`,
+          id: `lane-open-${l.name}`,
           label: l.name,
           hint: "",
           icon: "eye",
-          action: () => (modal.value = { kind: "lane-edit", name: l.name }),
+          action: () => {
+            selectedLane.value = l.name;
+            view.value = "lanes";
+          },
         })),
     });
   }
@@ -303,14 +317,14 @@ export function buildCommands(): Command[] {
     hint: "",
     icon: "plus",
     action: () => {
-      // Routes through ModalRoot → NewLaneModal so creation matches the
-      // edit/delete flow and the name input is reliably focused on open.
+      // Routes through ModalRoot → NewLaneModal so the name input is
+      // reliably focused on open.
       closeAllPopovers();
       modal.value = { kind: "new-lane" };
     },
   });
 
-  // ----- tag scoped (filter + edit) -----
+  // ----- tag scoped (filter + the Tags panel) -----
   // The palette reveals the canonical attached sidebar filter, including
   // search and multi-select. Keep the historical command id for matching;
   // no per-tag flat commands or detached filtering modal.
@@ -332,23 +346,26 @@ export function buildCommands(): Command[] {
         [...tags.value]
           .sort((a, b) => a.name.localeCompare(b.name))
           .map(tg => ({
-            id: `tag-edit-${tg.name}`,
+            id: `tag-open-${tg.name}`,
             label: `#${tg.name}`,
             hint: "",
             icon: "eye",
-            action: () => (modal.value = { kind: "tag-edit", name: tg.name }),
+            action: () => {
+              selectedTag.value = tg.name;
+              view.value = "tags";
+            },
           })),
     });
   }
 
-  // ----- management (explicit sidebar modes — never filter changes) -----
+  // ----- management (the rail's panels — never filter changes) -----
   cmds.push({
     id: "manage-lanes",
     label: "Manage lanes",
     hint: "",
     icon: "layers",
     action: () => {
-      sidebarMode.value = "lanes";
+      view.value = "lanes";
     },
   });
   cmds.push({
@@ -357,8 +374,27 @@ export function buildCommands(): Command[] {
     hint: "",
     icon: "hash",
     action: () => {
-      sidebarMode.value = "tags";
+      view.value = "tags";
     },
+  });
+  cmds.push({
+    id: "backup",
+    label: "Backup\u2026",
+    hint: "",
+    icon: "archive",
+    action: () => {
+      view.value = "backup";
+    },
+  });
+
+  // ----- side panel (the same toggle as the task toolbar's button) -----
+  const panelShown = contextShown();
+  cmds.push({
+    id: "side-panel",
+    label: panelShown ? "Hide the side panel" : "Show the side panel",
+    hint: "",
+    icon: "panelRight",
+    action: () => (panelShown ? hideContext() : showContext(contextTab.value)),
   });
 
   // ----- resume (only when the active task has a pi or bb author) -----
@@ -376,7 +412,7 @@ export function buildCommands(): Command[] {
           hint: c.harness === "bb" ? "open in bb" : "copy the pi command",
           icon: "play",
           action: () => {
-            tab.value = "authors";
+            showContext("details");
             return resumeSession(at.id, c.author);
           },
         })),
@@ -391,13 +427,22 @@ export function buildCommands(): Command[] {
     hint: "",
     icon: "layers",
     submenu: () => [
-      ...TASK_SORTS.map(v => ({
+      ...SORT_FIELDS.map(v => ({
         id: `sort-${v}`,
         label: `Sort by ${v}: ${SORT_HELP[v]}`,
-        hint: current(taskSort.value === v),
+        hint: current(sortField(taskSort.value) === v),
         icon: "chevronDown",
         action: () => {
-          taskSort.value = v;
+          taskSort.value = sortOf(v, isDescending(taskSort.value));
+        },
+      })),
+      ...[false, true].map(descending => ({
+        id: descending ? "sort-descending" : "sort-ascending",
+        label: descending ? "Sort descending: highest first" : "Sort ascending: lowest first",
+        hint: current(isDescending(taskSort.value) === descending),
+        icon: descending ? "chevronDown" : "chevronUp",
+        action: () => {
+          taskSort.value = sortOf(sortField(taskSort.value), descending);
         },
       })),
       ...TASK_GROUPS.map(v => ({
@@ -411,6 +456,29 @@ export function buildCommands(): Command[] {
       })),
     ],
   });
+  // Fold or unfold the list's groups, while it shows some.
+  const { group: grouping, groups: shownGroups } = taskArrangement.value;
+  if (grouping !== "none" && shownGroups.length > 0) {
+    const noun = grouping === "lane" ? "lanes" : "statuses";
+    cmds.push({
+      id: "collapse-groups",
+      label: `Collapse all ${noun}`,
+      hint: "",
+      icon: "chevronsDownUp",
+      action: () =>
+        collapseGroups(
+          grouping,
+          shownGroups.map(g => g.key),
+        ),
+    });
+    cmds.push({
+      id: "expand-groups",
+      label: `Expand all ${noun}`,
+      hint: "",
+      icon: "chevronsUpDown",
+      action: () => expandAllGroups(grouping),
+    });
+  }
   const appearanceSetting = SETTINGS.find(s => s.key === "appearance");
   if (appearanceSetting) {
     cmds.push({
@@ -430,12 +498,10 @@ export function buildCommands(): Command[] {
   }
   cmds.push({
     id: "settings",
-    label: "Settings and help",
+    label: "Settings",
     hint: kbd(","),
-    icon: "keyboard",
-    action: () => {
-      modal.value = { kind: "settings" };
-    },
+    icon: "settings",
+    action: () => openSettings(),
   });
 
   // ----- system -----

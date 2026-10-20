@@ -120,7 +120,8 @@ describe("document surface", () => {
       .toEqual(["const answer = 42;\n"]);
     expect(await page.locator(`${VIEW} .md-codeblock .md-copy`).textContent()).toBe("Copied");
 
-    // The outline scrolls the reader to its entry.
+    // The side panel's outline scrolls the reader to its entry.
+    await page.getByRole("tab", { name: "Outline" }).click();
     await page.locator(".doc-outline .doc-outline-link", { hasText: "Alpha" }).click();
     await expect.poll(() => inReaderViewport(page, `task-${id}-alpha`), POLL).toBe(true);
     await page.locator(".doc-outline .doc-outline-link", { hasText: "Beta" }).last().click();

@@ -59,13 +59,15 @@ describe("agent memory from the palette", () => {
     expect(await excluded(id)).toBe(false);
   });
 
-  test("the settings and help pane lists both memory commands", async () => {
+  test("the Settings panel lists both memory commands", async () => {
     const { page } = desktop;
     await addTask(desktop, "listed task");
     await openTask(page, "listed task");
-    await runCommand(page, "settings and help");
-    const pane = 'dialog[aria-label="Settings and help"][open]';
-    await page.locator(`${pane} input[type="search"]`).fill("agent memory");
+    await runCommand(page, "settings");
+    const pane = ".settings-panel";
+    await page.locator(pane).waitFor();
+    // The panel's search field lives in the list column.
+    await page.locator('input[aria-label="Search settings, commands and shortcuts"]').fill("agent memory");
     await expect
       .poll(
         () =>

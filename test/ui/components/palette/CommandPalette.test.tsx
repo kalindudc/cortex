@@ -316,4 +316,32 @@ describe("CommandPalette", () => {
     expect(filters.value).toEqual({ status: "open", lane: "now", tag: ["bug"] });
     expect(workspaceQuery.value).toBe("needle");
   });
+
+  test("picking the task already open from the Lanes view returns to Tasks", async () => {
+    const { view } = await import("../../../../src/ui/state/signals.ts");
+    const currentView = (): string => view.value;
+    paletteQuery.value = "";
+    tasks.value = [
+      {
+        id: 9,
+        lane: "now",
+        title: "Already open",
+        body: "",
+        status: "open",
+        priority: null,
+        created: 0,
+        updated: 0,
+        tags: [],
+        memory_excluded: false,
+      },
+    ];
+    selectedId.value = 9;
+    view.value = "lanes";
+    mockedSearchResults = [{ task: tasks.value[0], score: 10 }];
+    const { container } = render(<CommandPalette />);
+    fireEvent.click(container.querySelectorAll(".palette-row")[0]);
+    expect(selectedId.value).toBe(9);
+    expect(currentView()).toBe("tasks");
+    view.value = "tasks";
+  });
 });

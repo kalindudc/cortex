@@ -15,7 +15,15 @@
 // filter/lane changes that move the fallback.
 
 import { batch, effect } from "@preact/signals";
-import { selectedId, pendingHeadingFragment, tab, readerMode, preferredReaderMode } from "./signals.ts";
+import {
+  selectedId,
+  pendingHeadingFragment,
+  tab,
+  readerMode,
+  preferredReaderMode,
+  view,
+  TASK_VIEWS,
+} from "./signals.ts";
 
 // Matches the gate in lastTask.ts:22-30: positive integer only.
 const TASK_PATH = /^\/task\/(\d+)$/;
@@ -118,6 +126,9 @@ function applyLocation(): void {
   handledNavigation = key;
   const id = parsePathname(window.location.pathname);
   batch(() => {
+    // The task may already be selected, which the selection effect in
+    // workspace.ts never sees, so return to Tasks here.
+    if (!TASK_VIEWS.has(view.peek())) view.value = "tasks";
     selectedId.value = id;
     stageHeadingFragment(id, window.location.hash);
   });

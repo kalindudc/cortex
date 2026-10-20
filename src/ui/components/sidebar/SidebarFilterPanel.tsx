@@ -1,4 +1,5 @@
-// The sidebar's three filters share ONE attached, nonmodal surface. It is
+// The sidebar's three filters, and the task list's sort and group choice,
+// share ONE attached, nonmodal surface. It is
 // a sibling of sidebar-body (not inside its clipped/scrolling task list).
 // Absolute coordinates are local to the sidebar, so drawer entry motion
 // cannot turn viewport coordinates into a second, drifting offset.
@@ -6,12 +7,14 @@ import type { JSX, VNode } from "preact";
 import { useLayoutEffect, useRef } from "preact/hooks";
 import { useSignal } from "@preact/signals";
 import { filters, lanes, setFilter, type SidebarFilter } from "../../state/signals.ts";
+import { SETTINGS } from "../../state/settings.ts";
 import { closeSidebarFilter } from "../../state/popovers.ts";
 import { STATUS, STATUS_LABEL } from "../../../lib/constants.ts";
 import { searchCatalog, catalogSearchHint } from "../../../lib/catalogSearch.ts";
 import type { TaskStatus } from "../../api/types.ts";
 import { Icon } from "../Icon.tsx";
 import { TagFilterPanel } from "./TagFilterPanel.tsx";
+import { SettingRow } from "../panels/SettingRow.tsx";
 
 export function SidebarFilterPanel({ kind }: { kind: SidebarFilter }): VNode {
   const ref = useRef<HTMLElement>(null);
@@ -71,7 +74,14 @@ export function SidebarFilterPanel({ kind }: { kind: SidebarFilter }): VNode {
     };
   }, [kind]);
 
-  const title = kind === "tags" ? "Filter by tags" : kind === "status" ? "Status filter" : "Lane filter";
+  const title =
+    kind === "tags"
+      ? "Filter by tags"
+      : kind === "status"
+        ? "Status filter"
+        : kind === "lane"
+          ? "Lane filter"
+          : "Sort and group";
   return (
     <section
       ref={ref}
@@ -89,17 +99,41 @@ export function SidebarFilterPanel({ kind }: { kind: SidebarFilter }): VNode {
       <div class="sidebar-filter-surface">
         <header class="sidebar-filter-head">
           <h2 id={`sidebar-filter-${kind}-heading`}>{title}</h2>
-          <button type="button" class="btn-icon" aria-label="Close filter" onClick={() => closeSidebarFilter(true)}>
+          <button
+            type="button"
+            class="btn-icon"
+            aria-label={kind === "order" ? "Close sort and group" : "Close filter"}
+            onClick={() => closeSidebarFilter(true)}
+          >
             <Icon name="x" size={14} />
           </button>
         </header>
         {kind === "tags" ? (
           <TagFilterPanel close={() => closeSidebarFilter(true)} />
+        ) : kind === "order" ? (
+          <OrderChoices />
         ) : (
           <SingleFilterChoices kind={kind} />
         )}
       </div>
     </section>
+  );
+}
+
+// The Sort, Direction and Group settings themselves, so the list and the
+// settings panel change them the same way. It stays open across a change: the
+// choices are independent.
+function OrderChoices(): VNode {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    ref.current?.querySelector<HTMLElement>("select")?.focus({ preventScroll: true });
+  }, []);
+  return (
+    <div class="sidebar-order" ref={ref}>
+      {SETTINGS.filter(s => s.key === "sort" || s.key === "direction" || s.key === "group").map(s => (
+        <SettingRow key={s.key} spec={s} />
+      ))}
+    </div>
   );
 }
 

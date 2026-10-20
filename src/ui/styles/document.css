@@ -4,7 +4,6 @@
 .task-document {
   --document-gutter: 36px;
   --document-measure: 72ch;
-  --outline-width: 0px;
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
@@ -12,18 +11,17 @@
   min-width: 0;
   font-size: 16px;
 }
-.task-document.has-outline { --outline-width: 200px; }
 .workspace-toolbar {
   position: relative;
   z-index: 3;
   display: flex;
-  align-items: center;
+  align-items: stretch;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 16px;
+  gap: 0 10px;
   flex-shrink: 0;
-  min-height: 64px;
-  padding: 12px 28px;
+  min-height: 44px;
+  padding: 0 10px 0 18px;
   border-bottom: 1px solid var(--border);
   font-size: 12px;
 }
@@ -32,15 +30,18 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
+  min-height: 44px;
 }
-.workspace-toolbar-leading { gap: 22px; }
-.workspace-breadcrumb { display: flex; align-items: center; gap: 10px; color: var(--text-2); white-space: nowrap; }
-.workspace-breadcrumb > [aria-hidden] { color: var(--border-strong); }
+.workspace-toolbar-leading { gap: 10px; }
+.workspace-toolbar-actions { gap: 6px; }
+.workspace-breadcrumb { display: flex; align-items: center; gap: 6px; color: var(--text-2); white-space: nowrap; }
+.workspace-breadcrumb > .icon { color: var(--text-3); }
+.workspace-breadcrumb > .num { color: var(--text); font-weight: 500; }
 .workspace-toolbar-actions { flex-shrink: 0; margin-left: auto; }
 .status-anchor, .task-actions-anchor { position: relative; }
 .workspace-toolbar .status-pill {
-  height: var(--control-height);
-  padding: 0 10px;
+  height: 28px;
+  padding: 0 8px;
   border: 1px solid var(--border);
   border-radius: var(--r-2);
   background: transparent;
@@ -48,6 +49,8 @@
   color: var(--text-2);
 }
 .workspace-toolbar .status-pill:hover { background: var(--panel); border-color: var(--border-strong); }
+.workspace-toolbar .btn { height: 28px; }
+.workspace-toolbar .btn-icon { width: 28px; height: 28px; }
 .doc-mode-switch {
   display: inline-flex;
   align-items: center;
@@ -74,38 +77,40 @@
   background: transparent;
   font: 500 12px/1 var(--font-sans);
 }
-.mode-switch-super { display: inline-flex; align-items: center; align-self: stretch; padding: 0 8px 0 4px; margin-right: 2px; border-right: 1px solid var(--border); color: var(--text-3); font: 500 10px/1 var(--font-mono); letter-spacing: 0.02em; }
 .doc-mode-switch .mode-switch-digit { color: var(--text-3); font: 500 10px/1 var(--font-mono); opacity: 0.75; }
 .doc-mode-switch button.active .mode-switch-digit { opacity: 1; }
 .doc-mode-switch button.active { background: var(--bg); color: var(--text); box-shadow: 0 1px 3px #0001; }
 .doc-mode-switch button:hover:not(.active) { background: var(--tint); color: var(--text); }
-.doc-topbar { flex-shrink: 0; border-bottom: 1px solid var(--border); padding: 0 28px; }
-.doc-tabs { display: flex; align-items: stretch; gap: 24px; }
+/* The Document / Activity tablist sits in the toolbar row; its tabs fill
+   the row's height so the selected tab's underline meets the toolbar's
+   bottom border. */
+.workspace-toolbar-leading > .doc-tabs { align-self: stretch; }
+.doc-tabs { display: flex; align-items: stretch; gap: 2px; }
 .doc-tabs [role="tab"] {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   min-height: 44px;
-  padding: 10px 0;
+  margin-bottom: -1px;
+  padding: 0 8px;
   border-bottom: 2px solid transparent;
-  color: var(--text-2);
-  font: 400 12px/1.4 var(--font-sans);
+  color: var(--text-3);
+  font: 500 12.5px/1.4 var(--font-sans);
   white-space: nowrap;
 }
 .doc-tabs [role="tab"]:hover { color: var(--text); }
-.doc-tabs [role="tab"].active { color: var(--text); border-bottom-color: var(--accent); font-weight: 550; }
+.doc-tabs [role="tab"].active { color: var(--text); border-bottom-color: var(--accent); }
 .tab-count { min-width: 18px; padding: 1px 5px; border-radius: var(--r-1); background: var(--panel); color: var(--text-2); font: 10px/1.4 var(--font-mono); }
 .doc-page { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; min-width: 0; overflow: auto; }
 .task-header, .doc-conflict {
   flex-shrink: 0;
-  width: min(var(--document-measure), calc(100% - var(--outline-width) - 2 * var(--document-gutter)));
-  margin-left: max(var(--document-gutter), calc((100% - var(--outline-width) - var(--document-measure)) / 2));
+  width: min(var(--document-measure), calc(100% - 2 * var(--document-gutter)));
+  margin-left: max(var(--document-gutter), calc((100% - var(--document-measure)) / 2));
   font-size: 16px;
 }
 .task-header { position: relative; z-index: 2; margin-top: 36px; margin-bottom: 30px; }
-.document-kicker { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; color: var(--text-2); font: 10px/1.5 var(--font-mono); }
-.task-id { text-transform: uppercase; letter-spacing: .06em; }
-.task-updated { font: 11px/1.5 var(--font-sans); }
+.document-kicker { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; color: var(--text-3); font: 12px/1.5 var(--font-sans); }
+.task-id { font: 11px/1.5 var(--font-mono); }
 .task-title-row { display: flex; align-items: flex-start; min-width: 0; }
 .task-title-display {
   margin: 0;
@@ -126,41 +131,45 @@
 }
 .task-header-trailing { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 8px 12px; margin-top: 16px; }
 .task-props { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
+/* Header metadata reads as compact bordered chips: lane, priority, "+ Tag".
+   Their "Lane:" and "Priority:" labels stay for screen readers only. */
 .prop-trigger {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  height: var(--control-height);
-  min-width: var(--control-height);
-  padding: 0 8px;
-  border: 1px solid transparent;
-  border-radius: var(--r-2);
+  gap: 6px;
+  height: 26px;
+  min-width: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
   background: transparent;
   color: var(--text-2);
-  font: 400 12px/1 var(--font-sans);
+  font: 400 12.5px/1 var(--font-sans);
   white-space: nowrap;
   cursor: pointer;
 }
-.prop-trigger:hover { border-color: var(--border); background: var(--panel); color: var(--text); }
+.prop-trigger:hover { border-color: var(--border-strong); color: var(--text); }
 .prop-label { color: var(--text-2); }
-.prop-value { color: var(--text); font-weight: 500; max-width: 22ch; overflow: hidden; text-overflow: ellipsis; }
-.prop-trigger .icon { color: var(--text-2); }
-/* Header priority is NOT a list badge. Same geometry in display and edit;
-   the small list-row PriorityChip retains its independent styling. */
+.prop-value { max-width: 22ch; overflow: hidden; text-overflow: ellipsis; }
+.prop-trigger .icon { color: var(--text-3); }
+/* Header priority is NOT a list badge: the same 26px bordered chip, and the
+   same minimum width in display and edit (the edit input's own width is
+   3.5em in sidebar.css), so clicking it never changes its geometry. The
+   small list-row PriorityChip retains its independent styling. */
 .prop-trigger.priority-chip {
-  height: var(--control-height);
-  min-width: 112px;
-  width: 112px;
-  padding: 0 8px;
-  border-radius: var(--r-2);
+  height: 26px;
+  min-width: 64px;
+  padding: 0 9px;
+  border-radius: 7px;
   background: transparent;
-  border: 1px solid transparent;
+  border: 1px solid var(--border);
   color: var(--text-2);
-  font: 400 12px/1 var(--font-sans);
+  font: 400 12.5px/1 var(--font-sans);
   opacity: 1;
 }
-.prop-trigger.priority-chip:hover { background: var(--panel); border-color: var(--border); }
+.prop-trigger.priority-chip:hover { border-color: var(--border-strong); color: var(--text); }
+.prop-trigger.priority-chip .prop-value { font-weight: 600; }
 /* Empty metadata is an explicit add affordance, not plain read-only text. */
 button.prop-trigger.priority-chip-unset { border: 1px dotted var(--border-strong); }
 button.prop-trigger.priority-chip-unset:hover,
@@ -196,7 +205,7 @@ button.prop-trigger.priority-chip-unset:focus-visible { border-color: var(--text
   max-height: var(--title-full-height, none);
 }
 .task-header .tag-pill-removable { height: 28px; max-width: 28ch; }
-.tags-add { padding: 0; width: var(--control-height); }
+.tags-add { width: auto; padding: 0 9px; border-style: dashed; }
 .tags-add:disabled, .tags-overflow:disabled { opacity: .5; cursor: progress; }
 .tags-error { flex-basis: 100%; color: var(--err); font: 12px/1.5 var(--font-sans); }
 .draft-state { display: inline-flex; align-items: center; gap: 8px; margin-top: 8px; color: var(--text-2); font: 12px/1.5 var(--font-sans); }
@@ -210,7 +219,7 @@ button.prop-trigger.priority-chip-unset:focus-visible { border-color: var(--text
 .editor-baseline.is-error { color: var(--err); }
 .task-actions-menu { top: calc(100% + 6px); right: 0; min-width: 180px; }
 .task-actions-menu .task-action-delete { color: var(--err); display: flex; align-items: center; gap: 8px; }
-.doc-content { display: grid; grid-template-columns: minmax(0, 1fr) var(--outline-width); flex: 1 1 auto; min-height: 180px; min-width: 0; }
+.doc-content { display: grid; grid-template-columns: minmax(0, 1fr); flex: 1 1 auto; min-height: 180px; min-width: 0; }
 .doc-content[hidden], .doc-context[hidden] { display: none; }
 .doc-split { display: flex; min-width: 0; min-height: 0; }
 .doc-reader { flex: 1 1 auto; min-height: 0; min-width: 0; overflow: auto; position: relative; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; scroll-padding-top: 20px; }
@@ -225,9 +234,6 @@ button.prop-trigger.priority-chip-unset:focus-visible { border-color: var(--text
 .mode-edit .editable-task-body, .mode-split .editable-task-body { border: 1px solid var(--border); border-radius: var(--r-3); overflow: hidden; }
 .mode-split .doc-split > .editable-task-body, .mode-split .doc-split > .doc-reader { flex: 1 1 50%; min-width: 0; }
 .mode-split .doc-reader { --document-gutter: 24px; padding-top: 12px; }
-.doc-outline { min-width: 0; padding: 0 24px 32px 8px; overflow: auto; scrollbar-width: thin; }
-.doc-outline-title { margin: 0 0 12px 10px; color: var(--text-2); font: 600 10px/1.5 var(--font-sans); text-transform: uppercase; letter-spacing: .1em; cursor: pointer; list-style: none; }
-.doc-outline-title::-webkit-details-marker { display: none; }
 .doc-outline-link { display: block; width: 100%; min-height: 30px; padding: 7px 10px; border: 0; border-left: 2px solid var(--border); border-radius: 0; color: var(--text-2); font: 11px/1.45 var(--font-sans); background: transparent; text-align: left; overflow-wrap: anywhere; }
 .doc-outline-link:hover { background: var(--panel); color: var(--text); }
 .doc-outline-link[aria-current="location"] { background: var(--panel); color: var(--text); border-left-color: var(--accent); }
@@ -287,40 +293,30 @@ button.prop-trigger.priority-chip-unset:focus-visible { border-color: var(--text
 
 @media (max-width: 1200px) and (min-width: 901px) {
   .task-document { --document-gutter: 28px; }
-  .task-document.has-outline { --outline-width: 170px; }
   .workspace-toolbar-leading { gap: 12px; }
   .workspace-breadcrumb { display: none; }
 }
 @media (max-width: 900px) {
-  .task-document, .task-document.has-outline { --document-gutter: 20px; --outline-width: 0px; }
-  .workspace-toolbar { padding: 8px 16px; min-height: 60px; flex-wrap: wrap; gap: 8px; }
+  .task-document { --document-gutter: 20px; }
+  .workspace-toolbar { padding: 0 16px 8px; min-height: 44px; flex-wrap: wrap; gap: 0 8px; }
   .workspace-breadcrumb, .focus-reading-toggle { display: none; }
-  .workspace-toolbar-leading { flex: 1 1 100%; }
+  .workspace-toolbar-leading { flex: 1 1 100%; flex-wrap: wrap; row-gap: 8px; }
   .workspace-toolbar-actions { margin-left: auto; gap: 6px; }
   .workspace-toolbar .status-pill, .workspace-toolbar .btn, .workspace-toolbar .btn-icon { min-height: 44px; }
   .workspace-toolbar .status-pill { font-size: 11px; padding: 0 8px; }
   .workspace-toolbar .btn { font-size: 11px; padding: 0 10px; }
   .doc-mode-switch { display: flex; width: min(100%, 320px); }
   .doc-mode-switch button { flex: 1 1 0; min-height: 44px; min-width: 0; padding: 0 6px; }
-  .mode-switch-super { padding: 0 8px; font-size: 11px; }
-  .doc-topbar { padding: 0 20px; }
-  .doc-tabs { gap: 20px; }
   .doc-tabs [role="tab"] { min-height: 44px; font-size: 12px; }
   .task-header { margin-top: 24px; margin-bottom: 26px; }
   .task-title-display, .task-header .title-input-wrap > .title-input, .task-header .title-input-wrap::after { font-size: 26px; }
   .task-header-trailing { gap: 4px 8px; margin-top: 12px; }
   .task-props { display: contents; }
   .task-header .tag-pill-removable { --tag-remove-size: 40px; height: 44px; }
-  .tags-add { width: 44px; }
+  .tags-add { min-width: 44px; }
   .prop-trigger, .prop-trigger.priority-chip { height: 44px; min-width: 44px; }
   .doc-content { display: flex; flex-direction: column; }
   .doc-split { flex: 1 1 auto; }
-  .doc-outline { flex-shrink: 0; order: -1; margin: 0 20px 22px; padding: 0; border: 1px solid var(--border); border-radius: var(--r-2); background: var(--panel); max-height: 36dvh; }
-  .doc-outline-title { display: flex; align-items: center; min-height: 44px; margin: 0; padding: 10px 12px; text-transform: none; letter-spacing: 0; font-size: 12px; font-weight: 400; }
-  .doc-outline-title::before { content: "\25B8"; margin-right: 8px; }
-  .doc-outline-details[open] > summary::before { transform: rotate(90deg); }
-  .doc-outline-link { min-height: 44px; margin-left: 10px; width: calc(100% - 20px); }
-  .doc-outline-details[open] { padding-bottom: 10px; }
   .mode-edit .doc-split, .mode-split .doc-split { padding: 0 16px 20px; }
   .mode-split .doc-content { min-height: 460px; }
   .mode-split .doc-split { flex-direction: column; gap: 16px; }

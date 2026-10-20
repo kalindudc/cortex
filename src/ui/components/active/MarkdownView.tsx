@@ -1,7 +1,7 @@
 // MarkdownView — THE shared rendered-Markdown surface.
 //
-// Consumed by task reading (TaskDocument), expanded update bodies
-// (InboxPane) and the legacy modal viewers. Owns a generation-scoped DOM
+// Consumed by task reading (TaskDocument), expanded update bodies in the
+// Activity view (ActivityPane) and the legacy modal viewers. Owns a generation-scoped DOM
 // lifecycle over lib/markdown.ts:
 //
 //   1. renderMarkdown(source) → sanitized HTML string (fails closed: a

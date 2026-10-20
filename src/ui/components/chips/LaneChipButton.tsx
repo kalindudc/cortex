@@ -42,7 +42,7 @@ export function LaneChipButton({ task }: { task: Task }): VNode {
           togglePopover(lanePopover);
         }}
       >
-        <span class="prop-label">Lane:</span>
+        <span class="prop-label visually-hidden">Lane:</span>
         {laneColor(task.lane) ? <span class="lane-color" style={`background: ${laneColor(task.lane)}`}></span> : null}
         <span class="prop-value">{task.lane}</span>
         <Icon name="chevronDown" size={10} />

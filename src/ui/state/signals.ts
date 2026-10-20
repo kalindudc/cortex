@@ -82,16 +82,35 @@ export const sectionOpen = signal<{ views: boolean; lanes: boolean; tasks: boole
   lanes: true,
   tasks: true,
 });
-// Sidebar mode toggle. "main" is the workspace surface (filters + task
-// list); "tags" and "lanes" are explicit MANAGEMENT modes (labeled 'Manage
-// tags' / 'Manage lanes' with a Back-to-tasks affordance). Entering a
-// management mode never changes the active filters. Live, in-memory
-// only.
-export const sidebarMode = signal<"main" | "tags" | "lanes">("main");
+// The navigation rail's destination. "tasks" lists tasks with filters and
+// shows the task document; the others replace the list column (Backup has
+// none) and show their panel in the document's place. Switching never
+// changes the filters, and it is in memory only, so every launch opens on
+// tasks.
+export type View = "tasks" | "search" | "lanes" | "tags" | "backup" | "settings";
+export const view = signal<View>("tasks");
+// The views that show the task document and the side panel. Acting on a
+// task from any other view switches to Tasks first; Search keeps its results
+// beside the task it opens.
+export const TASK_VIEWS: ReadonlySet<View> = new Set<View>(["tasks", "search"]);
+// The lane and tag the Lanes and Tags panels show. A panel falls back to the
+// first entry when its selection no longer exists. In memory only.
+export const selectedLane = signal<string | null>(null);
+export const selectedTag = signal<string | null>(null);
+// The Search panel's query over every task. Separate from workspaceQuery, so
+// searching never changes the task list's filters. In memory only.
+export const searchQuery = signal<string>("");
+// The Settings panel's search over settings, commands and shortcuts; its
+// field lives in the list column. In memory only.
+export const settingsQuery = signal<string>("");
+// Bumped by workspace.openSettings(); the field refocuses on each change.
+export const settingsFocusRequest = signal<number>(0);
 // Sidebar filters are navigation-owned, NOT active-task metadata popovers.
 // A fallback active-task change during live filtering must not close them.
 // One discriminant gives the three attached panels mutual exclusion.
-export type SidebarFilter = "status" | "lane" | "tags";
+// "order" is the task list's sort and group choice: not a filter, but it
+// shares the same attached panel beside its trigger.
+export type SidebarFilter = "status" | "lane" | "tags" | "order";
 export const sidebarFilter = signal<SidebarFilter | null>(null);
 
 // ---------- document workspace ----------
@@ -144,10 +163,10 @@ export const postUpdateOpen = signal<boolean>(false);
 
 // ---------- popovers / overlays ----------
 // Lane creation flows through the NewLaneModal (modal.value = { kind:
-// "new-lane" }) instead of an inline sidebar popover form — keeps create /
-// edit / delete on a single consistent surface and dodges the autoFocus
-// race that the inline form had. Tag creation flows through the active-
-// task TagPicker (type a new name → "Create #foo" row appears).
+// "new-lane" }) instead of an inline sidebar popover form — dodges the
+// autoFocus race that the inline form had; editing lives in the Lanes and
+// Tags panels. Tag creation flows through NewTagModal and the active-task
+// TagPicker (type a new name → "Create #foo" row appears).
 export const statusPopover = signal<boolean>(false);
 // Active-task tags-chip popover. Mirrors statusPopover: click chip to toggle,
 // outside-click closes via dashboard.tsx's global handler + closeAllPopovers().
@@ -165,20 +184,19 @@ export const lanePopover = signal<boolean>(false);
 export const taskActionsPopover = signal<boolean>(false);
 export const paletteOpen = signal<boolean>(false);
 export const paletteQuery = signal<string>("");
-// modal kinds: 'confirm-delete' | 'lane-edit' | 'confirm-lane-delete' |
-// 'new-lane' | 'new-tag' | 'tag-edit' | 'confirm-tag-delete' |
-// 'filter-tags' | 'update-detail' | 'render-markdown'
+// modal kinds: 'confirm-delete' | 'confirm-lane-delete' | 'new-lane' |
+// 'new-tag' | 'confirm-tag-delete' | 'filter-tags' | 'update-detail' |
+// 'render-markdown'
 export const modal = signal<{ kind: string; [k: string]: unknown } | null>(null);
 
 // ---------- misc ----------
 // Resolved on boot from /api/me (gh hosts.yml -> git user.name -> hostname -> "me").
 export const meAuthor = signal<string>("me");
-// Task-content tab (one APG tablist in TaskDocument): "document" (default,
-// the rendered/editable task body), "updates" (Activity — the active
-// task's update thread + inline composer), "authors" (per-task author
-// rollup), or "related" (three buckets from /api/tasks/:id/related,
-// fetched into `relatedTasks` below).
-export const tab = signal<"document" | "updates" | "authors" | "related">("document");
+// Task-content tab (one APG tablist in the task toolbar): "document" (default,
+// the rendered/editable task body) or "updates" (Activity: the active task's
+// update thread and inline composer). Authors and related tasks live in the
+// side panel's Details tab, which `relatedTasks` below feeds.
+export const tab = signal<"document" | "updates">("document");
 
 // Fetched RelatedTasks for the active task. null means "not yet fetched"
 // (loading) — distinct from `{referencedBy:[],references:[],shared:[]}`

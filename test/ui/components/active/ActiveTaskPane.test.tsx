@@ -116,7 +116,18 @@ describe("ActiveTaskPane", () => {
     expect(container.querySelector(".empty")).toBeFalsy();
     expect(container.querySelector(".task-document")).toBeTruthy();
     expect(container.querySelector(".task-title-display")?.textContent).toBe("Wire up routing");
-    expect(container.querySelector(".task-id")?.textContent).toBe("[42]");
+    expect(container.querySelector(".task-id")?.textContent).toBe("@42");
+  });
+
+  test("hidden hides the pane in both states and keeps the document mounted", () => {
+    const empty = render(<ActiveTaskPane hidden={true} />);
+    expect((empty.container.querySelector("section.pane-active") as HTMLElement).hidden).toBe(true);
+    empty.unmount();
+    tasks.value = [makeTask({ id: 42 })];
+    selectedId.value = 42;
+    const { container } = render(<ActiveTaskPane hidden={true} />);
+    expect((container.querySelector("section.pane-active") as HTMLElement).hidden).toBe(true);
+    expect(container.querySelector(".task-document")).toBeTruthy();
   });
 
   test("status pill click toggles the StatusPopover open", () => {

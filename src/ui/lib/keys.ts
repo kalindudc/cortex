@@ -26,12 +26,6 @@ const NO_ALT_KEYS: ReadonlySet<string> = new Set();
 export function modeShortcutHint(mode: ReaderMode, mac = IS_MAC): string {
   return `${mac ? "⌘ + ⌥" : "Ctrl + Alt"} + ${MODE_DIGITS[mode]}`;
 }
-// The shared "super key" chord, shown ONCE for the mode group; each button
-// then only needs its digit. Apple convention omits separators between
-// modifier glyphs; other platforms keep the readable Ctrl+Alt form.
-export function modeShortcutPrefix(mac = IS_MAC): string {
-  return mac ? "⌘ + ⌥" : "Ctrl+Alt";
-}
 export function modeShortcutDigit(mode: ReaderMode): string {
   return MODE_DIGITS[mode];
 }

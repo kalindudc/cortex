@@ -167,9 +167,8 @@ export function TaskHeader({ task, draft }: { task: Task; draft: TaskDraft }): V
   return (
     <header class={`task-header${titleRevealed.value ? " is-title-revealed" : ""}`} onMouseLeave={dismissReveal}>
       <div class="document-kicker">
-        <span>Task</span>
         <span class="task-id num" {...tip(`Task ${task.id}`)}>
-          [{task.id}]
+          @{task.id}
         </span>
         <span aria-hidden="true">·</span>
         <span class="task-updated" {...tip("Last updated")}>
