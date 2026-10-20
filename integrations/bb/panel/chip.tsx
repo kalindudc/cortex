@@ -6,14 +6,17 @@ import { useThreadState } from "./hooks";
 import { openCortexTab } from "./selection";
 import { StatusDot } from "./status";
 
-/** The header task chip, unless the taskChip setting hides it. */
-export function CortexChip(props: PluginThreadHeaderActionProps) {
+/**
+ * The header task chip, unless the taskChip setting hides it or the viewport is
+ * compact: a phone's header has no room, and the right panel still opens the tab.
+ */
+export function CortexChip({ threadId, isCompactViewport }: PluginThreadHeaderActionProps) {
   const { values } = useSettings();
-  return values?.taskChip === false ? null : <TaskChip {...props} />;
+  return values?.taskChip === false || isCompactViewport ? null : <TaskChip threadId={threadId} />;
 }
 
 /** `#<id> · <status>` for the focus task (plain `cortex` without one); opens the Cortex tab following it. */
-function TaskChip({ threadId, isCompactViewport }: PluginThreadHeaderActionProps) {
+function TaskChip({ threadId }: { threadId: string }) {
   const { state, error } = useThreadState(threadId);
   const navigate = useBbNavigate();
   const focus = state?.links.find(link => link.id === state.focusTaskId) ?? null;
@@ -49,7 +52,7 @@ function TaskChip({ threadId, isCompactViewport }: PluginThreadHeaderActionProps
       ) : (
         <Icon name="AlertTriangle" className="size-4" aria-hidden />
       )}
-      {isCompactViewport ? null : <span>{label}</span>}
+      <span>{label}</span>
     </Button>
   );
 }

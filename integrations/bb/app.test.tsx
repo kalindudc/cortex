@@ -163,6 +163,10 @@ function handlers(state: CortexThreadState = threadState(), overrides: Partial<H
   };
 }
 
+/** bb's composer footer: a left group, then the right-hand group ending with the context circle. */
+const COMPOSER_FOOTER =
+  '<div data-follow-up-composer-footer><div>branch</div><div><button aria-label="Context window 49% used">49%</button></div></div>';
+
 const calls = (slot: { inspection: { rpcCalls: Array<{ method: string; input: unknown }> } }, method: string) =>
   slot.inspection.rpcCalls.filter(call => call.method === method).map(call => call.input);
 
@@ -601,6 +605,7 @@ describe("header chip", () => {
   test("names the focus task with its status dot and opens the Cortex tab", async () => {
     const slot = chip(threadState());
     const button = await slot.findByRole("button", { name: /#1 · open/ });
+    expect(button.textContent).toBe("#1 \u00b7 open");
     expect(button.getAttribute("data-tone")).toBe("ok");
     expect(button.querySelector("[data-status=open]")).toBeTruthy();
     fireEvent.click(button);
@@ -618,10 +623,11 @@ describe("header chip", () => {
     expect((await stale.findByRole("button", { name: /changed: x/ })).getAttribute("data-tone")).toBe("stale");
   });
 
-  test("collapses to an icon on compact viewports", async () => {
+  test("is absent on compact viewports, where the Cortex tab stays in the right panel", async () => {
     const slot = chip(threadState(), true);
-    const button = await slot.findByRole("button", { name: /#1 · open/ });
-    expect(button.textContent).toBe("");
+    await act(async () => {});
+    expect(slot.queryByRole("button")).toBeNull();
+    expect(slot.inspection.rpcCalls).toEqual([]);
   });
 
   test("is absent when the taskChip setting is off", async () => {
@@ -637,12 +643,22 @@ describe("header chip", () => {
 });
 
 describe("memory icon", () => {
-  const icon = (rpc: Handlers = handlers(), options: { settings?: Record<string, boolean> } = {}) =>
+  const icon = (rpc: Handlers = handlers(), options: { settings?: Record<string, boolean>; compact?: boolean } = {}) =>
     renderSlot(
       app.threadHeaderActions[1]!,
-      { threadId: THREAD, projectId: "proj_1", isCompactViewport: false },
+      { threadId: THREAD, projectId: "proj_1", isCompactViewport: options.compact ?? false },
       { rpc, ...(options.settings ? { settings: options.settings } : {}) },
     );
+  /** Makes the body a thread pane, so a slot rendered into it finds bb's composer footer once it is added. */
+  const asPane = () => document.body.setAttribute("data-split-pane-id", "pane-1");
+  const addFooter = () => {
+    document.body.insertAdjacentHTML("beforeend", COMPOSER_FOOTER);
+    return document.querySelector(`${FOOTER_SELECTOR} > :last-child`) as HTMLElement;
+  };
+  afterEach(() => {
+    document.body.removeAttribute("data-split-pane-id");
+    document.querySelector(FOOTER_SELECTOR)?.remove();
+  });
   const withMemory = (memory: MemoryState) => handlers(threadState(), { memory: () => memory });
   const stale = { id: 421, detail: "changed: a.ts" };
   const button = (slot: ReturnType<typeof icon>) => slot.getByRole("button", { name: /^Cortex memory:/ });
@@ -675,6 +691,7 @@ describe("memory icon", () => {
       name: "Cortex memory: no report from this thread's pi session yet. Open the Memory tab.",
     });
     expect(trigger.getAttribute("data-placement")).toBe("header");
+    expect(slot.container.contains(trigger)).toBe(true);
     fireEvent.click(trigger);
     expect(slot.inspection.navigateCalls).toContainEqual({
       method: "openThreadPanel",
@@ -695,6 +712,33 @@ describe("memory icon", () => {
     failing.lifecycle.unmount();
     const loading = icon(handlers(threadState(), { memory: () => new Promise(() => {}) }));
     expect((await loading.findByRole("button", { name: /loading/ })).getAttribute("data-tone")).toBe("muted");
+  });
+
+  test("with the composer footer it sits beside the context circle, on any viewport", async () => {
+    for (const compact of [false, true]) {
+      asPane();
+      const group = addFooter();
+      const slot = icon(handlers(), { compact });
+      await waitFor(() => expect(group.querySelector("[data-cortex-memory-icon] button")).toBeTruthy());
+      expect(button(slot).getAttribute("data-placement")).toBe("footer");
+      expect(within(slot.container).queryByRole("button")).toBeNull();
+      slot.lifecycle.unmount();
+      group.parentElement!.remove();
+    }
+  });
+
+  test("on a compact viewport it leaves the header empty and moves into the footer once it appears", async () => {
+    asPane();
+    const slot = icon(handlers(), { compact: true });
+    await act(async () => {});
+    expect(slot.queryByRole("button", { name: /^Cortex memory:/ })).toBeNull();
+    expect(slot.container.querySelector("span")).toBeTruthy();
+    const group = addFooter();
+    await waitFor(() => expect(group.querySelector("[data-cortex-memory-icon] button")).toBeTruthy());
+    expect(button(slot).getAttribute("data-placement")).toBe("footer");
+    group.parentElement!.remove();
+    await waitFor(() => expect(slot.queryByRole("button", { name: /^Cortex memory:/ })).toBeNull());
+    expect(within(slot.container).queryByRole("button")).toBeNull();
   });
 
   test("is absent with the memoryChip setting off", async () => {
@@ -776,9 +820,7 @@ describe("footer placement", () => {
   function pane(withFooter = true) {
     const root = document.createElement("div");
     root.setAttribute("data-split-pane-id", "pane-1");
-    root.innerHTML = withFooter
-      ? '<header></header><div data-follow-up-composer-footer><div>branch</div><div><button aria-label="Context window 49% used">49%</button></div></div>'
-      : "<header></header>";
+    root.innerHTML = withFooter ? `<header></header>${COMPOSER_FOOTER}` : "<header></header>";
     document.body.appendChild(root);
     const header = root.querySelector("header") as HTMLElement;
     const group = root.querySelector(`${FOOTER_SELECTOR} > :last-child`) as HTMLElement | null;

@@ -233,18 +233,20 @@ function MemoryIcon({ threadId, placement }: { threadId: string; placement: "foo
 /**
  * A thread header action, which bb always mounts, unlike a prompt-box action.
  * It shows the memory icon beside the context circle under the prompt box,
- * or here in the header when that row is not on screen.
+ * or here in the header when that row is not on screen, unless the viewport is
+ * compact: a phone's header has no room. The anchor stays to find the row.
  */
-export function MemoryHeaderAction({ threadId }: PluginThreadHeaderActionProps): ReactNode {
+export function MemoryHeaderAction({ threadId, isCompactViewport }: PluginThreadHeaderActionProps): ReactNode {
   const { values } = useSettings();
   const hidden = values?.memoryChip === false;
   const [anchor, setAnchor] = useState<HTMLSpanElement | null>(null);
   const mount = useFooterMount(hidden ? null : anchor);
   if (hidden) return null;
+  const inHeader = mount === null && !isCompactViewport;
   const icon = <MemoryIcon threadId={threadId} placement={mount === null ? "header" : "footer"} />;
   return (
-    <span ref={setAnchor} className={mount === null ? "inline-flex items-center" : "hidden"}>
-      {mount === null ? icon : createPortal(icon, mount)}
+    <span ref={setAnchor} className={inHeader ? "inline-flex items-center" : "hidden"}>
+      {mount !== null ? createPortal(icon, mount) : inHeader ? icon : null}
     </span>
   );
 }

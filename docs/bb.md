@@ -44,12 +44,12 @@ notes. Changes reach a provider the next time bb starts its session, never mid-s
 
 ## The Cortex tab and the header chip
 
-Open the tab from the thread's right panel (Cortex) or by clicking the chip in the thread header; the chip, a card in
-a reply and a Memory stream each switch the thread's one Cortex tab to their task. Its switcher lists the tasks this
-thread posted updates to, whether through `cortex_update` or `cortex update` in its shell, plus any task you linked
-by search or id. The focus task is the one you pinned, or else the most active one. The chip names it as
-`#<id> · <status>` with its status colour, reads plain `cortex` when the thread has no task, and warns when the focus
-task is blocked or stale. Unlinking removes only a link you added: a task the thread posted to stays listed.
+Open the tab from the thread's right panel (Cortex) or, except on a phone, by clicking the chip in the thread header;
+the chip, a card in a reply and a Memory stream each switch the thread's one Cortex tab to their task. Its switcher
+lists the tasks this thread posted updates to, whether through `cortex_update` or `cortex update` in its shell, plus
+any task you linked by search or id. The focus task is the one you pinned, or else the most active one. The chip names
+it as `#<id> · <status>` with its status colour, reads plain `cortex` when the thread has no task, and warns when the
+focus task is blocked or stale. Unlinking removes only a link you added: a task the thread posted to stays listed.
 
 The header shows the task's status, its freshness and, for a plan, how many Low-Level Tasks were reported done.
 Overview splits the body at its `##` headings and folds a long one to a line per section. Activity is the update
@@ -72,12 +72,12 @@ from a new, separate thread, because bb applies tools and instructions only when
 
 ## Memory in the prompt box and the Memory tab
 
-A brain icon beside the context circle under each thread's prompt box, or in the thread header when that row is not on
-screen, shows memory in pi's footer colours: accent once memory is in context, yellow for a stale stream, red after a
-failed memory call, pulsing while pi's save turn runs. Hovering it summarises the thread's memory and Cortex task,
-with a bar of where the streams in context came from; clicking it opens the Memory tab. The tab shows what pi's
-`/memory` shows: health, the streams the thread works on, every stream in context and why, and the session's totals
-(for another provider, what the plugin gave and the agent recalled). Each stream opens in the Cortex tab.
+A brain icon beside the context circle under each thread's prompt box, or, except on a phone, in the thread header
+when that row is off screen, shows memory in pi's footer colours: accent once memory is in context, yellow for a stale
+stream, red after a failed memory call, pulsing while pi's save turn runs. Hovering it summarises the thread's memory
+and Cortex task, with a bar of where the streams in context came from; clicking it opens the Memory tab. The tab shows
+what pi's `/memory` shows: health, the streams the thread works on, every stream in context and why, and the session's
+totals (for another provider, what the plugin gave and the agent recalled). Each stream opens in the Cortex tab.
 
 The tab's menu sets this thread's memory: follow the setting, Look up and save, Look up only, or Off. A pi thread
 applies a change from its next message, when bb rebuilds the pi session and keeps its conversation; another provider
