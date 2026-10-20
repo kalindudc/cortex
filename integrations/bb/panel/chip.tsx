@@ -1,7 +1,9 @@
+import { useState } from "react";
 import { type PluginThreadHeaderActionProps, useBbNavigate, useSettings } from "@get-bb/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
+import { useFooterPresent } from "./footer";
 import { useThreadState } from "./hooks";
 import { openCortexTab } from "./selection";
 import { StatusDot } from "./status";
@@ -9,10 +11,22 @@ import { StatusDot } from "./status";
 /**
  * The header task chip, unless the taskChip setting hides it or the viewport is
  * compact: a phone's header has no room, and the right panel still opens the tab.
+ * While the pane shows no footer row the memory icon sits in the header instead,
+ * so the header keeps one Cortex button. The anchor stays to find the row.
  */
 export function CortexChip({ threadId, isCompactViewport }: PluginThreadHeaderActionProps) {
   const { values } = useSettings();
-  return values?.taskChip === false || isCompactViewport ? null : <TaskChip threadId={threadId} />;
+  const [anchor, setAnchor] = useState<HTMLSpanElement | null>(null);
+  const hidden = values?.taskChip === false || isCompactViewport;
+  const memoryOff = values?.memoryChip === false;
+  const footer = useFooterPresent(hidden || memoryOff ? null : anchor);
+  if (hidden) return null;
+  const shown = memoryOff || footer;
+  return (
+    <span ref={setAnchor} className={shown ? "inline-flex items-center" : "hidden"}>
+      {shown ? <TaskChip threadId={threadId} /> : null}
+    </span>
+  );
 }
 
 /** `#<id> · <status>` for the focus task (plain `cortex` without one); opens the Cortex tab following it. */

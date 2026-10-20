@@ -7,6 +7,12 @@ export const FOOTER_SELECTOR = "[data-follow-up-composer-footer]";
 const PANE_SELECTOR = "[data-split-pane-id]";
 const CIRCLE_SELECTOR = ':scope > button[aria-label^="Context window"]';
 
+/** The right-hand group of the pane's composer footer, the one that ends with the context circle. */
+function footerGroup(pane: ParentNode): HTMLElement | null {
+  const group = pane.querySelector(FOOTER_SELECTOR)?.lastElementChild;
+  return group instanceof HTMLElement ? group : null;
+}
+
 /**
  * Puts `node` in the right-hand group of the pane's composer footer, before
  * the context circle, and says whether it is there. A node already in that
@@ -14,13 +20,33 @@ const CIRCLE_SELECTOR = ':scope > button[aria-label^="Context window"]';
  * circle (Thread Spend) never makes the two move each other in a loop.
  */
 export function placeInFooter(node: HTMLElement, pane: ParentNode): boolean {
-  const group = pane.querySelector(FOOTER_SELECTOR)?.lastElementChild;
-  if (!(group instanceof HTMLElement)) {
+  const group = footerGroup(pane);
+  if (group === null) {
     node.remove();
     return false;
   }
   if (node.parentElement !== group) group.insertBefore(node, group.querySelector(CIRCLE_SELECTOR));
   return true;
+}
+
+/** Runs `check` now and after the pane changes, unless `settled` says the footer it last saw is still in place. */
+function watchPane(pane: Element, settled: () => boolean, check: () => void): () => void {
+  let frame = 0;
+  const run = (): void => {
+    frame = 0;
+    check();
+  };
+  run();
+  const observer = new MutationObserver(() => {
+    // A streaming timeline changes the pane all the time: a settled footer costs one check,
+    // and a search runs at most once a frame.
+    if (!settled() && frame === 0) frame = requestAnimationFrame(run);
+  });
+  observer.observe(pane, { childList: true, subtree: true });
+  return () => {
+    observer.disconnect();
+    cancelAnimationFrame(frame);
+  };
 }
 
 /**
@@ -38,24 +64,37 @@ export function useFooterMount(anchor: HTMLElement | null): HTMLElement | null {
     const node = document.createElement("span");
     node.setAttribute("data-cortex-memory-icon", "");
     node.className = "inline-flex shrink-0 items-center";
-    let frame = 0;
-    const place = (): void => {
-      frame = 0;
-      setMount(placeInFooter(node, pane) ? node : null);
-    };
-    place();
-    const observer = new MutationObserver(() => {
-      // A streaming timeline changes the pane all the time: a node still in the footer costs one check,
-      // and a search runs at most once a frame.
-      if (node.isConnected && node.parentElement?.parentElement?.matches(FOOTER_SELECTOR)) return;
-      if (frame === 0) frame = requestAnimationFrame(place);
-    });
-    observer.observe(pane, { childList: true, subtree: true });
+    const stop = watchPane(
+      pane,
+      () => node.isConnected && node.parentElement?.parentElement?.matches(FOOTER_SELECTOR) === true,
+      () => setMount(placeInFooter(node, pane) ? node : null),
+    );
     return () => {
-      observer.disconnect();
-      cancelAnimationFrame(frame);
+      stop();
       node.remove();
     };
   }, [anchor]);
   return mount;
+}
+
+/** Whether the thread pane that holds `anchor` shows the composer footer that `useFooterMount` uses. */
+export function useFooterPresent(anchor: HTMLElement | null): boolean {
+  const [present, setPresent] = useState(false);
+  useLayoutEffect(() => {
+    const pane = anchor?.closest(PANE_SELECTOR) ?? null;
+    if (pane === null) {
+      setPresent(false);
+      return;
+    }
+    let group: HTMLElement | null = null;
+    return watchPane(
+      pane,
+      () => group?.isConnected === true,
+      () => {
+        group = footerGroup(pane);
+        setPresent(group !== null);
+      },
+    );
+  }, [anchor]);
+  return present;
 }

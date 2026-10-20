@@ -72,12 +72,12 @@ from a new, separate thread, because bb applies tools and instructions only when
 
 ## Memory in the prompt box and the Memory tab
 
-A brain icon beside the context circle under each thread's prompt box, or, except on a phone, in the thread header
-when that row is off screen, shows memory in pi's footer colours: accent once memory is in context, yellow for a stale
-stream, red after a failed memory call, pulsing while pi's save turn runs. Hovering it summarises the thread's memory
-and Cortex task, with a bar of where the streams in context came from; clicking it opens the Memory tab. The tab shows
-what pi's `/memory` shows: health, the streams the thread works on, every stream in context and why, and the session's
-totals (for another provider, what the plugin gave and the agent recalled). Each stream opens in the Cortex tab.
+A brain icon beside the context circle under each thread's prompt box, or, except on a phone, in the thread header when
+that row is off screen (the task chip then steps aside), shows memory in pi's footer colours: accent once memory is in
+context, yellow for a stale stream, red after a failed memory call, pulsing while pi's save turn runs. Hovering it
+summarises the thread's memory and Cortex task, with a bar of where the streams in context came from; clicking it opens
+the Memory tab. The tab shows what pi's `/memory` shows: health, the streams the thread works on, every stream in
+context and why, and the session's totals (for another provider, what the plugin gave and the agent recalled).
 
 The tab's menu sets this thread's memory: follow the setting, Look up and save, Look up only, or Off. A pi thread
 applies a change from its next message, when bb rebuilds the pi session and keeps its conversation; another provider
