@@ -24,21 +24,21 @@ A stream body is Markdown with these sections, in this order, ending with a
 
 ```markdown
 ## Goal
-Make a single scroll notch move the task list one task at a time.
+Keep an idle live stream connected past Bun's 10 s idle timeout.
 
 ## State
-Wheel reports are parsed in mouse.ts; the list moves through session.wheelNotch. Ghostty sends several reports per notch.
+The daemon's heartbeat is sent in server.ts; the client drops a stream after subscription.ts's idle timeout.
 
 ## Decisions
-- User: one notch = one task, regardless of terminal multiplier.
-- Rejected: debouncing by time (felt laggy in review).
+- User: keep the heartbeat under Bun's idle timeout.
+- Rejected: raising Bun's idle timeout (it hides dead peers).
 
 ## Next
-1. Cover the dialog rows with the same notch counter.
+1. Pin the idle window with an integration test.
 
 ## Files
-- `src/tui/mouse.ts`
-- `src/tui/session.ts`
+- `src/server.ts`
+- `src/subscription.ts`
 
 Verified: 2026-09-30
 ```

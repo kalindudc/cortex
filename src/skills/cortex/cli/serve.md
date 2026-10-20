@@ -1,8 +1,8 @@
 # `cortex serve`
 
-Run the daemon for THIS database (`CORTEX_DB`, else `~/.config/cortex/cortex.db`) on a private Unix socket that every CLI command (and TUI) talks to. There is no TCP listener. The daemon owns the database for its whole life (the `<db>.owner.lock` lease) and publishes `<db>.daemon.json` beside the database once it is ready; there are no pid or URL files.
+Run the daemon for THIS database (`CORTEX_DB`, else `~/.config/cortex/cortex.db`) on a private Unix socket that every CLI command (and the desktop app) talks to. There is no TCP listener. The daemon owns the database for its whole life (the `<db>.owner.lock` lease) and publishes `<db>.daemon.json` beside the database once it is ready; there are no pid or URL files.
 
-The terminal workspace (plain `cortex`, or `cortex tui`) starts this daemon in the background when none runs. Quitting a TUI never stops the daemon.
+The desktop app (plain `cortex`, or `cortex app`) starts this daemon in the background when none runs. Quitting the app never stops the daemon.
 
 ## Usage
 

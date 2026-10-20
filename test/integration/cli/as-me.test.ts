@@ -5,7 +5,7 @@ import { Store } from "../../../src/store.ts";
 import { reap, startForeground } from "../fixtures/daemon.ts";
 import { mkTmpEnv, runCli } from "../helpers.ts";
 
-// `cortex update --as-me` records a change as the user's own, the way the TUI
+// `cortex update --as-me` records a change as the user's own, the way the desktop app
 // does: credited to the user's author name (also `cortex doctor`'s `author`)
 // and never notifying. HOME is a sandbox whose gh hosts file names the user,
 // so the author cascade is deterministic and never reads the real home.

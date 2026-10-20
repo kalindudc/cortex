@@ -276,7 +276,7 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
     });
   }
 
-  // The TUI's update composer takes its default author from this.
+  // The desktop app's update composer takes its default author from this.
   app.get("/api/me", c => c.json({ author: resolveAuthor() }));
 
   // UI checks for pending migrations on boot so it can show a banner.
@@ -487,7 +487,7 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
       return c.json({ error: "invalid status" }, 400);
     }
     // Author attribution for the audit-trail row. HTTP path is OPTIONAL: the
-    // TUI never sends an author for a status change (the human is the
+    // desktop app never sends an author for a status change (the human is the
     // supervisor, the keypress IS the attribution), only attributed CLI calls
     // do (every `cortex update` requires --as <session-id>). That same flag
     // decides whether the transition persists a notification: no point
@@ -702,7 +702,7 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
   });
 
   // ---------- backup ----------
-  // On-demand backup (the TUI's :backup). Runs inside the daemon process against a
+  // On-demand backup (the desktop app's backup button). Runs inside the daemon process against a
   // separate read-only SQLite connection, so it is safe while the daemon is
   // serving writes. Restore remains CLI-only because it refuses a live daemon.
   app.post("/api/backup", async c => {
@@ -838,7 +838,7 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
   // ---------- lanes ----------
   app.get("/api/lanes", c => c.json(store.listLanes()));
 
-  // A lane, its member count and versions from one read, for guarded edits/deletes (TUI :lanes).
+  // A lane, its member count and versions from one read, for guarded edits/deletes (the lane modal).
   app.get("/api/lanes/:name/state", c => {
     const state = store.laneState(c.req.param("name"));
     if (!state) return c.json({ error: "not found" }, 404);
@@ -912,7 +912,7 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
   // Renames/forced removals cascade into tasks.
   app.get("/api/tags", c => c.json(store.listTags()));
 
-  // A tag, its member count (a delete's impact) and versions from one read (TUI :tags).
+  // A tag, its member count (a delete's impact) and versions from one read (the tag modal).
   app.get("/api/tags/:name/state", c => {
     const state = store.tagState(c.req.param("name"));
     if (!state) return c.json({ error: "not found" }, 404);

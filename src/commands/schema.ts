@@ -42,14 +42,11 @@ const COMMANDS: { name: string; summary: string }[] = [
   { name: "doctor", summary: "health/orientation: version, db, daemon, migrations (--json; read-only)" },
   { name: "schema", summary: "print this data-model + command description (--json)" },
   {
-    name: "tui",
-    summary: "open the terminal workspace (also plain `cortex` in an interactive terminal; starts a headless daemon)",
-  },
-  {
     name: "serve",
-    summary: "run this database's daemon on its private socket (the TUI starts one when needed)",
+    summary: "run this database's daemon on its private socket (the desktop app starts one when needed)",
   },
   { name: "stop", summary: "stop the daemon serving this database (others keep running)" },
+  { name: "app", summary: "open the installed desktop app, optionally at a task: app [id] [--heading slug]" },
   { name: "resume", summary: "re-open the harness session that posted updates on a task" },
   { name: "backup", summary: "write a data-only backup zip" },
   { name: "restore", summary: "merge a backup zip into the live database" },

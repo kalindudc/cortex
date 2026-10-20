@@ -200,7 +200,7 @@ describe("header", () => {
     expect(slot.getByText("Updated 4m ago · 4 updates · 2 not yet in the body")).toBeTruthy();
   });
 
-  test("the status menu lists every status with the TUI's keys and checks the current one; a key picks", async () => {
+  test("the status menu lists every status with their keys and checks the current one; a key picks", async () => {
     const slot = panel();
     await openMenu(await slot.findByRole("button", { name: /Status: Open/ }));
     const menu = await slot.findByRole("menu");
@@ -445,14 +445,14 @@ describe("switcher and more menu", () => {
     expect(await slot.findByRole("heading", { name: "Title 44" })).toBeTruthy();
   });
 
-  test("more: pin, copy the TUI command, and unlink only a linked task", async () => {
+  test("more: pin, copy the app command, and unlink only a linked task", async () => {
     const slot = panel();
     await openMenu(await slot.findByRole("button", { name: "More" }));
     const unlink = await slot.findByRole("menuitem", { name: /Unlink/ });
     expect(unlink.getAttribute("aria-disabled")).toBe("true");
     expect(unlink.textContent).toContain("posted here");
-    fireEvent.click(slot.getByRole("menuitem", { name: /Copy cortex tui 1/ }));
-    await waitFor(() => expect(slot.inspection.experimental_clipboardWrites).toEqual([{ text: "cortex tui 1" }]));
+    fireEvent.click(slot.getByRole("menuitem", { name: /Copy cortex app 1/ }));
+    await waitFor(() => expect(slot.inspection.experimental_clipboardWrites).toEqual([{ text: "cortex app 1" }]));
     await openMenu(slot.getByRole("button", { name: "More" }));
     fireEvent.click(await slot.findByRole("menuitem", { name: /Pin as focus/ }));
     await waitFor(() => expect(calls(slot, "pin")).toEqual([{ threadId: THREAD, taskId: 1 }]));

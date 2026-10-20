@@ -4,7 +4,7 @@ import path from "node:path";
 
 /**
  * The user's own author name: the attribution of a status change or post the
- * user makes in the TUI (the daemon's GET /api/me), by `cortex update
+ * user makes in the desktop app (the daemon's GET /api/me), by `cortex update
  * --as-me`, and reported by `cortex doctor`.
  * Cascade (first hit wins):
  *   1. `gh` CLI hosts file (~/.config/gh/hosts.yml) — the GitHub username

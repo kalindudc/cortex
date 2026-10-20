@@ -11,7 +11,7 @@ wrong thing. Code is the truth; a doc that is not readable is not worth keeping.
 
 ## Where facts go
 
-- README.md is the front door; docs/tui.md, docs/memory.md and docs/architecture.md each cover one area; AGENTS.md
+- README.md is the front door; docs/desktop.md, docs/memory.md and docs/architecture.md each cover one area; AGENTS.md
   is the contract for agents changing the repo. One fact has ONE home: link to it instead of restating it.
 - Every docs/*.md runs user-first: plain-language sections, then "Under the hood" (how and why, citing
   `path#Symbol`), then "Rules to keep" (each invariant with the test or symbol that enforces it).
@@ -28,8 +28,10 @@ wrong thing. Code is the truth; a doc that is not readable is not worth keeping.
 
 ## Never document
 
-- keybindings, `:commands`, theme tokens, tui.toml keys, CLI flags, HTTP routes, SSE event kinds as lists or
-  tables: point at `?` / `:help`, `cortex <cmd> --help` or `cortex schema` (a few entry points in prose are fine)
+- keybindings, commands, theme tokens, settings, CLI flags, HTTP routes, SSE event kinds as lists or tables: point
+  at the desktop app's help view, `cortex <cmd> --help` or `cortex schema` (a few entry points in prose are fine).
+  The one exception is the capability checklist in docs/desktop.md, a fixed record of what replaced each retired
+  terminal command
 - numeric constants: name the symbol instead
 - file trees, repo maps, signature dumps; what a function does line by line (that is a code comment)
 - plans, research, progress (cortex tasks), speculation ("we may later ...")

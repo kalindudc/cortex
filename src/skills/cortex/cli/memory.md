@@ -40,8 +40,8 @@ cortex memory excluded [--json]
 ```bash
 $ cortex memory search "what was I last doing for the routing-events work" --boost=cortex
 $ cortex memory show 42
-[42] Mouse wheel notches (open · cortex) · latest linked @57 (open, active 2026-09-29)
-staleness: stale · synced 2026-09-01 (29d) · changed: src/tui/mouse.ts
+[42] Idle stream heartbeat (open · cortex) · latest linked @57 (open, active 2026-09-29)
+staleness: stale · synced 2026-09-01 (29d) · changed: src/server.ts
 $ cortex memory show 42 --section=next
 ```
 

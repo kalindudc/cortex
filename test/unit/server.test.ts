@@ -640,7 +640,7 @@ describe("server: notifications", () => {
   });
 
   test("PATCH /api/tasks/:id/status open→blocked WITHOUT author (a human change) does NOT insert a transition notification", async () => {
-    // A human status change (the TUI) sends `{ status }` only — no author. That
+    // A human status change (the desktop app) sends `{ status }` only — no author. That
     // signals "the supervisor changed this themselves", so the transition
     // notification is suppressed (the row is already visibly updated
     // in-app via the task.updated SSE event). Only the original create
@@ -1083,7 +1083,7 @@ describe("server: versioned results and guarded writes (N8/N11)", () => {
 
   test("a guarded DELETE read before a concurrent post is a 412 and deletes nothing; the legacy DELETE still works", async () => {
     const t = store.addTask({ title: "doomed", body: "b" });
-    const confirmed = stateOf(store, t.id).versions; // what the TUI's :delete confirmation read
+    const confirmed = stateOf(store, t.id).versions; // what the delete confirmation read
     const posted = await call(app, "POST", `/api/tasks/${t.id}/updates`, { author: "agent-1", summary: "late note" });
     expect(posted.status).toBe(201);
     const now = stateOf(store, t.id);

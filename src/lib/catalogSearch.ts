@@ -19,3 +19,7 @@ export function searchCatalog<T>(
   });
   return { items, matched: items.length, total: catalog.length };
 }
+
+export function catalogSearchHint(result: CatalogSearchResult<unknown>): string {
+  return `${result.matched} of ${result.total} entries`;
+}

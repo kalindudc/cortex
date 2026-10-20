@@ -181,7 +181,7 @@ export function SwitcherMenu({
   );
 }
 
-/** Pin or unpin, copy the body or the TUI command, keep it out of agent memory or not, and link or unlink. */
+/** Pin or unpin, copy the body or the desktop app command, keep it out of agent memory or not, and link or unlink. */
 export function MoreMenu({
   taskId,
   body,
@@ -205,7 +205,7 @@ export function MoreMenu({
   onLink: () => void;
   onUnlink: () => void;
 }) {
-  const command = `cortex tui ${taskId}`;
+  const command = `cortex app ${taskId}`;
   const hasBody = body !== null && body.trim() !== "";
   const copy = async (text: string, done: string) => {
     const copied = await experimental_copyToClipboard({ text });

@@ -427,7 +427,7 @@ export interface VersionedWrites {
   removeTag(name: string, options?: { force?: boolean }, guard?: WriteGuard): Promise<RemoveResult>;
 }
 
-/** The full typed client (TUI and CLI): ApiClient plus snapshots and versioned writes. */
+/** The full typed client (desktop app and CLI): ApiClient plus snapshots and versioned writes. */
 export interface CortexClient extends ApiClient {
   health(): Promise<HealthResponse>;
   me(): Promise<{ author: string }>;

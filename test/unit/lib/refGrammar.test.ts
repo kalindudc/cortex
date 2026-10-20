@@ -1,5 +1,5 @@
 // refGrammar.ts — the @id / #tag grammar with NO runtime imports, so any
-// renderer (the terminal reader, src/tui/reader.ts) can share it. This file
+// renderer (the desktop app's reference decorations) can share it. This file
 // pins the segmentation contract itself.
 
 import { describe, test, expect } from "bun:test";

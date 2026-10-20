@@ -38,7 +38,7 @@ Type RESET to confirm: RESET
 - The daemon is stopped exactly: reset finds this database's daemon again after the prompt, asks it to shut down over its private socket, and waits until it releases the database. It never signals a pid, and daemons of other databases (another `CORTEX_DB`) keep running.
 - Reset then owns the database (the `<db>.owner.lock` lease) from the wipe through the re-initialization, so no other cortex command can open it half-way. The lock file itself is never deleted.
 - If the daemon has not released the database (its lease) by the stop timeout, reset stops with an error and wipes nothing. A daemon that starts serving the database during the reset also makes it stop (`cortex stop`, then retry).
-- Open terminal workspaces (TUIs) are clients, not owners: they report the lost daemon and reattach when a daemon serves the database again. The reset database has a new identity, so their unsaved drafts are never written into it.
+- Open desktop app windows are clients, not owners: they show the lost connection and reattach when a daemon serves the database again. The reset database has a new identity, so a window keeps its unsaved drafts for export and never writes them into it.
 
 ## Pitfalls
 

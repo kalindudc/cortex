@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { BIN, ROOT, mkTmpEnv, runCli } from "../helpers.ts";
 import {
   type ForegroundDaemon,
@@ -12,7 +12,9 @@ import {
 
 // `cortex watch` over the real daemon socket: a short ready marker on each
 // connection, every change as one JSON line, and a clean exit (daemon left
-// running) on SIGINT, SIGTERM or a closed stdout. Every process is tracked.
+// running) on SIGINT, SIGTERM or a closed stdout. Every process is tracked:
+// each test starts its own daemon, because reap() after a test also stops the
+// daemon, and a watch with none running would start an untracked one.
 
 const AUTHOR = "watcher-1c0ed4a8";
 const CURSOR = /^[A-Za-z0-9._-]+:\d+$/;
@@ -42,13 +44,18 @@ beforeAll(async () => {
   cleanup = tmp.cleanup;
   expect((await runCli({ args: ["init"], env })).code).toBe(0);
   expect((await runCli({ args: ["add", "watched task"], env })).code).toBe(0);
-  daemon = await startForeground(env);
 });
 
+beforeEach(async () => {
+  daemon = await startForeground(env);
+});
 afterEach(() => reap());
 afterAll(async () => {
   await reap();
+  // Every daemon was tracked and reaped, so none may still serve this database.
+  const left = await runCli({ args: ["stop"], env });
   cleanup();
+  expect(left.stdout.trim()).toBe("not running");
 });
 
 describe("cortex watch", () => {

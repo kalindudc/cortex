@@ -53,8 +53,7 @@ function prompt(question: string): Promise<string> {
 
 /**
  * The skills, the pi extension when pi is present, then the bb plugin when bb
- * is; `wipe` removes their dirs (and bb's plugin record) first. Shared with
- * the TUI's :config. A bb failure is reported in `bb`, after the rest is written.
+ * is; `wipe` removes their dirs (and bb's plugin record) first. A bb failure is reported in `bb`, after the rest is written.
  */
 export async function installAll(wipe: boolean): Promise<AgentsResult> {
   const skills = listSkills();

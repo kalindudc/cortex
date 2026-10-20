@@ -1,0 +1,64 @@
+name: desktop
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  desktop:
+    # Tests, packages and smoke-tests the desktop app; the packages are kept
+    # for seven days and never published.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          # Electron 44 needs Node 22.12 or newer.
+          node-version: "22"
+      - name: install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: install desktop dependencies
+        run: npm --prefix integrations/desktop ci
+      - name: allow Electron's sandbox (Ubuntu restricts unprivileged user namespaces)
+        if: runner.os == 'Linux'
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: real-window tests (macOS)
+        if: runner.os == 'macOS'
+        run: pnpm run test:desktop
+      - name: real-window tests (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum pnpm run test:desktop
+      - name: package
+        run: pnpm run desktop:dist
+      - name: packaged smoke test (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          if [ "$(uname -m)" = "arm64" ]; then dir=mac-arm64; else dir=mac; fi
+          CORTEX_DESKTOP_APP="$PWD/integrations/desktop/dist/$dir/Cortex.app" npm --prefix integrations/desktop test -- packaged
+      - name: packaged smoke test (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          CORTEX_DESKTOP_APP="$PWD/integrations/desktop/dist/linux-unpacked/cortex-desktop" \
+            xvfb-run --auto-servernum npm --prefix integrations/desktop test -- packaged
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cortex-desktop-${{ runner.os }}
+          path: |
+            integrations/desktop/dist/*.dmg
+            integrations/desktop/dist/*.zip
+            integrations/desktop/dist/*.AppImage
+            integrations/desktop/dist/*.deb
+          if-no-files-found: error
+          retention-days: 7

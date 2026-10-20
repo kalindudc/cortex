@@ -5,17 +5,17 @@ description: Personal task tracker for engineers supervising parallel AI coding 
 
 # Cortex
 
-Cortex is a single-binary, single-user task tracker designed for one human supervising several AI coding agents at once. Tasks live in a SQLite file under `~/.config/cortex/` (or `CORTEX_DB`). An optional daemon (`cortex serve`) serves one database over a private Unix socket, for the CLI and the terminal workspace. While it runs, every command goes through it; without it, each command owns the database just for its own work, so agents can run commands concurrently either way.
+Cortex is a single-binary, single-user task tracker designed for one human supervising several AI coding agents at once. Tasks live in a SQLite file under `~/.config/cortex/` (or `CORTEX_DB`). An optional daemon (`cortex serve`) serves one database over a private Unix socket, for the CLI and the desktop app. While it runs, every command goes through it; without it, each command owns the database just for its own work, so agents can run commands concurrently either way.
 
-Humans usually work in the terminal workspace (TUI): plain `cortex` in an interactive terminal, the same as `cortex tui`. It starts the daemon when none runs, and quitting it leaves that daemon running. Agents should NOT launch it (it needs a TTY and takes over the terminal): use the CLI with `--json`, whose writes every open TUI shows live.
+Humans usually work in the desktop app: plain `cortex` in an interactive terminal, the same as `cortex app`. It starts the daemon when none runs, and quitting it leaves that daemon running. Agents should NOT launch it (it opens a window): use the CLI with `--json`, whose writes every open app window shows live.
 
 ## Key Principles
 
 - **Single-user, local-only, no auth.** The daemon listens only on a private Unix socket. Anyone with shell access as your user has full CRUD. Do not expose the socket. There are no bearer tokens.
-- **Every update has an author.** A valid bb thread defaults to `bb-<thread id>`; explicit `--as` wins. Outside bb, use the `cortex_update` tool or the [session-id recipe](recipes/session-id.md). Without either, update exits 1. `--as-me` records a change as the user's own, like the TUI; it is for tools acting for the user (the bb plugin, the user's scripts), and agents never pass it: it hides their status changes from the blocked notification.
+- **Every update has an author.** A valid bb thread defaults to `bb-<thread id>`; explicit `--as` wins. Outside bb, use the `cortex_update` tool or the [session-id recipe](recipes/session-id.md). Without either, update exits 1. `--as-me` records a change as the user's own, like the desktop app; it is for tools acting for the user (the bb plugin, the user's scripts), and agents never pass it: it hides their status changes from the blocked notification.
 - **No severity flag. Message text describes urgency.** Write `-m "ready for review"` or `-m "blocked on missing API key"` in plain prose. Structured semantics belong in `--status` (`draft`/`open`/`review`/`blocked`/`done`), not in a separate severity field.
 - **Every status change is also an audit-trail row.** Setting `-s` writes both the message AND a `status → <new>` row in the updates table, both attributed to `--as`. Parallel-agent status oscillation (open→blocked→open→blocked) shows up in the inbox as history rather than silently overwriting.
-- **The TUI signals (status-line flash, optional bell) ONLY on transitions into `blocked`.** Routine updates, `done` flips, and review handoffs do NOT interrupt the human: `blocked` is the one signal worth it.
+- **The desktop app signals (a system notification) ONLY on transitions into `blocked`.** Routine updates, `done` flips, and review handoffs do NOT interrupt the human: `blocked` is the one signal worth it.
 - **Two body-edit modes — anchor-based and full overwrite.** `cortex edit <id> --body-search "<exact unique anchor>" --body-replace "<replacement>"` performs an in-place edit that fails 409 if the anchor is missing or matches multiple times — concurrent writes detect conflicts instead of silently overwriting each other. `cortex edit -b "<full body>"` (or `--body-file`) replaces the whole body in one shot. Choose based on the scope of the change you're making. `cortex update` is for status notes; the body is the task's description. See [cli/edit.md](cli/edit.md).
 
 ## CLI
@@ -31,7 +31,7 @@ Humans usually work in the terminal workspace (TUI): plain `cortex` in an intera
 | `cortex doctor` | Report version, db path, daemon state, pending migrations, counts (read-only; never starts a daemon). | [doctor.md](cli/doctor.md) |
 | `cortex memory search\|show\|context\|streams\|lane\|exclude\|include\|excluded` | Agent memory, including author-touched streams and the tasks the user keeps out of memory. | [memory.md](cli/memory.md) |
 | `cortex watch --json` | Follow changes; refetch after ready or resync. | [watch.md](cli/watch.md) |
-| `cortex tui [id]` | Open the terminal workspace (for humans; needs a TTY). Plain `cortex` in an interactive terminal does the same. | `cortex tui --help` |
+| `cortex app [id]` | Open the desktop app, at task `id` when given (for humans; agents never launch it). Plain `cortex` in an interactive terminal does the same. | `cortex app --help` |
 | `cortex serve` | Run this database's daemon (private socket). | [serve.md](cli/serve.md) |
 | `cortex reset` | Stop this database's daemon, wipe the DB (destructive, requires typing `RESET`). | [reset.md](cli/reset.md) |
 

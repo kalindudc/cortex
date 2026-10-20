@@ -1,5 +1,5 @@
-// lib/taskView.ts — The PURE task-list derivations behind the terminal
-// workspace's list (src/tui/workspace.ts). No I/O: every function maps its
+// lib/taskView.ts — The PURE task-list derivations behind the desktop
+// app's task list. No I/O: every function maps its
 // inputs to a result.
 //
 //   searchPool     — full-pool search (W3): runs on the COMPLETE task pool

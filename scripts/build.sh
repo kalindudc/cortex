@@ -26,12 +26,25 @@ pnpm install --frozen-lockfile
 # Wipe the old binary BEFORE rebuilding, so a build that silently fails
 # partway through never leaves a stale bin/cortex for tools (or `pnpm run
 # deploy`'s cp) to reuse. bin/ is .gitignored and fully regenerated below.
-rm -rf "$ROOT/bin"
-
-TARGET="bun-$(uname | tr '[:upper:]' '[:lower:]')-$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/')"
+# CORTEX_BUILD_TARGET cross-compiles to bin/cortex-<os>-<arch> and keeps the rest of bin/, so one machine
+# can build every binary the desktop packager needs. Unset, nothing changes.
+if [ -n "${CORTEX_BUILD_TARGET:-}" ]; then
+  case "$CORTEX_BUILD_TARGET" in
+    bun-darwin-arm64 | bun-darwin-x64 | bun-linux-x64 | bun-linux-arm64) ;;
+    *) echo "error: unsupported CORTEX_BUILD_TARGET=$CORTEX_BUILD_TARGET" >&2; exit 1 ;;
+  esac
+  TARGET="$CORTEX_BUILD_TARGET"
+  OUT="bin/cortex-${TARGET#bun-}"
+  mkdir -p "$ROOT/bin"
+  rm -f "$ROOT/$OUT"
+else
+  TARGET="bun-$(uname | tr '[:upper:]' '[:lower:]')-$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/')"
+  OUT="bin/cortex"
+  rm -rf "$ROOT/bin"
+fi
 
 pnpm exec bun build index.ts --compile --minify --bytecode --format=esm \
-  --target="$TARGET" --outfile bin/cortex
+  --target="$TARGET" --outfile "$OUT"
 
-chmod +x bin/cortex
-echo "✓ Built bin/cortex"
+chmod +x "$OUT"
+echo "✓ Built $OUT"

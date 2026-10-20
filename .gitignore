@@ -5,6 +5,8 @@
 node_modules/
 tmp/
 bin/
+out/
+integrations/desktop/dist/
 
 # transient body buffers used by edit/show flows
 .cortex-body-*.tmp

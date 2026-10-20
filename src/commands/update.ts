@@ -47,7 +47,7 @@ export default defineCommand({
       type: "boolean",
       default: false,
       description:
-        "record it as the user's own change, like the TUI: credited to the user, never notifying (for tools acting for the user, not agents)",
+        "record it as the user's own change, like the desktop app: credited to the user, never notifying (for tools acting for the user, not agents)",
     },
     json: {
       type: "boolean",
@@ -112,7 +112,7 @@ export default defineCommand({
 });
 
 /**
- * The TUI's own status write: no author, so the daemon credits the user
+ * The desktop app's own status write: no author, so the daemon credits the user
  * (GET /api/me) and records no notification. The status route answers with
  * the task only, so `update` is its `status → x` audit row, found by the
  * timestamp the write stamped on both.

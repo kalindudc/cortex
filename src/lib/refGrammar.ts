@@ -1,6 +1,6 @@
 // lib/refGrammar.ts — the in-text `@id` / `#tag` reference grammar, with
-// NO runtime imports, so any renderer can share it (the terminal reader,
-// src/tui/reader.ts).
+// NO runtime imports, so any renderer can share it (the desktop
+// app's reference decorations).
 //
 // Each consumer holds its OWN RegExp instance because the `g` flag means
 // `lastIndex` mutates per match. NEVER share a stateful regex across

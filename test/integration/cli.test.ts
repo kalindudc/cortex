@@ -327,3 +327,10 @@ test("cortex edit --body-search/--body-replace: success, no-match, ambiguous, mu
   r = await run("rm", String(did), "-f");
   expect(r.code).toBe(0);
 });
+
+test("`cortex tui` fails in one line and points at the desktop app", async () => {
+  const r = await run("tui");
+  expect(r.code).toBe(1);
+  expect(r.stderr.trim().split("\n")).toHaveLength(1);
+  expect(r.stderr).toContain("desktop app");
+});

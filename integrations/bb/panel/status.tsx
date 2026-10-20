@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
 import { type CortexStatus, STATUSES } from "../detail";
 
 // Copies of cortex's src/lib/constants.ts STATUS_LABEL and nextStatusFor, and
-// the TUI's status keys: the plugin imports no cortex source.
+// the status keys this panel offers: the plugin imports no cortex source.
 export const STATUS_LABEL: Record<CortexStatus, string> = {
   draft: "Draft",
   open: "Open",
@@ -39,8 +39,8 @@ export const NEXT_LABEL: Record<CortexStatus, string> = {
 export const STATUS_KEY: Record<CortexStatus, string> = { draft: "d", open: "o", review: "r", blocked: "b", done: "x" };
 const BY_KEY = new Map(STATUSES.map(status => [STATUS_KEY[status], status]));
 
-// The TUI's status colours (src/tui/theme.ts): draft info, open muted, review
-// warning, blocked destructive, done success; host tokens only.
+// Status colours: draft info, open muted, review warning, blocked
+// destructive, done success; host tokens only.
 const DOT: Record<CortexStatus, string> = {
   draft: "bg-file-accent",
   open: "bg-muted-foreground",
@@ -76,7 +76,7 @@ const pillClass = (status: CortexStatus) =>
     STATUS_TEXT[status],
   );
 
-/** The status pill: a menu of every status with the TUI's keys; a plain label when writes are off. */
+/** The status pill: a menu of every status with its key; a plain label when writes are off. */
 export function StatusPill({
   status,
   canWrite,
@@ -130,7 +130,7 @@ export function StatusPill({
         ))}
         <DropdownMenuSeparator />
         <p className="px-2 pt-1 pb-1.5 text-[11px] leading-snug text-subtle-foreground">
-          Recorded as you, like a change in the cortex TUI. Nobody is notified.
+          Recorded as you, like a change in the cortex desktop app. Nobody is notified.
         </p>
       </DropdownMenuContent>
     </DropdownMenu>

@@ -7,7 +7,7 @@ import { readTaskOrExit, renderTaskView } from "./show.ts";
 
 // cortex search — interactive fuzzy task finder.
 //
-// Ranks tasks with the SAME scorer as the TUI's search (src/lib/fuzzy.ts)
+// Ranks tasks with the SAME scorer as the desktop app's search (src/lib/fuzzy.ts)
 // so `@123` (exact id), `@text` (title-only) and `#tag` (tag) prefixes
 // behave identically in both surfaces, then hands the
 // ranked list to fzf for further interactive narrowing. Selecting a row

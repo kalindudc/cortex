@@ -88,7 +88,7 @@ export const STOPWORDS: ReadonlySet<string> = new Set(
  * term budget on `users, kalindu, src, github, com, ...` (the overengineering
  * audit). Each match becomes a space before tokenizing, in order, so a URL's
  * path never reads as a filesystem path. Kept on purpose: bare repo-relative
- * paths (`src/tui/mouse.ts`, how streams cite files), a one-segment
+ * paths (`src/server.ts`, how streams cite files), a one-segment
  * `/memory`, inline code, `@id`, `#tag` and `a-b` compounds. `replace`
  * resets a global regex's lastIndex, so sharing these is safe.
  */
@@ -485,7 +485,7 @@ export type HeadingSection = { heading: string | null; slug: string; level: numb
 /**
  * A body split at its Markdown headings (never by size; fenced code is not
  * scanned for headings). Each section's text starts with its heading line;
- * slugs are the TUI's anchors (src/lib/slug.ts), repeats
+ * slugs are the desktop app's heading anchors (src/lib/slug.ts), repeats
  * numbered `-2`, `-3` like the reader. Leading text without content is
  * dropped.
  */

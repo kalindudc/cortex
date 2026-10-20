@@ -10,9 +10,6 @@ import {
   daemonMetadataPath,
   ownerLockPath,
   MAX_SOCKET_PATH_BYTES,
-  tuiConfigPath,
-  themesDir,
-  tuiStatePath,
 } from "../../src/paths.ts";
 import path from "node:path";
 import os from "node:os";
@@ -110,25 +107,6 @@ describe("paths", () => {
     ensureConfigDir();
     expect(() => ensureConfigDir()).not.toThrow();
     expect(fs.existsSync(expected)).toBe(true);
-  });
-
-  // Terminal UI configuration (plan @400 N15): user-authored, read-only
-  // tui.toml and themes/*.toml, plus app-written per-profile view state. All
-  // under configDir(), so the XDG_CONFIG_HOME pin above isolates them too.
-  test("tuiConfigPath() and themesDir() resolve under configDir()", () => {
-    expect(tuiConfigPath()).toBe(path.join(tmpDir, "cortex", "tui.toml"));
-    expect(themesDir()).toBe(path.join(tmpDir, "cortex", "themes"));
-  });
-
-  test("tuiStatePath(profile) is configDir()/tui/<profile>.state.json and creates nothing", () => {
-    expect(tuiStatePath("default")).toBe(path.join(tmpDir, "cortex", "tui", "default.state.json"));
-    expect(tuiStatePath("work-2_b")).toBe(path.join(tmpDir, "cortex", "tui", "work-2_b.state.json"));
-    expect(fs.existsSync(path.join(tmpDir, "cortex"))).toBe(false);
-  });
-
-  test("tuiStatePath() rejects profile names that could escape or alias the state directory", () => {
-    const bad = ["", ".", "..", "../x", "a/b", "a\\b", "-x", ".hidden", "a b", "a\u0000b", "x".repeat(65), "Émile"];
-    for (const name of bad) expect(() => tuiStatePath(name)).toThrow(/invalid profile name/);
   });
 
   test("ensureConfigDir() creates nested XDG paths recursively", () => {

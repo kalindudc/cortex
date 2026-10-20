@@ -27,7 +27,7 @@ cortex edit <id> -t "<new title>" --body-search "..." --body-replace "..."
 
 ## Clearing priority
 
-Use `--clear-priority` when a task is no longer urgent (the work that prompted the priority is done) or when a priority was set by mistake. The task stays in its lane and keeps its tags; only the priority flips back to unset. After clearing, `cortex show` omits the `priority:` line, the TUI shows no priority, and the task sorts after every prioritised row in `cortex ls`.
+Use `--clear-priority` when a task is no longer urgent (the work that prompted the priority is done) or when a priority was set by mistake. The task stays in its lane and keeps its tags; only the priority flips back to unset. After clearing, `cortex show` omits the `priority:` line, the desktop app shows no priority, and the task sorts after every prioritised row in `cortex ls`.
 
 `--clear-priority` is mutually exclusive with `-p`; passing both exits 1.
 

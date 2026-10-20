@@ -15,7 +15,7 @@ import type { CortexClient, Endpoint } from "./contracts.ts";
 // One error class for every client.
 export { HttpError };
 
-/** Default deadline for native requests, so a hung daemon fails instead of hanging the CLI/TUI. */
+/** Default deadline for native requests, so a hung daemon fails instead of hanging the CLI or the desktop app. */
 export const DEFAULT_TIMEOUT_MS = 30_000;
 
 /**

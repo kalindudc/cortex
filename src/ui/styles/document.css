@@ -1,0 +1,337 @@
+/* Document workspace, aligned with prototype B. The toolbar is application
+   chrome; the title, metadata and content share one bounded reading column.
+   This slice owns that layout rather than layering legacy pane overrides. */
+.task-document {
+  --document-gutter: 36px;
+  --document-measure: 72ch;
+  --outline-width: 0px;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  font-size: 16px;
+}
+.task-document.has-outline { --outline-width: 200px; }
+.workspace-toolbar {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  flex-shrink: 0;
+  min-height: 64px;
+  padding: 12px 28px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.workspace-toolbar-leading, .workspace-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.workspace-toolbar-leading { gap: 22px; }
+.workspace-breadcrumb { display: flex; align-items: center; gap: 10px; color: var(--text-2); white-space: nowrap; }
+.workspace-breadcrumb > [aria-hidden] { color: var(--border-strong); }
+.workspace-toolbar-actions { flex-shrink: 0; margin-left: auto; }
+.status-anchor, .task-actions-anchor { position: relative; }
+.workspace-toolbar .status-pill {
+  height: var(--control-height);
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  background: transparent;
+  font: 500 12px/1 var(--font-sans);
+  color: var(--text-2);
+}
+.workspace-toolbar .status-pill:hover { background: var(--panel); border-color: var(--border-strong); }
+.doc-mode-switch {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 2px;
+  padding: 3px;
+  margin: 0;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  background: var(--panel);
+}
+.doc-mode-switch button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 26px;
+  min-width: 44px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-1);
+  color: var(--text-2);
+  background: transparent;
+  font: 500 12px/1 var(--font-sans);
+}
+.mode-switch-super { display: inline-flex; align-items: center; align-self: stretch; padding: 0 8px 0 4px; margin-right: 2px; border-right: 1px solid var(--border); color: var(--text-3); font: 500 10px/1 var(--font-mono); letter-spacing: 0.02em; }
+.doc-mode-switch .mode-switch-digit { color: var(--text-3); font: 500 10px/1 var(--font-mono); opacity: 0.75; }
+.doc-mode-switch button.active .mode-switch-digit { opacity: 1; }
+.doc-mode-switch button.active { background: var(--bg); color: var(--text); box-shadow: 0 1px 3px #0001; }
+.doc-mode-switch button:hover:not(.active) { background: var(--tint); color: var(--text); }
+.doc-topbar { flex-shrink: 0; border-bottom: 1px solid var(--border); padding: 0 28px; }
+.doc-tabs { display: flex; align-items: stretch; gap: 24px; }
+.doc-tabs [role="tab"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 10px 0;
+  border-bottom: 2px solid transparent;
+  color: var(--text-2);
+  font: 400 12px/1.4 var(--font-sans);
+  white-space: nowrap;
+}
+.doc-tabs [role="tab"]:hover { color: var(--text); }
+.doc-tabs [role="tab"].active { color: var(--text); border-bottom-color: var(--accent); font-weight: 550; }
+.tab-count { min-width: 18px; padding: 1px 5px; border-radius: var(--r-1); background: var(--panel); color: var(--text-2); font: 10px/1.4 var(--font-mono); }
+.doc-page { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; min-width: 0; overflow: auto; }
+.task-header, .doc-conflict {
+  flex-shrink: 0;
+  width: min(var(--document-measure), calc(100% - var(--outline-width) - 2 * var(--document-gutter)));
+  margin-left: max(var(--document-gutter), calc((100% - var(--outline-width) - var(--document-measure)) / 2));
+  font-size: 16px;
+}
+.task-header { position: relative; z-index: 2; margin-top: 36px; margin-bottom: 30px; }
+.document-kicker { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; color: var(--text-2); font: 10px/1.5 var(--font-mono); }
+.task-id { text-transform: uppercase; letter-spacing: .06em; }
+.task-updated { font: 11px/1.5 var(--font-sans); }
+.task-title-row { display: flex; align-items: flex-start; min-width: 0; }
+.task-title-display {
+  margin: 0;
+  font: 640 30px/1.25 var(--font-sans);
+  letter-spacing: -.035em;
+  color: var(--text);
+  overflow-wrap: anywhere;
+  min-width: 0;
+  user-select: text;
+  cursor: text;
+}
+.task-header .title-input-wrap { border: 0; min-width: 0; }
+.task-header .title-input-wrap > .title-input, .task-header .title-input-wrap::after {
+  font: 640 30px/1.25 var(--font-sans);
+  letter-spacing: -.035em;
+  padding: 0;
+  color: var(--text);
+}
+.task-header-trailing { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 8px 12px; margin-top: 16px; }
+.task-props { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.prop-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: var(--control-height);
+  min-width: var(--control-height);
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: var(--r-2);
+  background: transparent;
+  color: var(--text-2);
+  font: 400 12px/1 var(--font-sans);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.prop-trigger:hover { border-color: var(--border); background: var(--panel); color: var(--text); }
+.prop-label { color: var(--text-2); }
+.prop-value { color: var(--text); font-weight: 500; max-width: 22ch; overflow: hidden; text-overflow: ellipsis; }
+.prop-trigger .icon { color: var(--text-2); }
+/* Header priority is NOT a list badge. Same geometry in display and edit;
+   the small list-row PriorityChip retains its independent styling. */
+.prop-trigger.priority-chip {
+  height: var(--control-height);
+  min-width: 112px;
+  width: 112px;
+  padding: 0 8px;
+  border-radius: var(--r-2);
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-2);
+  font: 400 12px/1 var(--font-sans);
+  opacity: 1;
+}
+.prop-trigger.priority-chip:hover { background: var(--panel); border-color: var(--border); }
+/* Empty metadata is an explicit add affordance, not plain read-only text. */
+button.prop-trigger.priority-chip-unset { border: 1px dotted var(--border-strong); }
+button.prop-trigger.priority-chip-unset:hover,
+button.prop-trigger.priority-chip-unset:focus-visible { border-color: var(--text-2); background: var(--panel); color: var(--text); }
+.prop-trigger.priority-chip-input { text-align: center; background: var(--panel); border-color: var(--border-strong); cursor: text; }
+.prop-trigger.priority-chip.high .prop-value { color: var(--err); }
+.prop-trigger.priority-chip.urgent .prop-value { color: var(--code-accent); }
+.tags-header { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 5px; min-width: 0; }
+.task-header .tag-pill { height: 23px; font-family: var(--font-sans); font-size: 11px; font-weight: 500; border-radius: var(--r-pill); max-width: 24ch; overflow: hidden; text-overflow: ellipsis; }
+.task-header .tag-pill-colored { background: rgba(var(--label-r), var(--label-g), var(--label-b), .1); border-color: rgba(var(--label-r), var(--label-g), var(--label-b), .32); color: color-mix(in srgb, rgb(var(--label-r), var(--label-g), var(--label-b)) 45%, var(--text)); }
+.task-title-trigger { display: block; width: 100%; min-height: 1.25em; padding: 0; border: 0; border-radius: var(--r-1); background: transparent; color: inherit; font: inherit; letter-spacing: inherit; text-align: left; overflow-wrap: anywhere; cursor: text; }
+.task-title-trigger:hover { background: color-mix(in srgb, var(--panel) 65%, transparent); }
+.task-title-trigger.is-empty { color: var(--text-2); }
+/* The header is pinned above the scrolling reader/editor, so the display
+   title clamps to --title-clamp-lines (TaskHeader publishes the count and
+   measures overflow). `lh` keeps the clamp height tied to the real
+   line-height at every font size. Once a title really overflows, the
+   heading is `.is-clamped`; a reveal (TaskHeader's `.is-title-revealed` on
+   the header, or keyboard focus-visible on the trigger) lifts the clamp and
+   lets the text grow IN FLOW to its measured full height, so the metadata
+   row, reader and editor move down with it exactly as they do for the
+   title textarea, which is exempt: editing always shows every line. */
+.task-title-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--title-clamp-lines, 2);
+  max-height: calc(var(--title-clamp-lines, 2) * 1lh);
+  overflow: hidden;
+}
+.task-header.is-title-revealed .is-clamped .task-title-text,
+.is-clamped .task-title-trigger:focus-visible .task-title-text {
+  -webkit-line-clamp: none;
+  max-height: var(--title-full-height, none);
+}
+.task-header .tag-pill-removable { height: 28px; max-width: 28ch; }
+.tags-add { padding: 0; width: var(--control-height); }
+.tags-add:disabled, .tags-overflow:disabled { opacity: .5; cursor: progress; }
+.tags-error { flex-basis: 100%; color: var(--err); font: 12px/1.5 var(--font-sans); }
+.draft-state { display: inline-flex; align-items: center; gap: 8px; margin-top: 8px; color: var(--text-2); font: 12px/1.5 var(--font-sans); }
+.draft-state-failed { color: var(--err); }
+.draft-state-retrying { color: var(--warn); }
+.draft-retry { min-height: 28px; padding: 2px 10px; border: 1px solid var(--border); border-radius: var(--r-2); color: var(--err); font: inherit; }
+.draft-retry:hover { background: var(--panel); }
+/* Holds the editor's place until the draft's atomic baseline is known (or
+   explains why it could not be read); the editor then mounts once. */
+.editor-baseline { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; min-height: 120px; padding: 16px; color: var(--text-2); font: 12px/1.5 var(--font-sans); }
+.editor-baseline.is-error { color: var(--err); }
+.task-actions-menu { top: calc(100% + 6px); right: 0; min-width: 180px; }
+.task-actions-menu .task-action-delete { color: var(--err); display: flex; align-items: center; gap: 8px; }
+.doc-content { display: grid; grid-template-columns: minmax(0, 1fr) var(--outline-width); flex: 1 1 auto; min-height: 180px; min-width: 0; }
+.doc-content[hidden], .doc-context[hidden] { display: none; }
+.doc-split { display: flex; min-width: 0; min-height: 0; }
+.doc-reader { flex: 1 1 auto; min-height: 0; min-width: 0; overflow: auto; position: relative; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; scroll-padding-top: 20px; }
+.doc-reading-column, .doc-context > .task-context {
+  width: min(var(--document-measure), calc(100% - 2 * var(--document-gutter)));
+  margin: 0 auto;
+  padding-bottom: 48px;
+  font-size: 16px;
+}
+.doc-context { flex: 1 1 auto; min-height: 180px; min-width: 0; overflow: auto; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+.mode-edit .doc-split, .mode-split .doc-split { padding: 0 28px 24px; gap: 0; }
+.mode-edit .editable-task-body, .mode-split .editable-task-body { border: 1px solid var(--border); border-radius: var(--r-3); overflow: hidden; }
+.mode-split .doc-split > .editable-task-body, .mode-split .doc-split > .doc-reader { flex: 1 1 50%; min-width: 0; }
+.mode-split .doc-reader { --document-gutter: 24px; padding-top: 12px; }
+.doc-outline { min-width: 0; padding: 0 24px 32px 8px; overflow: auto; scrollbar-width: thin; }
+.doc-outline-title { margin: 0 0 12px 10px; color: var(--text-2); font: 600 10px/1.5 var(--font-sans); text-transform: uppercase; letter-spacing: .1em; cursor: pointer; list-style: none; }
+.doc-outline-title::-webkit-details-marker { display: none; }
+.doc-outline-link { display: block; width: 100%; min-height: 30px; padding: 7px 10px; border: 0; border-left: 2px solid var(--border); border-radius: 0; color: var(--text-2); font: 11px/1.45 var(--font-sans); background: transparent; text-align: left; overflow-wrap: anywhere; }
+.doc-outline-link:hover { background: var(--panel); color: var(--text); }
+.doc-outline-link[aria-current="location"] { background: var(--panel); color: var(--text); border-left-color: var(--accent); }
+.doc-outline-link.level-3, .doc-outline-link.level-4, .doc-outline-link.level-5, .doc-outline-link.level-6 { padding-left: 20px; }
+.doc-empty-body { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 44px 20px; border: 1px dashed var(--border-strong); border-radius: var(--r-3); color: var(--text-2); text-align: center; }
+.doc-empty-body p { margin: 0; }
+.doc-stale-notice, .outside-filter-notice { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 10px 14px; border: 1px solid var(--border); border-radius: var(--r-2); background: var(--panel); color: var(--text-2); font: 12px/1.5 var(--font-sans); }
+.doc-stale-notice { margin-bottom: 16px; }
+.doc-stale-notice button, .outside-filter-notice button { min-height: 28px; color: var(--code-accent); font: inherit; }
+.outside-filter-notice { border-width: 0 0 1px; border-radius: 0; flex-shrink: 0; }
+
+/* Shared sanitized Markdown typography: comfortable prose, quiet code
+   furniture, and LOCAL overflow for wide tables/diagrams/source. */
+.markdown-view { font: 16px/1.7 var(--font-sans); color: var(--text-content); max-width: 72ch; min-width: 0; overflow-wrap: anywhere; user-select: text; cursor: text; }
+.markdown-view h1, .markdown-view h2, .markdown-view h3, .markdown-view h4, .markdown-view h5, .markdown-view h6 { color: var(--text); line-height: 1.35; scroll-margin-top: 20px; }
+.markdown-view h1 { font-size: 24px; margin: 34px 0 14px; letter-spacing: -.025em; }
+.markdown-view h2 { font-size: 20px; font-weight: 620; margin: 32px 0 12px; letter-spacing: -.02em; }
+.markdown-view h3 { font-size: 16px; font-weight: 650; margin: 24px 0 10px; }
+.markdown-view h4, .markdown-view h5, .markdown-view h6 { font-size: 1em; margin: 20px 0 10px; }
+.markdown-view > :first-child { margin-top: 0; }
+.markdown-view p { margin: 0 0 18px; }
+.markdown-view strong { color: var(--text); font-weight: 630; }
+.markdown-view ul, .markdown-view ol { margin: 0 0 20px; padding-left: 23px; }
+.markdown-view li { margin: 8px 0; padding-left: 2px; }
+.markdown-view li > ul, .markdown-view li > ol { margin: 8px 0; }
+.markdown-view blockquote { margin: 22px 0; padding: 13px 17px; border-left: 3px solid var(--accent); border-radius: 0 var(--r-2) var(--r-2) 0; background: var(--panel); font-size: 14px; color: var(--text-2); }
+.markdown-view blockquote p:last-child { margin-bottom: 0; }
+.markdown-view hr { border: 0; border-top: 1px solid var(--border); margin: 28px 0; }
+.markdown-view a, .markdown-view .md-ref { color: var(--code-accent); text-decoration: underline; text-underline-offset: 3px; }
+.markdown-view img { max-width: 100%; height: auto; }
+.markdown-view input[type="checkbox"] { width: 14px; height: 14px; margin-right: 8px; accent-color: var(--code-accent); pointer-events: none; }
+.markdown-view li:has(> input[type="checkbox"]) { list-style: none; margin-left: -23px; padding-left: 0; }
+.markdown-view code { font: .85em/1.5 var(--font-mono); background: var(--panel); padding: 2px 4px; border-radius: 3px; }
+.markdown-view pre { margin: 22px 0; padding: 14px; overflow: auto; font: 12px/1.75 var(--font-mono); border: 1px solid var(--border); border-radius: var(--r-3); background: var(--panel); scrollbar-width: thin; }
+.markdown-view pre code { font: inherit; padding: 0; background: transparent; }
+.markdown-view .md-codeblock { margin: 22px 0; border: 1px solid var(--border); border-radius: var(--r-3); background: var(--panel); overflow: hidden; }
+.markdown-view .md-codeblock pre { margin: 0; border: 0; border-radius: 0; }
+.md-codebar { display: flex; justify-content: space-between; align-items: center; min-height: 34px; padding: 4px 8px 4px 14px; border-bottom: 1px solid var(--border); user-select: none; }
+.md-code-language { color: var(--text-2); font: 10px/1.5 var(--font-mono); text-transform: uppercase; letter-spacing: .06em; }
+.markdown-view .md-copy { min-height: 26px; padding: 4px 8px; border-radius: var(--r-1); color: var(--text-2); font: 11px/1.5 var(--font-sans); }
+.markdown-view .md-copy:hover { color: var(--text); background: var(--tint); }
+.markdown-view .md-table-wrap { overflow: auto; margin: 22px 0; border: 1px solid var(--border); border-radius: var(--r-3); scrollbar-width: thin; }
+.markdown-view table { width: 100%; border-collapse: collapse; font-size: 13px; text-align: left; }
+.markdown-view th, .markdown-view td { padding: 10px 12px; border-bottom: 1px solid var(--border); min-width: 110px; vertical-align: top; }
+.markdown-view th { background: var(--panel); color: var(--text); font-weight: 600; }
+.markdown-view tr:last-child td { border-bottom: 0; }
+.markdown-view .md-ref { display: inline; padding: 0; border: 0; background: transparent; font: inherit; border-radius: 2px; cursor: pointer; }
+.markdown-view .md-ref:hover { background: var(--accent-tint); }
+.markdown-view pre.mermaid { text-align: center; overflow: auto; max-width: 100%; }
+.markdown-view pre.mermaid[data-mermaid-state="done"] { border: 0; background: transparent; padding: 0; }
+.markdown-view pre.mermaid svg { max-width: 100%; height: auto; }
+.markdown-view .md-mermaid-error { border: 1px solid var(--err); border-radius: var(--r-2); padding: 12px 14px; margin: 22px 0; }
+.markdown-view .md-mermaid-error-msg, .markdown-view-failed .md-render-error { color: var(--err); font: 13px/1.5 var(--font-sans); margin-bottom: 8px; }
+.markdown-view .md-mermaid-retry { min-height: var(--control-height); padding: 4px 12px; border: 1px solid var(--border); border-radius: var(--r-2); color: var(--text-2); font: 12px/1.5 var(--font-sans); }
+.markdown-view .md-mermaid-retry:hover { background: var(--panel); color: var(--text); }
+.markdown-view-failed .md-source-fallback { white-space: pre-wrap; }
+
+@media (max-width: 1200px) and (min-width: 901px) {
+  .task-document { --document-gutter: 28px; }
+  .task-document.has-outline { --outline-width: 170px; }
+  .workspace-toolbar-leading { gap: 12px; }
+  .workspace-breadcrumb { display: none; }
+}
+@media (max-width: 900px) {
+  .task-document, .task-document.has-outline { --document-gutter: 20px; --outline-width: 0px; }
+  .workspace-toolbar { padding: 8px 16px; min-height: 60px; flex-wrap: wrap; gap: 8px; }
+  .workspace-breadcrumb, .focus-reading-toggle { display: none; }
+  .workspace-toolbar-leading { flex: 1 1 100%; }
+  .workspace-toolbar-actions { margin-left: auto; gap: 6px; }
+  .workspace-toolbar .status-pill, .workspace-toolbar .btn, .workspace-toolbar .btn-icon { min-height: 44px; }
+  .workspace-toolbar .status-pill { font-size: 11px; padding: 0 8px; }
+  .workspace-toolbar .btn { font-size: 11px; padding: 0 10px; }
+  .doc-mode-switch { display: flex; width: min(100%, 320px); }
+  .doc-mode-switch button { flex: 1 1 0; min-height: 44px; min-width: 0; padding: 0 6px; }
+  .mode-switch-super { padding: 0 8px; font-size: 11px; }
+  .doc-topbar { padding: 0 20px; }
+  .doc-tabs { gap: 20px; }
+  .doc-tabs [role="tab"] { min-height: 44px; font-size: 12px; }
+  .task-header { margin-top: 24px; margin-bottom: 26px; }
+  .task-title-display, .task-header .title-input-wrap > .title-input, .task-header .title-input-wrap::after { font-size: 26px; }
+  .task-header-trailing { gap: 4px 8px; margin-top: 12px; }
+  .task-props { display: contents; }
+  .task-header .tag-pill-removable { --tag-remove-size: 40px; height: 44px; }
+  .tags-add { width: 44px; }
+  .prop-trigger, .prop-trigger.priority-chip { height: 44px; min-width: 44px; }
+  .doc-content { display: flex; flex-direction: column; }
+  .doc-split { flex: 1 1 auto; }
+  .doc-outline { flex-shrink: 0; order: -1; margin: 0 20px 22px; padding: 0; border: 1px solid var(--border); border-radius: var(--r-2); background: var(--panel); max-height: 36dvh; }
+  .doc-outline-title { display: flex; align-items: center; min-height: 44px; margin: 0; padding: 10px 12px; text-transform: none; letter-spacing: 0; font-size: 12px; font-weight: 400; }
+  .doc-outline-title::before { content: "\25B8"; margin-right: 8px; }
+  .doc-outline-details[open] > summary::before { transform: rotate(90deg); }
+  .doc-outline-link { min-height: 44px; margin-left: 10px; width: calc(100% - 20px); }
+  .doc-outline-details[open] { padding-bottom: 10px; }
+  .mode-edit .doc-split, .mode-split .doc-split { padding: 0 16px 20px; }
+  .mode-split .doc-content { min-height: 460px; }
+  .mode-split .doc-split { flex-direction: column; gap: 16px; }
+  .mode-split .doc-split > .editable-task-body { flex: 1 0 200px; }
+  .mode-split .doc-split > .doc-reader { flex: 1 0 220px; --document-gutter: 4px; padding-top: 0; }
+  .markdown-view .md-copy, .markdown-view .md-mermaid-retry { min-height: 44px; }
+}
+/* Unsaved text of deleted tasks: kept until the user exports or discards it. */
+.orphan-drafts { flex-shrink: 0; padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--panel); font: 12px/1.5 var(--font-sans); }
+.orphan-drafts-title { margin: 0 0 6px; color: var(--err); font: 600 12px/1.5 var(--font-sans); }
+.orphan-drafts-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.orphan-draft { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.orphan-draft-label { flex-shrink: 0; color: var(--text-2); }
+.orphan-draft-text { flex: 1; min-width: 0; overflow: hidden; color: var(--text); text-overflow: ellipsis; white-space: nowrap; }

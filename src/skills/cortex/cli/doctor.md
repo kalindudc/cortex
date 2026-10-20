@@ -19,7 +19,7 @@ cortex doctor --json   # machine-readable report
   "daemon": { "running": false, "url": null },
   "pendingMigrations": [],
   "counts": { "tasks": 42, "lanes": 3, "tags": 7 },
-  "author": "you"                   // the user's author name: what the TUI and `update --as-me` credit
+  "author": "you"                   // the user's author name: what the desktop app and `update --as-me` credit
 }
 ```
 

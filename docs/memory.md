@@ -24,15 +24,15 @@ A small template, ending with the date the body was last checked against the cod
 
 ```markdown
 ## Goal
-Make one scroll notch move the task list by one task.
+Keep an idle live stream connected.
 ## State
-Wheel reports are parsed in mouse.ts; some terminals send several per notch.
+The heartbeat is sent in server.ts; Bun closes a connection that is idle for 10 s.
 ## Decisions
-- User: one notch = one task. Rejected: debouncing by time (felt laggy).
+- User: keep the heartbeat under the idle timeout. Rejected: raising Bun's timeout (hides dead peers).
 ## Next
-1. Use the same notch counter in dialogs.
+1. Pin it with an integration test.
 ## Files
-- `src/tui/mouse.ts`
+- `src/server.ts`
 Verified: 2026-09-30
 ```
 
@@ -52,13 +52,13 @@ With pi (the coding agent cortex ships an extension for), memory arrives on its 
 
 Without pi, an agent runs `cortex memory context --query="<the ask>"` once, then `cortex memory show <id>`.
 
-Search matches words and their forms, and each hit shows which words matched. Full paths, links, commit hashes,
-UUIDs, pasted code blocks and small talk in the ask are ignored, so they never pull in unrelated streams; a
-repo-relative file like `src/tui/mouse.ts` still counts. It covers every project, the
-current one first, because work spans repos. A long body opens with its priority sections (Next, open questions,
-Decisions, State) and lists the rest. An older stream names the newer one continuing it as its "latest linked".
-`cortex memory exclude <id>`, `:memory off` in the terminal workspace or bb's More menu keep a task out of all of
-this; reading it by id still works, and a running pi session keeps its primer until compaction or `/memory refresh`.
+Search matches words and their forms, and each hit shows which words matched. Full paths, links, commit hashes, UUIDs,
+pasted code blocks and small talk in the ask are ignored, so they never pull in unrelated streams; a repo-relative
+file like `src/server.ts` still counts. It covers every project, the current one first, because work spans repos. A
+long body opens with its priority sections (Next, open questions, Decisions, State) and lists the rest. An older
+stream names the newer one continuing it as its "latest linked". `cortex memory exclude <id>`, the desktop app's "Keep
+out of agent memory" command or bb's More menu keep a task out of all of this; reading it by id still works, and a
+running pi session keeps its primer until compaction or `/memory refresh`.
 
 ## When is memory stale?
 
@@ -128,7 +128,7 @@ which would surface every stream, but never a word naming a cortex topic or comm
 tie-break only (a global blend was measured to cut precision); `src/memory.ts#memoryPhrases` searches compounds
 like `routing-events` as phrases, from the same blanked text. Every surface (`cortex memory search`,
 `cortex memory context`, pi's automatic hits, `cortex_recall`) gets these terms. Why not drop every path and
-inline code? Streams cite repo-relative files (`src/tui/mouse.ts`) and identifiers, and recall by them works. Why
+inline code? Streams cite repo-relative files (`src/server.ts`) and identifiers, and recall by them works. Why
 not stopword `update` or `repo`? They name cortex topics. Why not clean the query in the pi extension or the
 route? A copy in the extension drifts, and a future caller of the helpers would get raw text.
 `src/store.ts#searchMemory` searches every lane and keeps a section only when it covers `MEMORY_LIMITS.minMatched`

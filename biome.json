@@ -61,6 +61,21 @@
       }
     }
   },
+  "overrides": [
+    {
+      "includes": ["src/ui/**", "test/ui/**"],
+      "linter": {
+        "rules": {
+          "a11y": {
+            "useButtonType": "off",
+            "useKeyWithClickEvents": "off",
+            "noStaticElementInteractions": "off",
+            "noAutofocus": "off"
+          }
+        }
+      }
+    }
+  ],
   "assist": {
     "enabled": true,
     "actions": {

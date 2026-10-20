@@ -1,0 +1,31 @@
+/* ---------- status dot + pill ---------- */
+.dot {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  background: currentColor; flex-shrink: 0;
+}
+.dot-status-draft  { color: var(--info); }
+.dot-status-open    { color: var(--text-3); }
+.dot-status-review  { color: var(--warn); }
+.dot-status-blocked { color: var(--err); }
+.dot-status-done    { color: var(--ok); }
+
+.status-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 24px; padding: 0 10px; border-radius: var(--r-pill);
+  background: var(--tint); color: var(--text-2);
+  font-size: var(--fs-2); font-weight: 500;
+  transition: background var(--dur-2) var(--ease);
+}
+.status-pill:hover { background: var(--tint-strong); color: var(--text); }
+
+.lane-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 20px; padding: 0 10px;
+  border-radius: var(--r-pill);
+  background: var(--tint); color: var(--text-2);
+  font-size: var(--fs-1); font-weight: 600; line-height: 1;
+  border: 0; cursor: pointer;
+  transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
+}
+.lane-chip:hover { background: var(--tint-strong, var(--accent-tint)); color: var(--text); }
+.lane-chip .lane-color { width: 6px; height: 6px; border-radius: 50%; }

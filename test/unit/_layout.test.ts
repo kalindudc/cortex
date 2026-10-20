@@ -5,9 +5,9 @@
  * AND to PREVENT TESTS FROM EVER WRITING TO THE DEVELOPER'S REAL CORTEX
  * CONFIG. It runs as a unit test (no binary spawn) and asserts:
  *
- *   1. UNIT NO-BINARY-SPAWN — no `test/unit/**\/*.test.ts` file may import
- *      from the integration helpers or call `runCli`. Unit tests are pure
- *      in-process by definition.
+ *   1. NO-BINARY-SPAWN — no `test/unit/**` or `test/ui/**` test file may
+ *      import from the integration helpers or call `runCli`. Unit and
+ *      renderer tests are pure in-process by definition.
  *
  *   2. HERMETIC TEXT GUARD — no test file under `test/` may reference the
  *      developer's real `~/.config/cortex` path literally (with one
@@ -18,6 +18,10 @@
  *      mtime+size are snapshotted at suite start and asserted unchanged
  *      at suite end. Catches regressions even when static text-scan
  *      misses them (e.g. an indirect helper writes to the real path).
+ *
+ *   4. DOM-FREE UNIT TIER — no `test/unit/**` test file may reach happy-dom,
+ *      @testing-library or the `test/ui` tier; DOM tests live in `test/ui/`
+ *      and run only through `pnpm run test:ui`.
  */
 
 import { test, expect, describe, beforeAll } from "bun:test";
@@ -35,22 +39,22 @@ const TEST_ROOT = path.join(REPO_ROOT, "test");
 // boundary and undermines the convention.
 //
 // Allow-list: `_layout.test.ts` itself reads test files via fs (NOT a spawn).
-// We scan ALL `test/unit/**/*.test.ts` files.
-function listUnitTestFiles(): string[] {
+// We scan ALL `test/unit/**` and `test/ui/**` test files.
+function listTierTestFiles(tier: "unit" | "ui"): string[] {
   const out: string[] = [];
   const walk = (dir: string): void => {
     for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
       const abs = path.join(dir, ent.name);
       if (ent.isDirectory()) walk(abs);
-      else if (ent.isFile() && ent.name.endsWith(".test.ts")) out.push(abs);
+      else if (ent.isFile() && /\.test\.tsx?$/.test(ent.name)) out.push(abs);
     }
   };
-  walk(path.join(TEST_ROOT, "unit"));
+  walk(path.join(TEST_ROOT, tier));
   return out;
 }
 
-describe("layout: unit tests do not spawn the cortex binary", () => {
-  for (const abs of listUnitTestFiles()) {
+describe("layout: unit and renderer tests do not spawn the cortex binary", () => {
+  for (const abs of [...listTierTestFiles("unit"), ...listTierTestFiles("ui")]) {
     const rel = path.relative(REPO_ROOT, abs);
     test(`${rel} does not import the integration helpers or call runCli`, () => {
       // Layout guard itself contains regex source for these patterns; its
@@ -71,6 +75,21 @@ describe("layout: unit tests do not spawn the cortex binary", () => {
   }
 });
 
+// ---------- 4. DOM-FREE UNIT TIER ----------
+//
+// AGENTS.md promises the unit tier has no DOM: happy-dom and
+// @testing-library belong to test/ui, which only `pnpm run test:ui` runs
+// with the happy-dom preload.
+describe("layout: the unit tier is DOM-free", () => {
+  for (const abs of listTierTestFiles("unit")) {
+    const rel = path.relative(REPO_ROOT, abs);
+    if (rel.endsWith("_layout.test.ts")) continue;
+    test(`${rel} does not reach happy-dom, @testing-library or test/ui`, () => {
+      expect(fs.readFileSync(abs, "utf8")).not.toMatch(/happy-dom|@testing-library|\btest\/ui\b/);
+    });
+  }
+});
+
 // ---------- 2. HERMETIC TEXT GUARD ----------
 //
 // No test file may reference the developer's real `~/.config/cortex` path
@@ -84,7 +103,7 @@ function listEveryTestFile(): string[] {
       const abs = path.join(dir, ent.name);
       if (ent.isDirectory()) {
         walk(abs);
-      } else if (ent.isFile() && ent.name.endsWith(".test.ts")) {
+      } else if (ent.isFile() && /\.test\.tsx?$/.test(ent.name)) {
         out.push(abs);
       }
     }

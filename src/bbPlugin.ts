@@ -8,8 +8,7 @@
  * pushed, network access and credentials, and installs whatever the remote
  * holds rather than what matches this binary.
  *
- * Every child runs with captured output and an argument array (the TUI's
- * :config calls this too), with timeouts long enough for bb to build.
+ * Every child runs with captured output and an argument array, with timeouts long enough for bb to build.
  */
 
 import { createHash } from "node:crypto";

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 // The REAL pi-tui (a cortex dependency at pi's pin): a mock.module of it would
-// leak into every later test file in the same `bun test` run (src/tui uses it).
+// leak into every later test file in the same `bun test` run (src/extensions/memory-view.ts uses it).
 import { visibleWidth } from "@earendil-works/pi-tui";
 import {
   clean,

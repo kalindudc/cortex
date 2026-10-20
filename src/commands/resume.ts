@@ -34,20 +34,8 @@
 import { defineCommand } from "citty";
 import { spawn } from "node:child_process";
 import readline from "node:readline";
-import type { Update } from "../store.ts";
+import { type Candidate, harnessCommand, missingProgramMessage, resumeCandidates } from "../lib/resume.ts";
 import { readTaskOrExit } from "./show.ts";
-
-const UUIDV7_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-const BB_THREAD_RE = /^thr_[0-9a-z]{6,40}$/;
-
-export type Candidate = {
-  author: string;
-  harness: "pi" | "bb";
-  sessionId: string;
-  count: number;
-  lastSeen: number;
-  lastSummary: string;
-};
 
 /** Pure-TS relative-time helper. No date library. */
 function rel(ts: number): string {
@@ -129,44 +117,6 @@ async function pickWithReadline(cands: Candidate[]): Promise<Candidate | null> {
 }
 
 /**
- * The task's resumable harness sessions, most recent first: updates
- * aggregated by author (count, lastSeen, lastSummary), kept only when the
- * first dash splits the tag into `pi` and a strict uuidv7 or `bb` and a
- * thread id. Defense in depth: only well-formed ids reach `spawn`. The
- * terminal workspace's :resume checks this before handing over the terminal.
- */
-export function resumeCandidates(updates: readonly Update[]): Candidate[] {
-  const byAuthor = new Map<string, { count: number; lastSeen: number; lastSummary: string }>();
-  for (const u of updates) {
-    const prev = byAuthor.get(u.author);
-    if (!prev || u.created > prev.lastSeen) {
-      byAuthor.set(u.author, {
-        count: (prev?.count ?? 0) + 1,
-        lastSeen: u.created,
-        lastSummary: u.summary,
-      });
-    } else {
-      byAuthor.set(u.author, {
-        count: prev.count + 1,
-        lastSeen: prev.lastSeen,
-        lastSummary: prev.lastSummary,
-      });
-    }
-  }
-  const cands: Candidate[] = [];
-  for (const [author, agg] of byAuthor) {
-    const dash = author.indexOf("-");
-    if (dash <= 0) continue;
-    const harness = author.slice(0, dash);
-    const sessionId = author.slice(dash + 1);
-    if (harness === "pi" && UUIDV7_RE.test(sessionId)) cands.push({ author, harness, sessionId, ...agg });
-    else if (harness === "bb" && BB_THREAD_RE.test(sessionId)) cands.push({ author, harness, sessionId, ...agg });
-  }
-  cands.sort((a, b) => b.lastSeen - a.lastSeen);
-  return cands;
-}
-
-/**
  * Spawn `pi --session <id>` or `$BB_CLI thread open <id>` (else `bb`) with stdio inherited. Never returns.
  *
  * Bun's `child_process.spawn` (under `bun build --compile`) raises ENOENT
@@ -174,22 +124,15 @@ export function resumeCandidates(updates: readonly Update[]): Candidate[] {
  * try/catch AND keep the async handler for non-Bun runtimes (test runs
  * via `bun run` and the production binary both go through the sync path).
  */
-function missingProgram(c: Candidate, program: string): string {
-  return c.harness === "bb"
-    ? `${program} not found; set BB_CLI or install bb`
-    : "pi not found in PATH; install @earendil-works/pi-coding-agent";
-}
-
 function execHarness(c: Candidate): void {
-  const program = c.harness === "bb" ? process.env.BB_CLI || "bb" : "pi";
-  const argv = c.harness === "bb" ? ["thread", "open", c.sessionId] : ["--session", c.sessionId];
+  const { program, argv } = harnessCommand(c, process.env);
   let child: ReturnType<typeof spawn>;
   try {
     child = spawn(program, argv, { stdio: "inherit" });
   } catch (err) {
     const e = err as NodeJS.ErrnoException;
     if (e.code === "ENOENT" || /not found/i.test(e.message ?? "")) {
-      console.error(missingProgram(c, program));
+      console.error(missingProgramMessage(c, program));
     } else {
       console.error(e.message ?? String(err));
     }
@@ -197,7 +140,7 @@ function execHarness(c: Candidate): void {
   }
   child.on("error", (err: NodeJS.ErrnoException) => {
     if (err.code === "ENOENT") {
-      console.error(missingProgram(c, program));
+      console.error(missingProgramMessage(c, program));
     } else {
       console.error(err.message);
     }

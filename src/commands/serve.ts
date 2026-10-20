@@ -98,7 +98,7 @@ async function hostDaemon(): Promise<void> {
 export default defineCommand({
   meta: {
     name: "serve",
-    description: "run this database's cortex daemon on its private socket (the TUI starts one when needed)",
+    description: "run this database's cortex daemon on its private socket (the desktop app starts one when needed)",
   },
   args: {
     foreground: {

@@ -1,0 +1,79 @@
+/* The native dialog owns modality. Its transparent viewport wrapper owns
+   positioning; the modal uses the SAME gutter budget for its height cap. */
+dialog.dialog-frame {
+  --dialog-top: clamp(16px, 12dvh, 112px);
+  --dialog-bottom: 24px;
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  max-width: 100vw;
+  height: 100dvh;
+  max-height: 100dvh;
+  margin: 0;
+  padding: var(--dialog-top) 24px var(--dialog-bottom);
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  overflow: hidden;
+  outline: none;
+}
+dialog.dialog-frame:not([open]) { display: none; }
+dialog.dialog-frame::backdrop { background: rgba(0, 0, 0, .32); }
+.modal {
+  width: 100%;
+  max-width: 480px;
+  min-width: 0;
+  min-height: 0;
+  max-height: calc(100dvh - var(--dialog-top) - var(--dialog-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r-4);
+  background: var(--bg);
+  box-shadow: var(--shadow-cmd);
+}
+.modal h2 { margin: 0; color: var(--text); font: 600 19px/1.35 var(--font-sans); letter-spacing: -.02em; }
+.modal .meta { color: var(--text-2); line-height: 1.6; }
+.modal input:not([type="checkbox"]), .modal select { min-height: var(--control-height); font-family: var(--font-sans); }
+.modal-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; padding-top: 4px; }
+.modal--wide { max-width: 760px; overflow: hidden; }
+.modal--render-markdown { max-width: 960px; }
+/* Settings and help: one search over settings, commands and shortcuts. */
+.settings-modal { max-width: 640px; }
+.settings-search { width: 100%; }
+.settings-section { display: flex; flex-direction: column; gap: 8px; }
+.settings-section h3 { margin: 0; color: var(--text); font: 600 var(--fs-3)/1.4 var(--font-sans); }
+.setting-row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 4px 12px; }
+.setting-label { color: var(--text); }
+.setting-control { display: flex; gap: 8px; }
+.setting-help { grid-column: 1 / -1; margin: 0; }
+.help-rows { margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.help-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.help-row dt { color: var(--text); }
+.help-row dd { margin: 0; }
+.update-body { flex: 1 1 auto; min-height: 0; overflow: auto; scrollbar-width: thin; }
+.update-body .markdown-view { margin: 0 auto; }
+
+/* One navigation identity inside the left sheet, with its close button
+   aligned to the brand rather than another stacked application header. */
+dialog.dialog-frame--sheet { --dialog-top: 0px; --dialog-bottom: 0px; padding: 0; align-items: stretch; justify-content: flex-start; }
+.nav-drawer-body { position: relative; width: min(320px, calc(100vw - 24px)); height: 100dvh; min-width: 0; display: flex; flex-direction: column; background: var(--panel); border-right: 1px solid var(--border); box-shadow: var(--shadow-cmd); }
+.nav-drawer-head { position: absolute; top: 14px; right: 10px; display: flex; z-index: 1; }
+.nav-drawer-body .sidebar-brand { padding-right: 64px; }
+.nav-drawer-body .workspace-local { display: none; }
+.nav-drawer-body .pane-lanes { flex: 1 1 auto; min-height: 0; height: auto; border-right: 0; }
+@media (max-height: 560px), (max-width: 900px) {
+  dialog.dialog-frame { --dialog-top: 12px; --dialog-bottom: 12px; padding-left: 12px; padding-right: 12px; }
+  dialog.dialog-frame--sheet { --dialog-top: 0px; --dialog-bottom: 0px; padding: 0; }
+  .modal { padding: 18px; }
+}
+@media (max-width: 900px) {
+  .modal .btn, .modal .btn-icon, .nav-drawer-head .btn-icon { min-width: 44px; min-height: 44px; }
+  .modal input:not([type="checkbox"]), .modal select { min-height: 44px; }
+}

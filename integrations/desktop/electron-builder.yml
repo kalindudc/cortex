@@ -1,0 +1,36 @@
+appId: com.kalindu.cortex.desktop
+productName: Cortex
+directories:
+  output: dist
+  buildResources: build
+extraMetadata:
+  main: main.cjs
+  homepage: https://github.com/kalindudc/cortex
+files:
+  - package.json
+  - from: ../../out/desktop
+    to: .
+    filter: ["main.cjs", "preload.cjs"]
+extraResources:
+  - from: ../../out/ui
+    to: ui
+mac:
+  identity: "-"
+  hardenedRuntime: true
+  entitlements: entitlements.mac.plist
+  entitlementsInherit: entitlements.mac.plist
+  category: public.app-category.productivity
+  icon: build/icon.icns
+  target: [dmg, zip]
+  extraResources:
+    - from: ../../bin/cortex-darwin-${arch}
+      to: cortex
+linux:
+  executableName: cortex-desktop
+  category: Utility
+  icon: build/icon.png
+  maintainer: Kalindu De Costa <kalindu.decosta@shopify.com>
+  target: [AppImage, deb]
+  extraResources:
+    - from: ../../bin/cortex-linux-${arch}
+      to: cortex

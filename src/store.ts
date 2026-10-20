@@ -54,7 +54,7 @@ export type Tag = {
 };
 
 /**
- * Server-persisted notification row backing the TUI's :notifications list.
+ * Server-persisted notification row backing the desktop app's notification drawer.
  * `status` reuses the `TaskStatus` union so a client renders it with the
  * status marker and color — no bespoke notification colors. The value is a
  * SNAPSHOT of the task's status at
@@ -167,7 +167,7 @@ export const TAG_NAME_RE = /^[a-z0-9_@-]{1,32}$/;
  * and from matching markdown headings (`# Heading` — the space after `#`
  * is not in the tag character class so length-1 match fails).
  *
- * Used by the server's `Store.relatedTasks` scan; the terminal reader
+ * Used by the server's `Store.relatedTasks` scan; the desktop renderer
  * parses the same grammar through `src/lib/refGrammar.ts`. Each consumer
  * holds its own `RegExp` instance because the `g` flag mutates
  * `lastIndex`; this server-side instance is standalone so the module has
@@ -1900,7 +1900,7 @@ export class Store {
    * become inbox history (chronological), not silent overwrites.
    *
    * `opts.author` is the attribution stamp for the audit row. The CLI passes
-   * the validated `--as` value; an unattributed HTTP change (the TUI) passes
+   * the validated `--as` value; an unattributed HTTP change (the desktop app) passes
    * the server-side cascade (`resolveAuthor()`). See transitionStatus for `notify`/guards.
    */
   setStatus(id: number, status: TaskStatus, opts: StatusOptions = {}, guard?: WriteGuard): Task {
@@ -2031,7 +2031,7 @@ export class Store {
 
   /**
    * List every tag with the count of tasks currently carrying it. Powers
-   * `cortex tag ls` and the TUI's tag picker. Sorted alphabetically.
+   * `cortex tag ls` and the desktop app's tag picker. Sorted alphabetically.
    */
   listTags(): (Tag & { task_count: number })[] {
     return this.db

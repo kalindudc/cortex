@@ -127,47 +127,14 @@ export function daemonSocketPath(canonicalDatabasePath: string): string {
 }
 
 /**
- * Output of a daemon started in the background (`cortex serve`, TUI
- * autostart) for a canonical database: the socket's name with `.log`, in the
- * same private runtime directory. Truncated at every background start, so a
- * daemon that dies before it is ready can be explained to the caller.
+ * Output of a daemon started in the background (`cortex serve`, the desktop
+ * app's daemon autostart) for a canonical database: the socket's name with
+ * `.log`, in the same private runtime directory. Truncated at every
+ * background start, so a daemon that dies before it is ready can be explained
+ * to the caller.
  */
 export function daemonLogPath(canonicalDatabasePath: string): string {
   return daemonSocketPath(canonicalDatabasePath).replace(/\.sock$/, ".log");
-}
-
-// ---------- terminal UI configuration ----------
-//
-// `tui.toml` and `themes/*.toml` are USER-authored and read-only to cortex;
-// every profile shares them. Only `tui/<profile>.state.json` is app-written
-// (view preferences, merged on save by src/tui/preferences.ts). Everything
-// stays under configDir() so the XDG_CONFIG_HOME test pin isolates it.
-
-/** The user's terminal UI configuration file (leader, keys, mouse, theme, appearance, colors). */
-export function tuiConfigPath(): string {
-  return path.join(configDir(), "tui.toml");
-}
-
-/** Directory of the user's custom terminal themes, `<name>.toml` each. */
-export function themesDir(): string {
-  return path.join(configDir(), "themes");
-}
-
-/** A profile name: ASCII letters/digits first, then letters, digits, `-` or `_`, at most 64 characters. */
-const PROFILE_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
-
-/**
- * App-written view state of one TUI profile: `configDir()/tui/<profile>.state.json`.
- * Throws for a profile name that could leave or alias the state directory
- * (separators, dots, leading `-`, control or non-ASCII characters). A pure lookup.
- */
-export function tuiStatePath(profile: string): string {
-  if (!PROFILE_NAME.test(profile)) {
-    throw new Error(
-      `invalid profile name ${JSON.stringify(profile)}: use 1-64 ASCII letters, digits, '-' or '_', starting with a letter or digit`,
-    );
-  }
-  return path.join(configDir(), "tui", `${profile}.state.json`);
 }
 
 /** Directory for on-demand cortex data-only backup archives. */

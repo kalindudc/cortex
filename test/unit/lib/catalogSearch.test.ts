@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { searchCatalog } from "../../../src/lib/catalogSearch.ts";
+import { catalogSearchHint, searchCatalog } from "../../../src/lib/catalogSearch.ts";
 
 const catalog = Array.from({ length: 5000 }, (_, index) => ({
   name: `team-${String(index).padStart(4, "0")}-platform`,
@@ -29,5 +29,11 @@ describe("optional catalog search", () => {
     expect(result.items).toEqual([]);
     expect(result.matched).toBe(0);
     expect(result.total).toBe(5000);
+  });
+});
+
+describe("catalogSearchHint", () => {
+  test("reports how many entries matched out of the whole catalog", () => {
+    expect(catalogSearchHint(searchCatalog(catalog, "team-000", item => item.name))).toBe("10 of 5000 entries");
   });
 });

@@ -11,8 +11,7 @@
  * body over 64 KiB was cut off mid-string.
  *
  * Routing the console methods through the streams fixes every call site at
- * once. The CLI entry installs it before any command runs; the TUI writes
- * through pi-tui's own stream writes and is unaffected. The real-pipe
+ * once. The CLI entry installs it before any command runs. The real-pipe
  * regression test is test/integration/cli/large-output.test.ts. Remove this
  * once the pinned Bun writes console output completely to non-blocking
  * pipes (re-run that test on the new runtime first).

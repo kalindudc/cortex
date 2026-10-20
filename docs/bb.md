@@ -64,8 +64,8 @@ menu copies the body and excludes the task from memory or includes it again; the
 An agent can write `::cortex{id="529"}` on its own line in a reply; bb shows it as a card that opens task 529.
 Stale means the files the task cites changed after its body was last brought up to date
 ([docs/memory.md](memory.md#when-is-memory-stale)). The plugin checks this only when the thread's checkout is on the
-bb server's machine; otherwise the tab says it was not checked. Changes from any agent, shell or the terminal
-workspace appear within moments, and after a reconnect every open tab and chip refetches.
+bb server's machine; otherwise the tab says it was not checked. Changes from any agent, shell or the desktop
+app appear within moments, and after a reconnect every open tab and chip refetches.
 
 Trying it live changes your bb: `bb plugin dev integrations/bb` rebuilds and reloads on every save. Check behavior
 from a new, separate thread, because bb applies tools and instructions only when it starts a provider session.

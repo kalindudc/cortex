@@ -1,0 +1,216 @@
+/* ---------- design tokens ----------
+   Warm, low-contrast neutral palette with a single soft-orange accent.
+
+   Theme resolution (handled by state/theme.ts, which always sets
+   data-theme to the resolved light or dark, following the system while the
+   appearance is "system"):
+     - <html> with no data-theme attribute    → follows prefers-color-scheme
+       (only before the script runs)
+     - <html data-theme="light">              → light
+     - <html data-theme="dark">               → dark
+     - <html data-theme="dark" data-contrast="high"> → high contrast: the
+       last block below, every text token at least 7:1 on --bg, --panel
+       and --tint
+   The dark token block is duplicated below: once inside the
+   prefers-color-scheme media query (system default) and once under the
+   explicit [data-theme="dark"] selector. Keep the two copies in sync when
+   editing. */
+:root {
+  /* surfaces — 4-step elevation, warm off-white → deeper taupe */
+  --bg:            #f6f2ec;  /* warm off-white base */
+  --panel:         #efe9dd;  /* slightly deeper for left/right panes */
+  --tint:          #e7e0d0;  /* hover/selected tint */
+  --tint-strong:   #d8cfba;  /* stronger interaction state */
+  --border:        #ddd4be;
+  --border-strong: #bdb19a;
+
+  /* text — warm near-black, with a softer grey for main-view content */
+  --text:         #2c2820;  /* chrome / labels / strong emphasis */
+  --text-content: #403a30;  /* main-view content (titles, headings) */
+  --text-2:       #56503f;  /* body */
+  --text-3:       #8a8170;  /* muted / meta */
+  --text-4:       #b5a994;  /* very muted */
+
+  /* accent — clean warm orange. accent-on is dark text (6.0:1 against the
+     accent, AA+ for normal body); white-on-accent would fail AA. The tint
+     is a very pale wash for halos / focus rings / selected backgrounds. */
+  --accent:        #ed8e60;
+  --accent-hover:  #d97a4b;
+  --accent-tint:   #f7e1d4;
+  --accent-on:     #2c2820;
+  /* Editor-only token: light mode needs darker contrast on cream than
+     --accent provides, otherwise codeblock text + list markers are
+     unreadable. Mirrored brighter in the dark blocks below. */
+  --code-accent:   #8a3d12;
+
+  /* Code selection highlight. Intentionally cool/blue-tinted so it reads
+     as visibly distinct from the warm --active-line used by the active
+     line — without those two being different, a selection on the active
+     line is invisible. */
+  --selection:     #cfd9e8;
+
+  /* Active-line background for the editor. MUST be translucent: CodeMirror
+     paints the selection layer behind text (z-index: -1) so any opaque
+     line background would mask the selection on the active line. Using
+     accent at low alpha gives a visible warm tint while letting the cool
+     --selection bleed through where they overlap. */
+  --active-line:   rgba(237, 142, 96, 0.13);
+
+  /* semantic */
+  --ok:    #5e8a4b;
+  --warn:  #c08a3a;
+  --err:   #b14a48;
+  --info:  #4a728d;
+
+  /* Dot color for the page-wide texture on .pane-active. Held at low alpha
+     so it reads as a hint of grain rather than a pattern. */
+  --paper-dot: rgba(64, 58, 48, 0.15);
+
+  --control-height: 32px;
+  --status-height: 32px;
+  --r-1: 4px;  --r-2: 6px;  --r-3: 8px;  --r-4: 12px;  --r-pill: 9999px;
+  --s-1: 4px;  --s-2: 8px;  --s-3: 12px;  --s-4: 16px;  --s-5: 20px;  --s-6: 24px;  --s-7: 32px;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
+               Roboto, ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  --font-feat: "cv01","cv11","ss01","ss03";
+
+  --fs-1: 11px; --fs-2: 12px; --fs-3: 13px; --fs-4: 14px;
+  --fs-5: 15px; --fs-6: 17px; --fs-7: 20px; --fs-8: 24px;
+
+  /* Shared interaction scale: immediate feedback, quick surfaces, drawers. */
+  --ease:    cubic-bezier(0.2, 0.8, 0.2, 1);
+  --dur-1:   90ms;
+  --dur-2:   140ms;
+  --dur-3:   180ms;
+
+  --shadow-pop: 0 1px 2px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
+  --shadow-cmd: 0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06);
+
+  color-scheme: light;
+}
+
+/* ---- dark token block ----
+   The exact same set of overrides applied in two places:
+     1) prefers-color-scheme: dark  AND  no explicit data-theme="light"
+     2) explicit data-theme="dark"  (user override)
+   Edit both copies together. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    /* Cool, slightly blue-tinted greys — not warm browns. Softened overall:
+       text sits around #dadbe0 (not stark white) so contrast stays around
+       AA+ instead of hammering AAA. */
+    --bg:            #1d1f24;
+    --panel:         #24262b;
+    --tint:          #2c2e34;
+    --tint-strong:   #383a40;
+    --border:        #2e3036;
+    --border-strong: #43454c;
+
+    --text:         #dadbe0;
+    --text-content: #c2c4ca;
+    --text-2:       #989aa0;
+    --text-3:       #6b6d72;
+    --text-4:       #4a4c52;
+
+    --accent:        #f5a47e;
+    --accent-hover:  #ffb795;
+    --accent-tint:   #2e2418;
+    --accent-on:     #1d1f24;
+    /* Editor-only token: brighter in dark mode so code/list highlights
+       lift off the dark panel. Mirrors the light value at top. */
+    --code-accent:   #f5a47e;
+
+    /* Cool blue-grey to contrast the warm --active-line. */
+    --selection:     #2a3550;
+    /* Translucent warm wash — must be rgba so --selection shows through
+       on the active line (CM's selection layer sits behind text). */
+    --active-line:   rgba(245, 164, 126, 0.10);
+
+    --ok:    #7eaa6c;
+    --warn:  #d8a558;
+    --err:   #e08580;
+    --info:  #7896b0;
+
+    --paper-dot: rgba(218, 219, 224, 0.05);
+
+    --shadow-pop: 0 1px 2px rgba(0,0,0,0.4), 0 4px 12px rgba(0,0,0,0.5);
+    --shadow-cmd: 0 8px 32px rgba(0,0,0,0.6), 0 2px 8px rgba(0,0,0,0.4);
+
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg:            #1d1f24;
+  --panel:         #24262b;
+  --tint:          #2c2e34;
+  --tint-strong:   #383a40;
+  --border:        #2e3036;
+  --border-strong: #43454c;
+
+  --text:         #dadbe0;
+  --text-content: #c2c4ca;
+  --text-2:       #989aa0;
+  --text-3:       #6b6d72;
+  --text-4:       #4a4c52;
+
+  --accent:        #f5a47e;
+  --accent-hover:  #ffb795;
+  --accent-tint:   #2e2418;
+  --accent-on:     #1d1f24;
+  /* Editor-only token: brighter in dark mode so code/list highlights
+     lift off the dark panel. Mirrors the light value at top. */
+  --code-accent:   #f5a47e;
+
+  /* Cool blue-grey to contrast the warm --active-line. */
+  --selection:     #2a3550;
+  /* Translucent warm wash — must be rgba so --selection shows through
+     on the active line (CM's selection layer sits behind text). */
+  --active-line:   rgba(245, 164, 126, 0.10);
+
+  --ok:    #7eaa6c;
+  --warn:  #d8a558;
+  --err:   #e08580;
+  --info:  #7896b0;
+
+  --paper-dot: rgba(218, 219, 224, 0.15);
+
+  --shadow-pop: 0 1px 2px rgba(0,0,0,0.4), 0 4px 12px rgba(0,0,0,0.5);
+  --shadow-cmd: 0 8px 32px rgba(0,0,0,0.6), 0 2px 8px rgba(0,0,0,0.4);
+
+  color-scheme: dark;
+}
+
+/* High contrast (dark, with text at 7:1 contrast or more), layered on the
+   dark palette; it must stay the last token block so it wins. */
+:root[data-contrast="high"] {
+  --bg:            #000000;
+  --panel:         #0c0c0c;
+  --tint:          #161616;
+  --tint-strong:   #262626;
+  --border:        #8a8a8a;
+  --border-strong: #c8c8c8;
+
+  --text:         #ffffff;
+  --text-content: #ffffff;
+  --text-2:       #e0e0e0;
+  --text-3:       #c8c8c8;
+  --text-4:       #a6a6a6;
+
+  --accent:        #ffb27a;
+  --accent-hover:  #ffc999;
+  --accent-tint:   #2a1a0c;
+  --accent-on:     #000000;
+  --code-accent:   #ffb27a;
+
+  --selection:     #15294a;
+  --active-line:   rgba(255, 178, 122, 0.12);
+
+  --ok:    #9fe38a;
+  --warn:  #ffd66b;
+  --err:   #ff9e9e;
+  --info:  #9fcfff;
+
+  color-scheme: dark;
+}

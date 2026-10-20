@@ -30,7 +30,7 @@ cortex update <id> --as-me -m "<message>" [-s <status>] [-b <body>] [--json]
 | `<id>` | (positional) | yes | Task id from `cortex ls`. |
 | `--message` | `-m` | yes (except `--as-me -s`) | What changed and what it means, in one or two plain sentences on one line, **max 4096 chars**. Put numbers, lists and logs in `--body`. |
 | `--as` | `--author` | outside bb | Author tag: `<role>-<8 hex>`, `pi-<uuidv7>` or `bb-<thread id>`; max 80 chars, no newlines. Defaults to `bb-<thread id>` in a bb thread. See [recipes/session-id.md](../recipes/session-id.md). |
-| `--as-me` | — | no | Record it as the user's own change, exactly like the TUI: credited to the user's author name (`cortex doctor` shows it) and never notifying. Cannot be combined with `--as`; ignores `BB_THREAD_ID`. **For tools acting for the user** (the bb plugin, the user's own scripts). **Agents never pass it**: it hides their status changes from the blocked notification. |
+| `--as-me` | — | no | Record it as the user's own change, exactly like the desktop app: credited to the user's author name (`cortex doctor` shows it) and never notifying. Cannot be combined with `--as`; ignores `BB_THREAD_ID`. **For tools acting for the user** (the bb plugin, the user's own scripts). **Agents never pass it**: it hides their status changes from the blocked notification. |
 | `--status` | `-s` | no | One of `draft`, `open`, `review`, `blocked`, `done`. Flips the task and writes an audit-trail row. |
 | `--body` | `-b` | no | Longer detail shown by `cortex show <id>`. |
 | `--json` | — | no | Emit `{ "update": {...}, "status"? }` as JSON on stdout instead of the `✓ ...` lines (`--as-me -s` alone: `update` is the `status → x` audit row). On failure emits `{ "error": { "code", "message" } }` and exits 1. |
@@ -52,9 +52,9 @@ cortex update 42 -m "Need a Stripe test key from ops; pausing here." \
   --as implementer-1c0ed4a8
 ```
 
-The TUI flashes ONLY for the second example, because the transition is into `blocked`.
+The desktop app notifies ONLY for the second example, because the transition is into `blocked`.
 
-A tool acting for the user (never an agent) changes only the status, the way a keypress in the TUI does:
+A tool acting for the user (never an agent) changes only the status, the way a status change in the desktop app does:
 
 ```bash
 cortex update 42 --as-me -s done

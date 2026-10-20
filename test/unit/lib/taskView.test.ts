@@ -1,5 +1,5 @@
-// lib/taskView.ts — the PURE task-list derivations behind the terminal
-// workspace (src/tui/workspace.ts). Every function maps inputs to a result.
+// lib/taskView.ts — the PURE task-list derivations behind the desktop
+// app's task list. Every function maps inputs to a result.
 
 import { describe, test, expect } from "bun:test";
 import type { Task } from "../../../src/store.ts";

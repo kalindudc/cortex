@@ -31,7 +31,7 @@ $ cortex add "Investigate flaky CI on main" -l now -p 0 -b "Failures cluster in 
 [42] Investigate flaky CI on main
 ```
 
-Archive/document task — omit `--priority`; the task sorts after every prioritised row in `cortex ls`, and `cortex show` and the TUI show no priority:
+Archive/document task — omit `--priority`; the task sorts after every prioritised row in `cortex ls`, and `cortex show` and the desktop app show no priority:
 
 ```bash
 $ cortex add "Plan: nullable priority" -l cortex -t plan
@@ -58,5 +58,5 @@ $ generate_plan | cortex add "Plan: X" --body-file - --json
 - **Attribution is opt-in outside bb.** Without `--as` and outside a bb thread, `cortex add` is anonymous and the audit trail starts at the first update; `--as <id>` records the first `created` update in the same call (see [session-id recipe](../recipes/session-id.md)).
 - **Do NOT auto-set `--priority` without an explicit user signal.** Most tasks are opt-in metadata containers (plans, research notes, archives). Priority is an urgency annotation; only set it when the user asked you to.
 - `--priority` rejects negatives, decimals, and non-numeric strings. `-p 1.5` or `-p high` exit 1.
-- A title-only task is fine; `--body` is for context that `cortex ls` hides until you open the task (`cortex show`, or the TUI).
+- A title-only task is fine; `--body` is for context that `cortex ls` hides until you open the task (`cortex show`, or the desktop app).
 - Lanes are case-sensitive. `-l Now` and `-l now` create two separate lanes.
