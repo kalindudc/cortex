@@ -278,7 +278,14 @@ export interface MemoryStreamsQuery {
   excludeLane?: string;
   author?: string;
   active?: boolean;
+  /** Also list tasks the user excluded from memory: only the user's own views (bb's thread list) set it. */
+  withExcluded?: boolean;
   limit?: number;
+}
+
+/** PATCH /api/tasks/:id/memory: keep the task out of what agent memory offers, or let memory offer it again. */
+export interface MemoryRequest {
+  excluded: boolean;
 }
 
 type CreateTaskFields = {
@@ -353,7 +360,15 @@ export interface BackupRequest {
 export interface BackupResult {
   outPath: string;
   bytes: number;
-  stats: { lanes: number; tags: number; tasks: number; updates: number; task_tags: number; notifications: number };
+  stats: {
+    lanes: number;
+    tags: number;
+    tasks: number;
+    updates: number;
+    task_tags: number;
+    notifications: number;
+    memory_exclusions: number;
+  };
   notification: Notification;
 }
 
@@ -401,6 +416,7 @@ export interface VersionedWrites {
   setStatus(id: number, request: StatusRequest, guard?: WriteGuard): Promise<TaskWriteResult>;
   moveTask(id: number, lane: string, guard?: WriteGuard): Promise<TaskWriteResult>;
   changeTags(id: number, request: TagChangeRequest, guard?: WriteGuard): Promise<TaskWriteResult>;
+  setMemory(id: number, request: MemoryRequest, guard?: WriteGuard): Promise<TaskWriteResult>;
   removeTask(id: number, guard?: WriteGuard): Promise<RemoveResult>;
   postUpdate(id: number, request: PostUpdateRequest, guard?: WriteGuard): Promise<PostUpdateResult>;
   addLane(request: CreateLaneRequest, guard?: WriteGuard): Promise<LaneWriteResult>;

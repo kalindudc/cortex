@@ -306,6 +306,7 @@ describe("Store.memoryStreams / memoryStream", () => {
       synced: 1_000,
       activity: 1_000,
       tags: [],
+      memory_excluded: false,
     });
     expect(Object.keys(row ?? {})).not.toContain("body");
   });
@@ -489,5 +490,103 @@ describe("linked streams (_memory_links, plan @422)", () => {
     s.setStatus(review.id, "done", { author: "pi-x" }); // not activity: b stays the newest
     expect(s.memoryStream(a.id)?.latest?.id).toBe(b.id);
     expect(s.memoryStream(b.id)?.latest).toBeNull();
+  });
+});
+
+describe("memory exclusion (memory_exclusions)", () => {
+  const sectionsOf = (s: Store, taskId: number): number =>
+    s.runInTransaction(
+      raw =>
+        raw.query<{ n: number }, [number]>("SELECT COUNT(*) AS n FROM _memory_sections WHERE task_id = ?;").get(taskId)
+          ?.n ?? 0,
+    );
+
+  test("an excluded task is never a hit, and including it restores it at once", () => {
+    const s = open();
+    const alpha = s.addTask({ title: "gizmo alpha", lane: "l" });
+    const beta = s.addTask({ title: "gizmo beta", lane: "l" });
+    expect(ids(s.searchMemory(["gizmo"])).sort()).toEqual([alpha.id, beta.id].sort());
+    s.setMemoryExcluded(beta.id, true);
+    expect(ids(s.searchMemory(["gizmo"]))).toEqual([alpha.id]);
+    expect(ids(s.searchMemory(["gizmo"], { lane: "l" }))).toEqual([alpha.id]);
+    expect(s.getTask(beta.id)?.memory_excluded).toBe(true);
+    expect(s.listTasks().find(t => t.id === beta.id)?.memory_excluded).toBe(true);
+    expect(s.memoryStream(beta.id)?.task.memory_excluded).toBe(true);
+    expect(s.getTask(alpha.id)?.memory_excluded).toBe(false);
+    s.setMemoryExcluded(beta.id, false);
+    expect(ids(s.searchMemory(["gizmo"])).sort()).toEqual([alpha.id, beta.id].sort());
+  });
+
+  test("the hit limit counts only included tasks", () => {
+    const s = open();
+    const shown = s.addTask({ title: "gizmo shown" });
+    for (let i = 0; i < MEMORY_LIMITS.hits; i++) {
+      const hidden = s.addTask({ title: `gizmo hidden ${i}` });
+      s.setMemoryExcluded(hidden.id, true);
+    }
+    expect(ids(s.searchMemory(["gizmo"]))).toEqual([shown.id]);
+  });
+
+  test("the index holds no text of an excluded task", () => {
+    const s = open();
+    const t = s.addTask({ title: "gizmo", body: "secret plans" });
+    s.addUpdate({ task_id: t.id, author: "pi-x", summary: "more secret plans" });
+    s.searchMemory(["gizmo"]);
+    expect(sectionsOf(s, t.id)).toBeGreaterThan(0);
+    s.setMemoryExcluded(t.id, true);
+    expect(s.searchMemory(["secret", "plans"])).toEqual([]);
+    expect(sectionsOf(s, t.id)).toBe(0);
+  });
+
+  test("stream lists hide excluded tasks unless withExcluded", () => {
+    const s = open();
+    const a = s.addTask({ title: "a", lane: "l" });
+    const b = s.addTask({ title: "b", lane: "l" });
+    s.addUpdate({ task_id: a.id, author: "pi-x", summary: "work" });
+    s.addUpdate({ task_id: b.id, author: "pi-x", summary: "work" });
+    s.setMemoryExcluded(b.id, true);
+    expect(ids(s.memoryStreams({ lane: "l" }))).toEqual([a.id]);
+    expect(ids(s.memoryStreams({ lane: "l", active: true }))).toEqual([a.id]);
+    expect(ids(s.memoryStreams({ author: "pi-x" }))).toEqual([a.id]);
+    expect(ids(s.memoryStreams({ excludeLane: "other" }))).toEqual([a.id]);
+    const all = s.memoryStreams({ author: "pi-x", withExcluded: true });
+    expect(ids(all).sort()).toEqual([a.id, b.id].sort());
+    expect(all.find(row => row.id === b.id)?.memory_excluded).toBe(true);
+    expect(all.find(row => row.id === a.id)?.memory_excluded).toBe(false);
+  });
+
+  test("latest linked skips an excluded task, which still loads by id", () => {
+    const s = open();
+    at(1_000);
+    const a = s.addTask({ title: "a", lane: "l" });
+    at(2_000);
+    const b = s.addTask({ title: "b", lane: "l", body: `continues @${a.id}` });
+    s.setMemoryExcluded(b.id, true);
+    expect(s.memoryStream(a.id)?.latest).toBeNull();
+    const loaded = s.memoryStream(b.id);
+    expect(loaded?.task.id).toBe(b.id);
+    expect(loaded?.task.memory_excluded).toBe(true);
+    s.setMemoryExcluded(b.id, false);
+    expect(s.memoryStream(a.id)?.latest?.id).toBe(b.id);
+  });
+
+  test("exclusion is idempotent, survives tag rewrites, and goes with its task", () => {
+    const s = open();
+    const t = s.addTask({ title: "t", tags: ["topic"] });
+    const before = s.taskState(t.id)?.versions.entity;
+    s.setMemoryExcluded(t.id, true);
+    const once = s.taskState(t.id)?.versions.entity;
+    expect(once).not.toBe(before);
+    s.setMemoryExcluded(t.id, true);
+    expect(s.taskState(t.id)?.versions.entity).toBe(once);
+    s.setTaskTags(t.id, ["other"]);
+    s.changeTaskTags(t.id, { remove: ["other"] });
+    expect(s.getTask(t.id)?.memory_excluded).toBe(true);
+    s.removeTask(t.id);
+    const rows = s.runInTransaction(
+      raw => raw.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM memory_exclusions;").get()?.n,
+    );
+    expect(rows).toBe(0);
+    expect(() => s.setMemoryExcluded(999, true)).toThrow("task 999 not found");
   });
 });

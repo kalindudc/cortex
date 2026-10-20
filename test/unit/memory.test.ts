@@ -83,6 +83,7 @@ const task = (over: Partial<Task> = {}): Task => ({
   created: 0,
   updated: 0,
   tags: [],
+  memory_excluded: false,
   ...over,
 });
 
@@ -103,6 +104,7 @@ const row = (over: Partial<MemoryStreamRow> = {}): MemoryStreamRow => ({
   lane: "l",
   status: "open",
   tags: [],
+  memory_excluded: false,
   updated: 0,
   synced: 0,
   activity: 0,
@@ -529,6 +531,12 @@ describe("rendering", () => {
     expect(text).toContain(`\n${body}\n`);
     expect(text).not.toContain("Contents:");
     expect(text).toContain("not in a git checkout");
+  });
+
+  test("renderStream says when the user excluded the stream from memory (a load by id still prints it)", () => {
+    const s = stream({ task: task({ body: "b", tags: ["x"], memory_excluded: true }) });
+    const header = renderStream(s, checkStaleness(s, plain, now)).split("\n")[1];
+    expect(header).toBe("[7] TUI mouse wheel (open \u00b7 myrepo \u00b7 #x \u00b7 excluded from memory)");
   });
 
   test("renderStream leads a long body with Next, open questions and Decisions, then a Contents line", () => {

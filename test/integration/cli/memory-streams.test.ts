@@ -59,6 +59,7 @@ describe("cortex memory streams", () => {
         "activity",
         "id",
         "lane",
+        "memory_excluded",
         "status",
         "synced",
         "tags",

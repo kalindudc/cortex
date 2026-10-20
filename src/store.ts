@@ -19,14 +19,17 @@ export type Task = {
   created: number;
   updated: number;
   tags: string[];
+  /** The user keeps this task out of what agent memory offers (`memory_exclusions`); a load by id ignores it. */
+  memory_excluded: boolean;
 };
 
 /**
  * Internal SQL row shape: a `Task` with `tags` replaced by the
- * GROUP_CONCAT'd CSV string returned from the LEFT JOIN. Lives module-scope
- * (not exported) so the public `Task` type stays clean.
+ * GROUP_CONCAT'd CSV string returned from the LEFT JOIN and
+ * `memory_excluded` as SQLite's 0/1. Lives module-scope (not exported) so
+ * the public `Task` type stays clean.
  */
-type TaskRow = Omit<Task, "tags"> & { tag_csv: string | null };
+type TaskRow = Omit<Task, "tags" | "memory_excluded"> & { tag_csv: string | null; memory_excluded: number };
 
 export type Update = {
   id: number;
@@ -121,7 +124,10 @@ export const SHARED_TAG_BLOCKLIST: ReadonlySet<string> = new Set(["plan", "pr-de
  * newest update that is not a status audit or `created` row: bulk status
  * flips and lane/tag moves are not activity.
  */
-export type MemoryStreamRow = Pick<Task, "id" | "title" | "lane" | "status" | "tags" | "updated"> & {
+export type MemoryStreamRow = Pick<
+  Task,
+  "id" | "title" | "lane" | "status" | "tags" | "updated" | "memory_excluded"
+> & {
   synced: number;
   activity: number;
 };
@@ -494,20 +500,29 @@ const ACTIVITY_SQL = `MAX(t.created, COALESCE(e.edited, 0), COALESCE((
     SELECT MAX(u.created) FROM updates u
      WHERE u.task_id = t.id AND u.summary NOT LIKE 'status \u2192 %' AND u.summary <> 'created'), 0))`;
 
+/**
+ * Over `tasks t`: 1 when the user keeps the task out of agent memory. The one
+ * definition every memory read filters on (the index, stream lists, latest
+ * linked), so no read can drift from the others.
+ */
+const MEMORY_EXCLUDED_SQL = "EXISTS (SELECT 1 FROM memory_exclusions x WHERE x.task_id = t.id)";
+
 /** The memory stream row: bodiless task columns, sorted tag list, `synced` (last body change, else `created`), `activity`. */
 const STREAM_ROW_SELECT = `
   SELECT t.id, t.title, t.lane, t.status, t.updated,
          COALESCE(e.edited, t.created) AS synced,
          ${ACTIVITY_SQL} AS activity,
-         COALESCE((SELECT GROUP_CONCAT(tag_name, ',' ORDER BY tag_name) FROM task_tags WHERE task_id = t.id), '') AS tag_csv
+         COALESCE((SELECT GROUP_CONCAT(tag_name, ',' ORDER BY tag_name) FROM task_tags WHERE task_id = t.id), '') AS tag_csv,
+         ${MEMORY_EXCLUDED_SQL} AS memory_excluded
     FROM tasks t
     LEFT JOIN _body_edits e ON e.task_id = t.id`;
 
-type StreamRowSql = Omit<MemoryStreamRow, "tags"> & { tag_csv: string };
+type StreamRowSql = Omit<MemoryStreamRow, "tags" | "memory_excluded"> & { tag_csv: string; memory_excluded: number };
 
-const rowToStream = ({ tag_csv, ...rest }: StreamRowSql): MemoryStreamRow => ({
+const rowToStream = ({ tag_csv, memory_excluded, ...rest }: StreamRowSql): MemoryStreamRow => ({
   ...rest,
   tags: tag_csv ? tag_csv.split(",") : [],
+  memory_excluded: memory_excluded === 1,
 });
 
 export type StoreOpenOptions = {
@@ -558,6 +573,8 @@ export class Store {
   private cachedDatabaseId: string | null = null;
   /** Mutation id of the innermost runIdempotent call currently executing its write. */
   private activeMutationId: string | null = null;
+  /** How task reads compute `memory_excluded`, decided once per Store (see taskExcludedColumn). */
+  private cachedExcludedColumn: string | null = null;
 
   private constructor(
     private readonly db: Database,
@@ -687,6 +704,16 @@ export class Store {
           task_id  INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
           tag_name TEXT    NOT NULL REFERENCES tags(name) ON UPDATE CASCADE ON DELETE CASCADE,
           PRIMARY KEY(task_id, tag_name)
+        );
+      `);
+      // The tasks the user keeps out of agent memory. A side table, not a
+      // tag, so no tag rename, forced delete or set-replace can switch it
+      // off; public (backed up) because it is the user's choice, not derived
+      // data. Additive under the notifications precedent; cascades with its
+      // task like `task_tags`.
+      this.db.run(`
+        CREATE TABLE IF NOT EXISTS memory_exclusions (
+          task_id INTEGER PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE
         );
       `);
       // Notifications: server-persisted notification feed. New table,
@@ -944,6 +971,16 @@ export class Store {
     }
 
     return applied;
+  }
+
+  /**
+   * MEMORY_EXCLUDED_SQL for task reads, or a constant 0 on a database that
+   * predates `memory_exclusions` and is read without migrate()
+   * (Store.readSnapshot), where nothing can be excluded yet.
+   */
+  private taskExcludedColumn(): string {
+    this.cachedExcludedColumn ??= this.hasTable("memory_exclusions") ? MEMORY_EXCLUDED_SQL : "0";
+    return this.cachedExcludedColumn;
   }
 
   /** Whether the schema has table `name` (older databases lack the tables later releases added). */
@@ -1441,10 +1478,11 @@ export class Store {
    * deterministic; the CLI/UI never re-sort.
    */
   private rowToTask(row: TaskRow): Task {
-    const { tag_csv, ...rest } = row;
+    const { tag_csv, memory_excluded, ...rest } = row;
     return {
       ...rest,
       tags: tag_csv ? tag_csv.split(",") : [],
+      memory_excluded: memory_excluded === 1,
     };
   }
 
@@ -1598,7 +1636,8 @@ export class Store {
     // uniformly.
     const sql = `
       SELECT t.*,
-             COALESCE(GROUP_CONCAT(tt.tag_name, ',' ORDER BY tt.tag_name), '') AS tag_csv
+             COALESCE(GROUP_CONCAT(tt.tag_name, ',' ORDER BY tt.tag_name), '') AS tag_csv,
+             ${this.taskExcludedColumn()} AS memory_excluded
         FROM tasks t
         LEFT JOIN task_tags tt ON tt.task_id = t.id
         ${where}
@@ -1613,7 +1652,8 @@ export class Store {
     const row = this.db
       .query<TaskRow, [number]>(
         `SELECT t.*,
-                COALESCE(GROUP_CONCAT(tt.tag_name, ',' ORDER BY tt.tag_name), '') AS tag_csv
+                COALESCE(GROUP_CONCAT(tt.tag_name, ',' ORDER BY tt.tag_name), '') AS tag_csv,
+                ${this.taskExcludedColumn()} AS memory_excluded
            FROM tasks t
            LEFT JOIN task_tags tt ON tt.task_id = t.id
           WHERE t.id = ?
@@ -2151,6 +2191,28 @@ export class Store {
     })();
   }
 
+  /**
+   * Keep the task out of what agent memory offers (`excluded`), or let
+   * memory offer it again. Setting the current value is a no-op, so like a
+   * tag delta a guard is optional and covers nothing by itself; only a real
+   * change advances the task's `entity`. Memory reads pick it up on their
+   * next reconcile; a load by id is never affected.
+   */
+  setMemoryExcluded(id: number, excluded: boolean, guard?: WriteGuard): Task {
+    const expected = this.parseGuard(guard, "a task", TASK_SCOPES, []);
+    return this.db.transaction(() => {
+      if (!this.getTask(id)) throw new Error(`task ${id} not found`);
+      this.assertVersions("task", id, expected);
+      const changed = excluded
+        ? this.db.run(`INSERT OR IGNORE INTO memory_exclusions (task_id) VALUES (?);`, [id]).changes
+        : this.db.run(`DELETE FROM memory_exclusions WHERE task_id = ?;`, [id]).changes;
+      if (changed > 0) this.bump("task", id, ["entity"]);
+      const full = this.getTask(id);
+      if (!full) throw new Error(`task ${id} not found`);
+      return full;
+    })();
+  }
+
   // ---------- update methods ----------
 
   /** Post an update and return its row. See postUpdate for `status`/`notify` and guards. */
@@ -2289,11 +2351,16 @@ export class Store {
    * machine rows (status audits, `created`). A re-indexed task's
    * `_memory_links` rows are rewritten from the `@id` refs of its body and
    * log (self excluded); a removed task's rows are deleted.
+   *
+   * A task the user excluded from memory gets NO sections, so no search can
+   * match its text or count it in ranking, while its links are kept (a load
+   * by id still finds the stream continuing it). Exclusion is part of the
+   * signature, so toggling it re-indexes the task by itself.
    */
   private reconcileMemoryIndex(): void {
     const current = this.db
-      .query<{ id: number; sig: string }, []>(
-        `SELECT t.id AS id, COALESCE(r.token, '') || ':' || t.updated AS sig
+      .query<{ id: number; base: string; excluded: number }, []>(
+        `SELECT t.id AS id, COALESCE(r.token, '') || ':' || t.updated AS base, ${MEMORY_EXCLUDED_SQL} AS excluded
            FROM tasks t
            LEFT JOIN _resource_revisions r ON r.resource = 'task:' || t.id AND r.scope = 'entity';`,
       )
@@ -2324,7 +2391,8 @@ export class Store {
     let next =
       (this.db.query<{ max: number | null }, []>(`SELECT MAX(rowid) AS max FROM _memory_sections;`).get()?.max ?? 0) +
       1;
-    for (const { id, sig } of current) {
+    for (const { id, base, excluded } of current) {
+      const sig = excluded ? `${base}:excluded` : base;
       const seen = indexed.get(id);
       indexed.delete(id);
       if (seen?.sig === sig) continue;
@@ -2336,8 +2404,8 @@ export class Store {
         .all(id)
         .map(row => row.summary)
         .join("\n");
-      const texts = memorySections(task.body ?? "", MEMORY_LIMITS.sectionChars);
-      if (summaries) texts.push(...memorySections(summaries, MEMORY_LIMITS.logSectionChars));
+      const texts = excluded ? [] : memorySections(task.body ?? "", MEMORY_LIMITS.sectionChars);
+      if (summaries && !excluded) texts.push(...memorySections(summaries, MEMORY_LIMITS.logSectionChars));
       const first = next;
       for (const text of texts) insert.run(next++, id, task.title, tags, text);
       stamp.run(id, sig, first, next - 1);
@@ -2358,8 +2426,9 @@ export class Store {
    * The newest stream reached from `id` through same-lane `@id` links (either
    * direction) to LATER-created tasks: each hop takes the linked candidate
    * with the newest activity, at most MEMORY_LIMITS.chainHops hops (creation
-   * order makes it cycle-free; a visited set guards anyway). Null when no
-   * later linked stream exists. Needs the index reconciled first.
+   * order makes it cycle-free; a visited set guards anyway). A task excluded
+   * from memory is never a hop, so it is never named or passed through. Null
+   * when no later linked stream exists. Needs the index reconciled first.
    */
   private latestLinked(id: number): LinkedStream | null {
     const origin = this.db
@@ -2371,7 +2440,7 @@ export class Store {
          FROM tasks t LEFT JOIN _body_edits e ON e.task_id = t.id
         WHERE t.id IN (SELECT task_id FROM _memory_links WHERE ref_id = ?1
                        UNION SELECT ref_id FROM _memory_links WHERE task_id = ?2)
-          AND t.lane = ?3 AND t.created > ?4
+          AND t.lane = ?3 AND t.created > ?4 AND NOT ${MEMORY_EXCLUDED_SQL}
         ORDER BY activity DESC, t.id DESC LIMIT 1;`,
     );
     const visited = new Set([id]);
@@ -2521,12 +2590,21 @@ export class Store {
    * Bodiless stream rows, newest `activity` first: `lane`, `excludeLane`
    * (every other lane), `author` (tasks with an update by exactly that tag)
    * and `active` (not done) filters. Powers the agent primer (GET
-   * /api/memory/streams).
+   * /api/memory/streams). Tasks excluded from memory are left out unless
+   * `withExcluded`, which only the user's own views pass (bb's thread list).
    */
   memoryStreams(
-    filter: { lane?: string; excludeLane?: string; author?: string; active?: boolean; limit?: number } = {},
+    filter: {
+      lane?: string;
+      excludeLane?: string;
+      author?: string;
+      active?: boolean;
+      withExcluded?: boolean;
+      limit?: number;
+    } = {},
   ): MemoryStreamRow[] {
     const clauses: string[] = [];
+    if (!filter.withExcluded) clauses.push(`NOT ${MEMORY_EXCLUDED_SQL}`);
     const params: (string | number)[] = [];
     if (filter.lane) {
       clauses.push("t.lane = ?");

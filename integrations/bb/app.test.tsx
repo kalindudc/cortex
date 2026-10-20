@@ -65,6 +65,7 @@ function detail(id: number, overrides: Partial<CortexTaskDetail> = {}): CortexTa
       body: `Body of task ${id}`,
       created: now - 3 * DAY,
       updated: now - 4 * 60_000,
+      memoryExcluded: false,
     },
     updates: [
       { id: 10, author: "pi-01a145fc-cdce", summary: "created", body: null, created: now - 3 * DAY, kind: "created" },
@@ -135,6 +136,11 @@ function handlers(state: CortexThreadState = threadState(), overrides: Partial<H
     unlink: () => state,
     setStatus: ({ taskId, status }) => {
       const next = { ...get(taskId), task: { ...get(taskId).task, status } };
+      details.set(taskId, next);
+      return next;
+    },
+    setMemoryExcluded: ({ taskId, excluded }) => {
+      const next = { ...get(taskId), task: { ...get(taskId).task, memoryExcluded: excluded } };
       details.set(taskId, next);
       return next;
     },
@@ -470,6 +476,30 @@ describe("switcher and more menu", () => {
       expect(copy.getAttribute("aria-disabled")).toBe("true");
       cleanup();
     }
+  });
+
+  test("more: exclude a task from agent memory, see it marked, and include it again", async () => {
+    const slot = panel();
+    expect(await slot.findByRole("heading", { name: "Title 1" })).toBeTruthy();
+    expect(slot.queryByText("excluded from memory")).toBeNull();
+    await openMenu(slot.getByRole("button", { name: "More" }));
+    fireEvent.click(await slot.findByRole("menuitem", { name: "Exclude from memory" }));
+    await waitFor(() => expect(calls(slot, "setMemoryExcluded")).toEqual([{ threadId: THREAD, taskId: 1, excluded: true }]));
+    expect(await slot.findByText("excluded from memory")).toBeTruthy();
+    expect(toast).toHaveBeenCalledWith("#1 is out of agent memory; reading it by id still works");
+    await openMenu(slot.getByRole("button", { name: "More" }));
+    fireEvent.click(await slot.findByRole("menuitem", { name: "Include in memory" }));
+    await waitFor(() => expect(calls(slot, "setMemoryExcluded")).toHaveLength(2));
+    expect(calls(slot, "setMemoryExcluded")[1]).toEqual({ threadId: THREAD, taskId: 1, excluded: false });
+    await waitFor(() => expect(slot.queryByText("excluded from memory")).toBeNull());
+  });
+
+  test("more: a cortex without memory exclusion offers no memory item", async () => {
+    const old = detail(1, { task: { ...detail(1).task, memoryExcluded: null } });
+    const slot = panel(handlers(threadState(), { task: () => old }));
+    await openMenu(await slot.findByRole("button", { name: "More" }));
+    expect(await slot.findByRole("menuitem", { name: "Copy task body" })).toBeTruthy();
+    expect(slot.queryByRole("menuitem", { name: /memory/ })).toBeNull();
   });
 
   test("more: a refused clipboard write says so", async () => {

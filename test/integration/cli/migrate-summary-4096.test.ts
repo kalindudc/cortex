@@ -240,6 +240,25 @@ describe.skipIf(!SQLITE3)("updates-summary-4096 migration", () => {
     expectRevisionsAfterUpgrade(e.env.CORTEX_DB as string, 1);
   });
 
+  test("200-era DB: a task excluded from memory before init stays excluded through the tasks rebuild", async () => {
+    const e = legacyEnv("migrate-200-exclusion", LEGACY_200_DB);
+    const run = (...args: string[]) => runCli({ args, env: e.env });
+    let r = await run("memory", "exclude", "1");
+    expect(r.code).toBe(0);
+
+    r = await run("init");
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain("\u2713 migration applied: tasks-priority-nullable");
+    r = await run("memory", "excluded", "--json");
+    expect((JSON.parse(r.stdout) as Task[]).map(t => t.id)).toEqual([1]);
+
+    // The foreign key still points at the rebuilt tasks table: removing the task drops its exclusion.
+    r = await run("rm", "1", "--force");
+    expect(r.code).toBe(0);
+    r = await run("memory", "excluded", "--json");
+    expect(JSON.parse(r.stdout)).toEqual([]);
+  });
+
   // The legacy tasks-table rebuilds reset sqlite_sequence to MAX(id), so a task
   // id deleted before `cortex init` can be issued again afterwards (see the
   // todo below). Whatever id the next task gets, its revision tokens must be

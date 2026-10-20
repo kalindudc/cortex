@@ -84,6 +84,7 @@ const CORTEX_TERMS = new Set([
   "body_search_ambiguous",
   "task_tags",
   "task_count",
+  "memory_excluded",
 ]);
 
 /** Every reference in `text` to something cortex does not ship. */

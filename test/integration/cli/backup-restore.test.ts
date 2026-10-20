@@ -365,6 +365,7 @@ describe("backup/restore and private concurrency metadata (plan @400 N10)", () =
         "format",
         "format_version",
         "lanes",
+        "memory_exclusions",
         "notifications",
         "source_host",
         "source_user",
@@ -376,7 +377,7 @@ describe("backup/restore and private concurrency metadata (plan @400 N10)", () =
         "updates",
       ]);
       expect(Object.keys(doc.tables as Record<string, unknown>).sort()).toEqual(
-        ["lanes", "notifications", "tags", "task_tags", "tasks", "updates"].sort(),
+        ["lanes", "memory_exclusions", "notifications", "tags", "task_tags", "tasks", "updates"].sort(),
       );
       const sourceMeta = withStore(source.env, s => ({ id: s.databaseId(), versions: s.taskState(1)?.versions }));
       const text = JSON.stringify(doc);

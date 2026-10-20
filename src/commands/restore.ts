@@ -14,8 +14,8 @@ import { DatabaseNotFoundError, Store } from "../store.ts";
 
 function skippedLine(counts: RestoreCounts): string | null {
   const skipped = counts.skipped;
-  if (skipped.updates === 0 && skipped.taskTags === 0 && skipped.notifications === 0) return null;
-  return `  skipped: ${skipped.updates} orphaned updates, ${skipped.taskTags} orphaned task_tags, ${skipped.notifications} orphaned notifications`;
+  if (Object.values(skipped).every(n => n === 0)) return null;
+  return `  skipped: ${skipped.updates} orphaned updates, ${skipped.taskTags} orphaned task_tags, ${skipped.notifications} orphaned notifications, ${skipped.memoryExclusions} orphaned memory exclusions`;
 }
 
 function printCounts(counts: RestoreCounts): void {
@@ -25,6 +25,7 @@ function printCounts(counts: RestoreCounts): void {
   console.log(`  updates: ${counts.updates}`);
   console.log(`  task_tags: ${counts.taskTags}`);
   console.log(`  notifications: ${counts.notifications}`);
+  console.log(`  memory exclusions: ${counts.memoryExclusions}`);
   const skipped = skippedLine(counts);
   if (skipped) console.log(skipped);
 }

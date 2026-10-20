@@ -20,6 +20,7 @@ function mkTask(overrides: Partial<Task>): Task {
     created: CREATED,
     updated: UPDATED,
     tags: [],
+    memory_excluded: false,
     ...overrides,
   };
 }

@@ -29,7 +29,7 @@ Humans usually work in the terminal workspace (TUI): plain `cortex` in an intera
 | `cortex update <id> -m <msg> --as <id>` | Post an update on a task; optionally flip status. | [cli/update.md](cli/update.md) |
 | `cortex schema` | Print the data model + command grammar (agent orientation, DB-free). | [schema.md](cli/schema.md) |
 | `cortex doctor` | Report version, db path, daemon state, pending migrations, counts (read-only; never starts a daemon). | [doctor.md](cli/doctor.md) |
-| `cortex memory search\|show\|context\|streams\|lane` | Agent memory, including author-touched streams. | [memory.md](cli/memory.md) |
+| `cortex memory search\|show\|context\|streams\|lane\|exclude\|include\|excluded` | Agent memory, including author-touched streams and the tasks the user keeps out of memory. | [memory.md](cli/memory.md) |
 | `cortex watch --json` | Follow changes; refetch after ready or resync. | [watch.md](cli/watch.md) |
 | `cortex tui [id]` | Open the terminal workspace (for humans; needs a TTY). Plain `cortex` in an interactive terminal does the same. | `cortex tui --help` |
 | `cortex serve` | Run this database's daemon (private socket). | [serve.md](cli/serve.md) |

@@ -15,6 +15,7 @@ function task(over: Partial<Task> = {}): Task {
     created: 0,
     updated: 0,
     tags: ["bug", "ui"],
+    memory_excluded: false,
     ...over,
   };
 }

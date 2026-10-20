@@ -57,9 +57,9 @@ history, newest first, with a line where the body was last synced; an update fro
 
 Click the status pill to pick any status, or take the next step in one click, with Undo in the toast that follows.
 On Activity you can post a note, optionally changing the status in the same step. Both are recorded as you with
-`cortex update --as-me`, exactly like a change in the terminal workspace: credited to you and notifying nobody. The
-tab never edits a task's body or title; use the terminal workspace for that, or copy the body from the More menu. A
-cortex whose `cortex doctor` names no `author` predates `--as-me`, so the tab stays read-only and says to update it.
+`cortex update --as-me`: credited to you, notifying nobody. A cortex whose `cortex doctor` names no `author`
+predates `--as-me`, so the tab stays read-only and says to update it. The tab never edits a body or title. The More
+menu copies the body and excludes the task from memory or includes it again; the header marks an excluded task.
 
 An agent can write `::cortex{id="529"}` on its own line in a reply; bb shows it as a card that opens task 529.
 Stale means the files the task cites changed after its body was last brought up to date
@@ -98,14 +98,14 @@ the SDK, portaling Radix components) are type-only development dependencies; zod
   with a short timeout (`./integrations/bb/cli.ts#DEFAULT_TIMEOUT_MS`), the caller's abort signal and typed
   `./integrations/bb/cli.ts#CortexCliError` failures. JSON output is validated before use, and an `{ error }` envelope
   fails even on exit 0. `./integrations/bb/cli.ts#verifyCortexFeatures` gates loading on `watch` and author streams.
-- `./integrations/bb/state.ts#createCortexState` merges `cortex memory streams --author=bb-<thread>` with the manual
-  links kept in this plugin's thread metadata, validated field by field on every read. Pin, link and unlink run one
-  at a time per thread. A task's `show` and `memory show` are cached briefly
+- `./integrations/bb/state.ts#createCortexState` merges `memory streams --author=bb-<thread> --with-excluded` with
+  the manual links kept in this plugin's thread metadata, validated field by field on every read. Pin, link and
+  unlink run one at a time per thread. A task's `show` and `memory show` are cached briefly
   (`./integrations/bb/state.ts#CACHE_MS`) and shared by every chip and tab, so a change costs one CLI round per task.
 - A checkout is local when its environment's host is bb's primary host. Otherwise `memory show` runs in the OS temp
   directory, which is never a checkout, and staleness is reported as unverifiable.
-- `cortex memory context --json` returns the lane and the primer in one call. Watch events refresh the primers of
-  the affected lane after a short debounce; a removed task, whose lane is unknown, refreshes all of them.
+- `cortex memory context --json` returns the lane and the primer in one call. A watch event refreshes, after a short
+  debounce, the primers of the task's lane and any that list the task; a removed task refreshes all of them.
 - `./integrations/bb/server.ts#instructionsFor` caps usage plus primer at bb's 4,096-character instruction limit.
   The configure callback is synchronous, so a cache miss never runs the CLI.
 - `cortex_recall` returns the text `cortex memory show` or `cortex memory search` prints, as the pi extension does
@@ -151,8 +151,8 @@ the SDK, portaling Radix components) are type-only development dependencies; zod
 - Tool failures throw, `cortex_recall` keeps the pi extension's per-request budget, and every tool argument, RPC
   input, metadata value and CLI output is validated: `./integrations/bb/server.test.ts`, `./integrations/bb/cli.test.ts`.
 - Staleness is checked only for a checkout on the bb server's own machine: `./integrations/bb/server.test.ts`.
-- The tab never edits a task's body or title; its only task writes are status changes and notes through
-  `cortex update --as-me`, which never notify, and only when doctor reports `author`:
+- The tab never edits a task's body or title; its only task writes are memory exclusion and, only when doctor
+  reports `author`, status changes and notes through `cortex update --as-me`, which never notify:
   `./integrations/bb/server.test.ts` (writes as the user), `test/integration/cli/as-me.test.ts`.
 - `cortex agents install` never changes the plugin's settings or touches a plugin bb installed from git or npm, and
   no test runs the real bb or npm (`CORTEX_BB_CLI=""` in every test env): `test/integration/cli/agents-bb.test.ts`,

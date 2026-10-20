@@ -159,6 +159,13 @@ describe("api: legacy methods keep their routes and bodies", () => {
       "/api/memory/streams?excludeLane=l&active=1&limit=3",
       null,
     ],
+    [
+      "memoryStreams(withExcluded)",
+      a => a.memoryStreams({ author: "pi-x", withExcluded: true }),
+      "GET",
+      "/api/memory/streams?author=pi-x&withExcluded=1",
+      null,
+    ],
     ["memoryStreams()", a => a.memoryStreams(), "GET", "/api/memory/streams", null],
     ["memoryStream", a => a.memoryStream(4), "GET", "/api/memory/streams/4", null],
   ];
@@ -205,6 +212,13 @@ describe("api: versioned guarded writes", () => {
     ],
     ["moveTask", a => a.versioned.moveTask(3, "later"), "PATCH", "/api/tasks/3/lane", { lane: "later" }],
     ["changeTags", a => a.versioned.changeTags(3, { add: ["a"] }), "PATCH", "/api/tasks/3/tags", { add: ["a"] }],
+    [
+      "setMemory",
+      a => a.versioned.setMemory(3, { excluded: true }),
+      "PATCH",
+      "/api/tasks/3/memory",
+      { excluded: true },
+    ],
     [
       "removeTask",
       a => a.versioned.removeTask(3, { expected: { entity: "e" } }),

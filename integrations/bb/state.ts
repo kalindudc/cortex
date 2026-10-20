@@ -57,6 +57,8 @@ export type CortexTaskDetail = {
     body: string | null;
     created: number;
     updated: number;
+    /** Kept out of what agent memory offers; null when this cortex predates memory exclusion. */
+    memoryExcluded: boolean | null;
   };
   /** Oldest first, as cortex stores them. */
   updates: CortexUpdate[];
@@ -86,6 +88,8 @@ export type CortexState = {
   unlink(threadId: string, taskId: number): Promise<CortexThreadState>;
   /** Records the change as the user (`update --as-me`) and returns the fresh detail. */
   setStatus(threadId: string, taskId: number, status: CortexStatus): Promise<CortexTaskDetail>;
+  /** Keeps the task out of agent memory (`memory exclude`) or lets memory offer it again; returns the fresh detail. */
+  setMemoryExcluded(threadId: string, taskId: number, excluded: boolean): Promise<CortexTaskDetail>;
   postNote(
     threadId: string,
     taskId: number,
@@ -156,6 +160,7 @@ export const taskDetailSchema: z.ZodType<CortexTaskDetail> = z.object({
     body: z.string().nullable(),
     created: z.number(),
     updated: z.number(),
+    memoryExcluded: z.boolean().nullable(),
   }),
   updates: z.array(
     z.object({
@@ -199,6 +204,8 @@ export const cliTaskSchema = z.object({
   body: z.string().nullable(),
   created: z.number(),
   updated: z.number(),
+  /** Absent from a cortex that predates memory exclusion. */
+  memory_excluded: z.boolean().optional(),
 });
 export const cliUpdateSchema = z.object({
   id: z.number(),
@@ -293,6 +300,7 @@ export function createCortexState(
   const warming = new Map<string, Promise<void>>();
   const locks = new Map<string, Promise<unknown>>();
   const pendingLanes = new Set<string>();
+  const pendingTasks = new Set<number>();
   let pendingAll = false;
   let primerTimer: ReturnType<typeof setTimeout> | null = null;
   let primaryHost: Promise<string | null> | null = null;
@@ -389,6 +397,7 @@ export function createCortexState(
           body: task.body,
           created: task.created,
           updated: task.updated,
+          memoryExcluded: task.memory_excluded ?? null,
         },
         updates,
         staleness,
@@ -413,7 +422,8 @@ export function createCortexState(
 
   function authored(threadId: string) {
     return cached(streams, threadId, () =>
-      runner.run(["memory", "streams", `--author=bb-${threadId}`, "--json"], z.array(streamRowSchema)),
+      // The user's own view: excluded tasks stay listed (an older cortex ignores the flag).
+      runner.run(["memory", "streams", `--author=bb-${threadId}`, "--with-excluded", "--json"], z.array(streamRowSchema)),
     );
   }
 
@@ -556,6 +566,12 @@ export function createCortexState(
     return task(threadId, id);
   }
 
+  async function setMemoryExcluded(threadId: string, id: number, excluded: boolean): Promise<CortexTaskDetail> {
+    await runner.run(["memory", excluded ? "exclude" : "include", String(id), "--json"], cliTaskSchema);
+    forgetTask(id);
+    return task(threadId, id);
+  }
+
   async function postNote(
     threadId: string,
     id: number,
@@ -642,10 +658,13 @@ export function createCortexState(
     primerTimer = null;
     const all = pendingAll;
     const lanes = new Set(pendingLanes);
+    const changed = new Set(pendingTasks);
     pendingAll = false;
     pendingLanes.clear();
+    pendingTasks.clear();
     for (const [projectId, primer] of primers) {
-      if (!all && !lanes.has(primer.lane)) continue;
+      // A primer also lists streams from other lanes, so one that names a changed task refreshes too.
+      if (!all && !lanes.has(primer.lane) && !primer.primerIds.some(id => changed.has(id))) continue;
       loadPrimer(projectId, primer.cwd).catch(err => bb.log.warn(`primer refresh for ${projectId} failed: ${String(err)}`));
     }
   }
@@ -669,6 +688,7 @@ export function createCortexState(
 
   async function refreshTask(id: number, lane?: string): Promise<void> {
     forgetTask(id);
+    pendingTasks.add(id);
     if (lane !== undefined) {
       refreshLane(lane);
       return;
@@ -697,6 +717,7 @@ export function createCortexState(
     link,
     unlink,
     setStatus,
+    setMemoryExcluded,
     postNote,
     searchTasks,
     recentTasks,

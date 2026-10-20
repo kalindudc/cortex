@@ -57,6 +57,8 @@ UUIDs, pasted code blocks and small talk in the ask are ignored, so they never p
 repo-relative file like `src/tui/mouse.ts` still counts. It covers every project, the
 current one first, because work spans repos. A long body opens with its priority sections (Next, open questions,
 Decisions, State) and lists the rest. An older stream names the newer one continuing it as its "latest linked".
+`cortex memory exclude <id>`, `:memory off` in the terminal workspace or bb's More menu keep a task out of all of
+this; reading it by id still works, and a running pi session keeps its primer until compaction or `/memory refresh`.
 
 ## When is memory stale?
 
@@ -107,7 +109,8 @@ FTS5 is SQLite's full-text search engine. Its tables (`_memory_sections`, `_memo
   built without FTS5 then breaks only memory search, loudly, not the tracker.
 - `src/store.ts#reconcileMemoryIndex` runs inside the read's transaction and re-indexes any task whose signature
   (its revision token, or `updated` if never stamped) changed. A hit always reflects the current task, and no
-  write path knows the index exists.
+  write path knows the index exists. A task in `memory_exclusions` (the user's choice, backed up) gets no
+  sections, keeping its links. Why not a `no-memory` tag? Tag renames and `--set-tags` would undo it silently.
 - The unit is a section (`src/memory.ts#memorySections`): body and update log split at headings and a size cap,
   each row carrying title and tags; the log skips status audits and `created` rows. Why not whole documents? Terms
   scattered across a long body qualified it for every broad query.
@@ -132,7 +135,8 @@ route? A copy in the extension drifts, and a future caller of the helpers would 
 stem groups (fewer for shorter queries), title and tags counting everywhere: a wrong memory is worse than none.
 Order: phrase match, coverage, the tie-break, BM25 (title over tags over text) times the lane boost, then id.
 Activity (`src/store.ts#ACTIVITY_SQL`) ignores status flips and lane or tag moves. `src/store.ts#latestLinked`
-follows `@id` links to later streams in the same lane, bounded, to a handover chain's head.
+follows `@id` links to later streams in the same lane, bounded, to a handover chain's head; it and the stream lists
+skip excluded tasks through `src/store.ts#MEMORY_EXCLUDED_SQL`.
 
 ### Staleness and breadcrumbs
 
@@ -170,6 +174,8 @@ pure functions of state and theme in `src/extensions/memory-view.ts`, installed 
 
 ## Rules to keep
 
+- Memory reads hide a task in `memory_exclusions` unless the caller passes `withExcluded` (the user's own views); a
+  load by id never filters: `test/unit/server.test.ts` (every memory route), `test/unit/store-memory.test.ts`.
 - Only `src/memory.ts#memoryTerms` output reaches an FTS5 MATCH, each term quoted by `src/store.ts#quoteTerm`;
   never raw text: `test/unit/server.test.ts`, `test/integration/cli/memory.test.ts` (punctuation queries).
 - Query noise (absolute and home paths, URLs, emails, ids, fenced code) and filler never become terms;

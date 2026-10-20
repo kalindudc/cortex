@@ -1,4 +1,4 @@
-import { test, expect, describe, beforeEach, afterEach, spyOn } from "bun:test";
+import { test, expect, describe, beforeEach, afterEach, setSystemTime, spyOn } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -403,6 +403,7 @@ describe("server: memory", () => {
         "matched",
         "snippet",
         "latest",
+        "memory_excluded",
       ].sort(),
     );
   });
@@ -445,6 +446,68 @@ describe("server: memory", () => {
     expect(status).toBe(200);
     expect(Object.keys(json as object).sort()).toEqual(["latest", "synced", "syncedUpdateId", "task", "updates"]);
     expect((await fetchJson(req("GET", "/api/memory/streams/999"))).status).toBe(404);
+  });
+});
+
+describe("server: memory exclusion", () => {
+  test("PATCH /api/tasks/:id/memory validates, 404s, answers legacy or versioned, and publishes once", async () => {
+    const runtime = createRuntime();
+    const a = buildApp(store, runtime);
+    const seen = recordEvents(runtime);
+    const t = store.addTask({ title: "private" });
+    expect((await call(a, "PATCH", `/api/tasks/${t.id}/memory`, { excluded: "yes" })).status).toBe(400);
+    expect((await call(a, "PATCH", "/api/tasks/999/memory", { excluded: true })).status).toBe(404);
+    const legacy = await call(a, "PATCH", `/api/tasks/${t.id}/memory`, { excluded: true });
+    expect(legacy.status).toBe(200);
+    expect(legacy.text).toBe(JSON.stringify(store.getTask(t.id)));
+    expect((legacy.json as Task).memory_excluded).toBe(true);
+    const versioned = await call(a, "PATCH", `/api/tasks/${t.id}/memory`, { excluded: false }, VERSIONED);
+    const dto = versioned.json as TaskWriteResult;
+    expect(dto.task.memory_excluded).toBe(false);
+    expect(dto.versions).toEqual(stateOf(store, t.id).versions);
+    expect(dto.replayed).toBe(false);
+    const updates = seen.filter(ev => ev.kind === "task.updated");
+    expect(updates.map(ev => (ev.payload as Task).memory_excluded)).toEqual([true, false]);
+  });
+
+  test("every memory route hides an excluded task; a load by id still works", async () => {
+    const at = (ms: number): void => {
+      setSystemTime(new Date(ms));
+    };
+    at(1_000);
+    const visible = store.addTask({ title: "gizmo visible", lane: "cortex" });
+    at(2_000);
+    const hidden = store.addTask({ title: "gizmo hidden", lane: "cortex", body: `continues @${visible.id}` });
+    store.addUpdate({ task_id: visible.id, author: "pi-x", summary: "worked" });
+    store.addUpdate({ task_id: hidden.id, author: "pi-x", summary: "worked" });
+    setSystemTime();
+    store.setMemoryExcluded(hidden.id, true);
+    const rowIds = (json: unknown): number[] => (json as { id: number }[]).map(row => row.id);
+    const cases: Record<string, () => Promise<void>> = {
+      "/api/memory/search": async () => {
+        const { json } = await fetchJson(req("GET", "/api/memory/search?q=gizmo"));
+        expect(rowIds((json as { hits: unknown }).hits)).toEqual([visible.id]);
+      },
+      "/api/memory/streams": async () => {
+        expect(rowIds((await fetchJson(req("GET", "/api/memory/streams?lane=cortex"))).json)).toEqual([visible.id]);
+        expect(rowIds((await fetchJson(req("GET", "/api/memory/streams?author=pi-x"))).json)).toEqual([visible.id]);
+        const all = (await fetchJson(req("GET", "/api/memory/streams?author=pi-x&withExcluded=1"))).json;
+        expect(rowIds(all).sort()).toEqual([visible.id, hidden.id].sort());
+      },
+      "/api/memory/streams/:id": async () => {
+        const shown = await fetchJson(req("GET", `/api/memory/streams/${visible.id}`));
+        expect((shown.json as { latest: unknown }).latest).toBeNull();
+        const loaded = await fetchJson(req("GET", `/api/memory/streams/${hidden.id}`));
+        expect(loaded.status).toBe(200);
+        expect((loaded.json as { task: Task }).task.memory_excluded).toBe(true);
+      },
+    };
+    for (const check of Object.values(cases)) await check();
+    // A new memory read must come with a case here, so it cannot leak an excluded task unnoticed.
+    const memoryRoutes = app.routes
+      .filter(route => route.method === "GET" && route.path.startsWith("/api/memory/"))
+      .map(route => route.path);
+    expect([...new Set(memoryRoutes)].sort()).toEqual(Object.keys(cases).sort());
   });
 });
 

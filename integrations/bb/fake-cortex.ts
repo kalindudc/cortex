@@ -15,6 +15,8 @@ export type FakeTask = {
     body: string | null;
     created: number;
     updated?: number;
+    /** Absent for a cortex that predates memory exclusion. */
+    memory_excluded?: boolean;
   };
   updates: Array<{ id: number; task_id: number; author: string; summary: string; body: string | null; created: number }>;
   synced?: number;
@@ -103,6 +105,11 @@ if (a === "schema") {
       checked: 0, behind: s.behind ?? 0,
     },
   });
+} else if (a === "memory" && (b === "exclude" || b === "include")) {
+  const t = taskOf(c);
+  t.task.memory_excluded = b === "exclude";
+  fs.writeFileSync(fixtureFile, JSON.stringify(fixture));
+  out(taskJson(t));
 } else if (a === "memory" && b === "search") {
   out("TEXT memory search " + c + (flag("boost") ? " boost=" + flag("boost") : "") + "\n");
 } else if (a === "memory" && b === "context") {

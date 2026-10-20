@@ -38,6 +38,7 @@ const threadIdInputSchema = z.object({ threadId: z.string().regex(THREAD_ID) });
 const threadTaskInputSchema = threadIdInputSchema.extend({ taskId: z.number().int().positive() });
 const pinInputSchema = threadIdInputSchema.extend({ taskId: z.number().int().positive().nullable() });
 const setStatusInputSchema = threadTaskInputSchema.extend({ status: z.enum(STATUSES) });
+const setMemoryExcludedInputSchema = threadTaskInputSchema.extend({ excluded: z.boolean() });
 // The text is split once here, so a bad note is an input error before any CLI call.
 const postNoteInputSchema = threadTaskInputSchema
   .extend({ text: z.string().max(100_000), status: z.enum(STATUSES).optional() })
@@ -65,6 +66,7 @@ export const rpcContract = defineRpcContract({
   link: { input: threadTaskInputSchema, output: threadStateSchema },
   unlink: { input: threadTaskInputSchema, output: threadStateSchema },
   setStatus: { input: setStatusInputSchema, output: taskDetailSchema },
+  setMemoryExcluded: { input: setMemoryExcludedInputSchema, output: taskDetailSchema },
   postNote: { input: postNoteInputSchema, output: taskDetailSchema },
   searchTasks: { input: searchInputSchema, output: taskRowsSchema },
   recentTasks: {
@@ -214,6 +216,7 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
       link: unavailable,
       unlink: unavailable,
       setStatus: unavailable,
+      setMemoryExcluded: unavailable,
       postNote: unavailable,
       searchTasks: unavailable,
       recentTasks: unavailable,
@@ -266,6 +269,8 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
     link: ({ threadId, taskId }) => written(threadId, state.link(threadId, taskId)),
     unlink: ({ threadId, taskId }) => written(threadId, state.unlink(threadId, taskId)),
     setStatus: ({ threadId, taskId, status }) => written(threadId, state.setStatus(threadId, taskId, status), taskId),
+    setMemoryExcluded: ({ threadId, taskId, excluded }) =>
+      written(threadId, state.setMemoryExcluded(threadId, taskId, excluded), taskId),
     postNote: ({ threadId, taskId, text, status }) => {
       const note = splitNote(text);
       if ("error" in note) throw new Error(note.error);

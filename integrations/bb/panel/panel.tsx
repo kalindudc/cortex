@@ -183,6 +183,19 @@ function TaskView({
       () => rpc.call("pin", { threadId, taskId: pinned ? null : task.id }),
       pinned ? "Focus follows the most active task again" : `#${task.id} is now this thread's focus`,
     );
+  const toggleMemory = async () => {
+    const excluded = !task.memoryExcluded;
+    try {
+      onDetail(await rpc.call("setMemoryExcluded", { threadId, taskId: task.id, excluded }));
+      toast(
+        excluded
+          ? `#${task.id} is out of agent memory; reading it by id still works`
+          : `#${task.id} is back in agent memory`,
+      );
+    } catch (cause) {
+      toast.error(`Could not change memory for #${task.id}: ${errorText(cause)}`);
+    }
+  };
   const post = async ({ text, status }: { text: string; status: CortexStatus | null }) => {
     if (text.trim() === "") {
       if (status !== null) await changeStatus(status);
@@ -217,7 +230,9 @@ function TaskView({
             body={task.body}
             pinned={pinned}
             listed={listed}
+            memoryExcluded={task.memoryExcluded}
             onPin={() => void togglePin()}
+            onToggleMemory={() => void toggleMemory()}
             onLink={() => onLink(task.id)}
             onUnlink={() =>
               void threadWrite(async () => {
@@ -232,6 +247,12 @@ function TaskView({
           <span className="font-mono">#{task.id}</span>
           <span aria-hidden>·</span>
           <span>{task.lane}</span>
+          {task.memoryExcluded ? (
+            <>
+              <span aria-hidden>·</span>
+              <span>excluded from memory</span>
+            </>
+          ) : null}
           {task.tags.map(tag => (
             <Badge key={tag} variant="secondary" className="rounded-full px-1.5 py-px text-[11px] font-normal">
               #{tag}

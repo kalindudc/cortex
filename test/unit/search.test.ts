@@ -16,6 +16,7 @@ function mkTask(overrides: Partial<Task> & { id: number; title: string }): Task 
     created: 0,
     updated: 0,
     tags: [],
+    memory_excluded: false,
     ...overrides,
   };
 }

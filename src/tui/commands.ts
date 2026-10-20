@@ -1734,6 +1734,41 @@ export const COMMANDS: readonly CommandSpec[] = [
     },
   },
   {
+    name: "memory",
+    aliases: [],
+    group: "Task",
+    usage: ":memory [on|off]",
+    description:
+      "Let agent memory offer the current task (on) or keep it out of search, primers and links (off); bare toggles. Reading it by id still works",
+    complete: prefix => ["off", "on"].filter(c => c.startsWith(prefix)),
+    run: (session, argument) => {
+      if (argument !== "" && argument !== "on" && argument !== "off") {
+        throw new CommandError("Usage: :memory [on|off]");
+      }
+      const attempt = argument === "" ? ":memory" : `:memory ${argument}`;
+      const submitted = submittedTask(session, attempt);
+      return session.mutate(async client => {
+        const shown = submitted();
+        const excluded = argument === "" ? !shown.memory_excluded : argument === "off";
+        if (excluded === shown.memory_excluded) {
+          session.notify("info", `@${shown.id} is already ${excluded ? "out of" : "in"} agent memory`);
+          return;
+        }
+        try {
+          await client.versioned.setMemory(shown.id, { excluded });
+        } catch (err) {
+          throw writeFailure(err, `run ${attempt}`);
+        }
+        session.notify(
+          "info",
+          excluded
+            ? `@${shown.id} is out of agent memory; reading it by id still works`
+            : `@${shown.id} is back in agent memory`,
+        );
+      });
+    },
+  },
+  {
     name: "delete",
     aliases: [],
     group: "Task",

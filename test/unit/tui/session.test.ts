@@ -42,6 +42,7 @@ const task = (id: number, over: Partial<Task> = {}): Task => ({
   created: 1,
   updated: 1,
   tags: [],
+  memory_excluded: false,
   ...over,
 });
 

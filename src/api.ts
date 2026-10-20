@@ -312,6 +312,8 @@ export function createApi(send: RequestSender, options: ApiOptions = {}): Cortex
         request("PATCH", `/api/tasks/${id}/lane`, { body: withGuard({ lane }, guard), versioned: true }),
       changeTags: (id, change, guard) =>
         request("PATCH", `/api/tasks/${id}/tags`, { body: withGuard(change, guard), versioned: true }),
+      setMemory: (id, body, guard) =>
+        request("PATCH", `/api/tasks/${id}/memory`, { body: withGuard(body, guard), versioned: true }),
       removeTask: (id, guard) => request("DELETE", `/api/tasks/${id}`, { ...guardOnly(guard), versioned: true }),
       postUpdate: (id, body, guard) =>
         request("POST", `/api/tasks/${id}/updates`, { body: withGuard(body, guard), versioned: true }),

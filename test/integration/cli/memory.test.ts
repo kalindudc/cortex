@@ -199,4 +199,43 @@ describe("cortex memory (compiled binary)", () => {
     expect(r.code).toBe(1);
     expect(r.stderr).toContain("task 999 not found");
   });
+
+  test("memory exclude keeps a task out of recall; reading it by id still works", async () => {
+    type Row = { id: number; memory_excluded: boolean };
+    const kept = (await json<Row>(["add", "gizmo visible notes", "--as", "x-1", "--json"])).id;
+    const hidden = (await json<Row>(["add", "gizmo hidden notes", "--as", "x-1", "--json"])).id;
+    const hits = async (): Promise<number[]> =>
+      (await json<{ hits: Row[] }>(["memory", "search", "gizmo notes", "--json"])).hits.map(h => h.id);
+    expect((await hits()).sort()).toEqual([kept, hidden].sort());
+
+    const r = await cli(["memory", "exclude", String(hidden)]);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain(`@${hidden} excluded from memory`);
+    expect(await hits()).toEqual([kept]);
+    const context = await json<{ hits: Row[]; primerIds: number[] }>([
+      "memory",
+      "context",
+      "--json",
+      "--query=gizmo notes",
+      "--author=x-1",
+    ]);
+    expect(context.hits.map(h => h.id)).toEqual([kept]);
+    expect(context.primerIds).not.toContain(hidden);
+
+    const shown = await cli(["memory", "show", String(hidden)]);
+    expect(shown.code).toBe(0);
+    expect(shown.stdout.split("\n")[1]).toContain("excluded from memory");
+    expect((await json<{ task: Row }>(["show", String(hidden), "--json"])).task.memory_excluded).toBe(true);
+    expect((await json<Row[]>(["memory", "excluded", "--json"])).map(t => t.id)).toEqual([hidden]);
+    expect((await json<Row[]>(["memory", "streams", "--author=x-1", "--json"])).map(t => t.id)).toEqual([kept]);
+    const all = await json<Row[]>(["memory", "streams", "--author=x-1", "--with-excluded", "--json"]);
+    expect(all.find(t => t.id === hidden)?.memory_excluded).toBe(true);
+
+    expect((await cli(["memory", "include", String(hidden)])).code).toBe(0);
+    expect((await hits()).sort()).toEqual([kept, hidden].sort());
+    expect((await cli(["memory", "excluded"])).stdout).toContain("(no tasks are excluded from memory)");
+    const missing = await cli(["memory", "exclude", "999"]);
+    expect(missing.code).toBe(1);
+    expect(missing.stderr).toContain("task 999 not found");
+  });
 });

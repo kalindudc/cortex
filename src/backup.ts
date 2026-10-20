@@ -13,6 +13,7 @@ export type BackupStats = {
   updates: number;
   task_tags: number;
   notifications: number;
+  memory_exclusions: number;
 };
 
 export type BackupDoc = {
@@ -31,6 +32,7 @@ export type BackupDoc = {
   updates: Record<string, unknown>[];
   task_tags: Record<string, unknown>[];
   notifications: Record<string, unknown>[];
+  memory_exclusions: Record<string, unknown>[];
 };
 
 export type CreateBackupOpts = { liveDbPath: string; outPath: string; rotate?: number };
@@ -42,7 +44,8 @@ export type RestoreCounts = {
   updates: number;
   taskTags: number;
   notifications: number;
-  skipped: { updates: number; taskTags: number; notifications: number };
+  memoryExclusions: number;
+  skipped: { updates: number; taskTags: number; notifications: number; memoryExclusions: number };
 };
 export type DryRunResult = {
   doc: Pick<BackupDoc, "format_version" | "cortex_version" | "created_at" | "source_host" | "stats">;
@@ -50,7 +53,10 @@ export type DryRunResult = {
 };
 
 type TableSpec = {
-  name: keyof Pick<BackupDoc, "lanes" | "tags" | "tasks" | "updates" | "task_tags" | "notifications">;
+  name: keyof Pick<
+    BackupDoc,
+    "lanes" | "tags" | "tasks" | "updates" | "task_tags" | "notifications" | "memory_exclusions"
+  >;
   columns: readonly string[];
   idColumn: string | null;
   optional?: boolean;
@@ -72,6 +78,8 @@ export const TABLES: ReadonlyArray<TableSpec> = [
     idColumn: "id",
     optional: true,
   },
+  // The user's memory choices travel with the data; an older database or archive has none.
+  { name: "memory_exclusions", columns: ["task_id"], idColumn: null, optional: true },
 ] as const;
 
 const FORMAT_VERSION = 1;
@@ -133,7 +141,7 @@ function sourceHost(): string {
 }
 
 function emptyStats(): BackupStats {
-  return { lanes: 0, tags: 0, tasks: 0, updates: 0, task_tags: 0, notifications: 0 };
+  return { lanes: 0, tags: 0, tasks: 0, updates: 0, task_tags: 0, notifications: 0, memory_exclusions: 0 };
 }
 
 function emptyCounts(): RestoreCounts {
@@ -144,7 +152,8 @@ function emptyCounts(): RestoreCounts {
     updates: 0,
     taskTags: 0,
     notifications: 0,
-    skipped: { updates: 0, taskTags: 0, notifications: 0 },
+    memoryExclusions: 0,
+    skipped: { updates: 0, taskTags: 0, notifications: 0, memoryExclusions: 0 },
   };
 }
 
@@ -162,6 +171,7 @@ function normalisedStats(doc: Record<string, unknown>): BackupStats {
     updates: Number(stats.updates ?? rowArray(doc, "updates").length),
     task_tags: Number(stats.task_tags ?? rowArray(doc, "task_tags").length),
     notifications: Number(stats.notifications ?? rowArray(doc, "notifications").length),
+    memory_exclusions: Number(stats.memory_exclusions ?? rowArray(doc, "memory_exclusions").length),
   };
 }
 
@@ -190,6 +200,7 @@ function validateDoc(raw: unknown): BackupDoc {
     updates: rowArray(doc, "updates"),
     task_tags: rowArray(doc, "task_tags"),
     notifications: rowArray(doc, "notifications"),
+    memory_exclusions: rowArray(doc, "memory_exclusions"),
   };
 }
 
@@ -364,6 +375,7 @@ export async function exportData(liveDbPath: string): Promise<BackupDoc> {
         updates: [],
         task_tags: [],
         notifications: [],
+        memory_exclusions: [],
       };
       const tables: Record<string, string[]> = {};
       const stats = emptyStats();
@@ -606,6 +618,25 @@ function insertNotifications(
   }
 }
 
+function insertMemoryExclusions(
+  db: Database,
+  doc: BackupDoc,
+  counts: RestoreCounts,
+  columns: Set<string>,
+  idMap: Map<number, number>,
+): void {
+  for (const row of doc.memory_exclusions) {
+    const sourceTaskId = asInt(row, "task_id");
+    const taskId = sourceTaskId === null ? null : idMap.get(sourceTaskId);
+    if (!taskId) {
+      counts.skipped.memoryExclusions++;
+      continue;
+    }
+    insertDynamic({ db, table: "memory_exclusions", data: { ...row, task_id: taskId }, columns, orIgnore: true });
+    counts.memoryExclusions++;
+  }
+}
+
 export async function restoreBackup(opts: RestoreOpts): Promise<{ idMap: Map<number, number>; counts: RestoreCounts }> {
   const extracted = extractBackup(opts.backupPath);
   try {
@@ -617,6 +648,7 @@ export async function restoreBackup(opts: RestoreOpts): Promise<{ idMap: Map<num
       const updateColumns = currentColumns(db, "updates");
       const taskTagColumns = currentColumns(db, "task_tags");
       const notificationColumns = currentColumns(db, "notifications");
+      const exclusionColumns = currentColumns(db, "memory_exclusions");
       if (!tableHasRows(db, "lanes") || !tableHasRows(db, "tasks") || !tableHasRows(db, "updates")) {
         throw new Error("destination database is missing required cortex tables");
       }
@@ -627,6 +659,7 @@ export async function restoreBackup(opts: RestoreOpts): Promise<{ idMap: Map<num
       insertUpdates(db, extracted.doc, counts, updateColumns, idMap);
       insertTaskTags(db, extracted.doc, counts, taskTagColumns, idMap, touched);
       insertNotifications(db, extracted.doc, counts, notificationColumns, idMap);
+      insertMemoryExclusions(db, extracted.doc, counts, exclusionColumns, idMap);
       stampRestored(opts.liveStore, idMap, touched);
       return { idMap, counts };
     });
@@ -732,6 +765,11 @@ export function projectRestore(doc: BackupDoc, destination: Store | null): DryRu
     const taskId = asInt(row, "task_id");
     if (taskId !== null && docTaskIds.has(taskId)) counts.notifications++;
     else counts.skipped.notifications++;
+  }
+  for (const row of doc.memory_exclusions) {
+    const taskId = asInt(row, "task_id");
+    if (taskId !== null && docTaskIds.has(taskId)) counts.memoryExclusions++;
+    else counts.skipped.memoryExclusions++;
   }
   return {
     doc: {

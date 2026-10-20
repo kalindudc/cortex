@@ -59,6 +59,7 @@ const task = (id: number, over: Partial<Task> = {}): Task => ({
   created: 1,
   updated: 1,
   tags: [],
+  memory_excluded: false,
   ...over,
 });
 const LANES: Lane[] = [
@@ -372,6 +373,14 @@ describe("layout (N19)", () => {
     expect(text).toMatch(/◐ @4 {2}Wait for review/);
     type(h, "j");
     expect(screen(h)).toContain("Blocked");
+  });
+
+  test("the document header says memory off for a task kept out of agent memory, in words", async () => {
+    const h = await started({ tasks: [task(1, { title: "private notes", priority: 1, memory_excluded: true })] });
+    const header = plain(h.shell.frame()).find(l => l.includes("@1 · now"));
+    expect(header).toMatch(/@1 · now · ● Open · P1 · memory off/);
+    const shown = await started({ tasks: [task(1, { title: "shared notes" })] });
+    expect(plain(shown.shell.frame()).join("\n")).not.toContain("memory off");
   });
 
   test("the status line shows mode, focus, the save state and the connection", async () => {

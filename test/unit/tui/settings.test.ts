@@ -40,6 +40,7 @@ const task = (id: number, over: Partial<Task> = {}): Task => ({
   created: 0,
   updated: id,
   tags: [],
+  memory_excluded: false,
   ...over,
 });
 const TASKS: Task[] = [task(1, { title: "b" }), task(2, { title: "a" }), task(3, { title: "c", status: "done" })];

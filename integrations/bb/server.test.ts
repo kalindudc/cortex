@@ -430,6 +430,21 @@ describe("watch", () => {
     await service.done;
   });
 
+  test("a changed task refreshes every cached primer that lists it, even one for another lane", async () => {
+    const fixture = baseFixture();
+    // This project's primer is for lane "other" but lists task 1 (lane cortex) among other lanes' streams.
+    fixture.context = { lane: "other", primer: "PRIMER", primerIds: [1] };
+    fixture.watch = { lines: [line("task.updated", { id: 1, lane: "cortex" })] };
+    const s = await setup({ fixture });
+    await warm(s);
+    const contexts = () => s.argvs().filter(argv => argv[1] === "context").length;
+    expect(contexts()).toBe(1);
+    const service = s.harness.behavior.runService("watch");
+    await vi.waitFor(() => expect(contexts()).toBe(2), { timeout: 4000 });
+    service.controller.abort();
+    await service.done;
+  });
+
   test("routeCortexEvent refreshes before it publishes and ignores malformed frames", () => {
     const order: string[] = [];
     const publish = (channel: string) => order.push(`publish:${channel}`);
@@ -580,6 +595,37 @@ describe("writes as the user", () => {
     // The thread's list shows the new status too: its stream rows were dropped.
     const shows = s.argvs().filter(argv => argv[0] === "show" && argv[1] === "1").length;
     expect(shows).toBe(2);
+  });
+
+  test("setMemoryExcluded runs memory exclude|include, drops cached reads, publishes, and returns the fresh detail", async () => {
+    const s = await setup({ fixture: writableFixture() });
+    const before = (await s.harness.behavior.callRpc("task", { threadId: THREAD, taskId: 1 })) as Record<string, any>;
+    // The fixture's cortex prints no memory_excluded, like one that predates exclusion.
+    expect(before.task.memoryExcluded).toBeNull();
+    const excluded = (await s.harness.behavior.callRpc("setMemoryExcluded", {
+      threadId: THREAD,
+      taskId: 1,
+      excluded: true,
+    })) as Record<string, any>;
+    expect(s.argvs()).toContainEqual(["memory", "exclude", "1", "--json"]);
+    expect(excluded.task.memoryExcluded).toBe(true);
+    expect(s.harness.inspection.realtimeSignals).toEqual(expect.arrayContaining([threadSignal(THREAD), taskSignal(1)]));
+    const included = (await s.harness.behavior.callRpc("setMemoryExcluded", {
+      threadId: THREAD,
+      taskId: 1,
+      excluded: false,
+    })) as Record<string, any>;
+    expect(s.argvs()).toContainEqual(["memory", "include", "1", "--json"]);
+    expect(included.task.memoryExcluded).toBe(false);
+    await expect(
+      s.harness.behavior.callRpc("setMemoryExcluded", { threadId: THREAD, taskId: 1, excluded: "yes" }),
+    ).rejects.toThrow();
+  });
+
+  test("the thread's list asks for excluded tasks too: it is the user's own view", async () => {
+    const s = await setup();
+    await s.harness.behavior.callRpc("threadState", { threadId: THREAD });
+    expect(s.argvs()).toContainEqual(["memory", "streams", `--author=bb-${THREAD}`, "--with-excluded", "--json"]);
   });
 
   test("setStatus validates its input and surfaces a CLI failure", async () => {

@@ -673,7 +673,8 @@ export function renderStream(stream: MemoryStream, staleness: Staleness, opts: {
   if (staleness.repo === "none") state += " \u00b7 not in a git checkout";
   if (staleness.changed.length > 0) state += ` \u00b7 changed: ${staleness.changed.join(", ")}`;
   if (staleness.missing.length > 0) state += ` \u00b7 missing: ${staleness.missing.join(", ")}`;
-  const header = `[${task.id}] ${task.title} (${task.status} \u00b7 ${task.lane}${tags})${latestNote(stream.latest)}`;
+  const excluded = task.memory_excluded ? " \u00b7 excluded from memory" : "";
+  const header = `[${task.id}] ${task.title} (${task.status} \u00b7 ${task.lane}${tags}${excluded})${latestNote(stream.latest)}`;
   const lines = [MEMORY_PREAMBLE, header, state, ""];
   lines.push(bodyView(task.id, (task.body ?? "").trimEnd(), opts.section));
   lines.push("");

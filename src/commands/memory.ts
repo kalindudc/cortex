@@ -15,7 +15,7 @@ import {
   renderStream,
 } from "../memory.ts";
 import { emitError, printJson } from "../output.ts";
-import type { MemoryStream, MemoryStreamRow } from "../store.ts";
+import type { MemoryStream, MemoryStreamRow, Task } from "../store.ts";
 
 /**
  * `cortex memory` — agent memory over cortex tasks. A task is a memory
@@ -27,6 +27,9 @@ import type { MemoryStream, MemoryStreamRow } from "../store.ts";
  *   context         the one call a harness makes per prompt: primer + hits (this lane boosted)
  *   streams         the streams one author posted updates to (e.g. a bb thread's tasks)
  *   lane            the lane of the current checkout (git's common dir)
+ *   exclude <id>    keep a task out of what memory offers (the user's call); reading it by id still works
+ *   include <id>    let memory offer it again
+ *   excluded        the tasks kept out of memory
  *
  * Every read goes through withClient (the verified daemon, or the same
  * handlers in-process). git runs only OUTSIDE withClient: `context` resolves
@@ -45,6 +48,14 @@ function positiveInt(raw: string | undefined, name: string, json: boolean): numb
   const value = Number(raw);
   if (!Number.isInteger(value) || value <= 0) emitError(json, new Error(`${name} must be a positive integer`));
   return value;
+}
+
+function taskId(raw: string, json: boolean): number {
+  const id = Number.parseInt(raw, 10);
+  if (!Number.isFinite(id) || id <= 0 || String(id) !== raw.trim()) {
+    emitError(json, new Error("id must be a positive integer"));
+  }
+  return id;
 }
 
 function taskIds(raw: string | undefined, json: boolean): number[] | undefined {
@@ -117,10 +128,7 @@ const show = defineCommand({
   },
   async run({ args }) {
     const json = args.json;
-    const id = Number.parseInt(args.id, 10);
-    if (!Number.isFinite(id) || id <= 0 || String(id) !== args.id.trim()) {
-      emitError(json, new Error("id must be a positive integer"));
-    }
+    const id = taskId(args.id, json);
     let stream: MemoryStream;
     try {
       stream = await withClient(client => client.memoryStream(id));
@@ -226,6 +234,11 @@ const streams = defineCommand({
   },
   args: {
     author: { type: "string", required: true, valueHint: "tag", description: "exact author tag, e.g. bb-<thread id>" },
+    "with-excluded": {
+      type: "boolean",
+      default: false,
+      description: "also list tasks excluded from memory (for the user's own views, such as bb's Cortex tab)",
+    },
     limit: {
       type: "string",
       alias: "n",
@@ -241,7 +254,7 @@ const streams = defineCommand({
     const limit = positiveInt(args.limit, "limit", json) ?? STREAMS_DEFAULT_LIMIT;
     let rows: MemoryStreamRow[];
     try {
-      rows = await withClient(client => client.memoryStreams({ author, limit }));
+      rows = await withClient(client => client.memoryStreams({ author, limit, withExcluded: args["with-excluded"] }));
     } catch (err) {
       emitError(json, err);
     }
@@ -254,10 +267,76 @@ const streams = defineCommand({
       return;
     }
     for (const row of rows) {
+      const excluded = row.memory_excluded ? EXCLUDED_NOTE : "";
       console.log(
-        `[${row.id}] ${row.status} \u00b7 ${row.lane} \u00b7 active ${isoDay(row.activity)} \u00b7 ${row.title}`,
+        `[${row.id}] ${row.status} \u00b7 ${row.lane} \u00b7 active ${isoDay(row.activity)} \u00b7 ${row.title}${excluded}`,
       );
     }
+  },
+});
+
+const EXCLUDED_NOTE = " \u00b7 excluded from memory";
+
+/** `exclude` and `include`: one idempotent write each way; the CLI never asks, so agents run it only for the user. */
+function exclusionCommand(excluded: boolean) {
+  return defineCommand({
+    meta: {
+      name: excluded ? "exclude" : "include",
+      description: excluded
+        ? "keep a task out of what memory offers agents (search, primer, latest linked); reading it by id still works"
+        : "let memory offer a task again after `cortex memory exclude`",
+    },
+    args: {
+      id: { type: "positional", required: true, valueHint: "task-id", description: "task id (see `cortex ls`)" },
+      json: jsonArg,
+    },
+    async run({ args }) {
+      const json = args.json;
+      const id = taskId(args.id, json);
+      let task: Task;
+      try {
+        task = (await withClient(client => client.versioned.setMemory(id, { excluded }))).task;
+      } catch (err) {
+        if (err instanceof HttpError && err.status === 404) emitError(json, new Error(`task ${id} not found`));
+        emitError(json, err);
+      }
+      if (json) {
+        printJson(task);
+        return;
+      }
+      console.log(
+        excluded
+          ? `\u2713 @${id} excluded from memory; reading it by id still works`
+          : `\u2713 @${id} included in memory`,
+      );
+    },
+  });
+}
+
+const excludedCmd = defineCommand({
+  meta: {
+    name: "excluded",
+    description: "list the tasks kept out of memory (`cortex memory include <id>` undoes one)",
+  },
+  args: { json: jsonArg },
+  async run({ args }) {
+    const json = args.json;
+    let tasks: Task[];
+    try {
+      tasks = await withClient(client => client.tasks());
+    } catch (err) {
+      emitError(json, err);
+    }
+    const rows = tasks.filter(task => task.memory_excluded).map(({ body: _body, ...row }) => row);
+    if (json) {
+      printJson(rows);
+      return;
+    }
+    if (rows.length === 0) {
+      console.log("(no tasks are excluded from memory)");
+      return;
+    }
+    for (const row of rows) console.log(`[${row.id}] ${row.status} \u00b7 ${row.lane} \u00b7 ${row.title}`);
   },
 });
 
@@ -273,5 +352,14 @@ export default defineCommand({
     name: "memory",
     description: "agent memory: ranked recall, staleness since the last body sync, breadcrumbs, one-call context",
   },
-  subCommands: { search, show, context, streams, lane: laneCmd },
+  subCommands: {
+    search,
+    show,
+    context,
+    streams,
+    lane: laneCmd,
+    exclude: exclusionCommand(true),
+    include: exclusionCommand(false),
+    excluded: excludedCmd,
+  },
 });

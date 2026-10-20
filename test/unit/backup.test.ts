@@ -188,6 +188,46 @@ describe("restore merge semantics", () => {
   });
 });
 
+describe("memory exclusions travel with the data", () => {
+  test("export lists them, and a restore that renumbers a task keeps it excluded; orphans are skipped", async () => {
+    const source = openTmpStore("source-exclusions");
+    const dest = openTmpStore("dest-exclusions");
+    try {
+      const kept = source.store.addTask({ title: "kept out" });
+      source.store.addTask({ title: "still in memory" });
+      source.store.setMemoryExcluded(kept.id, true);
+      const doc = await exportData(source.dbPath);
+      expect(doc.memory_exclusions).toEqual([{ task_id: kept.id }]);
+      expect(doc.stats.memory_exclusions).toBe(1);
+
+      dest.store.addTask({ title: "takes id 1" });
+      const outPath = path.join(source.dir, "backup.zip");
+      await createBackup({ liveDbPath: source.dbPath, outPath });
+      expect((await dryRunRestore(outPath, dest.store)).would.memoryExclusions).toBe(1);
+      const result = await restoreBackup({ backupPath: outPath, liveStore: dest.store });
+      const remapped = result.idMap.get(kept.id) as number;
+      expect(remapped).not.toBe(kept.id);
+      expect(dest.store.getTask(remapped)?.memory_excluded).toBe(true);
+      expect(dest.store.getTask(1)?.memory_excluded).toBe(false);
+      expect(result.counts.memoryExclusions).toBe(1);
+
+      const orphan = writeBackupDoc({
+        ...doc,
+        tasks: [],
+        updates: [],
+        task_tags: [],
+        memory_exclusions: [{ task_id: 7 }],
+      });
+      const skipped = await restoreBackup({ backupPath: orphan, liveStore: dest.store });
+      expect(skipped.counts.memoryExclusions).toBe(0);
+      expect(skipped.counts.skipped.memoryExclusions).toBe(1);
+    } finally {
+      source.store.close();
+      dest.store.close();
+    }
+  });
+});
+
 describe("backwards-compatible data-only restore", () => {
   test("restoreBackup accepts older v1 docs with missing optional tables/columns and ignores unknown columns", async () => {
     const dest = openTmpStore("dest-compat");
@@ -223,6 +263,8 @@ describe("backwards-compatible data-only restore", () => {
       expect(result.counts.tasks).toEqual({ preserved: 1, bumped: 0 });
       expect(dest.store.getTask(42)?.title).toBe("legacy task");
       expect(dest.store.getTask(42)?.priority).toBeNull();
+      expect(dest.store.getTask(42)?.memory_excluded).toBe(false);
+      expect(result.counts.memoryExclusions).toBe(0);
     } finally {
       dest.store.close();
     }
@@ -261,6 +303,7 @@ const V1_KEYS = [
   "format",
   "format_version",
   "lanes",
+  "memory_exclusions",
   "notifications",
   "source_host",
   "source_user",
@@ -305,6 +348,7 @@ describe("backup excludes private metadata", () => {
         ["updates", ["id", "task_id", "author", "summary", "body", "severity", "created"], "id"],
         ["task_tags", ["task_id", "tag_name"], null],
         ["notifications", ["id", "task_id", "author", "status", "title", "message", "read", "created"], "id"],
+        ["memory_exclusions", ["task_id"], null],
       ]);
 
       const outPath = path.join(dir, "private.zip");

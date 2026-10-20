@@ -1748,6 +1748,8 @@ export class Shell {
         seg(statusPair(task.status, "bg"), `${STATUS_MARK[task.status]} ${STATUS_LABEL[task.status]}`),
       ];
       if (task.priority !== null) meta.push(seg("muted@bg", ` · P${task.priority}`));
+      // A word, never color alone: the task is kept out of what agent memory offers.
+      if (task.memory_excluded) meta.push(seg("muted@bg", " · memory off"));
       // The header row: one leading cell (the margin), the metadata and the tag labels, then the view
       // tabs at the right edge: with key hints, plain, or abbreviated, whichever keeps every tag.
       let column = 1 + meta.reduce((n, m) => n + displayWidth(m.text), 0);

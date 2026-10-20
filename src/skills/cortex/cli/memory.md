@@ -10,8 +10,11 @@ fetches per prompt. Protocol: [recipes/memory.md](../recipes/memory.md).
 cortex memory search <query> [--lane=<name>] [--boost=<lane>] [--limit=<n>] [--json]
 cortex memory show <id> [--section=<text>] [--json]
 cortex memory context [--query=<text>] [--author=<tag>] [--exclude=<ids>] [--limit=<n>] [--lane=<name>] [--load-hint=<text>] [--no-primer] [--json]
-cortex memory streams --author=<tag> [--limit=<n>] [--json]
+cortex memory streams --author=<tag> [--with-excluded] [--limit=<n>] [--json]
 cortex memory lane
+cortex memory exclude <id> [--json]     # only when the user asks
+cortex memory include <id> [--json]     # only when the user asks
+cortex memory excluded [--json]
 ```
 
 ## Args
@@ -21,8 +24,10 @@ cortex memory lane
 | `search <query>` | `--lane` (a filter; default every lane), `--boost` (rank this lane higher), `--limit` (default 5, max 20) | ranked hits; `--json`: `{ terms, recent, hits }` |
 | `show <id>` | `--section` (only the sections whose heading slug contains it, in full) | staleness + body (section-first past 12,000 chars) + breadcrumb trail; `--json`: `{ task, synced, latest, trail, staleness }` plus `sections` with `--section` |
 | `context` | `--query`, `--author` (its streams lead the primer), `--exclude` (ids already shown, comma-separated), `--limit`, `--lane` (the primer's lane and the boosted lane; default: this checkout's), `--load-hint` (how the hits text says to load a hit), `--no-primer` (hits only) | primer + hits from every lane; `--json`: `{ lane, terms, recent, primer, primerIds, hits, hitsText }` (`primerIds`: the streams the primer lists) |
-| `streams` | `--author` (required; the tasks that author posted updates to), `--limit` (default 20, max 50) | bodiless rows, newest activity first; `--json`: `[{ id, title, lane, status, tags, updated, synced, activity }]` |
+| `streams` | `--author` (required; the tasks that author posted updates to), `--with-excluded` (also tasks kept out of memory, for the user's own views), `--limit` (default 20, max 50) | bodiless rows, newest activity first; `--json`: `[{ id, title, lane, status, tags, updated, synced, activity, memory_excluded }]` |
 | `lane` | none | this checkout's lane (git's common dir: `<repo>/.git` or `~/world/git` names its parent; worktrees share it) |
+| `exclude <id>` / `include <id>` | none | keep the task out of what memory offers (search, primer, latest linked), or let memory offer it again; idempotent; `--json`: the task |
+| `excluded` | none | the tasks kept out of memory; `--json`: task rows without bodies |
 
 - A hit or stream carries `activity` (the newest body edit or update, status changes excluded) and `latest`: the newest stream reached through same-lane `@id` links to later-created tasks (a handover chain), or null.
 - `recent` is true when the query had a recency word (`last`, `latest`, `recent`, `current`, `today`, ...): the word is dropped from the terms and equally matching hits sort newest activity first.
@@ -41,6 +46,8 @@ $ cortex memory show 42 --section=next
 ```
 
 ## Pitfalls
+
+- Excluding a task from memory is the user's call: run `exclude` or `include` only when the user asks. Reading by id is separate and always works: `cortex show`, `memory show <id>` and `@<id>` recall load an excluded task, and its header says `excluded from memory`. Every task's JSON carries `memory_excluded`.
 
 - Pass values as `--flag=value`. Nested subcommands skip cortex's argv normalizer, so a dash-leading value in a separate `--flag value` pair is read as a flag.
 - The search index and its `@id` link graph are DERIVED: built lazily on the first search, reconciled on every search and show, never backed up. Nothing to maintain.

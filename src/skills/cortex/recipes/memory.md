@@ -15,6 +15,8 @@ A task is a stream:
 - tags = topics
 - status = the user's tracking, NOT a relevance signal: `done` streams are still valid memory (the primer lists only unfinished streams; search covers all)
 
+The user can keep a task out of memory (`cortex memory exclude <id>`): search, the primer and latest-linked pointers never offer it. Leave that choice to the user; exclude or include a task only when asked. Loading an excluded task by id still works, so follow an explicit `@<id>` as usual.
+
 ## Stream template
 
 A stream body is Markdown with these sections, in this order, ending with a

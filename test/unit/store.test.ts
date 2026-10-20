@@ -85,6 +85,7 @@ function snapshot(s: Store): Record<string, unknown[]> {
     tags: "SELECT * FROM tags ORDER BY name",
     task_tags: "SELECT * FROM task_tags ORDER BY task_id, tag_name",
     notifications: "SELECT * FROM notifications ORDER BY id",
+    memory_exclusions: "SELECT * FROM memory_exclusions ORDER BY task_id",
     revisions: "SELECT * FROM _resource_revisions ORDER BY resource, scope",
     receipts: "SELECT * FROM _mutation_receipts ORDER BY mutation_id",
     bodyEdits: "SELECT * FROM _body_edits ORDER BY task_id",
@@ -858,6 +859,7 @@ function makeLegacyDb(db: string, options: { preMigrations?: boolean } = {}): vo
       raw.run("DROP TABLE _migrations;");
     }
     raw.run("DROP TABLE notifications;");
+    raw.run("DROP TABLE memory_exclusions;");
     raw.run("DROP TABLE _resource_revisions;");
     raw.run("DROP TABLE _mutation_receipts;");
     raw.run("DROP TABLE _database_identity;");
@@ -908,8 +910,14 @@ describe("Store.readSnapshot", () => {
       pending: s.pendingMigrations(),
       titles: s.listTasks().map(t => t.title),
       updates: s.listUpdates(1).map(u => u.summary),
+      excluded: [s.listTasks()[0]?.memory_excluded, s.getTask(1)?.memory_excluded],
     }));
-    expect(snap).toEqual({ pending: ["updates-summary-4096"], titles: ["legacy task"], updates: ["kept"] });
+    expect(snap).toEqual({
+      pending: ["updates-summary-4096"],
+      titles: ["legacy task"],
+      updates: ["kept"],
+      excluded: [false, false],
+    });
     expect(sha256(fileDb)).toBe(before);
     // No migrate(): the notifications table is still absent, the migration still pending.
     expect(() => Store.readSnapshot(fileDb, s => s.listNotifications())).toThrow(/no such table/);
@@ -1000,6 +1008,7 @@ describe("Store: database identity and private metadata", () => {
       "created",
       "id",
       "lane",
+      "memory_excluded",
       "priority",
       "status",
       "tags",

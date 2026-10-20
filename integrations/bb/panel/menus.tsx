@@ -181,13 +181,15 @@ export function SwitcherMenu({
   );
 }
 
-/** Pin or unpin, copy the body or the TUI command, and link or unlink. */
+/** Pin or unpin, copy the body or the TUI command, keep it out of agent memory or not, and link or unlink. */
 export function MoreMenu({
   taskId,
   body,
   pinned,
   listed,
+  memoryExcluded,
   onPin,
+  onToggleMemory,
   onLink,
   onUnlink,
 }: {
@@ -196,7 +198,10 @@ export function MoreMenu({
   pinned: boolean;
   /** The task's row in the thread's list, or null when it is not linked. */
   listed: { authored: boolean } | null;
+  /** Null when this cortex predates memory exclusion: no menu item then. */
+  memoryExcluded: boolean | null;
   onPin: () => void;
+  onToggleMemory: () => void;
   onLink: () => void;
   onUnlink: () => void;
 }) {
@@ -234,6 +239,12 @@ export function MoreMenu({
           <Icon name="Copy" aria-hidden />
           Copy <span className="font-mono">{command}</span>
         </DropdownMenuItem>
+        {memoryExcluded === null ? null : (
+          <DropdownMenuItem onSelect={onToggleMemory}>
+            <Icon name="Brain" aria-hidden />
+            {memoryExcluded ? "Include in memory" : "Exclude from memory"}
+          </DropdownMenuItem>
+        )}
         {listed === null ? (
           <DropdownMenuItem onSelect={onLink}>
             <Icon name="Link" aria-hidden />

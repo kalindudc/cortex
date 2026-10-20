@@ -584,6 +584,28 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
     }
   });
 
+  // Memory exclusion is a task write, so the /api/memory/ routes stay read-only.
+  app.patch("/api/tasks/:id/memory", async c => {
+    const id = Number(c.req.param("id"));
+    const { guard, fields: body } = splitGuard((await lenientBody(c)) as { excluded?: unknown; guard?: unknown });
+    if (typeof body.excluded !== "boolean") return c.json({ error: "excluded must be a boolean" }, 400);
+    const excluded = body.excluded;
+    try {
+      const { result, replayed } = mutate(guard, "task.memory", { id, body }, () => {
+        const task = store.setMemoryExcluded(id, excluded, guard as WriteGuard);
+        return { task, versions: versionsOf("task", id) };
+      });
+      if (!replayed) publish("task.updated", result.task);
+      return answer(c, result.task, { ...result, replayed });
+    } catch (err) {
+      const failure = guardFailure(c, err);
+      if (failure) return failure;
+      const msg = (err as Error).message;
+      const code = msg.includes("not found") ? 404 : 400;
+      return c.json({ error: msg }, code);
+    }
+  });
+
   app.delete("/api/tasks/:id", async c => {
     const id = Number(c.req.param("id"));
     const parsed = await deleteBody(c);
@@ -757,6 +779,7 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
         excludeLane: c.req.query("excludeLane") || undefined,
         author,
         active,
+        withExcluded: c.req.query("withExcluded") === "1",
         limit,
       }),
     );

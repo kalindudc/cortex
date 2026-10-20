@@ -83,6 +83,8 @@ const COMMAND_CASES: readonly { input: string; name: string; argument: string; p
   { input: "priority none", name: "priority", argument: "none" },
   { input: "lane later", name: "lane", argument: "later", prefix: "lan" },
   { input: "tag +bug -old", name: "tag", argument: "+bug -old", prefix: "ta" },
+  { input: "memory off", name: "memory", argument: "off", prefix: "mem" },
+  { input: "memory", name: "memory", argument: "" },
   { input: "delete", name: "delete", argument: "", prefix: "de" },
   { input: "lanes", name: "lanes", argument: "", prefix: "lanes" },
   { input: "tags", name: "tags", argument: "", prefix: "tags" },
@@ -222,6 +224,7 @@ const task = (id: number, over: Partial<Task> = {}): Task => ({
   created: 0,
   updated: 0,
   tags: [],
+  memory_excluded: false,
   ...over,
 });
 
@@ -717,6 +720,10 @@ function fakeDaemon(tasks: Task[] = TASKS) {
           for (const n of change.remove ?? []) next.delete(n);
           return taskWrite({ ...t, tags: [...next].sort() });
         }),
+      setMemory: (id: number, request: { excluded: boolean }, guard: unknown) =>
+        write("setMemory", [id, request, guard], () =>
+          taskWrite({ ...mustTask(id), memory_excluded: request.excluded }),
+        ),
       removeTask: (id: number, guard: unknown) =>
         write("removeTask", [id, guard], () => {
           mustTask(id);
@@ -1401,6 +1408,37 @@ describe(":title, :priority and :lane", () => {
     expect(s.status?.text).toMatch(/already in big ideas/);
     expect(daemon.writes().length).toBe(1);
     expect(completeCommandLine("lane b", COMMANDS, s)).toEqual(["lane big ideas"]);
+  });
+});
+
+describe(":memory (keeping a task out of agent memory)", () => {
+  test("off excludes, bare toggles back, a repeat changes nothing, and a bad argument explains", async () => {
+    const { s, daemon } = withDaemon();
+    await s.execute("memory off");
+    expect(s.selectedTask()?.memory_excluded).toBe(true);
+    expect(s.status?.text).toMatch(/@1 is out of agent memory; reading it by id still works/);
+    await s.execute("memory off");
+    expect(s.status?.text).toMatch(/already out of agent memory/);
+    await s.execute("memory");
+    expect(s.selectedTask()?.memory_excluded).toBe(false);
+    await s.execute("memory on");
+    expect(s.status?.text).toMatch(/already in agent memory/);
+    await s.execute("memory maybe");
+    expect(s.status?.level).toBe("error");
+    expect(s.status?.text).toMatch(/Usage: :memory \[on\|off\]/);
+    expect(daemon.writes()).toEqual([
+      { name: "setMemory", args: [1, { excluded: true }, undefined] },
+      { name: "setMemory", args: [1, { excluded: false }, undefined] },
+    ]);
+    expect(completeCommandLine("memory o", COMMANDS, s)).toEqual(["memory off", "memory on"]);
+  });
+
+  test("a failed write is reported with the command that ran", async () => {
+    const { s, daemon } = withDaemon();
+    daemon.fail(new HttpError(404, "task 1 not found"));
+    await s.execute("memory off");
+    expect(s.status?.level).toBe("error");
+    expect(s.status?.text).toMatch(/Could not run :memory off: task 1 not found/);
   });
 });
 

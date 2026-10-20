@@ -26,7 +26,8 @@ const COMMANDS: { name: string; summary: string }[] = [
   { name: "search", summary: "fuzzy task finder via fzf (--json for scripted use)" },
   {
     name: "memory",
-    summary: "agent memory: search|show|context|streams|lane (ranked recall, staleness, breadcrumbs; --json)",
+    summary:
+      "agent memory: search|show|context|streams|lane|exclude|include|excluded (ranked recall, staleness, breadcrumbs; --json)",
   },
   {
     name: "update",
@@ -85,6 +86,7 @@ export default defineCommand({
         notifications: {
           columns: ["id", "task_id", "author", "status", "title", "message", "read", "created"],
         },
+        memory_exclusions: { columns: ["task_id"] },
       },
       grammar: {
         taskId: "positive integer, e.g. 42",
