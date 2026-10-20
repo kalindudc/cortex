@@ -10,6 +10,8 @@ Your agents post progress, status changes and plans to cortex from the command l
 desktop app, and cortex interrupts you only when an agent is blocked. Tasks double as memory, so the next agent
 session picks up where the last one stopped.
 
+![The desktop app: the task list by lane, an agent's plan with its diagram, and the agents that worked on it](docs/images/tasks.png)
+
 - **One binary.** The CLI and a small background daemon; plain `cortex` opens the desktop app.
 - **Local and private.** One SQLite file under `~/.config/cortex`, a private Unix socket, no network listener, no
   accounts.
@@ -41,6 +43,13 @@ cortex                                                            # watch it in 
 ```
 
 A task moves through draft, open, review, blocked and done. Only a move into blocked raises a notification.
+
+<p align="center">
+  <img src="docs/images/activity.png" alt="A task's Activity: every update its agents posted, beside the Inbox of status changes" width="49%">
+  <img src="docs/images/split.png" alt="Split view: a task's Markdown in the editor beside its rendered preview and outline" width="49%">
+</p>
+<p align="center"><sub>Left: everything the agents posted on a task, and the Inbox of status changes. Right: a task's
+Markdown beside its preview.</sub></p>
 
 ## Learn more
 
