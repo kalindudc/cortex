@@ -1,7 +1,7 @@
 ---
-budget: 172
+budget: 204
 sources: [src/commands/app.ts, src/desktop/, src/ui/, src/lib/catalogSearch.ts, src/lib/refGrammar.ts, src/lib/slug.ts,
-  integrations/desktop/]
+  scripts/build-css.sh, integrations/desktop/]
 ---
 
 # The desktop app
@@ -47,6 +47,9 @@ it is built and the rules that keep it safe; see also [architecture](architectur
   Cancel, and the draft of a task deleted meanwhile is kept and can be exported to a file.
 - Only a move into `blocked` raises a system notification, unless you turn it off in Settings.
 - Mod+[ and Mod+] step back and forward through the tasks you opened.
+- The app looks like paper on a desk: the document and the full panels are dotted sheets, the side panel's sections
+  are plain cards, prose and titles are set in Literata, the editor in iA Writer Mono, and diagrams look hand-drawn.
+  The fonts ship with the app, and the high-contrast appearance drops the paper's grain and dots.
 
 ## Coming from the terminal workspace
 
@@ -144,6 +147,31 @@ The app icon lives in `integrations/desktop/build/`: `icon.icns` for macOS (its 
 separately, with a thicker arc, so the symbol stays legible) and the 1024 pixel `icon.png` for Linux. Change both
 together, and rebuild `icon.icns` from an iconset with `iconutil -c icns`.
 
+### Paper look
+
+`src/ui/styles/tokens.css` holds the palettes: paper for light and night paper for dark, where the desk is the app's
+background and the sheet is the surface you read on. It also defines the paper itself: a faint grain, a dot grid, a
+slightly uneven edge and a soft lift. The document and the full panels are sheets with the dot grid; cards, such as the
+side panel's sections, stay plain, and so do dialogs. High contrast sets the grain and the dots to `none`.
+
+Paper is painted only by `src/ui/components/PaperLayer.tsx`: an empty, `aria-hidden` element placed first in its
+sheet, which `src/ui/styles/base.css` draws behind the content. The lift is a CSS filter, so its shadow follows the
+uneven edge, and a filter changes how `position: fixed` descendants are placed: they are positioned against the
+filtered element instead of the window, so a popover or tooltip inside a sheet would land in the wrong place, and the
+sheet's text would be redrawn on every scroll. A layer that holds no content has nothing for the filter to move. Why not
+a `box-shadow` on the sheet? It follows the element's straight box, not the cut edge.
+
+`src/ui/styles/fonts.css` sets prose and titles in Literata and the Markdown editor in iA Writer Mono. The files in
+`src/ui/fonts/` ship unmodified beside their licences (both under the SIL Open Font License, which reserves the font
+names), and `scripts/build-css.sh` copies them into the app. The renderer's content security policy, in
+`integrations/desktop/main.ts`, allows fonts only from the app, so they never load from the network. The editor stays
+monospaced on purpose: you line up Markdown tables and lists by eye, which a proportional face would break.
+
+Diagrams use the Mermaid settings in `src/ui/lib/markdown.ts#mermaidConfig`: Mermaid's hand-drawn look with a fixed
+seed (`src/ui/lib/markdown.ts#HAND_DRAWN_SEED`), so a diagram draws the same strokes on every render, in the current
+palette's ink with Literata labels. The settings are on Mermaid's secure list, so a diagram's own directives cannot
+change them, and a render waits briefly for the label font because Mermaid sizes its boxes by measuring the text.
+
 ### Side panel
 
 `src/ui/state/context.ts` owns the panel: whether it is open and its tab persist in `localStorage`, while the narrow
@@ -168,5 +196,9 @@ One set of sources describes the app: `src/ui/state/settings.ts#SETTINGS`, `src/
   `integrations/desktop/test/close-guard.test.ts`.
 - Every shortcut, command and setting comes from the one set of help sources, and every shortcut works:
   `integrations/desktop/test/settings-help.test.ts`.
+- The fonts load only from the app and set the prose, titles and editor; no request goes over http or https; paper
+  is painted only on a content-free layer, with no filter above the content; body text keeps 4.5:1 in light and dark,
+  and high contrast draws no grain or dots: `integrations/desktop/test/paper.test.ts`,
+  `test/unit/ui/paper-tokens.test.ts`, `test/unit/ui/fonts.test.ts`.
 - A post retried with the same mutation id lands once, and an idle stream outlives Bun's idle timeout, over the
   desktop's socket transport: `test/integration/desktop/stream-and-retry.test.ts`.
