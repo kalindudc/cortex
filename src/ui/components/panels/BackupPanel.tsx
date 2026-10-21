@@ -22,6 +22,7 @@ import { backupKeep, SETTINGS } from "../../state/settings.ts";
 import { BACKUP_NOTIFICATION_TITLE } from "../../../lib/constants.ts";
 import { fmtTime, plural } from "../../../lib/format.ts";
 import { Icon } from "../Icon.tsx";
+import { PanelSheet } from "./PanelSheet.tsx";
 import { SettingRow } from "./SettingRow.tsx";
 
 const RESTORE_COMMANDS = "cortex stop\ncortex restore --dry-run <file>\ncortex restore <file>";
@@ -96,7 +97,7 @@ export function BackupPanel(): VNode {
           <b>Backup</b>
         </div>
       </header>
-      <div class="panel-body">
+      <PanelSheet>
         <div class="panel-inner">
           <h1 class="panel-title">Backup</h1>
           <p class="panel-lede">
@@ -177,7 +178,7 @@ export function BackupPanel(): VNode {
             <CopyButton label="Copy commands" text={RESTORE_COMMANDS} />
           </div>
         </div>
-      </div>
+      </PanelSheet>
     </section>
   );
 }

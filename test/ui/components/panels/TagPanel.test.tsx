@@ -33,6 +33,7 @@ import { fireEvent, render } from "@testing-library/preact";
 import { TagPanel } from "../../../../src/ui/components/panels/TagPanel.tsx";
 import { filters, modal, selectedId, selectedTag, tags, tasks, view } from "../../../../src/ui/state/signals.ts";
 import type { Task } from "../../../../src/ui/api/types.ts";
+import { sheetBody } from "./sheet.ts";
 
 const task = (id: number, tagNames: string[]): Task => ({
   id,
@@ -86,6 +87,17 @@ describe("TagPanel", () => {
     expect(button(container, "Save changes").disabled).toBe(false);
     fireEvent.click(button(container, "Discard changes"));
     expect(nameInput(container).value).toBe("bug");
+  });
+
+  test("lies on one dotted sheet, and the tag's name keeps its case in the uppercase heading", () => {
+    const { container } = render(<TagPanel />);
+    const body = sheetBody(container);
+    expect(body.querySelector(".panel-title .tag-pill")?.textContent).toBe("bug");
+    const headings = Array.from(body.querySelectorAll(".panel-card-title"));
+    expect(headings.map(h => h.textContent)).toEqual(["Tag", "Tasks with #bug", "Delete"]);
+    expect(headings[1]?.querySelector(".panel-card-title-name")?.textContent).toBe("#bug");
+    // The colour row is the container its swatch grid reflows in on a narrow window.
+    expect(body.querySelectorAll(".panel-row-colour > .color-grid > .color-swatch")).toHaveLength(16);
   });
 
   test("a rename sends only { rename }, swaps the filter entry and moves the selection", async () => {
@@ -146,6 +158,6 @@ describe("TagPanel", () => {
   test("no tags: an empty state pointing to the + button", () => {
     tags.value = [];
     const { container } = render(<TagPanel />);
-    expect(container.querySelector(".empty-title")?.textContent).toBe("No tags yet");
+    expect(sheetBody(container).querySelector(".empty-title")?.textContent).toBe("No tags yet");
   });
 });

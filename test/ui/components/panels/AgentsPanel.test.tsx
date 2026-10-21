@@ -26,6 +26,7 @@ import { ModalRoot } from "../../../../src/ui/components/modals/ModalRoot.tsx";
 import { AgentsPanel } from "../../../../src/ui/components/panels/AgentsPanel.tsx";
 import { agentsBusy, agentsCheckError, agentsOutcome, agentsStatus } from "../../../../src/ui/state/agents.ts";
 import { modal } from "../../../../src/ui/state/signals.ts";
+import { sheetBody } from "./sheet.ts";
 
 const SKILLS = "/home/you/.agents/skills";
 const EXT = "/home/you/.pi/agent/extensions/cortex";
@@ -136,6 +137,19 @@ describe("AgentsPanel", () => {
     expect(container.querySelector('[data-agent-tool="bb plugin"]')?.textContent).toContain(
       "bb reports it running · runs cortex at /usr/local/bin/cortex",
     );
+  });
+
+  test("lies on one dotted sheet, with the summary, every tool and Reset inside it", async () => {
+    reply("status", { ok: true, action: "status", status: status() });
+    const { container } = render(<AgentsPanel />);
+    await act(flush);
+    const body = sheetBody(container);
+    expect(body.querySelector(".panel-title")?.textContent).toBe("Agent tools");
+    expect(body.querySelector(".agents-headline")?.textContent).toBe("2 agent tools to install or update");
+    const tools = container.querySelectorAll("[data-agent-tool]");
+    expect(tools.length).toBeGreaterThan(0);
+    for (const tool of Array.from(tools)) expect(body.contains(tool)).toBe(true);
+    expect(body.querySelector(".agents-reset")).not.toBeNull();
   });
 
   test("up to date: the summary says which cortex they match", async () => {

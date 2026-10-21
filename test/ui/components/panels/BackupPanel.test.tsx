@@ -57,6 +57,7 @@ import { BackupPanel } from "../../../../src/ui/components/panels/BackupPanel.ts
 import { notifications } from "../../../../src/ui/state/notifications.ts";
 import { backupKeep } from "../../../../src/ui/state/settings.ts";
 import type { Notification } from "../../../../src/ui/api/types.ts";
+import { sheetBody } from "./sheet.ts";
 
 const flush = async (): Promise<void> => {
   for (let i = 0; i < 4; i++) await Promise.resolve();
@@ -108,6 +109,14 @@ describe("BackupPanel", () => {
     expect(result?.textContent).toContain("Backup saved to /tmp/cfg/cortex/backups/cortex-host-2026.zip");
     expect(result?.textContent).toContain("421,880 bytes · 2 tasks · 1 update");
     expect(container.querySelector(".backup-folder")?.textContent).toBe("/tmp/cfg/cortex/backups");
+  });
+
+  test("lies on one dotted sheet, with the Keep backups setting and the restore steps inside it", () => {
+    const { container } = render(<BackupPanel />);
+    const body = sheetBody(container);
+    expect(body.querySelector(".panel-title")?.textContent).toBe("Backup");
+    expect(body.querySelector('[data-setting="backup"] #setting-backup')).not.toBeNull();
+    expect(body.querySelectorAll(".panel-callout li")).toHaveLength(3);
   });
 
   test("Keep backups at Last 10 sends { rotate: 10 }", async () => {

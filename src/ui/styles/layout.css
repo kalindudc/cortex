@@ -85,9 +85,11 @@ main:has(> .ctx-open) { --ctx-w: 300px; }
   min-width: 0;
   overflow: hidden;
 }
-/* A panel (Lanes, Tags, Backup) takes the document's place while App keeps
-   the document mounted but hidden. .pane's display:flex would beat the
-   hidden attribute, hence the explicit rule. */
+/* A full panel (Settings, Lanes, Tags, Backup, Agent tools) takes the
+   document's place on the desk while App keeps the document mounted but
+   hidden, and lies on the desk as one sheet (panels.css .panel-sheet).
+   .pane's display:flex would beat the hidden attribute, hence the explicit
+   rule. */
 .pane-active[hidden] { display: none; }
 .panel-view { grid-area: active; }
 /* The Activity view (ActivityPane) renders INSIDE the document workspace

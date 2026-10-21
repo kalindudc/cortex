@@ -37,6 +37,7 @@ import { SettingsPanel } from "../../../../src/ui/components/panels/SettingsPane
 import { SettingsNav } from "../../../../src/ui/components/sidebar/SettingsNav.tsx";
 import { SETTINGS } from "../../../../src/ui/state/settings.ts";
 import { meAuthor, navigationOpen, settingsFocusRequest, settingsQuery } from "../../../../src/ui/state/signals.ts";
+import { sheetBody } from "./sheet.ts";
 
 const IDENTITY = {
   protocol: 1 as const,
@@ -96,6 +97,17 @@ describe("SettingsPanel", () => {
     expect(helpIds(container, "Shortcuts")).toContain("settings");
     expect(helpIds(container, "Commands")).toContain("settings");
     expect(container.querySelector(".settings-empty")).toBeNull();
+  });
+
+  test("every section and its settings lie on one dotted sheet", async () => {
+    const { container } = render(<SettingsPanel />);
+    await act(tick);
+    const body = sheetBody(container);
+    expect(body.querySelectorAll("section.settings-section")).toHaveLength(8);
+    expect(Array.from(body.querySelectorAll("[data-setting]")).map(el => el.getAttribute("data-setting"))).toEqual(
+      SETTINGS.map(s => s.key),
+    );
+    expect(body.querySelector("#setting-appearance")?.getAttribute("role")).toBe("radiogroup");
   });
 
   test('"group" leaves only the Group row and the sort-group command', async () => {

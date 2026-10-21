@@ -17,6 +17,7 @@ import { IS_MAC } from "../../lib/keys.ts";
 import { SETTINGS, type SettingSpec } from "../../state/settings.ts";
 import { meAuthor, settingsQuery } from "../../state/signals.ts";
 import { buildCommands } from "../palette/buildCommands.ts";
+import { PanelSheet } from "./PanelSheet.tsx";
 import { SettingRow } from "./SettingRow.tsx";
 
 export const SETTING_SECTIONS: readonly SettingSpec["section"][] = [
@@ -116,7 +117,7 @@ export function SettingsPanel(): VNode {
           <b>Settings</b>
         </div>
       </header>
-      <div class="panel-body">
+      <PanelSheet>
         <div class="panel-inner">
           {rows.length === 0 && !about ? (
             <p class="meta settings-empty">No setting, command or shortcut matches</p>
@@ -137,7 +138,7 @@ export function SettingsPanel(): VNode {
           <HelpSection name="Commands" rows={rows.filter(r => r.section === "Commands")} />
           {about ? <AboutSection /> : null}
         </div>
-      </div>
+      </PanelSheet>
     </section>
   );
 }
