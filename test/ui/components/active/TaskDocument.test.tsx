@@ -116,7 +116,7 @@ mock.module("../../../../src/ui/components/active/MdEditor.tsx", () => {
   };
 });
 
-import { render, fireEvent } from "@testing-library/preact";
+import { render, fireEvent, waitFor } from "@testing-library/preact";
 import { TaskDocument } from "../../../../src/ui/components/active/TaskDocument.tsx";
 import { pruneTaskDrafts } from "../../../../src/ui/lib/useTaskDraft.ts";
 import {
@@ -262,9 +262,10 @@ describe("TaskDocument", () => {
     fireEvent.click(typeBtn);
     await tick();
     expect(container.querySelector(".doc-reader")?.textContent ?? "").toContain("start");
-    // …but after the 150ms debounce it shows the current local draft.
-    await tick(200);
-    expect(container.querySelector(".doc-reader")?.textContent ?? "").toContain("changed text");
+    // …but after the 150ms debounce it shows the current local draft (polled: a loaded runner fires timers late).
+    await waitFor(() => expect(container.querySelector(".doc-reader")?.textContent ?? "").toContain("changed text"), {
+      timeout: 2_000,
+    });
   });
 
   test("Read entry immediately shows the latest draft (no debounce wait)", async () => {

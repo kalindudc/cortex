@@ -211,6 +211,9 @@ the next command or daemon takes over and cleans up after it. For you, this mean
 
 - All SQLite access goes through `src/store.ts#Store`. No test enforces it; the one exception today is
   `src/backup.ts#exportData`, which opens its own readonly connection. Do not copy it.
+- Store SQL must run on SQLite 3.39, because Bun uses the system SQLite on macOS (3.43 on macOS 15): no
+  `GROUP_CONCAT(... ORDER BY ...)` or other 3.44+ syntax. The Intel job in `.github/workflows/desktop.yml` runs the
+  packaged app on macOS 15.
 - Keep the historical migrations so old databases still upgrade: `test/integration/cli/migrate-summary-4096.test.ts`.
   Opening an old database adds the private tables and the `updates` index without touching its data:
   `test/unit/store.test.ts`.

@@ -507,12 +507,21 @@ const ACTIVITY_SQL = `MAX(t.created, COALESCE(e.edited, 0), COALESCE((
  */
 const MEMORY_EXCLUDED_SQL = "EXISTS (SELECT 1 FROM memory_exclusions x WHERE x.task_id = t.id)";
 
+/**
+ * A GROUP_CONCAT'd tag list as a sorted array. Sorted here, not with GROUP_CONCAT(... ORDER BY), which needs
+ * SQLite 3.44: Bun uses the system SQLite on macOS, and macOS 15's is 3.43. Tag names are ASCII
+ * (`TAG_NAME_RE`), so this order is SQLite's BINARY order.
+ */
+function splitTags(tagCsv: string | null): string[] {
+  return tagCsv ? tagCsv.split(",").sort() : [];
+}
+
 /** The memory stream row: bodiless task columns, sorted tag list, `synced` (last body change, else `created`), `activity`. */
 const STREAM_ROW_SELECT = `
   SELECT t.id, t.title, t.lane, t.status, t.updated,
          COALESCE(e.edited, t.created) AS synced,
          ${ACTIVITY_SQL} AS activity,
-         COALESCE((SELECT GROUP_CONCAT(tag_name, ',' ORDER BY tag_name) FROM task_tags WHERE task_id = t.id), '') AS tag_csv,
+         COALESCE((SELECT GROUP_CONCAT(tag_name, ',') FROM task_tags WHERE task_id = t.id), '') AS tag_csv,
          ${MEMORY_EXCLUDED_SQL} AS memory_excluded
     FROM tasks t
     LEFT JOIN _body_edits e ON e.task_id = t.id`;
@@ -521,7 +530,7 @@ type StreamRowSql = Omit<MemoryStreamRow, "tags" | "memory_excluded"> & { tag_cs
 
 const rowToStream = ({ tag_csv, memory_excluded, ...rest }: StreamRowSql): MemoryStreamRow => ({
   ...rest,
-  tags: tag_csv ? tag_csv.split(",") : [],
+  tags: splitTags(tag_csv),
   memory_excluded: memory_excluded === 1,
 });
 
@@ -1473,15 +1482,14 @@ export class Store {
 
   /**
    * Internal row shape for the LEFT JOIN that materialises a task plus its
-   * comma-separated tag list. `tag_csv` is alphabetically sorted at the SQL
-   * level via GROUP_CONCAT(... ORDER BY tt.tag_name) so JSON output is
-   * deterministic; the CLI/UI never re-sort.
+   * comma-separated tag list; `splitTags` sorts it so JSON output is
+   * deterministic, and the CLI/UI never re-sort.
    */
   private rowToTask(row: TaskRow): Task {
     const { tag_csv, memory_excluded, ...rest } = row;
     return {
       ...rest,
-      tags: tag_csv ? tag_csv.split(",") : [],
+      tags: splitTags(tag_csv),
       memory_excluded: memory_excluded === 1,
     };
   }
@@ -1630,13 +1638,11 @@ export class Store {
     // priority ASC so 0 (highest) sorts first; tie-break by oldest-created.
     // `(t.priority IS NULL)` is a 0/1 expression — sorting it ASC pushes
     // null-priority rows AFTER all prioritized rows while preserving the
-    // created-time tie-break inside each group. GROUP_CONCAT(... ORDER BY
-    // tag_name) gives deterministic alphabetical output. COALESCE turns
-    // the empty join (no tags) into '' so the TS split produces []
-    // uniformly.
+    // created-time tie-break inside each group. COALESCE turns the empty
+    // join (no tags) into '' so `splitTags` produces [] uniformly.
     const sql = `
       SELECT t.*,
-             COALESCE(GROUP_CONCAT(tt.tag_name, ',' ORDER BY tt.tag_name), '') AS tag_csv,
+             COALESCE(GROUP_CONCAT(tt.tag_name, ','), '') AS tag_csv,
              ${this.taskExcludedColumn()} AS memory_excluded
         FROM tasks t
         LEFT JOIN task_tags tt ON tt.task_id = t.id
@@ -1652,7 +1658,7 @@ export class Store {
     const row = this.db
       .query<TaskRow, [number]>(
         `SELECT t.*,
-                COALESCE(GROUP_CONCAT(tt.tag_name, ',' ORDER BY tt.tag_name), '') AS tag_csv,
+                COALESCE(GROUP_CONCAT(tt.tag_name, ','), '') AS tag_csv,
                 ${this.taskExcludedColumn()} AS memory_excluded
            FROM tasks t
            LEFT JOIN task_tags tt ON tt.task_id = t.id
