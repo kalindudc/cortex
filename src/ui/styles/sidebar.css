@@ -282,11 +282,10 @@ button.priority-chip:hover { background: var(--tint-strong, var(--accent-tint));
    then the results or the section links. */
 .list-top { display: flex; align-items: center; flex-shrink: 0; min-height: 44px; padding: 0 12px; }
 .list-top > .ws-search { flex: 1; min-width: 0; }
-/* Settings links take the task rows' hover and selected looks. */
+/* Settings links take the task rows' hover look. */
 .settings-nav-list { display: flex; flex-direction: column; gap: 1px; padding: 6px 8px; overflow-y: auto; }
 .settings-nav-item { display: flex; align-items: center; gap: 9px; width: 100%; height: 30px; padding: 0 10px; border-radius: 5px; color: var(--text-2); font-size: var(--fs-3); text-align: left; white-space: nowrap; }
 .settings-nav-item:hover { background: var(--tint); color: var(--text); }
-.settings-nav-item[aria-current="page"], .settings-nav-item[aria-current="true"] { background: var(--sheet); box-shadow: var(--shadow-card); color: var(--text); }
 .settings-nav-item > .icon { flex-shrink: 0; }
 .search-field { min-height: 36px; }
 .search-field input { font-size: 14px; }
@@ -439,7 +438,7 @@ button.priority-chip:hover { background: var(--tint-strong, var(--accent-tint));
    sheet are one black, so the cards and the rail take visible rules. */
 :root[data-contrast="high"] .nav-rail { border-right: 1px solid var(--rule); }
 :root[data-contrast="high"] .nav-drawer-body .nav-rail { border-right: 0; }
-:root[data-contrast="high"] :is(.nav-rail .btn-icon[aria-current="page"], .task-row.active, .lane-row.selected, .search-row[aria-current="page"], .settings-nav-item[aria-current="page"], .settings-nav-item[aria-current="true"], .ws-search, .list-search) { box-shadow: inset 0 0 0 1px var(--rule-strong); }
+:root[data-contrast="high"] :is(.nav-rail .btn-icon[aria-current="page"], .task-row.active, .lane-row.selected, .search-row[aria-current="page"], .ws-search, .list-search) { box-shadow: inset 0 0 0 1px var(--rule-strong); }
 
 /* In landscape the navigation itself can scroll rather than clip its
    filter controls. Its sibling popup remains bounded to the sidebar. */
