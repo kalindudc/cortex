@@ -88,18 +88,14 @@ textarea.autosize {
    needs to be a flex column whose MdEditor child takes the remaining
    vertical space and owns internal scroll. The title input keeps its
    natural height — always visible — and the editor scrolls when content
-   exceeds the available space. */
+   exceeds the available space. It paints nothing: the document sheet
+   behind it carries the paper and its dot grid. */
 .editable-task-body {
   display: flex;
   flex-direction: column;
   flex: 1;
   min-height: 0;
   width: 100%;
-  /* Editor-only paper-dot texture: the grain marks the WRITING
-     surface; rendered prose stays clean. */
-  background-image: radial-gradient(circle, var(--paper-dot) 0.8px, transparent 1.2px);
-  background-size: 26px 26px;
-  background-position: 0 0;
 }
 .editable-task-body[hidden] { display: none; }
 /* ---------- .md-editor (CodeMirror-backed task description) ----------
@@ -111,15 +107,23 @@ textarea.autosize {
    Bounded so the header chrome above and the post-update form below stay
    pinned; CodeMirror owns internal scroll. I-beam cursor across the
    editable surface (gutter overrides back to default — line-number column
-   isn't editable). */
+   isn't editable).
+
+   Transparent, like the editor's own theme, so the sheet's dots show
+   through. Inside the document the editor hangs its 30px line-number
+   gutter (sized in MdEditor.tsx) into the sheet's margin, so the text
+   starts in the title's column; never further than that margin is wide. */
 .md-editor {
-  width: 100%;
+  --md-gutter-hang: 0px;
+  width: calc(100% + var(--md-gutter-hang));
+  margin-left: calc(-1 * var(--md-gutter-hang));
   display: block;
   flex: 1 1 auto;
   min-height: 120px;
   background: transparent;
   overflow: hidden;
 }
+.editable-task-body .md-editor { --md-gutter-hang: min(30px, var(--document-gutter, 0px)); }
 /* Author `display: block` above would otherwise beat the UA `[hidden]`
    rule — a hidden (Read-mode) editor MUST leave layout and the tab order. */
 .md-editor[hidden] { display: none; }
@@ -140,7 +144,7 @@ textarea.autosize {
    Meta/Ctrl is held, swapping to `pointer` for the duration so Mod+click
    has a visible clickable-link affordance. */
 .md-editor .cm-cortex-ref {
-  color: var(--info);
+  color: var(--code-accent);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
