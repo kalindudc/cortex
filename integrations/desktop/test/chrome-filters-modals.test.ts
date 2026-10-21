@@ -286,8 +286,11 @@ describe("lane and tag management", () => {
     const id = await addTask(desktop, "only holder", { tags: ["keeper"] });
     await waitForRow(page, "only holder");
     await page.locator("button.task-row", { hasText: "only holder" }).click();
-    await page.locator(".task-header .tag-pill-removable", { hasText: "keeper" }).hover();
-    await page.locator('button[aria-label="Remove tag keeper"]').click();
+    // Focus reveals the remove button as hover does, but does not depend on the pointer: revealing it widens
+    // the pill, which can wrap it out from under a resting pointer and back, so it never settles for a click.
+    const remove = page.locator('button[aria-label="Remove tag keeper"]');
+    await remove.focus();
+    await remove.click();
     await expect
       .poll(async () => (await listTasks(desktop)).find(t => t.id === id)?.tags, POLL)
       .toEqual([]);

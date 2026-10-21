@@ -65,7 +65,11 @@ describe.skipIf(!target)("packaged app", () => {
       CORTEX_BB_CLI: "",
       CORTEX_DESKTOP_HIDDEN: "1",
     };
-    if (process.env.DISPLAY) env.DISPLAY = process.env.DISPLAY;
+    // xvfb-run names its auth cookie in XAUTHORITY; without it X11 looks in the temporary HOME and refuses the display.
+    for (const name of ["DISPLAY", "XAUTHORITY"]) {
+      const value = process.env[name];
+      if (value) env[name] = value;
+    }
   });
 
   afterAll(async () => {

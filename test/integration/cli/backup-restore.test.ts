@@ -330,7 +330,10 @@ describe("cortex restore CLI", () => {
       s.close();
       // The database file and its WAL (which holds whatever was not yet
       // checkpointed), byte for byte: a readonly snapshot writes neither.
-      const fingerprint = (): string[] => [db, `${db}-wal`].map(f => (fs.existsSync(f) ? sha256(f) : "absent"));
+      // Reading a WAL database may create an empty WAL (Linux SQLite does);
+      // it holds nothing, so it counts the same as no WAL.
+      const fingerprint = (): string[] =>
+        [db, `${db}-wal`].map(f => (fs.existsSync(f) && fs.statSync(f).size > 0 ? sha256(f) : "no data"));
       const before = fingerprint();
 
       const dry = await runCli({ args: ["restore", backupPath, "--dry-run"], env: dest.env });

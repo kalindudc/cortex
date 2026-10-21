@@ -84,7 +84,11 @@ export async function launchDesktop(options: LaunchOptions = {}): Promise<Deskto
     CORTEX_DESKTOP_HIDDEN: "1",
     ...options.env,
   };
-  if (process.env.DISPLAY) env.DISPLAY = process.env.DISPLAY;
+  // xvfb-run names its auth cookie in XAUTHORITY; without it X11 looks in the temporary HOME and refuses the display.
+  for (const name of ["DISPLAY", "XAUTHORITY"]) {
+    const value = process.env[name];
+    if (value) env[name] = value;
+  }
 
   const cortex = (args: string[]): Promise<string> => runCortex(args, env);
   const sandbox: Sandbox = {
