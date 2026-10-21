@@ -116,6 +116,8 @@ mock.module("../../../../src/ui/components/active/MdEditor.tsx", () => {
   };
 });
 
+import fs from "node:fs";
+import path from "node:path";
 import { render, fireEvent, waitFor } from "@testing-library/preact";
 import { TaskDocument } from "../../../../src/ui/components/active/TaskDocument.tsx";
 import { pruneTaskDrafts } from "../../../../src/ui/lib/useTaskDraft.ts";
@@ -158,6 +160,53 @@ function task(over: Partial<Task> = {}): Task {
 }
 
 const tick = (ms = 0): Promise<void> => new Promise(r => setTimeout(r, ms));
+
+/** One style rule: its @media prelude (or null), its selector list, and its declarations. */
+interface CssRule {
+  media: string | null;
+  selector: string;
+  decls: Map<string, string>;
+}
+/** The rules of a stylesheet in src/ui/styles, read as text (happy-dom has no layout or cascade). */
+function stylesheet(name: string): CssRule[] {
+  const file = path.resolve(import.meta.dir, "../../../../src/ui/styles", name);
+  const text = fs.readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const out: CssRule[] = [];
+  const walk = (src: string, media: string | null): void => {
+    let at = 0;
+    for (let open = src.indexOf("{", at); open >= 0; open = src.indexOf("{", at)) {
+      let depth = 1;
+      let close = open + 1;
+      for (; depth > 0; close++) depth += src[close] === "{" ? 1 : src[close] === "}" ? -1 : 0;
+      const prelude = src.slice(at, open).trim().replace(/\s+/g, " ");
+      const body = src.slice(open + 1, close - 1);
+      if (prelude.startsWith("@")) walk(body, prelude);
+      else {
+        const decls = new Map<string, string>();
+        for (const decl of body.split(";")) {
+          const colon = decl.indexOf(":");
+          if (colon > 0)
+            decls.set(
+              decl.slice(0, colon).trim(),
+              decl
+                .slice(colon + 1)
+                .trim()
+                .replace(/\s+/g, " "),
+            );
+        }
+        out.push({ media, selector: prelude, decls });
+      }
+      at = close;
+    }
+  };
+  walk(text, null);
+  return out;
+}
+function cssRule(rules: CssRule[], selector: string): Map<string, string> {
+  const found = rules.find(r => r.media === null && r.selector === selector);
+  if (!found) throw new Error(`expected a rule for ${selector}`);
+  return found.decls;
+}
 
 function modeButton(root: ParentNode, label: string): HTMLButtonElement {
   const btn = Array.from(root.querySelectorAll<HTMLButtonElement>(".doc-mode-switch button")).find(
@@ -489,6 +538,86 @@ describe("TaskDocument", () => {
     expect(docOutline.value).toEqual({ taskId: 5, headings: [], active: "task-5-alpha" });
     expect(container.querySelector(".doc-outline")).toBeNull();
     expect(container.querySelector(".has-outline")).toBeNull();
+  });
+
+  test("the toolbar sits on the desk; one sheet, painted by a content-free dotted layer, holds the header and both panels", async () => {
+    const { container } = render(<TaskDocument task={task()} />);
+    await tick();
+    const doc = container.querySelector<HTMLElement>(".task-document");
+    const sheet = container.querySelector<HTMLElement>(".doc-sheet");
+    if (!doc || !sheet) throw new Error("expected the document and its sheet");
+    expect(Array.from(doc.children).map(el => el.className)).toEqual(["workspace-toolbar", "doc-sheet paper-host"]);
+
+    // The layer is the sheet's first child and holds nothing; the scroll
+    // container is its only sibling, so no content sits under its filter.
+    const [layer, page] = Array.from(sheet.children);
+    expect(sheet.children).toHaveLength(2);
+    expect(sheet.querySelectorAll(".paper-layer")).toHaveLength(1);
+    expect(layer.className).toBe("paper-layer is-dotted");
+    expect(layer.getAttribute("aria-hidden")).toBe("true");
+    expect(layer.childNodes).toHaveLength(0);
+    expect(page.className).toBe("doc-page");
+    const panels = Array.from(page.children).map(el => el.id || el.className);
+    expect(panels).toContain("task-header");
+    expect(panels).toContain("doc-panel-document");
+    expect(panels).toContain("doc-panel-context");
+    expect(page.querySelector(".doc-reader .markdown-view h1")?.textContent).toBe("Alpha");
+    // Every popover anchor in the header lies in the scroll container.
+    expect(page.querySelectorAll(".task-header [data-pop]").length).toBeGreaterThan(0);
+  });
+
+  test("Edit, Split and Activity keep the same sheet, and only the document's mode class changes", async () => {
+    const { container } = render(<TaskDocument task={task()} />);
+    await tick();
+    const sheet = container.querySelector<HTMLElement>(".doc-sheet");
+    const doc = container.querySelector(".task-document");
+    for (const mode of ["Edit", "Split", "Read"]) {
+      fireEvent.click(modeButton(container, mode));
+      await tick();
+      expect(container.querySelector(".doc-sheet")).toBe(sheet);
+      expect(doc?.classList.contains(`mode-${mode.toLowerCase()}`)).toBe(true);
+      expect(sheet?.querySelector(".md-editor, .doc-reader")?.closest<HTMLElement>(".doc-page")?.parentElement).toBe(
+        sheet,
+      );
+    }
+    const activityTab = Array.from(container.querySelectorAll<HTMLButtonElement>("[role='tab']")).find(
+      b => b.textContent?.trim() === "Activity",
+    );
+    if (!activityTab) throw new Error("expected Activity tab");
+    fireEvent.click(activityTab);
+    await tick();
+    expect(container.querySelector(".doc-sheet")).toBe(sheet);
+    expect(sheet?.querySelector("#doc-panel-context")?.hasAttribute("hidden")).toBe(false);
+  });
+
+  test("no document or layout rule puts a filter, transform or clip-path on the sheet or its content", () => {
+    for (const name of ["document.css", "layout.css"]) {
+      for (const rule of stylesheet(name)) {
+        for (const prop of ["filter", "backdrop-filter", "transform", "clip-path", "will-change"]) {
+          expect(rule.decls.has(prop), `${name}: ${rule.selector} sets ${prop}`).toBe(false);
+        }
+      }
+    }
+  });
+
+  test("prose and headings are set in the serif; code, source and tables stay monospace", () => {
+    const rules = stylesheet("document.css");
+    expect(cssRule(rules, ".markdown-view").get("font")).toBe("400 16.5px/1.68 var(--font-serif)");
+    expect(cssRule(rules, ".markdown-view").get("color")).toBe("var(--text-content)");
+    const headings = cssRule(
+      rules,
+      ".markdown-view h1, .markdown-view h2, .markdown-view h3, .markdown-view h4, .markdown-view h5, .markdown-view h6",
+    );
+    expect(headings.get("font-family")).toBe("var(--font-serif)");
+    expect(headings.get("font-weight")).toBe("600");
+    for (const selector of [".markdown-view code", ".markdown-view pre", ".markdown-view table"]) {
+      expect(cssRule(rules, selector).get("font")).toContain("var(--font-mono)");
+    }
+    for (const selector of [".markdown-view code", ".markdown-view pre", ".markdown-view .md-table-wrap"]) {
+      expect(cssRule(rules, selector).get("background")).toBe("var(--tint)");
+    }
+    // The sheet is the editor's frame now: no bordered box around it.
+    expect(rules.some(r => r.selector.includes(".editable-task-body") && r.decls.has("border"))).toBe(false);
   });
 
   test("mode buttons expose pressed state(buttons, not a second tablist)", () => {

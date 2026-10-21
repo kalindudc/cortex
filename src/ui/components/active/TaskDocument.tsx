@@ -22,6 +22,11 @@
 // (ActivityPane). The headings of the shown document are published to
 // `docOutline` for the side panel's Outline tab, whose clicks come back
 // through `pendingHeadingFragment` (the one path that scrolls to a heading).
+//
+// The toolbar sits on the desk; the header and content lie on one sheet
+// below it. The sheet is a fixed frame whose PaperLayer paints the paper,
+// and `.doc-page` is the layer's sibling, so content scrolls inside the
+// frame and nothing with content or a popover anchor sits under a filter.
 
 import type { VNode } from "preact";
 import { useEffect, useRef } from "preact/hooks";
@@ -49,6 +54,7 @@ import { ExternalChangeBanner } from "./ExternalChangeBanner.tsx";
 import { MarkdownView, type MarkdownHeading } from "./MarkdownView.tsx";
 import { ActivityPane } from "./ActivityPane.tsx";
 import { Icon } from "../Icon.tsx";
+import { PaperLayer } from "../PaperLayer.tsx";
 
 // ---------------------------------------------------------------------------
 // Session-memory reading positions. Keyed by task id; survives task
@@ -274,82 +280,85 @@ export function TaskDocument({ task }: { task: Task }): VNode {
           </div>
         }
       />
-      <div class="doc-page">
-        <TaskHeader task={task} draft={draft} />
-        {draft.external.body != null ? (
-          <div class="doc-conflict">
-            <ExternalChangeBanner
-              label="Body"
-              incoming={draft.external.body}
-              onApply={() => draft.apply("body")}
-              onDismiss={() => draft.keep("body")}
-            />
-          </div>
-        ) : null}
-        <span class="visually-hidden" aria-live="polite">
-          {announce.value}
-        </span>
-
-        <div
-          class={`doc-content mode-${mode}`}
-          id="doc-panel-document"
-          role="tabpanel"
-          aria-labelledby="doc-tab-document"
-          hidden={currentTab !== "document"}
-        >
-          <div class="doc-split">
-            {editorMounted.value ? (
-              <EditableTaskBody
-                draft={draft}
-                visible={editorVisible}
-                onReady={h => {
-                  editorHandle.current = h;
-                  if (h) tryConsumeBodyFocus();
-                }}
+      <div class="doc-sheet paper-host">
+        <PaperLayer dots />
+        <div class="doc-page">
+          <TaskHeader task={task} draft={draft} />
+          {draft.external.body != null ? (
+            <div class="doc-conflict">
+              <ExternalChangeBanner
+                label="Body"
+                incoming={draft.external.body}
+                onApply={() => draft.apply("body")}
+                onDismiss={() => draft.keep("body")}
               />
-            ) : null}
-            {readerVisible ? (
-              <div class="doc-reader" ref={readerRef} tabIndex={-1} onScroll={savePosition}>
-                <div class="doc-reading-column">
-                  {staleNotice.value ? (
-                    <div class="doc-stale-notice" role="status">
-                      <span>The description changed while you were reading.</span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          readerSource.value = draft.body;
-                          staleNotice.value = false;
-                        }}
-                      >
-                        Show latest
-                      </button>
-                    </div>
-                  ) : null}
-                  {emptyBody ? (
-                    <div class="doc-empty-body">
-                      <Icon name="fileText" size={24} />
-                      <p>No description yet.</p>
-                      <button type="button" class="btn" onClick={() => requestMode("edit", "body")}>
-                        Add a description
-                      </button>
-                    </div>
-                  ) : (
-                    <MarkdownView source={readerSource.value} idPrefix={`task-${task.id}`} onHeadings={onHeadings} />
-                  )}
-                </div>
-              </div>
-            ) : null}
-          </div>
-        </div>
+            </div>
+          ) : null}
+          <span class="visually-hidden" aria-live="polite">
+            {announce.value}
+          </span>
 
-        <div
-          class="doc-context"
-          id="doc-panel-context"
-          role="tabpanel"
-          aria-labelledby="doc-tab-updates"
-          hidden={currentTab === "document"}
-        >
-          {currentTab !== "document" ? <ActivityPane /> : null}
+          <div
+            class={`doc-content mode-${mode}`}
+            id="doc-panel-document"
+            role="tabpanel"
+            aria-labelledby="doc-tab-document"
+            hidden={currentTab !== "document"}
+          >
+            <div class="doc-split">
+              {editorMounted.value ? (
+                <EditableTaskBody
+                  draft={draft}
+                  visible={editorVisible}
+                  onReady={h => {
+                    editorHandle.current = h;
+                    if (h) tryConsumeBodyFocus();
+                  }}
+                />
+              ) : null}
+              {readerVisible ? (
+                <div class="doc-reader" ref={readerRef} tabIndex={-1} onScroll={savePosition}>
+                  <div class="doc-reading-column">
+                    {staleNotice.value ? (
+                      <div class="doc-stale-notice" role="status">
+                        <span>The description changed while you were reading.</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            readerSource.value = draft.body;
+                            staleNotice.value = false;
+                          }}
+                        >
+                          Show latest
+                        </button>
+                      </div>
+                    ) : null}
+                    {emptyBody ? (
+                      <div class="doc-empty-body">
+                        <Icon name="fileText" size={24} />
+                        <p>No description yet.</p>
+                        <button type="button" class="btn" onClick={() => requestMode("edit", "body")}>
+                          Add a description
+                        </button>
+                      </div>
+                    ) : (
+                      <MarkdownView source={readerSource.value} idPrefix={`task-${task.id}`} onHeadings={onHeadings} />
+                    )}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          <div
+            class="doc-context"
+            id="doc-panel-context"
+            role="tabpanel"
+            aria-labelledby="doc-tab-updates"
+            hidden={currentTab === "document"}
+          >
+            {currentTab !== "document" ? <ActivityPane /> : null}
+          </div>
         </div>
       </div>
     </div>

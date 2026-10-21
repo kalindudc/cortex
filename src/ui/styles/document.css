@@ -1,9 +1,9 @@
-/* Document workspace, aligned with prototype B. The toolbar is application
-   chrome; the title, metadata and content share one bounded reading column.
-   This slice owns that layout rather than layering legacy pane overrides. */
+/* Document workspace. The toolbar is application chrome on the desk; the
+   title, metadata and content lie on one sheet of paper below it and share
+   one bounded reading column, centred in the sheet. */
 .task-document {
-  --document-gutter: 36px;
-  --document-measure: 72ch;
+  --document-gutter: 44px;
+  --document-measure: 70ch;
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
@@ -22,7 +22,6 @@
   flex-shrink: 0;
   min-height: 44px;
   padding: 0 10px 0 18px;
-  border-bottom: 1px solid var(--border);
   font-size: 12px;
 }
 .workspace-toolbar-leading, .workspace-toolbar-actions {
@@ -82,8 +81,8 @@
 .doc-mode-switch button.active { background: var(--bg); color: var(--text); box-shadow: 0 1px 3px #0001; }
 .doc-mode-switch button:hover:not(.active) { background: var(--tint); color: var(--text); }
 /* The Document / Activity tablist sits in the toolbar row; its tabs fill
-   the row's height so the selected tab's underline meets the toolbar's
-   bottom border. */
+   the row's height so the selected tab's underline sits at the toolbar's
+   bottom, just above the sheet's edge. */
 .workspace-toolbar-leading > .doc-tabs { align-self: stretch; }
 .doc-tabs { display: flex; align-items: stretch; gap: 2px; }
 .doc-tabs [role="tab"] {
@@ -91,7 +90,6 @@
   align-items: center;
   gap: 6px;
   min-height: 44px;
-  margin-bottom: -1px;
   padding: 0 8px;
   border-bottom: 2px solid transparent;
   color: var(--text-3);
@@ -101,6 +99,14 @@
 .doc-tabs [role="tab"]:hover { color: var(--text); }
 .doc-tabs [role="tab"].active { color: var(--text); border-bottom-color: var(--accent); }
 .tab-count { min-width: 18px; padding: 1px 5px; border-radius: var(--r-1); background: var(--panel); color: var(--text-2); font: 10px/1.4 var(--font-mono); }
+/* The sheet: a fixed frame on the desk, inset so its whole uneven edge
+   stays in view. Its first child, the PaperLayer, paints the paper; its
+   second, .doc-page, is the scroll container, so content scrolls inside a
+   still sheet and nothing that holds content or a popover anchor sits
+   under the layer's filter. Read and Edit cap it and centre it on the
+   desk; Split uses the full width. */
+.doc-sheet { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; min-width: 0; margin: 2px 14px 12px; }
+.task-document.mode-read > .doc-sheet, .task-document.mode-edit > .doc-sheet { width: calc(100% - 28px); max-width: 960px; margin-inline: auto; }
 .doc-page { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; min-width: 0; overflow: auto; }
 .task-header, .doc-conflict {
   flex-shrink: 0;
@@ -108,14 +114,17 @@
   margin-left: max(var(--document-gutter), calc((100% - var(--document-measure)) / 2));
   font-size: 16px;
 }
-.task-header { position: relative; z-index: 2; margin-top: 36px; margin-bottom: 30px; }
-.document-kicker { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; color: var(--text-3); font: 12px/1.5 var(--font-sans); }
+.task-header { position: relative; z-index: 2; margin-top: 34px; margin-bottom: 24px; }
+.document-kicker { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; color: var(--text-3); font: 12px/1.5 var(--font-sans); }
 .task-id { font: 11px/1.5 var(--font-mono); }
 .task-title-row { display: flex; align-items: flex-start; min-width: 0; }
+/* The display title and the title input share every metric, so editing
+   never shifts the layout (misc.css .title-input-wrap keeps the box). */
 .task-title-display {
   margin: 0;
-  font: 640 30px/1.25 var(--font-sans);
-  letter-spacing: -.035em;
+  font: 600 31px/1.2 var(--font-serif);
+  font-variation-settings: "opsz" 48;
+  letter-spacing: -.012em;
   color: var(--text);
   overflow-wrap: anywhere;
   min-width: 0;
@@ -124,15 +133,17 @@
 }
 .task-header .title-input-wrap { border: 0; min-width: 0; }
 .task-header .title-input-wrap > .title-input, .task-header .title-input-wrap::after {
-  font: 640 30px/1.25 var(--font-sans);
-  letter-spacing: -.035em;
+  font: 600 31px/1.2 var(--font-serif);
+  font-variation-settings: "opsz" 48;
+  letter-spacing: -.012em;
   padding: 0;
   color: var(--text);
 }
-.task-header-trailing { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 8px 12px; margin-top: 16px; }
+.task-header-trailing { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 8px 12px; margin-top: 12px; }
 .task-props { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
-/* Header metadata reads as compact bordered chips: lane, priority, "+ Tag".
-   Their "Lane:" and "Priority:" labels stay for screen readers only. */
+/* Header metadata reads as quiet outlined chips on the sheet, with no fill:
+   lane, priority, "+ Tag". Their "Lane:" and "Priority:" labels stay for
+   screen readers only. */
 .prop-trigger {
   display: inline-flex;
   align-items: center;
@@ -141,7 +152,7 @@
   height: 26px;
   min-width: 26px;
   padding: 0 9px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--rule-strong);
   border-radius: 7px;
   background: transparent;
   color: var(--text-2);
@@ -163,7 +174,7 @@
   padding: 0 9px;
   border-radius: 7px;
   background: transparent;
-  border: 1px solid var(--border);
+  border: 1px solid var(--rule-strong);
   color: var(--text-2);
   font: 400 12.5px/1 var(--font-sans);
   opacity: 1;
@@ -171,16 +182,18 @@
 .prop-trigger.priority-chip:hover { border-color: var(--border-strong); color: var(--text); }
 .prop-trigger.priority-chip .prop-value { font-weight: 600; }
 /* Empty metadata is an explicit add affordance, not plain read-only text. */
-button.prop-trigger.priority-chip-unset { border: 1px dotted var(--border-strong); }
+button.prop-trigger.priority-chip-unset { border: 1px dotted var(--rule-strong); }
 button.prop-trigger.priority-chip-unset:hover,
-button.prop-trigger.priority-chip-unset:focus-visible { border-color: var(--text-2); background: var(--panel); color: var(--text); }
+button.prop-trigger.priority-chip-unset:focus-visible { border-color: var(--text-2); background: var(--tint); color: var(--text); }
 .prop-trigger.priority-chip-input { text-align: center; background: var(--panel); border-color: var(--border-strong); cursor: text; }
 .prop-trigger.priority-chip.high .prop-value { color: var(--err); }
 .prop-trigger.priority-chip.urgent .prop-value { color: var(--code-accent); }
 .tags-header { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 5px; min-width: 0; }
-.task-header .tag-pill { height: 23px; font-family: var(--font-sans); font-size: 11px; font-weight: 500; border-radius: var(--r-pill); max-width: 24ch; overflow: hidden; text-overflow: ellipsis; }
-.task-header .tag-pill-colored { background: rgba(var(--label-r), var(--label-g), var(--label-b), .1); border-color: rgba(var(--label-r), var(--label-g), var(--label-b), .32); color: color-mix(in srgb, rgb(var(--label-r), var(--label-g), var(--label-b)) 45%, var(--text)); }
-.task-title-trigger { display: block; width: 100%; min-height: 1.25em; padding: 0; border: 0; border-radius: var(--r-1); background: transparent; color: inherit; font: inherit; letter-spacing: inherit; text-align: left; overflow-wrap: anywhere; cursor: text; }
+.task-header .tag-pill { height: 23px; border-color: var(--rule-strong); background: transparent; font-family: var(--font-sans); font-size: 11px; font-weight: 500; border-radius: var(--r-pill); max-width: 24ch; overflow: hidden; text-overflow: ellipsis; }
+.task-header .tag-pill-colored { background: rgba(var(--label-r), var(--label-g), var(--label-b), .06); border-color: rgba(var(--label-r), var(--label-g), var(--label-b), .35); color: color-mix(in srgb, rgb(var(--label-r), var(--label-g), var(--label-b)) 45%, var(--text)); }
+/* min-height is one line exactly: a taller button would centre the text
+   and set it lower than the title input. */
+.task-title-trigger { display: block; width: 100%; min-height: 1lh; padding: 0; border: 0; border-radius: var(--r-1); background: transparent; color: inherit; font: inherit; letter-spacing: inherit; text-align: left; overflow-wrap: anywhere; cursor: text; }
 .task-title-trigger:hover { background: color-mix(in srgb, var(--panel) 65%, transparent); }
 .task-title-trigger.is-empty { color: var(--text-2); }
 /* The header is pinned above the scrolling reader/editor, so the display
@@ -226,19 +239,24 @@ button.prop-trigger.priority-chip-unset:focus-visible { border-color: var(--text
 .doc-reading-column, .doc-context > .task-context {
   width: min(var(--document-measure), calc(100% - 2 * var(--document-gutter)));
   margin: 0 auto;
-  padding-bottom: 48px;
+  padding-bottom: 28px;
   font-size: 16px;
 }
 .doc-context { flex: 1 1 auto; min-height: 180px; min-width: 0; overflow: auto; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
-.mode-edit .doc-split, .mode-split .doc-split { padding: 0 28px 24px; gap: 0; }
-.mode-edit .editable-task-body, .mode-split .editable-task-body { border: 1px solid var(--border); border-radius: var(--r-3); overflow: hidden; }
+/* The sheet is the editor's frame: no box of its own. Edit keeps the
+   editor in the title's column (the same measure and gutter as
+   .task-header, resolved here so the editor's own font cannot change it);
+   Split lays the editor and the preview side by side, divided by a faint
+   rule. */
+.mode-edit .doc-split { padding: 0 max(var(--document-gutter), calc((100% - var(--document-measure)) / 2)); }
+.mode-split .doc-split { padding: 0 var(--document-gutter); gap: 0; }
 .mode-split .doc-split > .editable-task-body, .mode-split .doc-split > .doc-reader { flex: 1 1 50%; min-width: 0; }
-.mode-split .doc-reader { --document-gutter: 24px; padding-top: 12px; }
+.mode-split .doc-reader { --document-gutter: 24px; padding-top: 12px; border-left: 1px solid var(--rule); }
 .doc-outline-link { display: block; width: 100%; min-height: 30px; padding: 7px 10px; border: 0; border-left: 2px solid var(--border); border-radius: 0; color: var(--text-2); font: 11px/1.45 var(--font-sans); background: transparent; text-align: left; overflow-wrap: anywhere; }
 .doc-outline-link:hover { background: var(--panel); color: var(--text); }
 .doc-outline-link[aria-current="location"] { background: var(--panel); color: var(--text); border-left-color: var(--accent); }
 .doc-outline-link.level-3, .doc-outline-link.level-4, .doc-outline-link.level-5, .doc-outline-link.level-6 { padding-left: 20px; }
-.doc-empty-body { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 44px 20px; border: 1px dashed var(--border-strong); border-radius: var(--r-3); color: var(--text-2); text-align: center; }
+.doc-empty-body { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 44px 20px; border: 1px dashed var(--rule-strong); border-radius: var(--r-3); color: var(--text-2); text-align: center; }
 .doc-empty-body p { margin: 0; }
 .doc-stale-notice, .outside-filter-notice { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 10px 14px; border: 1px solid var(--border); border-radius: var(--r-2); background: var(--panel); color: var(--text-2); font: 12px/1.5 var(--font-sans); }
 .doc-stale-notice { margin-bottom: 16px; }
@@ -246,49 +264,52 @@ button.prop-trigger.priority-chip-unset:focus-visible { border-color: var(--text
 .outside-filter-notice { border-width: 0 0 1px; border-radius: 0; flex-shrink: 0; }
 
 /* Shared sanitized Markdown typography: comfortable prose, quiet code
-   furniture, and LOCAL overflow for wide tables/diagrams/source. */
-.markdown-view { font: 16px/1.7 var(--font-sans); color: var(--text-content); max-width: 72ch; min-width: 0; overflow-wrap: anywhere; user-select: text; cursor: text; }
-.markdown-view h1, .markdown-view h2, .markdown-view h3, .markdown-view h4, .markdown-view h5, .markdown-view h6 { color: var(--text); line-height: 1.35; scroll-margin-top: 20px; }
-.markdown-view h1 { font-size: 24px; margin: 34px 0 14px; letter-spacing: -.025em; }
-.markdown-view h2 { font-size: 20px; font-weight: 620; margin: 32px 0 12px; letter-spacing: -.02em; }
-.markdown-view h3 { font-size: 16px; font-weight: 650; margin: 24px 0 10px; }
-.markdown-view h4, .markdown-view h5, .markdown-view h6 { font-size: 1em; margin: 20px 0 10px; }
+   furniture, and LOCAL overflow for wide tables/diagrams/source. Prose and
+   headings are set in the serif; code, source and tables stay monospace,
+   on a tint that keeps the sheet's dots out from under them. Headings
+   carry no top margin: the block above them already leaves 20px. */
+.markdown-view { font: 400 16.5px/1.68 var(--font-serif); color: var(--text-content); max-width: 72ch; min-width: 0; overflow-wrap: anywhere; user-select: text; cursor: text; }
+.markdown-view h1, .markdown-view h2, .markdown-view h3, .markdown-view h4, .markdown-view h5, .markdown-view h6 { color: var(--text); font-family: var(--font-serif); font-weight: 600; line-height: 1.3; scroll-margin-top: 20px; }
+.markdown-view h1 { font-size: 25px; margin: 0 0 12px; letter-spacing: -.01em; }
+.markdown-view h2 { font-size: 21px; margin: 0 0 10px; letter-spacing: -.005em; }
+.markdown-view h3 { font-size: 18px; margin: 0 0 8px; }
+.markdown-view h4, .markdown-view h5, .markdown-view h6 { font-size: 1em; margin: 0 0 8px; }
 .markdown-view > :first-child { margin-top: 0; }
-.markdown-view p { margin: 0 0 18px; }
+.markdown-view p { margin: 0 0 20px; }
 .markdown-view strong { color: var(--text); font-weight: 630; }
 .markdown-view ul, .markdown-view ol { margin: 0 0 20px; padding-left: 23px; }
-.markdown-view li { margin: 8px 0; padding-left: 2px; }
-.markdown-view li > ul, .markdown-view li > ol { margin: 8px 0; }
-.markdown-view blockquote { margin: 22px 0; padding: 13px 17px; border-left: 3px solid var(--accent); border-radius: 0 var(--r-2) var(--r-2) 0; background: var(--panel); font-size: 14px; color: var(--text-2); }
+.markdown-view li { margin: 6px 0; padding-left: 2px; }
+.markdown-view li > ul, .markdown-view li > ol { margin: 6px 0; }
+.markdown-view blockquote { margin: 20px 0; padding: 0 0 0 16px; border-left: 2px solid var(--rule-strong); color: var(--text-2); }
 .markdown-view blockquote p:last-child { margin-bottom: 0; }
-.markdown-view hr { border: 0; border-top: 1px solid var(--border); margin: 28px 0; }
-.markdown-view a, .markdown-view .md-ref { color: var(--code-accent); text-decoration: underline; text-underline-offset: 3px; }
+.markdown-view hr { border: 0; border-top: 1px solid var(--rule-strong); margin: 24px 0; }
+.markdown-view a, .markdown-view .md-ref { color: var(--code-accent); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
 .markdown-view img { max-width: 100%; height: auto; }
 .markdown-view input[type="checkbox"] { width: 14px; height: 14px; margin-right: 8px; accent-color: var(--code-accent); pointer-events: none; }
 .markdown-view li:has(> input[type="checkbox"]) { list-style: none; margin-left: -23px; padding-left: 0; }
-.markdown-view code { font: .85em/1.5 var(--font-mono); background: var(--panel); padding: 2px 4px; border-radius: 3px; }
-.markdown-view pre { margin: 22px 0; padding: 14px; overflow: auto; font: 12px/1.75 var(--font-mono); border: 1px solid var(--border); border-radius: var(--r-3); background: var(--panel); scrollbar-width: thin; }
+.markdown-view code { font: .85em/1.5 var(--font-mono); background: var(--tint); padding: 2px 4px; border-radius: 3px; }
+.markdown-view pre { margin: 20px 0; padding: 14px; overflow: auto; font: 12px/1.75 var(--font-mono); border: 1px solid var(--rule); border-radius: var(--r-3); background: var(--tint); scrollbar-width: thin; }
 .markdown-view pre code { font: inherit; padding: 0; background: transparent; }
-.markdown-view .md-codeblock { margin: 22px 0; border: 1px solid var(--border); border-radius: var(--r-3); background: var(--panel); overflow: hidden; }
+.markdown-view .md-codeblock { margin: 20px 0; border: 1px solid var(--rule); border-radius: var(--r-3); background: var(--tint); overflow: hidden; }
 .markdown-view .md-codeblock pre { margin: 0; border: 0; border-radius: 0; }
-.md-codebar { display: flex; justify-content: space-between; align-items: center; min-height: 34px; padding: 4px 8px 4px 14px; border-bottom: 1px solid var(--border); user-select: none; }
+.md-codebar { display: flex; justify-content: space-between; align-items: center; min-height: 34px; padding: 4px 8px 4px 14px; border-bottom: 1px solid var(--rule); user-select: none; }
 .md-code-language { color: var(--text-2); font: 10px/1.5 var(--font-mono); text-transform: uppercase; letter-spacing: .06em; }
 .markdown-view .md-copy { min-height: 26px; padding: 4px 8px; border-radius: var(--r-1); color: var(--text-2); font: 11px/1.5 var(--font-sans); }
-.markdown-view .md-copy:hover { color: var(--text); background: var(--tint); }
-.markdown-view .md-table-wrap { overflow: auto; margin: 22px 0; border: 1px solid var(--border); border-radius: var(--r-3); scrollbar-width: thin; }
-.markdown-view table { width: 100%; border-collapse: collapse; font-size: 13px; text-align: left; }
-.markdown-view th, .markdown-view td { padding: 10px 12px; border-bottom: 1px solid var(--border); min-width: 110px; vertical-align: top; }
-.markdown-view th { background: var(--panel); color: var(--text); font-weight: 600; }
+.markdown-view .md-copy:hover { color: var(--text); background: var(--tint-strong); }
+.markdown-view .md-table-wrap { overflow: auto; margin: 20px 0; border: 1px solid var(--rule); border-radius: var(--r-3); background: var(--tint); scrollbar-width: thin; }
+.markdown-view table { width: 100%; border-collapse: collapse; font: 13px/1.5 var(--font-mono); text-align: left; }
+.markdown-view th, .markdown-view td { padding: 10px 12px; border-bottom: 1px solid var(--rule); min-width: 110px; vertical-align: top; }
+.markdown-view th { border-bottom-color: var(--rule-strong); color: var(--text); font-weight: 600; }
 .markdown-view tr:last-child td { border-bottom: 0; }
 .markdown-view .md-ref { display: inline; padding: 0; border: 0; background: transparent; font: inherit; border-radius: 2px; cursor: pointer; }
 .markdown-view .md-ref:hover { background: var(--accent-tint); }
 .markdown-view pre.mermaid { text-align: center; overflow: auto; max-width: 100%; }
 .markdown-view pre.mermaid[data-mermaid-state="done"] { border: 0; background: transparent; padding: 0; }
 .markdown-view pre.mermaid svg { max-width: 100%; height: auto; }
-.markdown-view .md-mermaid-error { border: 1px solid var(--err); border-radius: var(--r-2); padding: 12px 14px; margin: 22px 0; }
+.markdown-view .md-mermaid-error { border: 1px solid var(--err); border-radius: var(--r-2); padding: 12px 14px; margin: 20px 0; }
 .markdown-view .md-mermaid-error-msg, .markdown-view-failed .md-render-error { color: var(--err); font: 13px/1.5 var(--font-sans); margin-bottom: 8px; }
 .markdown-view .md-mermaid-retry { min-height: var(--control-height); padding: 4px 12px; border: 1px solid var(--border); border-radius: var(--r-2); color: var(--text-2); font: 12px/1.5 var(--font-sans); }
-.markdown-view .md-mermaid-retry:hover { background: var(--panel); color: var(--text); }
+.markdown-view .md-mermaid-retry:hover { background: var(--tint); color: var(--text); }
 .markdown-view-failed .md-source-fallback { white-space: pre-wrap; }
 
 @media (max-width: 1200px) and (min-width: 901px) {
@@ -303,12 +324,15 @@ button.prop-trigger.priority-chip-unset:focus-visible { border-color: var(--text
   .workspace-toolbar-leading { flex: 1 1 100%; flex-wrap: wrap; row-gap: 8px; }
   .workspace-toolbar-actions { margin-left: auto; gap: 6px; }
   .workspace-toolbar .status-pill, .workspace-toolbar .btn, .workspace-toolbar .btn-icon { min-height: 44px; }
+  .workspace-toolbar .btn-icon { min-width: 44px; }
   .workspace-toolbar .status-pill { font-size: 11px; padding: 0 8px; }
   .workspace-toolbar .btn { font-size: 11px; padding: 0 10px; }
   .doc-mode-switch { display: flex; width: min(100%, 320px); }
   .doc-mode-switch button { flex: 1 1 0; min-height: 44px; min-width: 0; padding: 0 6px; }
   .doc-tabs [role="tab"] { min-height: 44px; font-size: 12px; }
-  .task-header { margin-top: 24px; margin-bottom: 26px; }
+  .doc-sheet { margin: 2px 6px 6px; }
+  .task-document.mode-read > .doc-sheet, .task-document.mode-edit > .doc-sheet { width: calc(100% - 12px); }
+  .task-header { margin-top: 20px; margin-bottom: 20px; }
   .task-title-display, .task-header .title-input-wrap > .title-input, .task-header .title-input-wrap::after { font-size: 26px; }
   .task-header-trailing { gap: 4px 8px; margin-top: 12px; }
   .task-props { display: contents; }
@@ -317,11 +341,10 @@ button.prop-trigger.priority-chip-unset:focus-visible { border-color: var(--text
   .prop-trigger, .prop-trigger.priority-chip { height: 44px; min-width: 44px; }
   .doc-content { display: flex; flex-direction: column; }
   .doc-split { flex: 1 1 auto; }
-  .mode-edit .doc-split, .mode-split .doc-split { padding: 0 16px 20px; }
   .mode-split .doc-content { min-height: 460px; }
-  .mode-split .doc-split { flex-direction: column; gap: 16px; }
+  .mode-split .doc-split { flex-direction: column; gap: 12px; }
   .mode-split .doc-split > .editable-task-body { flex: 1 0 200px; }
-  .mode-split .doc-split > .doc-reader { flex: 1 0 220px; --document-gutter: 4px; padding-top: 0; }
+  .mode-split .doc-split > .doc-reader { flex: 1 0 220px; --document-gutter: 4px; padding-top: 12px; border-left: 0; border-top: 1px solid var(--rule); }
   .markdown-view .md-copy, .markdown-view .md-mermaid-retry { min-height: 44px; }
 }
 /* Unsaved text of deleted tasks: kept until the user exports or discards it. */
