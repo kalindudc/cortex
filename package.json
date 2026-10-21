@@ -17,7 +17,7 @@
     "test:desktop": "bash scripts/test-desktop.sh",
     "test": "pnpm run build && pnpm exec bun test test/unit/ test/integration/ && pnpm run test:ui",
     "test:unit": "pnpm exec bun test test/unit/",
-    "test:ui": "pnpm exec bun test --preload ./test/ui/setup-happy-dom.ts test/ui/",
+    "test:ui": "pnpm exec bun test --isolate --preload ./test/ui/setup-happy-dom.ts test/ui/",
     "test:integration": "pnpm run build && pnpm exec bun test test/integration/",
     "test:bb": "npm --prefix integrations/bb test && npm --prefix integrations/bb run typecheck",
     "dev": "bash scripts/dev-cli.sh",

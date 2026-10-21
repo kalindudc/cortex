@@ -30,7 +30,7 @@ Every command below is a real script in `package.json` (`docs:check` fails on a 
 - `pnpm run build` — compile `bin/cortex` via `scripts/build.sh`.
 - `pnpm test` — full suite: build + `bun test test/unit/ test/integration/`, then `pnpm run test:ui`.
 - `pnpm run test:unit` — unit tests only (fast).
-- `pnpm run test:ui` — renderer tests in `test/ui/` under happy-dom; the only script that preloads `test/ui/setup-happy-dom.ts`.
+- `pnpm run test:ui` — renderer tests in `test/ui/` under happy-dom; the only script that preloads `test/ui/setup-happy-dom.ts`. Each file runs in a fresh global (`--isolate`), because their `mock.module` mocks are process-wide.
 - `pnpm run test:integration` — integration tests against the built binary.
 - `pnpm run test:bb` — tests and typechecks `integrations/bb/`, the independent Node bb plugin that reads only the Cortex CLI (install its npm dependencies first).
 - `pnpm run dev -- <cortex-args>` — run the CLI from source via Bun (no compile step); with no args on a TTY it runs `cortex app`. Uses the `tmp/dev/` data sandbox unless `CORTEX_DEV_REAL=1` (see `scripts/dev-env.sh`, `scripts/dev-cli.sh`).
