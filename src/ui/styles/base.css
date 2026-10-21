@@ -4,7 +4,7 @@ html, body { margin: 0; padding: 0; height: 100%; }
 body {
   font: 400 var(--fs-4)/1.5 var(--font-sans);
   font-feature-settings: var(--font-feat);
-  color: var(--text); background: var(--bg);
+  color: var(--text); background: var(--desk);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   /* Default cursor everywhere; only true text-input surfaces (input,
@@ -47,3 +47,20 @@ button:focus-visible, a:focus-visible, summary:focus-visible, select:focus-visib
   outline: 2px solid var(--info); outline-offset: 2px;
 }
 
+/* ---------- paper ----------
+   A <PaperLayer> inside a .paper-host draws the sheet, because a filter
+   makes its element the containing block of position: fixed descendants
+   and re-rasterises its text on every scroll: never put filter, transform
+   or clip-path on an element that holds content. */
+.paper-host { position: relative; isolation: isolate; }
+.paper-layer { position: absolute; inset: 0; z-index: -1; pointer-events: none; filter: var(--paper-lift); }
+.paper-layer.is-card { filter: var(--card-lift); }
+.paper-layer::before {
+  content: ""; position: absolute; inset: 0;
+  background-color: var(--sheet); background-image: var(--paper-grain);
+  clip-path: var(--paper-edge);
+}
+.paper-layer.is-dotted::before {
+  background-image: var(--dot-grid), var(--paper-grain);
+  background-size: 22px 22px, auto; background-position: 11px 11px, 0 0;
+}

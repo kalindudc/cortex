@@ -1,47 +1,62 @@
 /* ---------- design tokens ----------
-   Warm, low-contrast neutral palette with a single soft-orange accent.
+   Paper on a desk, with a single soft-orange accent. The app background is
+   the desk (--desk, and --desk-deep for the rail and the status bar); the
+   document, full panels and modals are sheets lying on it (--sheet); side
+   panel sections and the selected row are small cards cut from the same
+   sheet. The paper layer in base.css draws the sheets and cards.
 
    Theme resolution (handled by state/theme.ts, which always sets
    data-theme to the resolved light or dark, following the system while the
    appearance is "system"):
      - <html> with no data-theme attribute    → follows prefers-color-scheme
        (only before the script runs)
-     - <html data-theme="light">              → light
-     - <html data-theme="dark">               → dark
+     - <html data-theme="light">              → light ("paper")
+     - <html data-theme="dark">               → dark ("night paper")
      - <html data-theme="dark" data-contrast="high"> → high contrast: the
-       last block below, every text token at least 7:1 on --bg, --panel
-       and --tint
+       last block below, every text token at least 7:1 on --bg, --panel,
+       --tint, --sheet and --desk
    The dark token block is duplicated below: once inside the
    prefers-color-scheme media query (system default) and once under the
-   explicit [data-theme="dark"] selector. Keep the two copies in sync when
-   editing. */
+   explicit [data-theme="dark"] selector. Keep the two copies identical
+   (test/unit/ui/paper-tokens.test.ts checks it). */
 :root {
-  /* surfaces — 4-step elevation, warm off-white → deeper taupe */
-  --bg:            #f6f2ec;  /* warm off-white base */
-  --panel:         #efe9dd;  /* slightly deeper for left/right panes */
-  --tint:          #e7e0d0;  /* hover/selected tint */
-  --tint-strong:   #d8cfba;  /* stronger interaction state */
-  --border:        #ddd4be;
-  --border-strong: #bdb19a;
+  /* surfaces */
+  --desk:          #ebe4d6;
+  --desk-deep:     #e4dccb;  /* the rail and the status bar */
+  --sheet:         #fbf8f1;
+  /* The older surface names, kept so current CSS keeps working. Every
+     theme below sets --sheet and --desk, and these follow. */
+  --bg:            var(--sheet);
+  --panel:         var(--desk);
+  /* Hover and selected washes: ink at 5.5% and 11% on the desk, solid so
+     they read the same on a sheet. */
+  --tint:          #e0d9cc;
+  --tint-strong:   #d6cfc2;
+  /* Rules are translucent ink, so one value works on the desk and on a
+     sheet; the borders are their solid equivalents on the desk. */
+  --rule:          rgba(70, 55, 35, 0.13);
+  --rule-strong:   rgba(70, 55, 35, 0.24);
+  --border:        #d6cebf;
+  --border-strong: #c3baab;
 
-  /* text — warm near-black, with a softer grey for main-view content */
-  --text:         #2c2820;  /* chrome / labels / strong emphasis */
-  --text-content: #403a30;  /* main-view content (titles, headings) */
-  --text-2:       #56503f;  /* body */
-  --text-3:       #8a8170;  /* muted / meta */
-  --text-4:       #b5a994;  /* very muted */
+  /* text — warm ink, with a softer shade for main-view content */
+  --text:         #2a251e;  /* chrome / labels / strong emphasis */
+  --text-content: #3a342b;  /* main-view content (titles, headings) */
+  --text-2:       #4f483c;  /* body */
+  --text-3:       #7b7161;  /* muted / meta */
+  --text-4:       #a99e89;  /* very muted */
 
   /* accent — clean warm orange. accent-on is dark text (6.0:1 against the
      accent, AA+ for normal body); white-on-accent would fail AA. The tint
      is a very pale wash for halos / focus rings / selected backgrounds. */
-  --accent:        #ed8e60;
+  --accent:        #ea8a5b;
   --accent-hover:  #d97a4b;
   --accent-tint:   #f7e1d4;
-  --accent-on:     #2c2820;
-  /* Editor-only token: light mode needs darker contrast on cream than
-     --accent provides, otherwise codeblock text + list markers are
-     unreadable. Mirrored brighter in the dark blocks below. */
-  --code-accent:   #8a3d12;
+  --accent-on:     #2a251e;
+  /* The accent as text: links, @refs, code and list markers. Light paper
+     needs it darker than --accent to stay readable; mirrored brighter in
+     the dark blocks below. */
+  --code-accent:   #9a4a1f;
 
   /* Code selection highlight. Intentionally cool/blue-tinted so it reads
      as visibly distinct from the warm --active-line used by the active
@@ -54,17 +69,37 @@
      line background would mask the selection on the active line. Using
      accent at low alpha gives a visible warm tint while letting the cool
      --selection bleed through where they overlap. */
-  --active-line:   rgba(237, 142, 96, 0.13);
+  --active-line:   rgba(234, 138, 91, 0.13);
 
-  /* semantic */
-  --ok:    #5e8a4b;
-  --warn:  #c08a3a;
+  /* semantic — --ok and --warn are a shade deeper than on the old palette,
+     so the status dots keep their contrast on the darker desk. */
+  --ok:    #5c8849;
+  --warn:  #b9832f;
   --err:   #b14a48;
   --info:  #4a728d;
 
   /* Dot color for the page-wide texture on .pane-active. Held at low alpha
      so it reads as a hint of grain rather than a pattern. */
   --paper-dot: rgba(64, 58, 48, 0.15);
+
+  /* paper — drawn only by the paper layer in base.css. --paper-grain is a
+     faint noise over every sheet and card; --dot-grid is the dot-journal
+     pattern of the document and full panels, on a 22px grid; --paper-edge
+     makes the edges slightly uneven (22 points an edge, set 0.2 to 1.8px
+     in, corners cut by 2px). --paper-lift and --card-lift are filters so
+     the shadow follows that edge, and stay faint: the paper barely lifts
+     off the desk. --shadow-card is the box-shadow of small straight-edged
+     cards such as the selected row and the active tab. */
+  --paper-grain: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .32 0 0 0 0 .25 0 0 0 0 .16 0 0 0 .04 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  --dot-grid: radial-gradient(circle, rgba(64, 52, 36, 0.16) 0.85px, transparent 1.25px);
+  --paper-edge: polygon(
+    2px 0.2px, 4.55% 0.9px, 9.09% 0.7px, 13.64% 0.3px, 18.18% 1.6px, 22.73% 0.9px, 27.27% 1.0px, 31.82% 0.9px, 36.36% 1.0px, 40.91% 0.7px, 45.45% 0.5px, 50.00% 1.3px, 54.55% 0.4px, 59.09% 0.8px, 63.64% 1.1px, 68.18% 1.5px, 72.73% 0.8px, 77.27% 0.3px, 81.82% 0.5px, 86.36% 1.4px, 90.91% 1.1px, 95.45% 1.1px,
+    calc(100% - 1.0px) 2px, calc(100% - 0.6px) 4.55%, calc(100% - 0.7px) 9.09%, calc(100% - 1.5px) 13.64%, calc(100% - 0.2px) 18.18%, calc(100% - 0.5px) 22.73%, calc(100% - 1.1px) 27.27%, calc(100% - 1.3px) 31.82%, calc(100% - 0.2px) 36.36%, calc(100% - 0.8px) 40.91%, calc(100% - 1.6px) 45.45%, calc(100% - 1.0px) 50.00%, calc(100% - 0.4px) 54.55%, calc(100% - 1.2px) 59.09%, calc(100% - 1.7px) 63.64%, calc(100% - 0.7px) 68.18%, calc(100% - 1.6px) 72.73%, calc(100% - 0.2px) 77.27%, calc(100% - 1.3px) 81.82%, calc(100% - 1.5px) 86.36%, calc(100% - 1.7px) 90.91%, calc(100% - 0.7px) 95.45%,
+    calc(100% - 2px) calc(100% - 0.5px), 95.45% calc(100% - 1.5px), 90.91% calc(100% - 1.7px), 86.36% calc(100% - 1.4px), 81.82% calc(100% - 1.8px), 77.27% calc(100% - 1.5px), 72.73% calc(100% - 0.9px), 68.18% calc(100% - 0.6px), 63.64% calc(100% - 1.2px), 59.09% calc(100% - 0.2px), 54.55% calc(100% - 1.7px), 50.00% calc(100% - 1.5px), 45.45% calc(100% - 0.8px), 40.91% calc(100% - 1.6px), 36.36% calc(100% - 0.2px), 31.82% calc(100% - 1.3px), 27.27% calc(100% - 1.7px), 22.73% calc(100% - 1.1px), 18.18% calc(100% - 1.3px), 13.64% calc(100% - 1.0px), 9.09% calc(100% - 1.6px), 4.55% calc(100% - 0.9px),
+    1.7px calc(100% - 2px), 1.8px 95.45%, 0.9px 90.91%, 1.5px 86.36%, 1.0px 81.82%, 0.6px 77.27%, 0.3px 72.73%, 0.3px 68.18%, 1.5px 63.64%, 0.4px 59.09%, 0.8px 54.55%, 1.1px 50.00%, 0.8px 45.45%, 1.0px 40.91%, 0.4px 36.36%, 0.8px 31.82%, 0.5px 27.27%, 1.1px 22.73%, 1.1px 18.18%, 1.7px 13.64%, 0.4px 9.09%, 1.8px 4.55%);
+  --paper-lift: drop-shadow(0 0 0.5px rgba(80, 60, 30, 0.14)) drop-shadow(0 1px 3px rgba(60, 45, 25, 0.045));
+  --card-lift:  drop-shadow(0 0 0.5px rgba(80, 60, 30, 0.14)) drop-shadow(0 1px 1px rgba(60, 45, 25, 0.04));
+  --shadow-card: 0 0 0 1px rgba(80, 60, 30, 0.06), 0 1px 1.5px rgba(60, 45, 25, 0.05);
 
   --control-height: 32px;
   --status-height: 28px;
@@ -85,8 +120,9 @@
   --dur-2:   140ms;
   --dur-3:   180ms;
 
-  --shadow-pop: 0 1px 2px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
-  --shadow-cmd: 0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06);
+  /* Paper-tinted and kept subtle. */
+  --shadow-pop: 0 1px 2px rgba(60, 45, 25, 0.05), 0 4px 12px rgba(60, 45, 25, 0.08);
+  --shadow-cmd: 0 8px 24px rgba(60, 45, 25, 0.12), 0 2px 6px rgba(60, 45, 25, 0.06);
 
   color-scheme: light;
 }
@@ -98,42 +134,51 @@
    Edit both copies together. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    /* Cool, slightly blue-tinted greys — not warm browns. Softened overall:
-       text sits around #dadbe0 (not stark white) so contrast stays around
-       AA+ instead of hammering AAA. */
-    --bg:            #1d1f24;
-    --panel:         #24262b;
-    --tint:          #2c2e34;
-    --tint-strong:   #383a40;
-    --border:        #2e3036;
-    --border-strong: #43454c;
+    /* Night paper: a warm charcoal desk with slightly lighter sheets.
+       --bg and --panel follow --sheet and --desk from the block above. */
+    --desk:          #1a1815;
+    --desk-deep:     #161411;
+    --sheet:         #24211c;
+    /* Ink at 8% and 14% on the desk, so a hover still shows on a sheet. */
+    --tint:          #2b2825;
+    --tint-strong:   #373530;
+    --rule:          rgba(236, 229, 216, 0.09);
+    --rule-strong:   rgba(236, 229, 216, 0.18);
+    --border:        #2d2a27;
+    --border-strong: #403d38;
 
-    --text:         #dadbe0;
-    --text-content: #c2c4ca;
-    --text-2:       #989aa0;
-    --text-3:       #6b6d72;
-    --text-4:       #4a4c52;
+    --text:         #ece5d8;
+    --text-content: #ddd5c6;
+    --text-2:       #cdc5b6;
+    --text-3:       #8e8575;
+    --text-4:       #5f584c;
 
-    --accent:        #f5a47e;
+    --accent:        #f0a27c;
     --accent-hover:  #ffb795;
     --accent-tint:   #2e2418;
-    --accent-on:     #1d1f24;
-    /* Editor-only token: brighter in dark mode so code/list highlights
-       lift off the dark panel. Mirrors the light value at top. */
-    --code-accent:   #f5a47e;
+    --accent-on:     #1a1815;
+    /* The accent as text: brighter in dark mode so links, @refs and code
+       lift off the dark paper. Mirrors the light value at top. */
+    --code-accent:   #f0a27c;
 
     /* Cool blue-grey to contrast the warm --active-line. */
     --selection:     #2a3550;
     /* Translucent warm wash — must be rgba so --selection shows through
        on the active line (CM's selection layer sits behind text). */
-    --active-line:   rgba(245, 164, 126, 0.10);
+    --active-line:   rgba(240, 162, 124, 0.10);
 
     --ok:    #7eaa6c;
     --warn:  #d8a558;
     --err:   #e08580;
     --info:  #7896b0;
 
-    --paper-dot: rgba(218, 219, 224, 0.05);
+    --paper-dot: rgba(218, 219, 224, 0.15);
+
+    --paper-grain: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .95 0 0 0 0 .9 0 0 0 0 .82 0 0 0 .022 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+    --dot-grid: radial-gradient(circle, rgba(236, 229, 216, 0.085) 0.85px, transparent 1.25px);
+    --paper-lift: drop-shadow(0 0 0.5px rgba(255, 245, 225, 0.09)) drop-shadow(0 1px 4px rgba(0, 0, 0, 0.28));
+    --card-lift:  drop-shadow(0 0 0.5px rgba(255, 245, 225, 0.09)) drop-shadow(0 1px 1px rgba(0, 0, 0, 0.22));
+    --shadow-card: 0 0 0 1px rgba(255, 245, 225, 0.04), 0 1px 2px rgba(0, 0, 0, 0.25);
 
     --shadow-pop: 0 1px 2px rgba(0,0,0,0.4), 0 4px 12px rgba(0,0,0,0.5);
     --shadow-cmd: 0 8px 32px rgba(0,0,0,0.6), 0 2px 8px rgba(0,0,0,0.4);
@@ -142,32 +187,38 @@
   }
 }
 :root[data-theme="dark"] {
-  --bg:            #1d1f24;
-  --panel:         #24262b;
-  --tint:          #2c2e34;
-  --tint-strong:   #383a40;
-  --border:        #2e3036;
-  --border-strong: #43454c;
+  /* Night paper: a warm charcoal desk with slightly lighter sheets.
+     --bg and --panel follow --sheet and --desk from the block above. */
+  --desk:          #1a1815;
+  --desk-deep:     #161411;
+  --sheet:         #24211c;
+  /* Ink at 8% and 14% on the desk, so a hover still shows on a sheet. */
+  --tint:          #2b2825;
+  --tint-strong:   #373530;
+  --rule:          rgba(236, 229, 216, 0.09);
+  --rule-strong:   rgba(236, 229, 216, 0.18);
+  --border:        #2d2a27;
+  --border-strong: #403d38;
 
-  --text:         #dadbe0;
-  --text-content: #c2c4ca;
-  --text-2:       #989aa0;
-  --text-3:       #6b6d72;
-  --text-4:       #4a4c52;
+  --text:         #ece5d8;
+  --text-content: #ddd5c6;
+  --text-2:       #cdc5b6;
+  --text-3:       #8e8575;
+  --text-4:       #5f584c;
 
-  --accent:        #f5a47e;
+  --accent:        #f0a27c;
   --accent-hover:  #ffb795;
   --accent-tint:   #2e2418;
-  --accent-on:     #1d1f24;
-  /* Editor-only token: brighter in dark mode so code/list highlights
-     lift off the dark panel. Mirrors the light value at top. */
-  --code-accent:   #f5a47e;
+  --accent-on:     #1a1815;
+  /* The accent as text: brighter in dark mode so links, @refs and code
+     lift off the dark paper. Mirrors the light value at top. */
+  --code-accent:   #f0a27c;
 
   /* Cool blue-grey to contrast the warm --active-line. */
   --selection:     #2a3550;
   /* Translucent warm wash — must be rgba so --selection shows through
      on the active line (CM's selection layer sits behind text). */
-  --active-line:   rgba(245, 164, 126, 0.10);
+  --active-line:   rgba(240, 162, 124, 0.10);
 
   --ok:    #7eaa6c;
   --warn:  #d8a558;
@@ -176,6 +227,12 @@
 
   --paper-dot: rgba(218, 219, 224, 0.15);
 
+  --paper-grain: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .95 0 0 0 0 .9 0 0 0 0 .82 0 0 0 .022 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  --dot-grid: radial-gradient(circle, rgba(236, 229, 216, 0.085) 0.85px, transparent 1.25px);
+  --paper-lift: drop-shadow(0 0 0.5px rgba(255, 245, 225, 0.09)) drop-shadow(0 1px 4px rgba(0, 0, 0, 0.28));
+  --card-lift:  drop-shadow(0 0 0.5px rgba(255, 245, 225, 0.09)) drop-shadow(0 1px 1px rgba(0, 0, 0, 0.22));
+  --shadow-card: 0 0 0 1px rgba(255, 245, 225, 0.04), 0 1px 2px rgba(0, 0, 0, 0.25);
+
   --shadow-pop: 0 1px 2px rgba(0,0,0,0.4), 0 4px 12px rgba(0,0,0,0.5);
   --shadow-cmd: 0 8px 32px rgba(0,0,0,0.6), 0 2px 8px rgba(0,0,0,0.4);
 
@@ -183,7 +240,10 @@
 }
 
 /* High contrast (dark, with text at 7:1 contrast or more), layered on the
-   dark palette; it must stay the last token block so it wins. */
+   dark palette; it must stay the last token block so it wins. It keeps its
+   own literal surfaces and points the paper surfaces at them (the reverse
+   of the blocks above), drops the grain and the dots, and draws rules as
+   its borders. */
 :root[data-contrast="high"] {
   --bg:            #000000;
   --panel:         #0c0c0c;
@@ -191,6 +251,11 @@
   --tint-strong:   #262626;
   --border:        #8a8a8a;
   --border-strong: #c8c8c8;
+  --sheet:         var(--bg);
+  --desk:          var(--panel);
+  --desk-deep:     var(--panel);
+  --rule:          var(--border);
+  --rule-strong:   var(--border-strong);
 
   --text:         #ffffff;
   --text-content: #ffffff;
@@ -211,6 +276,9 @@
   --warn:  #ffd66b;
   --err:   #ff9e9e;
   --info:  #9fcfff;
+
+  --paper-grain: none;
+  --dot-grid:    none;
 
   color-scheme: dark;
 }
