@@ -19,6 +19,7 @@ import {
 } from "../../state/agents.ts";
 import { modal } from "../../state/signals.ts";
 import { Icon } from "../Icon.tsx";
+import { PanelSheet } from "./PanelSheet.tsx";
 
 type Shown = { label: string; tone: "ok" | "warn" | "off" };
 
@@ -144,7 +145,7 @@ export function AgentsPanel(): VNode {
           <b>Agent tools</b>
         </div>
       </header>
-      <div class="panel-body">
+      <PanelSheet>
         <div class="panel-inner">
           <h1 class="panel-title">Agent tools</h1>
           <p class="panel-lede">
@@ -252,7 +253,7 @@ export function AgentsPanel(): VNode {
             </button>
           </div>
         </div>
-      </div>
+      </PanelSheet>
     </section>
   );
 }

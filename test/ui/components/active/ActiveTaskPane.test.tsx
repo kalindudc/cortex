@@ -119,6 +119,22 @@ describe("ActiveTaskPane", () => {
     expect(container.querySelector(".task-id")?.textContent).toBe("@42");
   });
 
+  test("an open task lies on the desk as the toolbar and one sheet; the empty state has no sheet", () => {
+    const empty = render(<ActiveTaskPane />);
+    expect(empty.container.querySelector(".doc-sheet, .paper-layer")).toBeNull();
+    empty.unmount();
+    tasks.value = [makeTask({ id: 42 })];
+    selectedId.value = 42;
+    const { container } = render(<ActiveTaskPane />);
+    const pane = container.querySelector("section.pane-active");
+    const sheet = pane?.querySelector(".task-document > .doc-sheet.paper-host");
+    if (!sheet) throw new Error("expected the task's sheet");
+    expect(pane?.querySelectorAll(".doc-sheet")).toHaveLength(1);
+    expect(sheet.previousElementSibling?.classList.contains("workspace-toolbar")).toBe(true);
+    expect(sheet.firstElementChild?.className).toBe("paper-layer is-dotted");
+    expect(sheet.querySelector(".doc-page > .task-header .task-title-display")).not.toBeNull();
+  });
+
   test("hidden hides the pane in both states and keeps the document mounted", () => {
     const empty = render(<ActiveTaskPane hidden={true} />);
     expect((empty.container.querySelector("section.pane-active") as HTMLElement).hidden).toBe(true);

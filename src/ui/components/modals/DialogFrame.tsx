@@ -13,14 +13,17 @@
 //   - a real `close` transition on unmount plus logical focus return to the
 //     element that was focused when the dialog opened (if still connected).
 //
-// Used by every modal kind (ModalRoot), the command palette and the mobile
-// navigation drawer. Geometry variants are CSS classes (modal.css):
-// `dialog-frame--top` (palette-style top anchor), `dialog-frame--sheet`
-// (narrow-viewport navigation drawer). Content sits in the caller's own
-// `.modal` box so the pre-existing modal styling is untouched.
+// Used by every modal kind (ModalRoot), the command palette, the mobile
+// navigation drawer and the narrow-window side panel. Geometry variants are
+// CSS classes (modal.css): `dialog-frame--top` (palette-style top anchor),
+// `dialog-frame--sheet` (full-height side sheets). Content sits in the
+// caller's own box (`.modal` for modals and the palette) inside a paper host
+// sized by that box, so the sheet's paper is painted once, here.
 
 import type { ComponentChildren, VNode } from "preact";
 import { useEffect, useRef } from "preact/hooks";
+
+import { PaperLayer } from "../PaperLayer.tsx";
 
 export interface DialogFrameProps {
   label: string;
@@ -96,7 +99,10 @@ export function DialogFrame(props: DialogFrameProps): VNode {
         if (e.target === ref.current) onCloseRef.current();
       }}
     >
-      {children}
+      <div class="dialog-paper paper-host">
+        <PaperLayer />
+        {children}
+      </div>
     </dialog>
   );
 }

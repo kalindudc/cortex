@@ -54,7 +54,7 @@ export function NewLaneModal({ close }: { close: () => void }): VNode {
 
   return (
     <DialogFrame label="New lane" onClose={close}>
-      <div class="modal" style="max-width: 420px" onKeyDown={onSubmitKeys(save)}>
+      <div class="modal modal--narrow" onKeyDown={onSubmitKeys(save)}>
         <div class="row">
           <h2 class="grow">New lane</h2>
           <button class="btn-icon" onClick={close} aria-label="Close">

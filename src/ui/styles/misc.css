@@ -160,6 +160,7 @@ input:disabled { opacity: 0.5; cursor: not-allowed; }
 /* App-wide status bar (row 2 of the main grid, spans every column).
    Read-only summary: the connection state and filter description on the
    left, then the counts, the bell and the palette hint on the right.
+   It sits on the deeper desk, like the rail, under a rule.
    Tabular numerals so jittery counts don't shift sibling text. */
 .status-bar {
   display: flex;
@@ -167,11 +168,12 @@ input:disabled { opacity: 0.5; cursor: not-allowed; }
   gap: 14px;
   height: var(--status-height);
   min-width: 0;
-  padding: 0 8px 0 12px;
-  border-top: 1px solid var(--border);
-  background: var(--panel);
+  padding: 0 8px 0 14px;
+  border-top: 1px solid var(--rule);
+  background: var(--desk-deep);
   color: var(--text-3);
-  font-size: var(--fs-1);
+  font-family: var(--font-sans);
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }

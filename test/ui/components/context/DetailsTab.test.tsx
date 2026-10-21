@@ -1,6 +1,7 @@
 // DetailsTab — the side panel's Details tab: the active task's properties,
 // its authors with Resume on resumable ones, and the three related-task
-// groups with their loading, retry and confirmed-empty states.
+// groups with their loading, retry and confirmed-empty states. On paper the
+// three are index cards; the last block reads the real stylesheet.
 
 import { describe, test, expect, mock, beforeEach } from "bun:test";
 
@@ -17,6 +18,7 @@ mock.module("../../../../src/ui/api/client.ts", () => ({
 }));
 
 import { render, fireEvent } from "@testing-library/preact";
+import { MONO, SANS, SERIF, family, noFill, paintsNothing, rootToken, style, withStyles } from "./paper.ts";
 import { STATUS_LABEL } from "../../../../src/lib/constants.ts";
 import { DetailsTab } from "../../../../src/ui/components/context/DetailsTab.tsx";
 import {
@@ -177,5 +179,162 @@ describe("DetailsTab", () => {
     const { container } = render(<DetailsTab />);
     expect(container.textContent).not.toContain("wrong task");
     expect(container.textContent).toContain("Loading…");
+  });
+});
+
+describe("DetailsTab on paper", () => {
+  withStyles();
+  beforeEach(() => {
+    tasks.value = [task({ id: 1, status: "review" }), task({ id: 9, title: "Gift cards at checkout" })];
+    lanes.value = [{ name: "now", color: "#ff8800", sort: 0 }];
+    selectedId.value = 1;
+    updates.value = { 1: [update({ id: 1, author: "bb-thr_abc123", created: 200 })] };
+    relatedTasks.value = { referencedBy: [], references: [], shared: [tasks.value[1]] };
+    relatedLoading.value = null;
+    relatedError.value = null;
+  });
+
+  const cards = (root: ParentNode): HTMLElement[] => Array.from(root.querySelectorAll<HTMLElement>(".ctx-card"));
+
+  test("Properties, Authors and Related are three separate cards, each painted by a plain PaperLayer card", () => {
+    const { container } = render(<DetailsTab />);
+    // The three cards are the tab's only children.
+    expect(Array.from(container.children).map(c => c.className)).toEqual([
+      "ctx-card paper-host",
+      "ctx-card paper-host",
+      "ctx-card paper-host",
+    ]);
+    const all = cards(container);
+    expect(all.map(c => c.children[1]?.textContent?.replace(/\s+\d+$/, ""))).toEqual([
+      "Properties",
+      "Authors",
+      "Related",
+    ]);
+    expect(all[0].querySelector(".ctx-props")).not.toBeNull();
+    expect(all[1].querySelector(".author-list")).not.toBeNull();
+    expect(all[1].querySelector(".resume-outcome")).not.toBeNull();
+    expect(all[2].querySelectorAll(".related-section")).toHaveLength(3);
+    for (const card of all) {
+      // The layer comes first and holds nothing; no dots on a card.
+      const layer = card.firstElementChild;
+      expect(layer?.className).toBe("paper-layer is-card");
+      expect(layer?.getAttribute("aria-hidden")).toBe("true");
+      expect(layer?.childNodes).toHaveLength(0);
+      expect(card.querySelectorAll(".paper-layer")).toHaveLength(1);
+      // The card's own box paints nothing: the layer is its paper.
+      const s = style(card);
+      expect(paintsNothing(s)).toBe(true);
+      expect(["", "none"]).toContain(s.filter);
+      expect([s.position, s.isolation]).toEqual(["relative", "isolate"]);
+      expect([s.paddingTop, s.paddingRight, s.paddingBottom, s.paddingLeft]).toEqual(["13px", "15px", "13px", "15px"]);
+      expect(style(layer).filter).toBe(rootToken("--card-lift"));
+    }
+    expect(all.slice(1).map(c => style(c).marginTop)).toEqual(["10px", "10px"]);
+  });
+
+  test("card headings are 10.5px uppercase sans in --text-3, and property values are in --text", () => {
+    const { container } = render(<DetailsTab />);
+    const headings = Array.from(container.querySelectorAll(".ctx-card > .ctx-section-title"));
+    expect(headings).toHaveLength(3);
+    for (const heading of headings) {
+      const h = style(heading);
+      expect([family(h.fontFamily), h.fontSize, h.textTransform, h.color]).toEqual([
+        SANS(),
+        "10.5px",
+        "uppercase",
+        rootToken("--text-3"),
+      ]);
+      expect(h.marginTop).toBe("0px");
+    }
+    expect(style(container.querySelector(".ctx-props dt")).color).toBe(rootToken("--text-3"));
+    for (const dd of Array.from(container.querySelectorAll(".ctx-props dd"))) {
+      expect(style(dd).color).toBe(rootToken("--text"));
+    }
+  });
+
+  test("author ids are monospace and Resume is outlined", () => {
+    const { container } = render(<DetailsTab />);
+    const name = style(container.querySelector(".author-name"));
+    expect([family(name.fontFamily), name.color]).toEqual([MONO(), rootToken("--text")]);
+    expect(container.querySelector(".author-row .avatar")).toBeNull();
+    const button = container.querySelector(".author-row button.author-resume");
+    expect(button?.getAttribute("aria-label")).toBe("Resume bb-thr_abc123");
+    const resume = style(button);
+    expect([resume.borderTopWidth, resume.borderTopStyle, resume.borderTopColor]).toEqual([
+      "1px",
+      "solid",
+      rootToken("--rule-strong"),
+    ]);
+    expect(resume.backgroundColor).toBe("transparent");
+  });
+
+  test("related task titles are the serif at 14px, on rows with no fill or rule of their own", () => {
+    const { container } = render(<DetailsTab />);
+    const row = container.querySelector(".related-section .related-row");
+    expect(row?.textContent).toContain("Gift cards at checkout");
+    const r = style(row);
+    expect(noFill(r)).toBe(true);
+    expect(["", "0px"]).toContain(r.borderBottomWidth);
+    const title = style(row?.querySelector(".related-title"));
+    expect([family(title.fontFamily), title.fontSize, title.color]).toEqual([SERIF(), "14px", rootToken("--text")]);
+    const id = style(row?.querySelector(".chip-id"));
+    expect(family(id.fontFamily)).toBe(MONO());
+    // The three groups are sub-headings of the Related card.
+    expect(Array.from(container.querySelectorAll(".related-section h3")).map(h => h.textContent)).toEqual([
+      "Referenced by",
+      "References",
+      "Shared tags",
+    ]);
+  });
+
+  // happy-dom applies width media queries but does no layout, so this pins
+  // the declared targets; the measured heights need a real browser. It keeps
+  // a computed style until the DOM changes, so each width renders afresh.
+  test("on a narrow window every related task and Retry is a 44px touch target, and a wide one keeps compact rows", () => {
+    type Viewport = { setViewport(size: { width: number; height: number }): void };
+    const happyDOM = (globalThis as unknown as { happyDOM: Viewport }).happyDOM;
+    // The narrow rules are scoped to the panel, so the tab is mounted inside it.
+    const at = (width: number): { container: Element; unmount: () => void } => {
+      happyDOM.setViewport({ width, height: 800 });
+      return render(
+        <aside class="context-panel">
+          <DetailsTab />
+        </aside>,
+      );
+    };
+    const rows = (root: ParentNode): Element[] =>
+      Array.from(root.querySelectorAll(".ctx-card .related-section .related-row"));
+    const retry = (root: ParentNode): Element | null => root.querySelector(".ctx-card .related-error button");
+    try {
+      relatedTasks.value = { referencedBy: [tasks.value[1]], references: [tasks.value[1]], shared: [tasks.value[1]] };
+      const wide = at(1280);
+      expect(rows(wide.container)).toHaveLength(3);
+      for (const row of rows(wide.container)) expect(style(row).minHeight).not.toBe("44px");
+      wide.unmount();
+      for (const width of [900, 390, 320]) {
+        const { container, unmount } = at(width);
+        expect(rows(container)).toHaveLength(3);
+        for (const row of rows(container)) {
+          const r = style(row);
+          expect([r.minHeight, r.display, r.alignItems], `${width}px`).toEqual(["44px", "flex", "center"]);
+          // The title's line may shrink, so a long one ends in an ellipsis.
+          expect(["0", "0px"], `${width}px`).toContain(style(row.querySelector(".row")).minWidth);
+        }
+        unmount();
+      }
+
+      relatedTasks.value = null;
+      relatedError.value = { taskId: 1, message: "backend unavailable" };
+      const wideError = at(1280);
+      expect(style(retry(wideError.container)).minHeight).not.toBe("44px");
+      wideError.unmount();
+      for (const width of [900, 320]) {
+        const { container, unmount } = at(width);
+        expect(style(retry(container)).minHeight, `${width}px`).toBe("44px");
+        unmount();
+      }
+    } finally {
+      happyDOM.setViewport({ width: 1280, height: 800 });
+    }
   });
 });

@@ -1,14 +1,19 @@
-/* ---------- command palette ---------- */
+/* ---------- command palette ----------
+   A sheet like every dialog (DialogFrame paints it), so its bands are
+   transparent with --rule lines: a filled band would square off the
+   sheet's uneven edge, and they stop 2px short of the sides, which the
+   edge cuts into. Its own chrome (the input, the breadcrumb, the shortcut
+   hints) is sans-serif; task titles in search results are serif. */
 .modal.palette {
-  max-width: 560px; padding: 0; gap: 0;
+  width: 560px; padding: 0 2px; gap: 0;
   overflow: hidden;
 }
 .palette-input {
-  border: 0; border-bottom: 1px solid var(--border); border-radius: 0;
-  padding: 14px 16px; font-size: var(--fs-5);
+  border: 0; border-bottom: 1px solid var(--rule); border-radius: 0;
+  padding: 14px 16px; font-family: var(--font-sans); font-size: var(--fs-5);
   background: transparent;
 }
-.palette-input:focus { outline: none; box-shadow: none; border-bottom-color: var(--border); }
+.palette-input:focus { outline: none; box-shadow: none; border-bottom-color: var(--rule); }
 
 /* Breadcrumb shown above the search input when the palette is inside a sub-
    menu. Click the back button OR press Esc / Backspace / ← (when query is
@@ -16,8 +21,8 @@
 .palette-breadcrumb {
   display: flex; align-items: center; gap: 8px;
   padding: 8px 8px 8px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--panel);
+  border-bottom: 1px solid var(--rule);
+  font-family: var(--font-sans);
 }
 .palette-breadcrumb .meta { font-size: var(--fs-2); }
 
@@ -28,7 +33,7 @@
   display: grid; grid-template-columns: 14px 1fr auto auto;
   align-items: center; gap: 10px;
   width: 100%; min-height: 38px; padding: 9px 12px; border-radius: var(--r-2);
-  color: var(--text-2); font-size: var(--fs-3);
+  color: var(--text-2); font-family: var(--font-sans); font-size: var(--fs-3);
   text-align: left;
   transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
 }
@@ -40,6 +45,7 @@
 .task-search-preview {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.palette .task-search-title { font: 400 14.5px/1.35 var(--font-serif); }
 .task-search-preview {
   color: var(--text-3); font-size: var(--fs-2);
 }
@@ -49,7 +55,7 @@ mark.search-hit {
 }
 .palette-row.active mark.search-hit,
 .palette-row:hover mark.search-hit {
-  color: var(--text); background: var(--tint);
+  color: var(--text); background: var(--tint-strong);
 }
 /* The trailing chevron on submenu rows uses --text-3 so the affordance is
    present but quiet — the row label is what the user is reading. */
@@ -61,11 +67,10 @@ mark.search-hit {
 .icon.rotate-90-cw  { transform: rotate(90deg); }
 .palette-row.active,
 .palette-row:hover { background: var(--tint); color: var(--text); }
-.palette-row.active { background: var(--accent-tint); color: var(--text); }
 .palette-foot {
   display: flex; gap: 12px; flex-wrap: wrap; flex-shrink: 0; padding: 10px 16px;
-  border-top: 1px solid var(--border);
-  background: var(--panel);
+  border-top: 1px solid var(--rule);
+  font-family: var(--font-sans);
   font-size: var(--fs-1);
 }
 .palette-foot .kbd { margin-right: 4px; }

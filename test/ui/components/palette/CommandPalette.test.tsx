@@ -1,7 +1,7 @@
 // CommandPalette — keyboard navigation + execution of the highlighted
 // command. Mounted only when paletteOpen.value === true (gated by App).
 
-import { describe, test, expect, mock, beforeEach } from "bun:test";
+import { describe, test, expect, mock, beforeEach, beforeAll, afterAll } from "bun:test";
 
 // We replace buildCommands with a fixture so the test isn't coupled to the
 // real command set. The mock factory must return a stable list (one per call)
@@ -27,6 +27,7 @@ mock.module("../../../../src/lib/fuzzy.ts", () => ({
 import { render, fireEvent } from "@testing-library/preact";
 import { CommandPalette } from "../../../../src/ui/components/palette/CommandPalette.tsx";
 import { paletteOpen, paletteQuery, tasks, selectedId } from "../../../../src/ui/state/signals.ts";
+import { mountStyles, rootToken } from "../modals/styles.ts";
 
 describe("CommandPalette", () => {
   beforeEach(() => {
@@ -343,5 +344,99 @@ describe("CommandPalette", () => {
     expect(selectedId.value).toBe(9);
     expect(currentView()).toBe("tasks");
     view.value = "tasks";
+  });
+});
+
+// Read from the real stylesheet (see ../modals/styles.ts for what happy-dom
+// can and cannot compute): the palette is a sheet whose own chrome is
+// sans-serif and whose task titles are serif.
+describe("CommandPalette on paper", () => {
+  const family = (list: string): string => (list.split(",")[0] ?? "").replace(/["']/g, "").trim();
+  const fontOf = (el: Element | null | undefined): string => {
+    if (!el) throw new Error("expected an element");
+    return family(getComputedStyle(el).fontFamily);
+  };
+  const task = {
+    id: 3,
+    lane: "now",
+    title: "Write the paper look",
+    body: "a body that mentions paper",
+    status: "open" as const,
+    priority: 1,
+    created: 0,
+    updated: 0,
+    tags: [],
+    memory_excluded: false,
+  };
+  let unmountStyles: () => void;
+  beforeAll(() => {
+    unmountStyles = mountStyles();
+  });
+  afterAll(() => unmountStyles());
+  beforeEach(() => {
+    paletteOpen.value = true;
+    tasks.value = [task];
+    extraCommands = [];
+    mockedSearchResults = [
+      { task, score: 10, highlight: { field: "body", text: "mentions paper", ranges: [{ start: 9, end: 14 }] } },
+    ];
+  });
+
+  test("task titles are the serif at 14.5px; the input, preview and hints stay sans-serif", () => {
+    paletteQuery.value = "paper";
+    const { container } = render(<CommandPalette />);
+    const serif = family(rootToken("--font-serif"));
+    const sans = family(rootToken("--font-sans"));
+    const title = container.querySelector(".palette-row .task-search-title");
+    expect(fontOf(title)).toBe(serif);
+    expect(getComputedStyle(title as Element).fontSize).toBe("14.5px");
+    expect(fontOf(container.querySelector(".palette-input"))).toBe(sans);
+    expect(fontOf(container.querySelector(".task-search-preview"))).toBe(sans);
+    expect(fontOf(container.querySelector(".palette-foot"))).toBe(sans);
+  });
+
+  test("commands, their shortcut hints and the breadcrumb stay sans-serif", () => {
+    extraCommands = [
+      {
+        id: "lanes",
+        label: "Move to lane\u2026",
+        hint: "M",
+        icon: "plus",
+        submenu: () => [{ id: "now", label: "now", icon: "plus" }],
+      },
+    ];
+    paletteQuery.value = "/";
+    const { container } = render(<CommandPalette />);
+    const sans = family(rootToken("--font-sans"));
+    const branch = Array.from(container.querySelectorAll(".palette-row")).find(r =>
+      r.textContent?.includes("Move to lane"),
+    );
+    expect(fontOf(branch)).toBe(sans);
+    expect(fontOf(branch?.querySelector(".meta.num"))).toBe(sans);
+    fireEvent.click(branch as Element);
+    expect(fontOf(container.querySelector(".palette-breadcrumb .meta"))).toBe(sans);
+  });
+
+  test("the active row is a --tint wash and no band paints over the sheet", () => {
+    extraCommands = [
+      {
+        id: "branch",
+        label: "Branch\u2026",
+        icon: "plus",
+        submenu: () => [{ id: "leaf", label: "Leaf", icon: "plus" }],
+      },
+    ];
+    paletteQuery.value = "/";
+    const { container } = render(<CommandPalette />);
+    const active = container.querySelector(".palette-row.active");
+    expect(active?.textContent).toContain("Alpha");
+    expect(getComputedStyle(active as Element).backgroundColor).toBe(rootToken("--tint"));
+    // Inside a submenu, so the breadcrumb band is there too.
+    const branch = Array.from(container.querySelectorAll(".palette-row")).find(r => r.textContent?.includes("Branch"));
+    fireEvent.click(branch as Element);
+    const unpainted = ["", "transparent", "none", "initial"];
+    for (const band of [".modal.palette", ".palette-breadcrumb", ".palette-input", ".palette-foot"]) {
+      expect(unpainted, band).toContain(getComputedStyle(container.querySelector(band) as Element).backgroundColor);
+    }
   });
 });
