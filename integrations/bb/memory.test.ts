@@ -11,8 +11,8 @@ import {
 const T1 = "thr_aaaaaaaa";
 const T2 = "thr_bbbbbbbb";
 
-/** A report as the pi extension's memoryReport builds it. */
-function report(over: Partial<MemoryView> = {}): MemoryView {
+/** A writer's view with nothing in it yet. */
+function emptyView(over: Partial<MemoryView> = {}): MemoryView {
   return {
     role: "writer",
     lane: "cortex",
@@ -60,8 +60,8 @@ describe("modes", () => {
 });
 
 describe("memoryViewSchema", () => {
-  test("accepts a report at every limit and drops fields it does not know", () => {
-    const full = report({
+  test("accepts a view at every limit and drops fields it does not know", () => {
+    const full = emptyView({
       lane: "l".repeat(200),
       error: "e".repeat(2000),
       stale: { id: 4, detail: "d".repeat(2000) },
@@ -69,19 +69,19 @@ describe("memoryViewSchema", () => {
       inContext: Array.from({ length: 500 }, (_, i) => ({ id: i + 1, via: "prompt" as const, query: "q".repeat(200) })),
     });
     expect(memoryViewSchema.parse(full)).toEqual(full);
-    expect(memoryViewSchema.parse({ ...report(), frame: 2, extra: true })).toEqual(report());
+    expect(memoryViewSchema.parse({ ...emptyView(), frame: 2, extra: true })).toEqual(emptyView());
   });
 
   test("rejects anything past a limit or outside the shape", () => {
     for (const bad of [
-      report({ inContext: Array.from({ length: 501 }, (_, i) => ({ id: i + 1, via: "recall" as const })) }),
-      report({ focus: Array.from({ length: 51 }, (_, i) => i + 1) }),
-      report({ error: "e".repeat(2001) }),
-      report({ stale: { id: 4, detail: "d".repeat(2001) } }),
-      report({ lane: "l".repeat(201) }),
-      { ...report(), role: "delegate" },
-      { ...report(), inContext: [{ id: 1, via: "magic" }] },
-      { ...report(), stats: { ...report().stats, prompts: -1 } },
+      emptyView({ inContext: Array.from({ length: 501 }, (_, i) => ({ id: i + 1, via: "recall" as const })) }),
+      emptyView({ focus: Array.from({ length: 51 }, (_, i) => i + 1) }),
+      emptyView({ error: "e".repeat(2001) }),
+      emptyView({ stale: { id: 4, detail: "d".repeat(2001) } }),
+      emptyView({ lane: "l".repeat(201) }),
+      { ...emptyView(), role: "delegate" },
+      { ...emptyView(), inContext: [{ id: 1, via: "magic" }] },
+      { ...emptyView(), stats: { ...emptyView().stats, prompts: -1 } },
     ]) {
       expect(memoryViewSchema.safeParse(bad).success).toBe(false);
     }
@@ -93,13 +93,13 @@ describe("memory tracker", () => {
     const t = tracker();
     expect(t.configured(T1, start)).toBe(true);
     expect(view(t)).toEqual(
-      report({
+      emptyView({
         recallBudget: 3,
         inContext: [
           { id: 5, via: "summary" },
           { id: 3, via: "summary" },
         ],
-        stats: { ...report().stats, chars: 120 },
+        stats: { ...emptyView().stats, chars: 120 },
       }),
     );
     t.configured(T2, { mode: "read", lane: "x", summary: [], chars: 0 });
@@ -222,29 +222,50 @@ describe("memory tracker", () => {
     expect(view(t)?.error).toBe("");
   });
 
+  test("matched tasks enter as prompt rows with the request cut to 40, counting a prompt, a lookup and chars", () => {
+    const t = tracker();
+    t.configured(T1, start);
+    t.failed(T1, "boom");
+    const query = "continue the harness-agnostic cortex bb plan, please";
+    t.matched(T1, [7, 3, 8], query, 300, 41.6);
+    const v = view(t);
+    // 3 was already in context as the summary, so it keeps that reason.
+    expect(v?.inContext).toEqual([
+      { id: 8, via: "prompt", query: query.slice(0, 40) },
+      { id: 7, via: "prompt", query: query.slice(0, 40) },
+      { id: 5, via: "summary" },
+      { id: 3, via: "summary" },
+    ]);
+    expect(v?.error).toBe("");
+    expect(v?.stats).toMatchObject({ prompts: 1, lookups: 1, lastMs: 42, chars: 120 + 300 });
+    expect(memoryViewSchema.safeParse(v).success).toBe(true);
+  });
+
+  test("focused adds the request's streams oldest first, keeping the five newest first", () => {
+    const t = tracker();
+    t.configured(T1, start);
+    t.updated(T1, 9);
+    t.focused(T1, [1, 2, 3, 4, 2, 5]);
+    expect(view(t)?.focus).toEqual([5, 2, 4, 3, 1]);
+  });
+
+  test("checkpointing sets saving and counts a checkpoint; saved clears saving", () => {
+    const t = tracker();
+    t.configured(T1, start);
+    t.checkpointing(T1);
+    expect(view(t)).toMatchObject({ saving: true, stats: { checkpoints: 1 } });
+    t.saved(T1);
+    expect(view(t)).toMatchObject({ saving: false, stats: { checkpoints: 1 } });
+    t.checkpointing(T1);
+    expect(view(t)?.stats.checkpoints).toBe(2);
+  });
+
   test("a tool event for an unknown thread starts a writer view with no lane", () => {
     const t = tracker();
     t.updated(T1, 8);
-    expect(view(t)).toEqual(report({ lane: null, recallBudget: 3, focus: [8] }));
+    expect(view(t)).toEqual(emptyView({ lane: null, recallBudget: 3, focus: [8] }));
     t.failed(T2, "boom");
     expect(view(t, T2)).toMatchObject({ role: "writer", lane: null, error: "boom" });
-  });
-
-  test("a report replaces the view unless it was sent earlier; tool events never touch a reported view", () => {
-    const t = tracker();
-    t.configured(T1, start);
-    expect(t.report(T1, report({ recallBudget: 2, focus: [1] }), 50)).toBe(true);
-    expect(view(t)).toEqual(report({ recallBudget: 2, focus: [1] }));
-    expect(t.report(T1, report({ focus: [2] }), 40)).toBe(false);
-    expect(t.report(T1, report({ focus: [3] }), 50)).toBe(true);
-    expect(view(t)?.focus).toEqual([3]);
-    const before = structuredClone(t.get(T1));
-    t.recalled(T1, "@4", shown(4, "stale \u00b7 x \u00b7 old"), 1);
-    t.updated(T1, 5);
-    t.failed(T1, "boom");
-    expect(t.nextRequest(T1)).toBe(false);
-    expect(t.configured(T1, start)).toBe(false);
-    expect(t.get(T1)).toEqual(before);
   });
 
   test("get carries the time the view was last written; no view is null", () => {
@@ -256,29 +277,11 @@ describe("memory tracker", () => {
     expect(t.get(T1)?.at).toBeGreaterThan(first);
   });
 
-  test("a re-read request is kept per thread, leaves the view's time alone, and is 0 without one", () => {
-    const t = tracker();
-    expect(t.refreshAt(T1)).toBe(0);
-    const asked = t.requestRefresh(T1);
-    expect(asked).toBeGreaterThan(0);
-    expect(t.refreshAt(T1)).toBe(asked);
-    expect(t.get(T1)).toBeNull();
-    t.report(T1, report(), 10);
-    const reported = t.get(T1)?.at ?? 0;
-    expect(reported).toBeGreaterThan(asked);
-    const again = t.requestRefresh(T1);
-    expect(again).toBeGreaterThan(reported);
-    expect(t.get(T1)?.at).toBe(reported);
-    expect(t.refreshAt(T2)).toBe(0);
-  });
-
   test("forget drops the thread", () => {
     const t = tracker();
     t.configured(T1, start);
-    t.requestRefresh(T1);
     t.forget(T1);
     expect(t.get(T1)).toBeNull();
-    expect(t.refreshAt(T1)).toBe(0);
     expect(t.configured(T1, start)).toBe(true);
   });
 

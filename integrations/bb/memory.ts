@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-/** Values of the Cortex pi extension's CORTEX_MEMORY (src/extensions/pi.ts memoryRole). */
+/** The thread's memory modes. */
 export const MEMORY_MODES = ["write", "read", "off"] as const;
 export const MEMORY_SETTINGS = ["auto", ...MEMORY_MODES] as const;
 export type MemoryMode = (typeof MEMORY_MODES)[number];
@@ -19,13 +19,14 @@ export const ROLE_LABEL: Record<MemoryRole, string> = {
   off: MODE_LABEL.off,
 };
 
-// A copy of src/extensions/memory-view.ts#REPORT_LIMITS (the plugin imports no cortex source), plus the lane and query.
-const LIMITS = { rows: 500, focus: 50, text: 2000, lane: 200, query: 200 } as const;
+// The most rows and characters a view keeps, plus the lane and query, and the request characters kept as the reason
+// a matching task is in context (src/extensions/pi.ts REASON_CHARS).
+const LIMITS = { rows: 500, focus: 50, text: 2000, lane: 200, query: 200, reason: 40 } as const;
 /** Threads whose memory view is kept; the least recently written goes first. */
 const MAX_THREADS = 500;
 /** Focus streams a view lists, as the pi extension keeps (src/extensions/pi.ts FOCUS_CAP). */
 const FOCUS_CAP = 5;
-// Copies of src/extensions/pi.ts STALENESS_LINE and SEARCH_ROW (the text of src/memory.ts renderStream and streamLine).
+// The staleness line and search rows printed by src/memory.ts renderStream and streamLine.
 const STALENESS_LINE = /^staleness: (\w+).*$/m;
 const SEARCH_ROW = /^- \[(\d+)\]/gm;
 const BY_ID = /^@?(\d+)(?:#(.+))?$/;
@@ -33,10 +34,7 @@ const BY_ID = /^@?(\d+)(?:#(.+))?$/;
 const taskId = z.number().int().positive();
 const count = z.number().int().nonnegative();
 
-/**
- * Mirrors src/extensions/memory-view.ts#MemoryReport within its REPORT_LIMITS.
- * Not strict: a newer extension's extra fields are dropped, not rejected.
- */
+/** One thread's memory view, as the plugin builds it. */
 export const memoryViewSchema = z.object({
   role: z.enum(["writer", "reader", "off"]),
   lane: z.string().max(LIMITS.lane).nullable(),
@@ -69,8 +67,6 @@ export type MemoryView = z.infer<typeof memoryViewSchema>;
 /** A thread's memory as the marker and the Memory tab show it. */
 export type MemoryState = {
   threadId: string;
-  /** A pi thread: the Cortex pi extension reports its view. */
-  pi: boolean;
   setting: MemorySetting;
   /** The thread's own choice, or null to follow the setting. */
   override: MemoryMode | null;
@@ -78,22 +74,15 @@ export type MemoryState = {
   /** Started by another thread. */
   child: boolean;
   view: MemoryView | null;
-  /** When the view was last written. */
-  reportedAt: number | null;
-  /** The thread's last re-read request (epoch ms), 0 for none. */
-  refreshAt: number;
 };
 
 export const memoryStateSchema: z.ZodType<MemoryState> = z.object({
   threadId: z.string(),
-  pi: z.boolean(),
   setting: z.enum(MEMORY_SETTINGS),
   override: z.enum(MEMORY_MODES).nullable(),
   mode: z.enum(MEMORY_MODES),
   child: z.boolean(),
   view: memoryViewSchema.nullable(),
-  reportedAt: z.number().nullable(),
-  refreshAt: z.number(),
 });
 
 /** A stored setting value; anything outside the options counts as `auto`. */
@@ -111,8 +100,7 @@ export function effectiveMode(setting: MemorySetting, override: MemoryMode | nul
 export type MemoryTracker = {
   /**
    * Records what configure gave the thread: the first call creates the view; a later one follows the latest role,
-   * fills a missing lane and enters a writer's new summary streams. Never touches a pi-reported view; true when
-   * the view changed.
+   * fills a missing lane and enters a writer's new summary streams; true when the view changed.
    */
   configured(
     threadId: string,
@@ -121,24 +109,21 @@ export type MemoryTracker = {
   recalled(threadId: string, query: string, text: string, ms: number): void;
   updated(threadId: string, taskId: number): void;
   failed(threadId: string, message: string): void;
+  /** Matching tasks steered into a request: entered as "prompt" with the query, one prompt and one lookup. */
+  matched(threadId: string, ids: readonly number[], query: string, chars: number, ms: number): void;
+  /** Adds focus streams named by the request's commands, oldest first so the newest leads. */
+  focused(threadId: string, ids: readonly number[]): void;
+  /** The save turn started: saving, and one more checkpoint. */
+  checkpointing(threadId: string): void;
+  /** The save turn ended or never started. */
+  saved(threadId: string): void;
   /** A new request clears the stale flag; true when that changed the view. */
   nextRequest(threadId: string): boolean;
-  /** A pi report replaces the view unless it was sent before the stored one; true when it was stored. */
-  report(threadId: string, view: MemoryView, sentAt: number): boolean;
   get(threadId: string): { view: MemoryView; at: number } | null;
-  /** Asks the thread's pi to re-read memory; returns the request's time. */
-  requestRefresh(threadId: string): number;
-  refreshAt(threadId: string): number;
   forget(threadId: string): void;
 };
 
-type Entry = {
-  view: MemoryView | null;
-  at: number;
-  /** The last report's sentAt; set only for a view the pi extension owns. */
-  sentAt: number | null;
-  refreshAt: number;
-};
+type Entry = { view: MemoryView | null; at: number };
 
 /** The changed/missing/old part of a `staleness: stale · synced … · …` line (src/extensions/pi.ts staleDetail). */
 function staleDetail(line: string): string {
@@ -146,8 +131,8 @@ function staleDetail(line: string): string {
 }
 
 /**
- * Per-thread memory views: pi threads' reports, and for other providers what
- * the plugin gave and the agent recalled. In memory only, for at most 500 threads.
+ * Per-thread memory views: what the plugin gave each thread and what its agent
+ * recalled. In memory only, for at most 500 threads.
  */
 export function createMemoryTracker(recallBudget: number, now: () => number = Date.now): MemoryTracker {
   const entries = new Map<string, Entry>();
@@ -177,19 +162,18 @@ export function createMemoryTracker(recallBudget: number, now: () => number = Da
     }
   }
 
-  /** Applies a tool event to the plugin's own view; a pi-reported view changes only through reports. */
+  /** Applies a tool event to the thread's view. */
   function edit(threadId: string, change: (view: MemoryView) => void): void {
-    const entry = entries.get(threadId);
-    if (entry && entry.sentAt !== null) return;
-    const view = entry?.view ?? emptyView("writer", null);
+    const view = entries.get(threadId)?.view ?? emptyView("writer", null);
     change(view);
-    write(threadId, { view, at: now(), sentAt: null, refreshAt: entry?.refreshAt ?? 0 });
+    write(threadId, { view, at: now() });
   }
 
   /** Enters a stream unless it is already in context (the first reason wins); true when it entered. */
-  function enter(view: MemoryView, id: number, via: "summary" | "prompt" | "recall"): boolean {
+  function enter(view: MemoryView, id: number, via: "summary" | "prompt" | "recall", query?: string): boolean {
     if (!Number.isInteger(id) || id <= 0 || view.inContext.some(entry => entry.id === id)) return false;
-    view.inContext = [{ id, via }, ...view.inContext].slice(0, LIMITS.rows);
+    const entry = query === undefined ? { id, via } : { id, via, query: query.slice(0, LIMITS.reason) };
+    view.inContext = [entry, ...view.inContext].slice(0, LIMITS.rows);
     return true;
   }
 
@@ -201,7 +185,6 @@ export function createMemoryTracker(recallBudget: number, now: () => number = Da
   return {
     configured(threadId, start) {
       const entry = entries.get(threadId);
-      if (entry && entry.sentAt !== null) return false;
       const role = ROLE[start.mode];
       // Entered oldest first, so the view lists them newest first, as the pi extension does.
       const enterSummary = (view: MemoryView): boolean =>
@@ -210,7 +193,7 @@ export function createMemoryTracker(recallBudget: number, now: () => number = Da
         const view = emptyView(role, start.lane);
         enterSummary(view);
         view.stats.chars = start.chars;
-        write(threadId, { view, at: now(), sentAt: null, refreshAt: entry?.refreshAt ?? 0 });
+        write(threadId, { view, at: now() });
         return true;
       }
       const { view } = entry;
@@ -260,33 +243,43 @@ export function createMemoryTracker(recallBudget: number, now: () => number = Da
         view.error = (message || "cortex failed").slice(0, LIMITS.text);
       });
     },
+    matched(threadId, ids, query, chars, ms) {
+      edit(threadId, view => {
+        for (const id of ids) enter(view, id, "prompt", query);
+        view.error = "";
+        view.stats.prompts++;
+        view.stats.lookups++;
+        view.stats.lastMs = Math.max(0, Math.round(ms));
+        view.stats.chars += chars;
+      });
+    },
+    focused(threadId, ids) {
+      edit(threadId, view => {
+        for (const id of ids) addFocus(view, id);
+      });
+    },
+    checkpointing(threadId) {
+      edit(threadId, view => {
+        view.saving = true;
+        view.stats.checkpoints++;
+      });
+    },
+    saved(threadId) {
+      edit(threadId, view => {
+        view.saving = false;
+      });
+    },
     nextRequest(threadId) {
       const entry = entries.get(threadId);
-      if (!entry?.view || entry.sentAt !== null || entry.view.stale === null) return false;
+      if (!entry?.view || entry.view.stale === null) return false;
       edit(threadId, view => {
         view.stale = null;
       });
       return true;
     },
-    report(threadId, view, sentAt) {
-      const entry = entries.get(threadId);
-      if (entry && entry.sentAt !== null && sentAt < entry.sentAt) return false;
-      write(threadId, { view, at: now(), sentAt, refreshAt: entry?.refreshAt ?? 0 });
-      return true;
-    },
     get(threadId) {
       const entry = entries.get(threadId);
       return entry?.view ? { view: entry.view, at: entry.at } : null;
-    },
-    requestRefresh(threadId) {
-      const entry = entries.get(threadId);
-      const at = now();
-      // The view's own time stays: the request is pending until a later report.
-      write(threadId, { view: entry?.view ?? null, at: entry?.at ?? at, sentAt: entry?.sentAt ?? null, refreshAt: at });
-      return at;
-    },
-    refreshAt(threadId) {
-      return entries.get(threadId)?.refreshAt ?? 0;
     },
     forget(threadId) {
       entries.delete(threadId);

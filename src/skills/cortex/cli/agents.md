@@ -35,7 +35,9 @@ writes it to `~/.config/cortex/bb-plugin`, runs `npm ci` there (runtime
 dependencies only) when its dependencies are not installed for this version,
 and registers the directory with bb (`bb plugin install path:<dir>`, which
 also moves a plugin installed from another path and keeps its settings), or
-reloads it when files changed. It never changes the plugin's settings and
+reloads it when files changed. The plugin also carries the skills, which bb
+gives to Claude Code threads (Claude Code does not read `~/.agents/skills`).
+It never changes the plugin's settings and
 shows `cortexPath` when it is set. It skips, and exits 0, when bb is not
 found, bb is not running, or the plugin was installed from git or npm (only
 `reset` replaces that). `reset` removes the plugin from bb, which deletes its

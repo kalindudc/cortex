@@ -56,12 +56,7 @@ export function markerLook(memory: MemoryState | null, error: string | null): Ma
   if (memory === null) return { symbol: s.empty, tone: "muted", title: "loading" };
   const { view } = memory;
   if ((view?.role ?? ROLE[memory.mode]) === "off") return { symbol: "", tone: "muted", title: "off for this thread" };
-  if (view === null) {
-    const title = memory.pi
-      ? "no report from this thread's pi session yet"
-      : "no agent session since the Cortex plugin loaded";
-    return { symbol: s.empty, tone: "muted", title };
-  }
+  if (view === null) return { symbol: s.empty, tone: "muted", title: "no agent session since the Cortex plugin loaded" };
   if (view.error) return { symbol: s.error, tone: "error", title: `error: ${view.error}` };
   if (view.stale) {
     const { id, detail } = view.stale;
@@ -99,11 +94,7 @@ export function summaryHeadline(memory: MemoryState | null, error: string | null
   if (memory === null) return "Loading\u2026";
   const { view } = memory;
   if ((view?.role ?? ROLE[memory.mode]) === "off") return "Off for this thread";
-  if (view === null) {
-    return memory.pi
-      ? "No report from this thread's pi session yet; it arrives with the next message"
-      : "This thread's agent has not started a session since the Cortex plugin loaded";
-  }
+  if (view === null) return "This thread's agent has not started a session since the Cortex plugin loaded";
   if (view.error) return `Error: ${view.error}`;
   if (view.stale) return `@${view.stale.id} is stale: ${view.stale.detail}`;
   if (view.saving) return "Saving: the automatic save turn is running";
@@ -252,16 +243,12 @@ export function MemoryHeaderAction({ threadId, isCompactViewport }: PluginThread
 }
 
 /** The health line in the words of pi's `/memory` (src/extensions/memory-view.ts healthLine), for one view. */
-function healthText(view: MemoryView, pi: boolean): string {
-  if (view.role === "off") return pi ? "off \u2014 CORTEX_MEMORY=off" : "off \u2014 no memory summary and no recall";
+function healthText(view: MemoryView): string {
+  if (view.role === "off") return "off \u2014 no memory summary and no recall";
   if (view.error) return `error \u2014 ${view.error}`;
   if (view.stale) return `stale \u2014 @${view.stale.id}: ${view.stale.detail}`;
   if (view.saving) return "saving \u2014 the memory checkpoint turn is running";
-  if (view.role === "reader") {
-    return pi
-      ? "Look up only: matching tasks arrive with messages and the agent can recall; nothing is saved automatically"
-      : "Look up only: no memory summary; the agent can still recall";
-  }
+  if (view.role === "reader") return "Look up only: no memory summary; the agent can still recall";
   if (view.inContext.length === 0) return "ready \u2014 nothing loaded yet";
   const { lookups, lastMs, chars } = view.stats;
   const done = lookups > 0 ? `${plural(lookups, "lookup")}, last ${lastMs} ms` : "0 lookups";
@@ -324,33 +311,21 @@ function StreamRow({
 
 const NONE = <p className="px-1.5 text-muted-foreground">none yet</p>;
 
-/** The mode menu, the note on when a change applies, and (pi only) re-read. */
+/** The mode menu and the note on when a change applies. */
 function Controls({ memory, onChange }: { memory: MemoryState; onChange: (next: MemoryState) => void }) {
-  const { threadId, pi, view } = memory;
+  const { threadId } = memory;
   const rpc = useCortexRpc();
-  const [busy, setBusy] = useState(false);
   const follow = `Follow the setting (${MODE_LABEL[effectiveMode(memory.setting, null, memory.child)]})`;
   const current = memory.override === null ? follow : MODE_LABEL[memory.override];
   const choose = async (mode: MemoryMode | null) => {
     try {
       onChange(await rpc.call("setMemoryMode", { threadId, mode }));
-      toast(pi ? "Applies from this thread's next message" : "Applies when bb next starts this thread's agent");
+      toast("Applies when bb next starts this thread's agent");
     } catch (cause) {
       toast.error(`Could not change memory: ${errorText(cause)}`);
     }
   };
-  const reread = async () => {
-    setBusy(true);
-    try {
-      onChange(await rpc.call("refreshMemory", { threadId }));
-    } catch (cause) {
-      toast.error(`Could not ask for a re-read: ${errorText(cause)}`);
-    } finally {
-      setBusy(false);
-    }
-  };
   const options: Array<[MemoryMode | null, string]> = [[null, follow], ...MEMORY_MODES.map(m => [m, MODE_LABEL[m]] as [MemoryMode, string])];
-  const pending = memory.refreshAt > (memory.reportedAt ?? 0);
   return (
     <div className="mt-3 flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
@@ -370,18 +345,8 @@ function Controls({ memory, onChange }: { memory: MemoryState; onChange: (next: 
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
-        {pi && memory.mode !== "off" ? (
-          <Button variant="outline" size="sm" className="h-[26px] px-2.5" disabled={busy || pending} onClick={() => void reread()}>
-            {pending ? "Re-read requested" : "Re-read memory"}
-          </Button>
-        ) : null}
       </div>
-      {pi && view !== null && ROLE[memory.mode] !== view.role ? (
-        <p className="text-[11.5px] text-warning-text">{MODE_LABEL[memory.mode]} applies from this thread's next message.</p>
-      ) : null}
-      {pi ? null : (
-        <p className="text-[11.5px] text-muted-foreground">A change applies when bb next starts this thread's agent.</p>
-      )}
+      <p className="text-[11.5px] text-muted-foreground">A change applies when bb next starts this thread's agent.</p>
     </div>
   );
 }
@@ -427,9 +392,7 @@ export function MemoryPanel({ threadId }: PluginThreadPanelProps): ReactNode {
       </header>
       {view === null ? (
         <p className="mt-2 text-muted-foreground">
-          {memory.pi
-            ? "No memory report from this thread's pi session yet. It arrives with the next message; if it never does, run `cortex agents install`."
-            : "This thread's agent has not started a session since the Cortex plugin loaded."}
+          This thread's agent has not started a session since the Cortex plugin loaded.
         </p>
       ) : (
         <p
@@ -439,7 +402,7 @@ export function MemoryPanel({ threadId }: PluginThreadPanelProps): ReactNode {
           )}
           data-testid="memory-health"
         >
-          {healthText(view, memory.pi)}
+          {healthText(view)}
         </p>
       )}
       <Controls memory={memory} onChange={accept} />

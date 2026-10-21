@@ -65,10 +65,11 @@ Memory is a hint; the code and the user are the truth.
 Known limit: automatic hits are lexical, so a conversational prompt can
 surface weak matches. Each hit shows the words it matched (`k/n: ...`);
 skip a hit whose matched words are incidental to the ask. After a
-session's first prompt, pi searches only when the prompt asks for earlier
-work (a recall cue: "continue", "last", "what was", an `@<id>`, ...).
-Recency words ("last", "latest", "current", ...) sort equally matching
-streams newest activity first; status changes are not activity.
+session's first prompt, pi (and the Cortex bb plugin) searches only when
+the prompt asks for earlier work (a recall cue: "continue", "last",
+"what was", an `@<id>`, ...). Recency words ("last", "latest",
+"current", ...) sort equally matching streams newest activity first;
+status changes are not activity.
 
 ## Roles
 

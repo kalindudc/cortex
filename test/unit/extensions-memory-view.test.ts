@@ -7,12 +7,10 @@ import {
   MEMORY_SYMBOLS,
   MemoryPanel,
   type MemoryViewState,
-  memoryReport,
   memoryStatus,
   memorySymbol,
   memoryViewLines,
   memoryViewText,
-  REPORT_LIMITS,
   type StreamInfo,
 } from "../../src/extensions/memory-view.ts";
 
@@ -321,54 +319,6 @@ describe("memoryViewText", () => {
     expect(out).not.toContain("<");
     expect(out).not.toContain("\u2500");
     expect(out).toEndWith("/memory refresh  re-read memory on the next prompt");
-  });
-});
-
-describe("memoryReport", () => {
-  test("carries every field but the spinner frame", () => {
-    const s = loaded({ saving: true, frame: 3, focus: [4], stale: { id: 4, detail: "old" } });
-    const report = memoryReport(s);
-    expect(Object.keys(report).sort()).toEqual([
-      "error",
-      "focus",
-      "inContext",
-      "lane",
-      "recallBudget",
-      "role",
-      "saving",
-      "stale",
-      "stats",
-    ]);
-    const { frame: _frame, ...rest } = s;
-    expect(report).toEqual(rest);
-  });
-
-  test("keeps the newest rows and focus streams and cuts long text to the limits", () => {
-    const long = "x".repeat(REPORT_LIMITS.text + 50);
-    const s = state({
-      error: long,
-      stale: { id: 9, detail: long },
-      focus: Array.from({ length: REPORT_LIMITS.focus + 5 }, (_, i) => i + 1),
-      inContext: Array.from({ length: REPORT_LIMITS.rows + 5 }, (_, i) => ({ id: i + 1, via: "recall" as const })),
-    });
-    const report = memoryReport(s);
-    expect(report.inContext).toHaveLength(REPORT_LIMITS.rows);
-    expect(report.inContext[0]).toEqual({ id: 1, via: "recall" });
-    expect(report.focus).toHaveLength(REPORT_LIMITS.focus);
-    expect(report.focus[0]).toBe(1);
-    expect(report.error).toHaveLength(REPORT_LIMITS.text);
-    expect(report.stale?.detail).toHaveLength(REPORT_LIMITS.text);
-  });
-
-  test("builds a new object and leaves its input unchanged", () => {
-    const s = loaded({ focus: [2, 1], stale: { id: 2, detail: "old" } });
-    const before = structuredClone(s);
-    const report = memoryReport(s);
-    report.focus.push(99);
-    report.inContext.push({ id: 99, via: "summary" });
-    report.stats.prompts = 42;
-    expect(s).toEqual(before);
-    expect(report.stale).not.toBe(s.stale);
   });
 });
 

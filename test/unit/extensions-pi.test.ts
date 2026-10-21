@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 // The embedded pi extension (`src/extensions/pi.ts`, @ts-nocheck) imports pi's
 // runtime packages, which cortex does not depend on. Mock both BEFORE the
@@ -30,8 +33,9 @@ const { default: extension, ...helpers } = (await import("../../src/extensions/p
   checkpointPrompt: (input: Record<string, unknown>) => string;
   RECALL_CUE: RegExp;
   sessionAuthor: (sessionId: string, threadId?: string) => string;
+  shouldStepAside: (toolName?: string, toolsFile?: string, argv?: readonly string[]) => boolean;
 };
-const { memoryRole, focusFromBash, shouldCheckpoint, checkpointPrompt, RECALL_CUE } = helpers;
+const { memoryRole, focusFromBash, shouldCheckpoint, checkpointPrompt, RECALL_CUE, shouldStepAside } = helpers;
 
 type ExecResult = { code: number; killed: boolean; stdout: string; stderr: string };
 type Exec = { cmd: string; args: string[]; opts: Record<string, unknown> };
@@ -57,29 +61,13 @@ const ERROR = "<error>\u2298 memory error</error> <dim>\u00b7 /memory</dim>";
 // The save spinner is the extension's only timer: record intervals instead of running them.
 type Interval = { fn: () => void; ms: number; cleared: boolean };
 let intervals: Interval[] = [];
-// Reports to the Cortex bb plugin: every fetch is recorded and answered by `answer`; `trail`
-// interleaves them with the execs a test chooses to log, so their order can be asserted.
-type Fetched = { url: string; init: RequestInit; body: Any };
-let fetched: Fetched[] = [];
-let trail: string[] = [];
-let answer: (call: Fetched) => Response = () => Response.json({ refreshAt: 0 });
-const originalBbThreadId = process.env.BB_THREAD_ID;
-const originalBbMemoryUrl = process.env.CORTEX_BB_MEMORY_URL;
+// A bb shell sets these (a bb pi thread's tools file, a thread's memory role); tests start without them.
+const SHELL_ENV = ["BB_THREAD_ID", "PI_BB_TOOLS_FILE", "CORTEX_MEMORY"] as const;
+const originalShellEnv = SHELL_ENV.map(key => [key, process.env[key]] as const);
 const realSetInterval = globalThis.setInterval;
 const realClearInterval = globalThis.clearInterval;
-const realFetch = globalThis.fetch;
 beforeEach(() => {
-  delete process.env.BB_THREAD_ID;
-  delete process.env.CORTEX_BB_MEMORY_URL;
-  fetched = [];
-  trail = [];
-  answer = () => Response.json({ refreshAt: 0 });
-  globalThis.fetch = (async (url: string, init: RequestInit) => {
-    const call = { url: String(url), init, body: JSON.parse(String(init.body)) };
-    fetched.push(call);
-    trail.push("fetch");
-    return answer(call);
-  }) as unknown as typeof fetch;
+  for (const key of SHELL_ENV) delete process.env[key];
   intervals = [];
   globalThis.setInterval = ((fn: () => void, ms: number) => {
     intervals.push({ fn, ms, cleared: false });
@@ -91,11 +79,10 @@ beforeEach(() => {
   }) as unknown as typeof clearInterval;
 });
 afterEach(() => {
-  if (originalBbThreadId === undefined) delete process.env.BB_THREAD_ID;
-  else process.env.BB_THREAD_ID = originalBbThreadId;
-  if (originalBbMemoryUrl === undefined) delete process.env.CORTEX_BB_MEMORY_URL;
-  else process.env.CORTEX_BB_MEMORY_URL = originalBbMemoryUrl;
-  globalThis.fetch = realFetch;
+  for (const [key, value] of originalShellEnv) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
   globalThis.setInterval = realSetInterval;
   globalThis.clearInterval = realClearInterval;
 });
@@ -190,7 +177,24 @@ function harness(
     emit("agent_before_settle", { type: "agent_before_settle", outcome, entries: [], continue: false });
   const compact = (summary: string) =>
     emit("session_compact", { type: "session_compact", compactionEntry: { summary }, reason: "manual" });
-  return { tools, commands, execs, statuses, notes, panels, emit, prompt, recall, memory, tool, settle, compact, ctx };
+  const handlerNames = () => Object.keys(handlers);
+  return {
+    tools,
+    commands,
+    execs,
+    statuses,
+    notes,
+    panels,
+    emit,
+    prompt,
+    recall,
+    memory,
+    tool,
+    settle,
+    compact,
+    ctx,
+    handlerNames,
+  };
 }
 
 /** The `memory show` text of a stream with the given staleness line. */
@@ -218,6 +222,68 @@ describe("pi extension registration", () => {
     expect(Object.keys(h.tools).sort()).toEqual(["cortex_recall", "cortex_update"]);
     expect(Object.keys(h.commands)).toEqual(["memory"]);
     expect(h.tools.cortex_recall.description).toContain("Budget: 3 calls per request");
+  });
+});
+
+describe("steps aside in bb", () => {
+  const RPC = ["node", "cli.js", "--mode", "rpc"];
+  const PRINT = ["node", "cli.js", "-p", "hi"];
+  let dir = "";
+  const realArgv = process.argv;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-pi-tools-"));
+  });
+  afterEach(() => {
+    process.argv = realArgv;
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  /** A tools file as bb writes it, set as PI_BB_TOOLS_FILE. */
+  const toolsFile = (contents: string) => {
+    const file = path.join(dir, "pi-tools.json");
+    fs.writeFileSync(file, contents);
+    process.env.PI_BB_TOOLS_FILE = file;
+    return file;
+  };
+  const bridged = () => toolsFile(JSON.stringify([{ name: "quest" }, { name: "cortex_update" }]));
+  const registered = (argv: string[]) => {
+    process.argv = argv;
+    const h = harness();
+    return { tools: Object.keys(h.tools), commands: Object.keys(h.commands), handlers: h.handlerNames() };
+  };
+
+  test("bb's RPC-mode pi with the plugin's cortex_update bridged: no tools, commands or handlers", () => {
+    bridged();
+    for (const argv of [RPC, ["node", "cli.js", "--mode=rpc"]]) {
+      expect(shouldStepAside("cortex_update", process.env.PI_BB_TOOLS_FILE, argv)).toBe(true);
+      expect(registered(argv)).toEqual({ tools: [], commands: [], handlers: [] });
+    }
+  });
+
+  test("a pi -p from the thread's shell inherits the file but keeps the extension", () => {
+    bridged();
+    expect(shouldStepAside("cortex_update", process.env.PI_BB_TOOLS_FILE, PRINT)).toBe(false);
+    const { tools, commands, handlers } = registered(PRINT);
+    expect(tools.sort()).toEqual(["cortex_recall", "cortex_update"]);
+    expect(commands).toEqual(["memory"]);
+    expect(handlers).toContain("before_agent_start");
+  });
+
+  test("unset, missing, invalid, non-array or a list without cortex_update: plain pi, even in RPC mode", () => {
+    expect(shouldStepAside("cortex_update", undefined, RPC)).toBe(false);
+    expect(shouldStepAside("cortex_update", path.join(dir, "missing.json"), RPC)).toBe(false);
+    for (const contents of ["{not json", '{"name":"cortex_update"}', '[null,"cortex_update",{"name":"quest"}]']) {
+      const file = toolsFile(contents);
+      expect(shouldStepAside("cortex_update", file, RPC)).toBe(false);
+      expect(registered(RPC).tools.sort()).toEqual(["cortex_recall", "cortex_update"]);
+    }
+    delete process.env.PI_BB_TOOLS_FILE;
+    expect(registered(RPC).tools.sort()).toEqual(["cortex_recall", "cortex_update"]);
+  });
+
+  test("follows the tool name it is given", () => {
+    const file = bridged();
+    expect(shouldStepAside("quest", file, RPC)).toBe(true);
+    expect(shouldStepAside("minion", file, RPC)).toBe(false);
   });
 });
 
@@ -1087,161 +1153,5 @@ describe("the memory status and /memory (plan @423)", () => {
     expect(text).toContain("    @4 \u00b7 matched \u201cfix the mouse wheel\u201d");
     expect(text).toContain("titles unavailable: cortex ls --json failed");
     expect(h.statuses.at(-1)).toBe(LOADED);
-  });
-});
-
-describe("bb memory report", () => {
-  const THREAD_ID = "thr_2qj8qzdqqr";
-  const URL = "http://127.0.0.1:38886/api/v1/plugins/cortex/http/memory";
-  const inBb = (env: Record<string, string> = { BB_THREAD_ID: THREAD_ID, CORTEX_BB_MEMORY_URL: URL }) => {
-    delete process.env.BB_THREAD_ID;
-    delete process.env.CORTEX_BB_MEMORY_URL;
-    Object.assign(process.env, env);
-  };
-  /** Lets fire-and-forget reports and their answers finish. */
-  const flush = () => new Promise(resolve => setTimeout(resolve, 0));
-  /** Context execs log themselves into the trail; recalls answer a stream or a search. */
-  const respond =
-    (over: Record<string, unknown> = {}) =>
-    (args: string[]) => {
-      if (args[0] === "memory" && args[1] === "context") trail.push("exec");
-      if (args[1] === "show") return ok("STREAM 5");
-      if (args[1] === "search") return ok("- [8] open \u00b7 cortex \u00b7 a");
-      if (args[0] === "update") return ok("\u2713 update posted");
-      return context(over);
-    };
-
-  test("without the address, a valid thread id or pi's rpc mode, a whole request makes no fetch", async () => {
-    const cases: [Record<string, string>, string][] = [
-      [{ CORTEX_BB_MEMORY_URL: URL }, "rpc"],
-      [{ BB_THREAD_ID: THREAD_ID }, "rpc"],
-      [{ BB_THREAD_ID: "thr_BAD", CORTEX_BB_MEMORY_URL: URL }, "rpc"],
-      [{ BB_THREAD_ID: THREAD_ID, CORTEX_BB_MEMORY_URL: "file:///tmp/memory" }, "rpc"],
-      [{ BB_THREAD_ID: THREAD_ID, CORTEX_BB_MEMORY_URL: URL }, "print"],
-      [{ BB_THREAD_ID: THREAD_ID, CORTEX_BB_MEMORY_URL: URL }, "tui"],
-    ];
-    for (const [env, mode] of cases) {
-      inBb(env);
-      const h = harness(respond(), { mode });
-      await h.emit("session_start", { type: "session_start", reason: "startup" });
-      await h.prompt("continue the mouse wheel work");
-      await h.recall("@5");
-      await h.tool("edit", { path: "a.ts" });
-      await h.settle();
-      running()[0]?.fn();
-      await h.emit("agent_end", { type: "agent_end", messages: [] });
-      await h.compact("progress summary");
-      await flush();
-      expect(fetched).toEqual([]);
-    }
-  });
-
-  test("bb's pi sends its view on start, awaits one report before each lookup, and resends only a changed view", async () => {
-    inBb();
-    const h = harness(respond({ hits: [{ id: 4 }], hitsText: "HIT 4" }), { mode: "rpc" });
-    await h.emit("session_start", { type: "session_start", reason: "startup" });
-    await flush();
-    expect(trail).toEqual(["fetch"]);
-    await h.prompt("fix the mouse wheel");
-    await flush();
-    // The awaited report, the lookup, then the view after injection (agent_end changes nothing).
-    expect(trail).toEqual(["fetch", "fetch", "exec", "fetch"]);
-    const [initial, awaited, after] = fetched;
-    expect(initial?.url).toBe(URL);
-    expect(initial?.init.method).toBe("POST");
-    expect(new Headers(initial?.init.headers).get("content-type")).toBe("application/json");
-    expect(Object.keys(awaited?.body ?? {}).sort()).toEqual(["sentAt", "threadId", "view"]);
-    expect(awaited?.body.threadId).toBe(THREAD_ID);
-    expect(Number.isInteger(awaited?.body.sentAt)).toBe(true);
-    expect(awaited?.body.view).not.toHaveProperty("frame");
-    expect(awaited?.body.view).toMatchObject({ role: "writer", saving: false, stats: { prompts: 0 } });
-    expect(after?.body.view).toMatchObject({
-      lane: "cortex",
-      stats: { prompts: 1, lookups: 1 },
-      inContext: [{ id: 4, via: "prompt", query: "fix the mouse wheel" }],
-    });
-
-    // A checkpoint's saving view is sent once; its spinner frames send nothing.
-    await h.recall("@5");
-    await h.tool("edit", { path: "a.ts" });
-    await h.settle();
-    await flush();
-    expect(fetched).toHaveLength(5);
-    expect(fetched.at(-1)?.body.view.saving).toBe(true);
-    for (let i = 0; i < 4; i++) running()[0]?.fn();
-    await flush();
-    expect(fetched).toHaveLength(5);
-    await h.emit("agent_end", { type: "agent_end", messages: [] });
-    await h.emit("agent_end", { type: "agent_end", messages: [] });
-    await flush();
-    expect(fetched).toHaveLength(6);
-    expect(fetched.at(-1)?.body.view.saving).toBe(false);
-  });
-
-  test("a newer refreshAt in any answer re-reads memory once: before injecting, or on the next prompt", async () => {
-    inBb();
-    let refreshAt = 0;
-    answer = () => Response.json({ refreshAt });
-    const h = harness(
-      args =>
-        args.some(arg => arg.startsWith("--query="))
-          ? respond({ primerIds: [3], hits: [{ id: 4 }], hitsText: "HIT 4" })(args)
-          : respond({ primerIds: [3] })(args),
-      { mode: "rpc" },
-    );
-    await h.prompt("fix the mouse wheel");
-    expect(await h.memory()).toContain("In context (2)");
-
-    // Asked while idle: the awaited report's answer applies before this prompt injects.
-    refreshAt = 5;
-    await h.prompt("yes");
-    expect(contextExecs(h.execs)).toHaveLength(2);
-    expect(contextExecs(h.execs)[1]?.args).not.toContain("--no-primer");
-    expect(flag(contextExecs(h.execs)[1]?.args ?? [], "exclude")).toBeUndefined();
-    expect(await h.memory()).toContain("In context (1)");
-
-    // The same refreshAt is not applied twice.
-    await h.prompt("yes");
-    expect(contextExecs(h.execs)).toHaveLength(2);
-
-    // A newer one in a fire-and-forget answer makes the next prompt re-read.
-    refreshAt = 9;
-    await h.recall("wheel notches");
-    await flush();
-    await h.prompt("yes");
-    expect(contextExecs(h.execs)).toHaveLength(3);
-    expect(contextExecs(h.execs)[2]?.args).not.toContain("--no-primer");
-  });
-
-  test("a rejected fetch or an HTTP 500 never throws or shows a memory error; awaiting resumes after a success", async () => {
-    inBb();
-    let fail: "reject" | 500 | null = "reject";
-    answer = () => {
-      if (fail === "reject") throw new Error("connection refused");
-      if (fail === 500) return new Response("boom", { status: 500 });
-      return Response.json({ refreshAt: 0 });
-    };
-    const h = harness(respond(), { mode: "rpc" });
-    await h.emit("session_start", { type: "session_start", reason: "startup" });
-    await flush();
-    const step = async (text: string) => {
-      trail = [];
-      const { event } = await h.prompt(text);
-      await flush();
-      expect(event.systemPromptOptions.sections.cortex_memory).toBe("PRIMER");
-      return trail;
-    };
-    // Each failure skips the next prompt's awaited report; the view after injection still goes.
-    expect(await step("fix the mouse wheel")).toEqual(["exec", "fetch"]);
-    fail = 500;
-    expect(await step("continue the mouse wheel work")).toEqual(["exec", "fetch"]);
-    fail = null;
-    expect(await step("continue the scroll work")).toEqual(["exec", "fetch"]);
-    expect(await step("continue the dialog work")).toEqual(["fetch", "exec", "fetch"]);
-    fail = "reject";
-    expect(await step("continue the dialog rows")).toEqual(["fetch", "exec", "fetch"]);
-    expect(await step("continue the dialog rows again")).toEqual(["exec", "fetch"]);
-    expect(h.statuses).not.toContain(ERROR);
-    expect(await h.memory()).toContain("\u25cb ready \u2014 nothing loaded yet");
   });
 });

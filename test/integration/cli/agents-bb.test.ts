@@ -48,20 +48,32 @@ const INSTALL_CALLS = [
   "bb plugin config cortex --json",
 ];
 
-/** The repository's plugin files that the binary must embed: everything but dotfiles and test-only files. */
-function expectedPluginFiles(): string[] {
-  const listed = Bun.spawnSync(["git", "ls-files", "--cached", "--others", "--exclude-standard", "integrations/bb"], {
-    cwd: ROOT,
-  });
+/** Repository files under `dir`, relative to it. */
+function listedFiles(dir: string): string[] {
+  const listed = Bun.spawnSync(["git", "ls-files", "--cached", "--others", "--exclude-standard", dir], { cwd: ROOT });
   expect(listed.exitCode).toBe(0);
   return new TextDecoder()
     .decode(listed.stdout)
     .split("\n")
     .filter(Boolean)
-    .map(file => file.slice("integrations/bb/".length))
+    .map(file => file.slice(`${dir}/`.length));
+}
+
+/**
+ * The repository's plugin files that the binary must embed: everything but dotfiles and test-only files, plus the
+ * bundled skills under skills/.
+ */
+function expectedPluginFiles(): string[] {
+  const plugin = listedFiles("integrations/bb")
     .filter(file => !path.basename(file).startsWith("."))
-    .filter(file => !/\.test\.tsx?$/.test(file) && file !== "fake-cortex.ts" && file !== "vitest.config.ts")
-    .sort();
+    .filter(file => !/\.test\.tsx?$/.test(file) && file !== "fake-cortex.ts" && file !== "vitest.config.ts");
+  const skills = listedFiles("src/skills").map(file => `skills/${file}`);
+  return [...plugin, ...skills].sort();
+}
+
+/** Where an embedded plugin file comes from in the repository. */
+function sourceOf(file: string): string {
+  return file.startsWith("skills/") ? path.join(ROOT, "src", file) : path.join(ROOT, "integrations", "bb", file);
 }
 
 function writtenFiles(dir: string): string[] {
@@ -91,9 +103,7 @@ describe("cortex agents install: the bb plugin", () => {
     expect(expected).toContain("panel/panel.tsx");
     expect(writtenFiles(s.dir)).toEqual(expected);
     for (const file of expected) {
-      expect(fs.readFileSync(path.join(s.dir, file), "utf8"), file).toBe(
-        fs.readFileSync(path.join(ROOT, "integrations", "bb", file), "utf8"),
-      );
+      expect(fs.readFileSync(path.join(s.dir, file), "utf8"), file).toBe(fs.readFileSync(sourceOf(file), "utf8"));
     }
     expect(s.fake.state().plugin).toMatchObject({ source: `path:${s.dir}`, status: "running" });
   });

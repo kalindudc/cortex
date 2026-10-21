@@ -1,7 +1,7 @@
 ---
 budget: 200
 sources: [src/memory.ts, src/store.ts, src/commands/memory.ts, src/server.ts, src/extensions/pi.ts,
-  src/extensions/memory-view.ts, src/skills/cortex/recipes/memory.md]
+  src/extensions/memory-view.ts, src/skills/cortex/recipes/memory.md, integrations/bb/turns.ts]
 ---
 # Agent memory
 
@@ -50,7 +50,8 @@ With pi (the coding agent cortex ships an extension for), memory arrives on its 
   `@42`), relevant streams it has not seen yet arrive as a hidden message.
 - The `cortex_recall` tool loads a stream (`"@42"`), one section of it (`"@42#next"`), or searches by keywords.
 
-Without pi, an agent runs `cortex memory context --query="<the ask>"` once, then `cortex memory show <id>`.
+In bb the Cortex plugin gives every provider the primer and `cortex_recall`; pi, Claude Code and Codex get hits too.
+Elsewhere without pi, an agent runs `cortex memory context --query="<the ask>"` once, then `cortex memory show <id>`.
 
 Search matches words and their forms, and each hit shows which words matched. Full paths, links, commit hashes, UUIDs,
 pasted code blocks and small talk in the ask are ignored, so they never pull in unrelated streams; a repo-relative
@@ -77,9 +78,8 @@ The footer holds a quiet memory marker that fills in once memory is in context. 
 a memory call failed (red), the agent is using a stale stream (yellow, with its id), or the automatic save turn is
 running (a spinner). `/memory` opens a panel: health, the streams this session is working on, every stream in
 context and why (session summary, matched your prompt, recalled by the agent) and the session's totals. It ends
-with a legend of the symbols; `r` re-reads memory on the next prompt. bb does not show pi's footer or `/memory`
-text; with the Cortex bb plugin an icon beside each thread's context circle shows the same states and the panel is
-its Memory tab ([docs/bb.md](bb.md#memory-in-the-prompt-box-and-the-memory-tab)).
+with a legend of the symbols; `r` re-reads memory on the next prompt. In bb the extension steps aside and the Cortex
+plugin's icon and Memory tab show the same states ([docs/bb.md](bb.md#memory-in-the-prompt-box-and-the-memory-tab)).
 
 Only the session you type into writes memory; headless ones (delegated agents, `pi -p` scripts) only read.
 `CORTEX_MEMORY=write|read|off` overrides that for the whole process.
@@ -163,9 +163,8 @@ pure functions of state and theme in `src/extensions/memory-view.ts`, installed 
   otherwise it needs two content words (`src/extensions/pi.ts#contentWords`, a cheap gate: the CLI's terms decide
   the hits) and either the first prompt or a `src/extensions/pi.ts#RECALL_CUE` match.
   The primer is refetched only after compaction or `/memory refresh`; errors go to the footer, never the prompt.
-- In bb, `src/extensions/pi.ts#reportToBb` sends the view to the Cortex plugin: one awaited report per prompt,
-  bounded by `src/extensions/pi.ts#BB_REPORT_TIMEOUT_MS` and skipped while the last one failed, and one per changed
-  view. It never throws or sets the memory error, and outside bb it makes no call ([docs/bb.md](bb.md#under-the-hood)).
+- In bb, `src/extensions/pi.ts#shouldStepAside` sees the plugin's `cortex_update` in `PI_BB_TOOLS_FILE` and
+  registers nothing ([docs/bb.md](bb.md#under-the-hood)).
 - `cortex_recall` claims a query before it runs (pi runs one message's tool calls in parallel). Failures throw:
   pi ignores a returned `isError`, and `pi.exec` reports a timeout as a success marked killed.
 - `src/extensions/pi.ts#shouldCheckpoint` (writer only) grants one hidden turn to a completed request that edited

@@ -3,7 +3,7 @@ budget: 160
 sources: [integrations/bb/server.ts, integrations/bb/state.ts, integrations/bb/watch.ts, integrations/bb/app.tsx,
   integrations/bb/cli.ts, integrations/bb/detail.ts, integrations/bb/memory.ts, integrations/bb/panel/,
   src/commands/agents.ts, src/commands/update.ts, src/bbPlugin.ts, src/bbPluginSource.ts, src/extensions/pi.ts,
-  src/extensions/memory-view.ts]
+  src/extensions/memory-view.ts, integrations/bb/turns.ts]
 ---
 # Cortex in bb
 
@@ -28,14 +28,15 @@ the tabs and the chips show the same reason.
 
 ## What each provider gets
 
-- Pi threads keep the Cortex pi extension (from `cortex agents install`) exactly as it is. The plugin adds no tools or
-  instructions, only the address to report memory to and, for Look up only or Off, the `CORTEX_MEMORY` variable the
-  extension already reads. They still get the tabs, the chips and the cards.
-- Threads on other providers, such as Codex or Claude Code, get `cortex_update` and `cortex_recall` with the same
-  names and arguments as the pi tools. Updates are credited to `bb-<thread id>`, the same author the CLI uses inside
-  a bb thread. Their instructions also carry short usage notes and the project's memory primer, the summary of
-  recent tasks that pi injects (see [docs/memory.md](memory.md#how-do-agents-find-memory)). Look up only leaves the
-  primer out; Off also drops `cortex_recall` and its notes, keeping `cortex_update`.
+- Every provider, pi, Codex, Claude Code and the rest, gets `cortex_update` and `cortex_recall`, credited to
+  `bb-<thread id>` (the author the CLI uses inside a bb thread), plus short usage notes and the project's memory
+  primer, the summary of recent tasks (see [docs/memory.md](memory.md#how-do-agents-find-memory)). Look up only leaves
+  the primer out; Off also drops `cortex_recall` and its notes, keeping `cortex_update`.
+- Claude Code also gets the four cortex skills from the plugin, because it reads only `~/.claude/skills`; the other
+  providers read the copies `cortex agents install` writes to `~/.agents/skills`. The pi extension steps aside in a bb
+  pi thread, so the plugin brings the tasks matching a message to pi, Claude Code and Codex threads, and the save
+  turn to every thread that looks up and saves; there are no compaction snapshots. A `pi -p` from that thread's shell
+  keeps the extension.
 
 bb asks for a thread's tools and instructions when the thread starts and cannot wait for cortex at that moment, so
 the plugin keeps one primer per project in a cache, filled when a thread in that project is created or starts a
@@ -74,15 +75,14 @@ from a new, separate thread, because bb applies tools and instructions only when
 
 A brain icon beside the context circle under each thread's prompt box, or, except on a phone, in the thread header when
 that row is off screen (the task chip then steps aside), shows memory in pi's footer colours: accent once memory is in
-context, yellow for a stale stream, red after a failed memory call, pulsing while pi's save turn runs. Hovering it
-summarises the thread's memory and Cortex task, with a bar of where the streams in context came from; clicking it opens
-the Memory tab. The tab shows what pi's `/memory` shows: health, the streams the thread works on, every stream in
-context and why, and the session's totals (for another provider, what the plugin gave and the agent recalled).
+context, yellow for a stale stream, red after a failed memory call, pulsing while the automatic save turn runs.
+Hovering it summarises the thread's memory and Cortex task, with a bar of where the streams in context came from;
+clicking it opens the Memory tab. The tab shows what pi's `/memory` shows: health, the streams the thread works on,
+every stream in context and why, and the session's totals (what the plugin gave and the agent recalled).
 
-The tab's menu sets this thread's memory: follow the setting, Look up and save, Look up only, or Off. A pi thread
-applies a change from its next message, when bb rebuilds the pi session and keeps its conversation; another provider
-applies it when bb next starts its session. In a pi thread, Re-read memory works like `/memory refresh`. After a
-plugin reload the tab waits for the thread's next memory event, and a checkout on another machine may never report.
+The tab's menu sets this thread's memory: follow the setting, Look up and save, Look up only, or Off. A change
+applies when bb next starts the thread's agent session. After a plugin reload the tab waits for the thread's next
+memory event.
 
 ## Under the hood
 
@@ -116,17 +116,17 @@ the SDK, portaling Radix components) are type-only development dependencies; zod
 - The frontend reads data only over the plugin's RPC methods and refetches on the `thread`, `task`, `memory` and `all`
   realtime signals (`./integrations/bb/state.ts#CortexRealtimeChannel`). A write drops the task's cached reads and
   publishes both signals; the tab applies a status change at once and reverts it if the write fails.
-- bb ignores a pi extension's footer status, so `src/extensions/pi.ts#reportToBb` posts
-  `src/extensions/memory-view.ts#memoryReport` to the plugin's local route: awaited at most once per prompt
-  (`src/extensions/pi.ts#BB_REPORT_TIMEOUT_MS`), otherwise only for a changed view, never throwing. Only bb's rpc-mode
-  pi reports, since a `pi -p` in the thread's shell inherits its variables; the answer carries the last re-read request.
-- `./integrations/bb/memory.ts#effectiveMode` picks the mode (the thread's choice, else the setting), which reaches pi
-  as `CORTEX_MEMORY` beside the report address (`./integrations/bb/server.ts#memoryEnv`). Why not answer it in the
-  report? A plugin that is down would let a child thread save again. `write` is never sent: the variable is
-  process-wide, so pi's `pi -p` helpers would save too. A changed environment rebuilds the pi session, so a failed
-  lookup repeats the thread's last entries.
-- `./integrations/bb/memory.ts#createMemoryTracker` keeps pi's reports (`./integrations/bb/memory.ts#memoryViewSchema`)
-  and other providers' views, built from configure and the tools; the `memory` RPC serves both and runs no CLI.
+- In bb's own pi, `src/extensions/pi.ts#shouldStepAside` finds the plugin's `cortex_update` in the tools file bb
+  writes (`PI_BB_TOOLS_FILE`), as the quests and minions packages do, and the extension registers nothing.
+- `./integrations/bb/turns.ts#registerMemoryTurns` reads each request from bb's events, steers matching tasks in as an
+  agent-only message only where the bridge injects a steer (an ACP steer cancels the prompt), and starts pi's checkpoint
+  with mode "start"; it copies `src/extensions/pi.ts#injectMemory` and `src/extensions/pi.ts#checkpointPrompt`.
+- The binary embeds `src/skills/` as the plugin's `skills/` (`src/bbPluginSource.ts#embeddedBbPlugin`), and
+  `./integrations/bb/server.ts#skillsFor` selects only the skills `./integrations/bb/server.ts#pluginSkillNames`
+  found in the install directory, since bb fails a configure that names an unknown skill.
+- `./integrations/bb/memory.ts#effectiveMode` picks the mode: the thread's choice, else the setting.
+- `./integrations/bb/memory.ts#createMemoryTracker` builds each thread's view
+  (`./integrations/bb/memory.ts#memoryViewSchema`) from configure and the tools; the `memory` RPC runs no CLI.
 - The icon is a header action, since bb mounts only its three most-used plugins' prompt-box actions;
   `./integrations/bb/panel/footer.ts#useFooterMount` moves it beside the context circle, as Thread Spend does. It
   never moves a node already there, so two plugins beside the circle never loop.
@@ -140,12 +140,12 @@ the SDK, portaling Radix components) are type-only development dependencies; zod
 
 - The plugin imports only the public bb SDK, zod, Node and its own files, never cortex's source:
   `./integrations/bb/server.test.ts` (public SDK scan).
-- Pi threads get no plugin tools, skills or instructions; other providers get both tools (only `cortex_update` with
-  memory off), and instructions stay within the limit without running the CLI: `./integrations/bb/server.test.ts`.
-- bb's pi never gets `CORTEX_MEMORY=write`, threads started by another thread look up only by default, and the report
-  schema mirrors the extension's: `./integrations/bb/server.test.ts`, `./integrations/bb/memory.test.ts`,
-  `test/unit/extensions-memory-view.test.ts`.
-- Only bb's own pi reports, never blocking a prompt past its timeout, throwing or counting as a memory error:
+- Every provider gets both tools (only `cortex_update` with memory off) and the instructions, which stay within the
+  limit without running the CLI; only Claude Code gets the skills, and nobody while Cortex is unavailable:
+  `./integrations/bb/server.test.ts`. Threads started by another thread look up only by default:
+  `./integrations/bb/memory.test.ts`. Matching tasks come only for a user's cued or first request, and at most one
+  agent-only save turn per request: `./integrations/bb/turns.test.ts`, `./integrations/bb/server.test.ts`.
+- The extension registers nothing in bb's RPC-mode pi when bb bridges `cortex_update`:
   `test/unit/extensions-pi.test.ts`. The icon and the chip follow their settings, the icon never moves a node already
   in the footer, and every opener reuses the one Cortex tab: `./integrations/bb/app.test.tsx` (one Cortex tab).
 - Tool failures throw, `cortex_recall` keeps the pi extension's per-request budget, and every tool argument, RPC

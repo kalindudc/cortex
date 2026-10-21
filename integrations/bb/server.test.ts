@@ -11,8 +11,16 @@ import {
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { createFakeCortex, type FakeCortex, type FakeFixture, type FakeTask } from "./fake-cortex";
 import type { MemoryView } from "./memory";
-import plugin, { instructionsFor, USAGE, usageFor } from "./server";
+import plugin, {
+  instructionsFor,
+  PLUGIN_SKILL_PROVIDERS,
+  pluginSkillNames,
+  skillsFor,
+  USAGE,
+  usageFor,
+} from "./server";
 import { REMOTE_REASON } from "./state";
+import type { EventRow } from "./turns";
 import { routeCortexEvent } from "./watch";
 
 const THREAD = "thr_aaaaaaaa";
@@ -20,10 +28,11 @@ const REMOTE = "thr_bbbbbbbb";
 const OTHER = "thr_cccccccc";
 /** A thread whose title lookup fails. */
 const GONE = "thr_ffffffff";
-/** A top-level pi thread, and a pi thread started by it. */
-const PI = "thr_pppppppp";
-const PI_CHILD = "thr_qqqqqqqq";
+/** A thread started by THREAD. */
+const CHILD = "thr_qqqqqqqq";
 const PROJECT = "proj_1";
+/** The skills the plugin's install directory holds in these tests. */
+const SKILLS = ["cortex", "cortex-planner"];
 const USER = "kalindu-test";
 
 function task(id: number, extra: Partial<FakeTask["task"]> = {}, rest: Partial<FakeTask> = {}): FakeTask {
@@ -58,20 +67,45 @@ function baseFixture(): FakeFixture {
   };
 }
 
+/** Skill directories as bb reads them: `<root>/skills/<name>/SKILL.md`. */
+function writeSkills(root: string, names: readonly string[]): void {
+  for (const name of names) {
+    fs.mkdirSync(path.join(root, "skills", name), { recursive: true });
+    fs.writeFileSync(path.join(root, "skills", name, "SKILL.md"), `---\nname: ${name}\n---\n`);
+  }
+}
+
+const names = (tools: Array<{ name: string }>) => tools.map(tool => tool.name).sort();
+
 type Setup = Awaited<ReturnType<typeof setup>>;
 const disposers: Array<() => Promise<void> | void> = [];
 afterEach(async () => {
   for (const dispose of disposers.splice(0).reverse()) await dispose();
 });
 
-async function setup(options: { fixture?: FakeFixture; running?: string[]; cortexPath?: string } = {}) {
+async function setup(
+  options: { fixture?: FakeFixture; running?: string[]; cortexPath?: string; skillsDir?: boolean } = {},
+) {
   const cortex: FakeCortex = createFakeCortex(options.fixture ?? baseFixture());
   disposers.push(cortex.cleanup);
   const checkout = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "cortex-bb-checkout-")));
   disposers.push(() => fs.rmSync(checkout, { recursive: true, force: true }));
+  // The plugin's install directory: SKILLS under skills/, or no skills/ at all.
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-bb-plugin-"));
+  disposers.push(() => fs.rmSync(rootDir, { recursive: true, force: true }));
+  if (options.skillsDir !== false) writeSkills(rootDir, SKILLS);
+  let listed = 0;
   const metadata = new Map<string, Record<string, unknown>>();
   /** Threads whose lookup fails from now on. */
   const broken = new Set<string>();
+  /** Per thread: bb's event rows (ascending seq), its queued messages, and the status and provider bb reports. */
+  const events = new Map<string, EventRow[]>();
+  const queued = new Map<string, unknown[]>();
+  const live = new Map<string, { status: "active" | "idle"; providerId: string }>();
+  const sent: Array<{ threadId: string; mode: string; input: Array<Record<string, unknown>> }> = [];
+  let sendFails: string | null = null;
+  // environments.get waits for this, so a test can hold a lookup at `state.locate`.
+  let gate: Promise<void> = Promise.resolve();
   const sdk = {
     threads: {
       get: async ({ threadId }: { threadId: string }) => {
@@ -81,10 +115,33 @@ async function setup(options: { fixture?: FakeFixture; running?: string[]; corte
           projectId: PROJECT,
           title: `Thread ${threadId}`,
           environmentId: threadId === REMOTE ? "env_remote" : "env_local",
-          ...(threadId === PI || threadId === PI_CHILD ? { providerId: "pi" } : {}),
-          ...(threadId === PI_CHILD ? { parentThreadId: PI } : {}),
+          ...(threadId === CHILD ? { parentThreadId: THREAD } : {}),
+          ...live.get(threadId),
         });
       },
+      events: {
+        list: async (args: {
+          threadId: string;
+          afterSeq?: string;
+          order?: "asc" | "desc";
+          limit?: string;
+          types?: readonly string[];
+        }) => {
+          const rows = (events.get(args.threadId) ?? []).filter(
+            row =>
+              (args.afterSeq === undefined || row.seq > Number(args.afterSeq)) &&
+              (args.types === undefined || args.types.includes(row.type)),
+          );
+          const ordered = args.order === "desc" ? [...rows].reverse() : rows;
+          return ordered.slice(0, Number(args.limit ?? "100"));
+        },
+      },
+      send: async (args: { threadId: string; mode: string; input: Array<Record<string, unknown>> }) => {
+        sent.push(args);
+        if (sendFails !== null) throw new Error(sendFails);
+        return { status: "started" };
+      },
+      queuedMessages: { list: async ({ threadId }: { threadId: string }) => queued.get(threadId) ?? [] },
       getPluginMetadata: async ({ threadId }: { threadId: string }) => metadata.get(threadId) ?? {},
       updatePluginMetadata: async ({
         threadId,
@@ -103,18 +160,28 @@ async function setup(options: { fixture?: FakeFixture; running?: string[]; corte
       listRunning: async () => (options.running ?? []).map(id => ({ id, hostId: "host_local" })),
     },
     environments: {
-      get: async ({ environmentId }: { environmentId: string }) => ({
-        id: environmentId,
-        hostId: environmentId === "env_remote" ? "host_remote" : "host_local",
-        path: checkout,
-      }),
+      get: async ({ environmentId }: { environmentId: string }) => {
+        await gate;
+        return {
+          id: environmentId,
+          hostId: environmentId === "env_remote" ? "host_remote" : "host_local",
+          path: checkout,
+        };
+      },
     },
     system: { config: async () => ({ primaryHostId: "host_local" }) },
+    plugins: {
+      list: async () => {
+        listed++;
+        return { plugins: [{ id: "other", rootDir: checkout }, { id: "cortex", rootDir }] };
+      },
+    },
   };
   const { bb, harness } = createFakePluginHost({
     pluginId: "cortex",
     settings: { cortexPath: options.cortexPath ?? cortex.binary },
     sdk: sdk as never,
+    agentSkillIds: SKILLS,
   });
   await plugin(bb);
   disposers.push(() => harness.lifecycle.dispose());
@@ -126,8 +193,95 @@ async function setup(options: { fixture?: FakeFixture; running?: string[]; corte
     harness.behavior.resolveAgentConfiguration(
       makePluginAgentConfigurationContext({ provider: { id: providerId }, project: { id: PROJECT }, ...over }),
     );
-  return { bb, harness, cortex, checkout, metadata, broken, argvs, resolve };
+  let seq = 0;
+  const push = (threadId: string, type: string, data: unknown): void => {
+    events.set(threadId, [...(events.get(threadId) ?? []), { seq: ++seq, type, createdAt: Date.now(), data }]);
+  };
+  /** bb records a request and the thread turns active, as bb does before the plugin's thread.active. */
+  const request = (
+    threadId: string,
+    text: string,
+    over: { provider?: string; initiator?: string; first?: boolean; agentOnly?: boolean } = {},
+  ) => {
+    const part = { type: "text", text, mentions: [], ...(over.agentOnly ? { visibility: "agent-only" } : {}) };
+    const target = { kind: over.first ? "thread-start" : "new-turn" };
+    push(threadId, "client/turn/requested", { input: [part], initiator: over.initiator ?? "user", target });
+    const providerId = over.provider ?? "codex";
+    live.set(threadId, { status: "active", providerId });
+    return harness.behavior.emitThreadEvent("thread.active", {
+      thread: makeThreadResponse({
+        id: threadId,
+        projectId: PROJECT,
+        providerId,
+        status: "active",
+        parentThreadId: threadId === CHILD ? THREAD : null,
+      }),
+    });
+  };
+  /** The request's completed items and its turn end, then the thread turns idle. */
+  const finish = (threadId: string, items: Array<Record<string, unknown>> = [], status = "completed") => {
+    for (const item of items) push(threadId, "item/completed", { item });
+    push(threadId, "turn/completed", { status });
+    const providerId = live.get(threadId)?.providerId ?? "codex";
+    live.set(threadId, { status: "idle", providerId });
+    return idle(threadId);
+  };
+  const idle = (threadId: string) =>
+    harness.behavior.emitThreadEvent("thread.idle", {
+      thread: makeThreadResponse({ id: threadId, projectId: PROJECT, parentThreadId: threadId === CHILD ? THREAD : null }),
+      lastAssistantText: null,
+    });
+  /** Holds every environment lookup until the returned release is called. */
+  const hold = (): (() => void) => {
+    let release = () => {};
+    gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    return () => {
+      gate = Promise.resolve();
+      release();
+    };
+  };
+  return {
+    bb,
+    harness,
+    cortex,
+    checkout,
+    metadata,
+    broken,
+    argvs,
+    resolve,
+    listed: () => listed,
+    events,
+    queued,
+    live,
+    sent,
+    failSend: (reason: string | null) => {
+      sendFails = reason;
+    },
+    push,
+    request,
+    finish,
+    idle,
+    hold,
+  };
 }
+
+const fileChange = (...paths: string[]) => ({
+  type: "fileChange",
+  id: `f-${paths.join(",")}`,
+  status: "completed",
+  changes: paths.map(path => ({ path, kind: "update" })),
+});
+const command = (cmd: string, output = "") => ({
+  type: "commandExecution",
+  id: `c-${cmd}`,
+  status: "completed",
+  command: cmd,
+  cwd: "/",
+  aggregatedOutput: output,
+});
+const agentOnlyText = (text: string) => ({ type: "text", text, mentions: [], visibility: "agent-only" });
 
 const threadSignal = (threadId: string) => ({ channel: "thread", payload: { threadId } });
 const taskSignal = (taskId: number) => ({ channel: "task", payload: { taskId } });
@@ -149,18 +303,48 @@ test("imports only the public SDK, zod, Node, the vendored UI and test tooling; 
 });
 
 describe("agent configuration", () => {
-  test("pi threads get no tools, skills or instructions; other providers get both tools and the usage block", async () => {
+  test("pi and codex get both tools and the usage block, and no skills", async () => {
     const s = await setup();
-    const pi = await s.resolve("pi");
-    expect(pi.tools).toEqual([]);
-    expect(pi.skills).toEqual([]);
-    expect(pi.instructions ?? "").toBe("");
-    const codex = await s.resolve("codex");
-    expect(codex.tools.map(tool => tool.name).sort()).toEqual(["cortex_recall", "cortex_update"]);
-    expect(codex.skills).toEqual([]);
-    // A cold cache contributes only the usage block and never runs the CLI.
-    expect(codex.instructions).toBe(USAGE);
+    await vi.waitFor(() => expect(s.listed()).toBe(1));
+    for (const provider of ["pi", "codex"]) {
+      const config = await s.resolve(provider);
+      expect(names(config.tools)).toEqual(["cortex_recall", "cortex_update"]);
+      expect(config.skills).toEqual([]);
+      // A cold cache contributes only the usage block and never runs the CLI.
+      expect(config.instructions).toBe(USAGE);
+    }
     expect(s.argvs().filter(argv => argv[1] === "context")).toEqual([]);
+  });
+
+  test("claude-code also gets the skills the plugin's install directory holds", async () => {
+    const s = await setup();
+    await vi.waitFor(async () => expect((await s.resolve("claude-code")).skills).toEqual(SKILLS));
+    const config = await s.resolve("claude-code");
+    expect(names(config.tools)).toEqual(["cortex_recall", "cortex_update"]);
+    expect(config.instructions).toBe(USAGE);
+  });
+
+  test("without a skills directory claude-code gets no skills and still both tools", async () => {
+    const s = await setup({ skillsDir: false });
+    await vi.waitFor(() => expect(s.listed()).toBe(1));
+    await new Promise(resolve => setTimeout(resolve, 10));
+    const config = await s.resolve("claude-code");
+    expect(config.skills).toEqual([]);
+    expect(names(config.tools)).toEqual(["cortex_recall", "cortex_update"]);
+  });
+
+  test("pluginSkillNames lists directories holding a SKILL.md; skillsFor gives them only to claude-code", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-bb-skills-"));
+    disposers.push(() => fs.rmSync(root, { recursive: true, force: true }));
+    expect(pluginSkillNames(root)).toEqual([]);
+    writeSkills(root, ["cortex-research", "cortex"]);
+    fs.mkdirSync(path.join(root, "skills", "notes"));
+    fs.mkdirSync(path.join(root, "skills", "empty", "SKILL.md"), { recursive: true });
+    fs.writeFileSync(path.join(root, "skills", "README.md"), "");
+    expect(pluginSkillNames(root)).toEqual(["cortex", "cortex-research"]);
+    expect([...PLUGIN_SKILL_PROVIDERS]).toEqual(["claude-code"]);
+    expect(skillsFor("claude-code", ["cortex"])).toEqual(["cortex"]);
+    for (const provider of ["pi", "codex", "cursor", "opencode"]) expect(skillsFor(provider, ["cortex"])).toEqual([]);
   });
 
   test("a warmed project adds its primer; running threads warm at startup", async () => {
@@ -168,7 +352,7 @@ describe("agent configuration", () => {
     await vi.waitFor(async () => expect((await s.resolve("codex")).instructions).toContain("<cortex_memory>"));
     const contexts = s.cortex.calls().filter(call => call.argv[1] === "context");
     expect(contexts).toEqual([{ argv: ["memory", "context", "--json"], cwd: s.checkout }]);
-    expect((await s.resolve("pi")).instructions ?? "").toBe("");
+    expect((await s.resolve("pi")).instructions).toContain("<cortex_memory>");
   });
 
   test("instructions stay within 4,096 characters", () => {
@@ -464,6 +648,11 @@ describe("needs configuration", () => {
     expect(s.harness.inspection.needsConfigurationMessages[0]).toMatch(/cortexPath.*bb plugin reload cortex/s);
     expect(s.harness.inspection.registrations.agentTools).toEqual([]);
     expect(s.harness.inspection.registrations.services).toEqual([]);
+    for (const provider of ["pi", "claude-code"]) {
+      const config = await s.resolve(provider);
+      expect(config.tools).toEqual([]);
+      expect(config.skills).toEqual([]);
+    }
     await expect(s.harness.behavior.callRpc("threadState", { threadId: THREAD })).rejects.toThrow(/Cortex is unavailable/);
   });
 
@@ -769,23 +958,12 @@ function memoryView(over: Partial<MemoryView> = {}): MemoryView {
 }
 
 describe("memory", () => {
-  const REPORT_URL: [string, unknown] = ["CORTEX_BB_MEMORY_URL", { serverPath: "/api/v1/plugins/cortex/http/memory" }];
-  const pairs = (entries: Array<{ name: string; value: unknown }>) => entries.map(entry => [entry.name, entry.value]);
-  const env = async (s: Setup, threadId: string) =>
-    pairs(await s.harness.behavior.resolveProviderEnv("pi", { threadId, projectId: PROJECT, hostId: "host_local" }));
   const rpc = (s: Setup, method: string, input: unknown) =>
     s.harness.behavior.callRpc(method, input) as Promise<Record<string, any>>;
   const memory = (s: Setup, threadId: string) => rpc(s, "memory", { threadId });
-  const post = (s: Setup, body: unknown) =>
-    s.harness.behavior.fetchHttp("POST", "/memory", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: typeof body === "string" ? body : JSON.stringify(body),
-    });
   const memorySignals = (s: Setup) => s.harness.inspection.realtimeSignals.filter(signal => signal.channel === "memory");
-  const names = (tools: Array<{ name: string }>) => tools.map(tool => tool.name).sort();
 
-  test("four settings with their defaults; a change applies to the next configure and environment and signals every thread", async () => {
+  test("four settings with their defaults; a change applies to the next configure and signals every thread", async () => {
     const s = await setup();
     const descriptors = s.harness.inspection.registrations.settingsDescriptors;
     expect(Object.keys(descriptors)).toEqual(["cortexPath", "memory", "memoryChip", "taskChip"]);
@@ -798,11 +976,9 @@ describe("memory", () => {
     expect(descriptors.memoryChip).toMatchObject({ type: "boolean", label: "Memory icon", default: true });
     expect(descriptors.taskChip).toMatchObject({ type: "boolean", label: "Task chip in the thread header", default: true });
     await warm(s);
-    expect(await env(s, PI)).toEqual([REPORT_URL]);
     await s.harness.behavior.setSettings({ memory: "read" });
     expect(memorySignals(s)).toContainEqual({ channel: "memory", payload: null });
     expect((await s.resolve("codex")).instructions).toBe(USAGE);
-    expect(await env(s, PI)).toEqual([REPORT_URL, ["CORTEX_MEMORY", "read"]]);
   });
 
   test("configure: the summary only when saving, no recall when off, child threads look up only, the thread's choice wins", async () => {
@@ -834,73 +1010,9 @@ describe("memory", () => {
     expect(names((await s.resolve("codex", { pluginMetadata: { memoryMode: "always" } })).tools)).toEqual([
       "cortex_update",
     ]);
-    const pi = await s.resolve("pi");
-    expect(pi.tools).toEqual([]);
-    expect(pi.instructions ?? "").toBe("");
-  });
-
-  test("pi environment: the report address always, CORTEX_MEMORY only to look up only or turn off, never write", async () => {
-    const s = await setup();
-    expect(await env(s, PI)).toEqual([REPORT_URL]);
-    expect(await env(s, PI_CHILD)).toEqual([REPORT_URL, ["CORTEX_MEMORY", "read"]]);
-    s.metadata.set(PI, { memoryMode: "off" });
-    expect(await env(s, PI)).toEqual([REPORT_URL, ["CORTEX_MEMORY", "off"]]);
-    s.metadata.set(PI_CHILD, { memoryMode: "write" });
-    expect(await env(s, PI_CHILD)).toEqual([REPORT_URL]);
-    s.metadata.delete(PI_CHILD);
-    await s.harness.behavior.setSettings({ memory: "write" });
-    expect(await env(s, PI_CHILD)).toEqual([REPORT_URL]);
-    const entries = await s.harness.behavior.resolveProviderEnv("pi", { threadId: PI, projectId: PROJECT, hostId: "h" });
-    expect(entries.every(entry => entry.reason.length > 0)).toBe(true);
-  });
-
-  test("a failed lookup repeats the thread's last entries, or the setting's for a top-level thread", async () => {
-    const s = await setup();
-    expect(await env(s, PI_CHILD)).toEqual([REPORT_URL, ["CORTEX_MEMORY", "read"]]);
-    s.broken.add(PI_CHILD);
-    await s.harness.behavior.setSettings({ memory: "off" });
-    expect(await env(s, PI_CHILD)).toEqual([REPORT_URL, ["CORTEX_MEMORY", "read"]]);
-    s.broken.add(PI);
-    expect(await env(s, PI)).toEqual([REPORT_URL, ["CORTEX_MEMORY", "off"]]);
-    await s.harness.behavior.setSettings({ memory: "auto" });
-    expect(await env(s, PI)).toEqual([REPORT_URL]);
-    expect(s.harness.inspection.logEntries.some(entry => entry.message.includes("its environment stays"))).toBe(true);
-  });
-
-  test("a valid report is stored and signalled, and its answer carries the last re-read; an older report is ignored", async () => {
-    const s = await setup();
-    const first = await post(s, { threadId: PI, sentAt: 100, view: memoryView({ focus: [1] }) });
-    expect(first.status).toBe(200);
-    expect(await first.json()).toEqual({ refreshAt: 0 });
-    expect(memorySignals(s)).toEqual([{ channel: "memory", payload: { threadId: PI } }]);
-    const stored = await memory(s, PI);
-    expect(stored).toMatchObject({ pi: true, child: false, setting: "auto", override: null, mode: "write", refreshAt: 0 });
-    expect(stored.view).toEqual(memoryView({ focus: [1] }));
-    expect(stored.reportedAt).toBeGreaterThan(0);
-
-    const asked = await rpc(s, "refreshMemory", { threadId: PI });
-    expect(asked.refreshAt).toBeGreaterThan(0);
-    const older = await post(s, { threadId: PI, sentAt: 50, view: memoryView({ focus: [2] }) });
-    expect(older.status).toBe(200);
-    expect(await older.json()).toEqual({ refreshAt: asked.refreshAt });
-    expect((await memory(s, PI)).view.focus).toEqual([1]);
-    expect(memorySignals(s)).toHaveLength(2);
-  });
-
-  test("the route rejects invalid JSON, a bad thread id, an over-long list and a body over 256 KiB, storing nothing", async () => {
-    const s = await setup();
-    const valid = { threadId: PI, sentAt: 1, view: memoryView() };
-    const rows = Array.from({ length: 501 }, (_, i) => ({ id: i + 1, via: "recall" as const }));
-    const cases: Array<[unknown, number]> = [
-      ["{not json", 400],
-      [{ ...valid, threadId: "thread-1" }, 400],
-      [{ ...valid, sentAt: -1 }, 400],
-      [{ ...valid, view: memoryView({ inContext: rows }) }, 400],
-      [{ ...valid, pad: "x".repeat(300 * 1024) }, 413],
-    ];
-    for (const [body, status] of cases) expect((await post(s, body)).status).toBe(status);
-    expect((await memory(s, PI)).view).toBeNull();
-    expect(memorySignals(s)).toEqual([]);
+    const pi = await s.resolve("pi", { pluginMetadata: { memoryMode: "write" } });
+    expect(names(pi.tools)).toEqual(["cortex_recall", "cortex_update"]);
+    expect(pi.instructions).toContain("<cortex_memory>");
   });
 
   test("another provider's view: the summary, recalls, a stale or failed recall, and thread.active clears stale", async () => {
@@ -911,7 +1023,7 @@ describe("memory", () => {
     await s.resolve("codex", { thread: { id: THREAD } });
     expect(memorySignals(s)).toContainEqual({ channel: "memory", payload: { threadId: THREAD } });
     const first = await memory(s, THREAD);
-    expect(first).toMatchObject({ pi: false, child: false, mode: "write" });
+    expect(first).toMatchObject({ child: false, mode: "write" });
     expect(first.view).toEqual(
       memoryView({
         recallBudget: 3,
@@ -970,7 +1082,7 @@ describe("memory", () => {
     expect(memorySignals(s)).toHaveLength(signals + 1);
   });
 
-  test("setMemoryMode sets and removes the thread's choice; taskRows runs one ls in id order; re-reading is for pi", async () => {
+  test("setMemoryMode sets and removes the thread's choice; taskRows runs one ls in id order; a child thread looks up only", async () => {
     const s = await setup();
     expect(await rpc(s, "setMemoryMode", { threadId: THREAD, mode: "read" })).toMatchObject({
       override: "read",
@@ -996,12 +1108,7 @@ describe("memory", () => {
     ]);
     expect(s.argvs().slice(before)).toEqual([["ls", "--json"]]);
 
-    await expect(rpc(s, "refreshMemory", { threadId: THREAD })).rejects.toThrow(/Re-reading applies to pi threads/);
-    expect(await memory(s, PI)).toMatchObject({ pi: true, view: null, reportedAt: null, refreshAt: 0 });
-    const asked = await rpc(s, "refreshMemory", { threadId: PI });
-    expect(asked.refreshAt).toBeGreaterThan(0);
-    expect((await memory(s, PI)).refreshAt).toBe(asked.refreshAt);
-    expect(await memory(s, PI_CHILD)).toMatchObject({ pi: true, child: true, mode: "read" });
+    expect(await memory(s, CHILD)).toMatchObject({ child: true, mode: "read", view: null });
   });
 
   test("the memory RPCs explain why when cortex is missing", async () => {
@@ -1010,10 +1117,260 @@ describe("memory", () => {
       ["memory", { threadId: THREAD }],
       ["taskRows", { ids: [1] }],
       ["setMemoryMode", { threadId: THREAD, mode: null }],
-      ["refreshMemory", { threadId: PI }],
     ];
     for (const [method, input] of calls) {
       await expect(s.harness.behavior.callRpc(method, input)).rejects.toThrow(/Cortex is unavailable/);
     }
+  });
+});
+
+const memoryOf = async (s: Setup, threadId: string) =>
+  ((await s.harness.behavior.callRpc("memory", { threadId })) as { view: MemoryView | null }).view;
+const THREE_FILES = [fileChange("src/a.ts", "src/b.ts"), fileChange("src/c.ts"), fileChange("src/a.ts")];
+
+describe("save turn", () => {
+  test("a writer request that changed three files and saved nothing gets ONE agent-only checkpoint turn", async () => {
+    const s = await setup();
+    await s.request(THREAD, "rename the helpers");
+    await s.finish(THREAD, THREE_FILES);
+    expect(s.sent).toEqual([
+      { threadId: THREAD, mode: "start", input: [agentOnlyText(expect.stringMatching(/^Memory checkpoint/))] },
+    ]);
+    const prompt = String(s.sent[0]?.input[0]?.text);
+    expect(prompt).toContain("- src/a.ts\n- src/b.ts\n- src/c.ts\n");
+    expect(prompt).toContain(`--as bb-${THREAD}`);
+    expect(prompt).toContain("Candidate streams (one memory search):\n(none found)");
+    expect(s.argvs()).toContainEqual(["memory", "context", "--json", "--no-primer", "--query=rename the helpers", "--limit=3"]);
+    expect(await memoryOf(s, THREAD)).toMatchObject({ saving: true, stats: { checkpoints: 1 } });
+
+    // bb runs the checkpoint turn: its own request brings nothing, and its idle only ends the saving state.
+    await s.request(THREAD, prompt, { agentOnly: true });
+    await s.finish(THREAD, THREE_FILES);
+    expect(s.sent).toHaveLength(1);
+    expect(await memoryOf(s, THREAD)).toMatchObject({ saving: false, stats: { checkpoints: 1 } });
+    // bb can go idle again without a new request (an environment restore).
+    await s.idle(THREAD);
+    expect(s.sent).toHaveLength(1);
+  });
+
+  test("no checkpoint after a memory write, for a reader, child, queued, interrupted or unseen request", async () => {
+    const cases: Array<[string, (s: Setup) => Promise<unknown>]> = [
+      [
+        "a cortex_update call",
+        async s => {
+          await s.request(THREAD, "rename the helpers");
+          await s.harness.behavior.callAgentTool("cortex_update", { task_id: 1, message: "x" }, { threadId: THREAD });
+          await s.finish(THREAD, THREE_FILES);
+        },
+      ],
+      [
+        "a cortex edit command",
+        async s => {
+          await s.request(THREAD, "rename the helpers");
+          await s.finish(THREAD, [...THREE_FILES, command("cortex edit 1 --body-search a --body-replace b")]);
+        },
+      ],
+      [
+        "the read-only setting",
+        async s => {
+          await s.harness.behavior.setSettings({ memory: "read" });
+          await s.request(THREAD, "rename the helpers");
+          await s.finish(THREAD, THREE_FILES);
+        },
+      ],
+      [
+        "a child thread",
+        async s => {
+          await s.request(CHILD, "rename the helpers");
+          await s.finish(CHILD, THREE_FILES);
+        },
+      ],
+      [
+        "queued messages",
+        async s => {
+          s.queued.set(THREAD, [{ id: "queued-1" }]);
+          await s.request(THREAD, "rename the helpers");
+          await s.finish(THREAD, THREE_FILES);
+        },
+      ],
+      [
+        "an interrupted turn",
+        async s => {
+          await s.request(THREAD, "rename the helpers");
+          await s.finish(THREAD, THREE_FILES, "interrupted");
+        },
+      ],
+      [
+        "a request whose thread.active was not seen",
+        async s => {
+          s.push(THREAD, "client/turn/requested", {
+            input: [{ type: "text", text: "rename the helpers", mentions: [] }],
+            initiator: "user",
+            target: { kind: "new-turn" },
+          });
+          await s.finish(THREAD, THREE_FILES);
+        },
+      ],
+    ];
+    for (const [name, run] of cases) {
+      const s = await setup();
+      await run(s);
+      expect(s.sent, name).toEqual([]);
+    }
+  });
+
+  test("focus from an earlier cortex_recall makes one changed file an update naming that stream", async () => {
+    const s = await setup();
+    await s.request(THREAD, "rename the helpers");
+    await s.harness.behavior.callAgentTool("cortex_recall", { query: "@4" }, { threadId: THREAD });
+    await s.finish(THREAD, [fileChange("src/a.ts")]);
+    expect(s.sent).toHaveLength(1);
+    expect(s.sent[0]?.mode).toBe("start");
+    expect(String(s.sent[0]?.input[0]?.text)).toContain("Focus streams (most recent first): @4");
+    expect(s.argvs().some(argv => argv.includes("--limit=3"))).toBe(false);
+  });
+
+  test("a send that throws crashes nothing, clears saving and logs a warning; the next request can save again", async () => {
+    const s = await setup();
+    s.failSend("already_active");
+    await s.request(THREAD, "rename the helpers");
+    const { errors } = await s.finish(THREAD, THREE_FILES);
+    expect(errors).toEqual([]);
+    expect(s.sent).toHaveLength(1);
+    expect((await memoryOf(s, THREAD))?.saving).toBe(false);
+    expect(
+      s.harness.inspection.logEntries.some(entry => /memory checkpoint .* failed: already_active/.test(entry.message)),
+    ).toBe(true);
+    s.failSend(null);
+    await s.request(THREAD, "rename the helpers again");
+    await s.finish(THREAD, THREE_FILES);
+    expect(s.sent).toHaveLength(2);
+    expect((await memoryOf(s, THREAD))?.saving).toBe(true);
+  });
+});
+
+describe("matching tasks", () => {
+  function hitsFixture(hitsText = "HITS"): FakeFixture {
+    const fixture = baseFixture();
+    fixture.context = { lane: "cortex", primer: "PRIMER", hits: [7], hitsText };
+    return fixture;
+  }
+  const lookups = (s: Setup) => s.cortex.calls().filter(call => call.argv[1] === "context" && call.argv.includes("--no-primer"));
+  const LOAD_HINT = '--load-hint=cortex_recall "@<id>"';
+
+  test("a codex thread's first request brings the matching tasks as one agent-only steer", async () => {
+    const s = await setup({ fixture: hitsFixture() });
+    await s.request(THREAD, "continue the parser work", { first: true });
+    expect(lookups(s)).toEqual([
+      {
+        argv: [
+          "memory",
+          "context",
+          "--json",
+          "--no-primer",
+          `--author=bb-${THREAD}`,
+          "--limit=5",
+          LOAD_HINT,
+          "--query=continue the parser work",
+        ],
+        cwd: s.checkout,
+      },
+    ]);
+    expect(s.sent).toEqual([{ threadId: THREAD, mode: "steer", input: [agentOnlyText("HITS")] }]);
+    const view = await memoryOf(s, THREAD);
+    expect(view?.inContext).toEqual([{ id: 7, via: "prompt", query: "continue the parser work" }]);
+    expect(view?.stats).toMatchObject({ prompts: 1, lookups: 1, chars: 4 });
+  });
+
+  test("a later request looks up only with a recall cue, with three hits and the seen tasks excluded", async () => {
+    const s = await setup({ fixture: hitsFixture() });
+    await s.request(THREAD, "continue the parser work", { first: true });
+    await s.finish(THREAD);
+    await s.request(THREAD, "rename the helpers");
+    await s.finish(THREAD);
+    expect(lookups(s)).toHaveLength(1);
+    await s.request(THREAD, "what was the parser fix");
+    expect(lookups(s)[1]?.argv).toEqual([
+      "memory",
+      "context",
+      "--json",
+      "--no-primer",
+      `--author=bb-${THREAD}`,
+      "--limit=3",
+      LOAD_HINT,
+      "--query=what was the parser fix",
+      "--exclude=7",
+    ]);
+    expect(s.sent.map(send => send.mode)).toEqual(["steer", "steer"]);
+  });
+
+  test("streams the memory summary lists can still match; only matched and recalled ones are excluded", async () => {
+    const fixture = hitsFixture();
+    fixture.context = { lane: "cortex", primer: "PRIMER", primerIds: [1, 3], hits: [7], hitsText: "HITS" };
+    const s = await setup({ fixture });
+    await warm(s);
+    await s.resolve("codex", { thread: { id: THREAD } });
+    await s.request(THREAD, "continue the parser work", { first: true });
+    expect(lookups(s)[0]?.argv.some(arg => arg.startsWith("--exclude"))).toBe(false);
+  });
+
+  test("nothing for an ACP provider, another thread's message, memory off, no hits or a request already over", async () => {
+    const cases: Array<[string, FakeFixture, (s: Setup) => Promise<unknown>, number]> = [
+      ["an acp-opencode thread", hitsFixture(), s => s.request(THREAD, "continue the parser work", { first: true, provider: "acp-opencode" }), 0],
+      ["an agent initiator", hitsFixture(), s => s.request(THREAD, "continue the parser work", { first: true, initiator: "agent" }), 0],
+      [
+        "memory off",
+        hitsFixture(),
+        async s => {
+          await s.harness.behavior.setSettings({ memory: "off" });
+          await s.request(THREAD, "continue the parser work", { first: true });
+        },
+        0,
+      ],
+      ["empty hitsText", hitsFixture(""), s => s.request(THREAD, "continue the parser work", { first: true }), 1],
+      [
+        "a thread bb reports idle when the lookup returns",
+        hitsFixture(),
+        async s => {
+          const active = s.request(THREAD, "continue the parser work", { first: true });
+          s.live.set(THREAD, { status: "idle", providerId: "codex" });
+          await active;
+        },
+        1,
+      ],
+    ];
+    for (const [name, fixture, run, lookupCount] of cases) {
+      const s = await setup({ fixture });
+      await run(s);
+      expect(lookups(s), name).toHaveLength(lookupCount);
+      expect(s.sent, name).toEqual([]);
+    }
+  });
+
+  test("a lookup that outlives its request never steers into the next one", async () => {
+    const s = await setup({ fixture: hitsFixture() });
+    const release = s.hold();
+    const first = s.request(THREAD, "continue the parser work", { first: true });
+    // Lets the request's handler store its start and reach the held lookup before the request ends.
+    await new Promise(resolve => setTimeout(resolve, 20));
+    await s.finish(THREAD);
+    await s.request(THREAD, "rename the helpers");
+    expect(s.live.get(THREAD)?.status).toBe("active");
+    release();
+    await first;
+    expect(lookups(s)).toHaveLength(1);
+    expect(s.sent).toEqual([]);
+    expect((await memoryOf(s, THREAD))?.inContext ?? []).toEqual([]);
+  });
+
+  test("instructions: steer providers hear about matching tasks; an ACP provider is told to recall instead", async () => {
+    const s = await setup();
+    for (const provider of ["codex", "claude-code", "pi"]) expect((await s.resolve(provider)).instructions).toBe(USAGE);
+    expect(USAGE).toContain("hidden cortex memory message");
+    const acp = (await s.resolve("acp-opencode")).instructions;
+    expect(acp).toBe(usageFor(true, false));
+    expect(acp).not.toContain("hidden cortex memory message");
+    expect(acp).toContain("No matching tasks arrive on their own");
+    expect(usageFor(false, true)).not.toContain("matching tasks");
   });
 });

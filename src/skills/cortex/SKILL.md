@@ -51,7 +51,7 @@ Every mutating command (`add`, `edit`, `update`, `mv`, `rm`, `tag add|edit|rm`, 
 ## Memory
 
 Tasks double as memory streams across sessions: the body is the current state, updates are breadcrumbs, the lane is the project (derived from the ask; recipes/persistence.md §2).
-Under pi, relevant memory is injected automatically and `cortex_recall` loads a stream with its staleness check.
+Under pi, relevant memory is injected automatically; in bb, the Cortex plugin gives every provider the memory primer. Both offer `cortex_recall`, which loads a stream with its staleness check.
 In bb with the Cortex plugin, a line `::cortex{id="<id>"}` in your reply shows that task as a card that opens it in the Cortex tab.
 When to read, trust, write and re-sync memory: [recipes/memory.md](recipes/memory.md).
 

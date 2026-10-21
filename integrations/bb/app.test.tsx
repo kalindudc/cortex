@@ -111,14 +111,11 @@ function memoryView(overrides: Partial<MemoryView> = {}): MemoryView {
 function memoryState(overrides: Partial<MemoryState> = {}): MemoryState {
   return {
     threadId: THREAD,
-    pi: true,
     setting: "auto",
     override: null,
     mode: "write",
     child: false,
     view: memoryView(),
-    reportedAt: 1,
-    refreshAt: 0,
     ...overrides,
   };
 }
@@ -158,7 +155,6 @@ function handlers(state: CortexThreadState = threadState(), overrides: Partial<H
     memory: () => memoryState(),
     taskRows: ({ ids }) => ({ tasks: ids.map(id => ({ id, title: `Stream ${id}`, lane: "cortex", status: "open" })) }),
     setMemoryMode: ({ mode }) => memoryState({ override: mode }),
-    refreshMemory: () => memoryState({ refreshAt: 2 }),
     ...overrides,
   };
 }
@@ -705,8 +701,7 @@ describe("memory icon", () => {
       [memoryState({ view: memoryView({ stale, saving: true }) }), "warning", /@421 is stale/],
       [memoryState({ view: memoryView({ role: "off" }) }), "muted", /off for this thread/],
       [memoryState({ mode: "off", view: null }), "muted", /off for this thread/],
-      [memoryState({ view: null }), "muted", /no report from this thread's pi session yet/],
-      [memoryState({ pi: false, view: null }), "muted", /no agent session since the Cortex plugin loaded/],
+      [memoryState({ view: null }), "muted", /no agent session since the Cortex plugin loaded/],
     ];
     for (const [memory, tone, name] of cases) {
       const slot = icon(withMemory(memory));
@@ -720,7 +715,7 @@ describe("memory icon", () => {
   test("opens the Memory tab; without the composer footer it stays in the header", async () => {
     const slot = icon(withMemory(memoryState({ view: null })));
     const trigger = await slot.findByRole("button", {
-      name: "Cortex memory: no report from this thread's pi session yet. Open the Memory tab.",
+      name: "Cortex memory: no agent session since the Cortex plugin loaded. Open the Memory tab.",
     });
     expect(trigger.getAttribute("data-placement")).toBe("header");
     expect(slot.container.contains(trigger)).toBe(true);
@@ -836,7 +831,7 @@ describe("memory summary", () => {
     reader.unmount();
     for (const [memory, error, headline] of [
       [memoryState({ mode: "off", view: memoryView({ role: "off" }) }), null, "Off for this thread"],
-      [memoryState({ view: null }), null, /No report from this thread's pi session yet/],
+      [memoryState({ view: null }), null, /has not started a session since the Cortex plugin loaded/],
       [null, "cortex is down", "Memory could not load: cortex is down"],
     ] as const) {
       const card = summary({ memory, error, task: null });
@@ -966,19 +961,12 @@ describe("Memory tab", () => {
     expect(slot.inspection.navigateCalls).toContainEqual({ method: "openThreadPanel", options: { actionId: "cortex" } });
   });
 
-  test("look up only has its own health line, for pi and for other providers, and no Working on", async () => {
+  test("look up only has its own health line and no Working on", async () => {
     const reader = memoryView({ role: "reader", inContext: [{ id: 4, via: "prompt", query: "x" }] });
-    const pi = tab(handlers(threadState(), { memory: () => memoryState({ mode: "read", view: reader }) }));
-    expect(
-      await pi.findByText(
-        "Look up only: matching tasks arrive with messages and the agent can recall; nothing is saved automatically",
-      ),
-    ).toBeTruthy();
-    expect(pi.getByText("Look up only \u00b7 lane cortex")).toBeTruthy();
-    expect(pi.queryByRole("region", { name: "Working on" })).toBeNull();
-    pi.lifecycle.unmount();
-    const other = tab(handlers(threadState(), { memory: () => memoryState({ pi: false, mode: "read", view: reader }) }));
-    expect(await other.findByText("Look up only: no memory summary; the agent can still recall")).toBeTruthy();
+    const slot = tab(handlers(threadState(), { memory: () => memoryState({ mode: "read", view: reader }) }));
+    expect(await slot.findByText("Look up only: no memory summary; the agent can still recall")).toBeTruthy();
+    expect(slot.getByText("Look up only \u00b7 lane cortex")).toBeTruthy();
+    expect(slot.queryByRole("region", { name: "Working on" })).toBeNull();
   });
 
   test("choosing Look up only saves the thread's choice and notes when it applies", async () => {
@@ -995,9 +983,9 @@ describe("Memory tab", () => {
     ]);
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Look up only" }));
     await waitFor(() => expect(calls(slot, "setMemoryMode")).toEqual([{ threadId: THREAD, mode: "read" }]));
-    expect(await slot.findByText("Look up only applies from this thread's next message.")).toBeTruthy();
-    expect(slot.getByRole("button", { name: /Memory for this thread: Look up only/ })).toBeTruthy();
-    expect(toast).toHaveBeenCalledWith("Applies from this thread's next message");
+    expect(await slot.findByRole("button", { name: /Memory for this thread: Look up only/ })).toBeTruthy();
+    expect(slot.getByText("A change applies when bb next starts this thread's agent.")).toBeTruthy();
+    expect(toast).toHaveBeenCalledWith("Applies when bb next starts this thread's agent");
   });
 
   test("a child thread's menu follows look up only; a failed change shows an error", async () => {
@@ -1014,32 +1002,12 @@ describe("Memory tab", () => {
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Could not change memory: metadata is read-only"));
   });
 
-  test("Re-read is offered only for pi threads that use memory, and stays requested until the next report", async () => {
-    const slot = tab();
-    fireEvent.click(await slot.findByRole("button", { name: "Re-read memory" }));
-    await waitFor(() => expect(calls(slot, "refreshMemory")).toEqual([{ threadId: THREAD }]));
-    expect(((await slot.findByRole("button", { name: "Re-read requested" })) as HTMLButtonElement).disabled).toBe(true);
-    slot.lifecycle.unmount();
-
-    const other = tab(handlers(threadState(), { memory: () => memoryState({ pi: false }) }));
-    expect(await other.findByText("A change applies when bb next starts this thread's agent.")).toBeTruthy();
-    expect(other.queryByRole("button", { name: "Re-read memory" })).toBeNull();
-    other.lifecycle.unmount();
-    const off = tab(handlers(threadState(), { memory: () => memoryState({ mode: "off", override: "off" }) }));
-    await off.findByRole("button", { name: /Memory for this thread: Off/ });
-    expect(off.queryByRole("button", { name: "Re-read memory" })).toBeNull();
-  });
-
-  test("explains a missing view for pi and for other providers, and shows a failed read with Retry", async () => {
-    const pi = tab(handlers(threadState(), { memory: () => memoryState({ view: null }) }));
-    expect(await pi.findByText(/No memory report from this thread's pi session yet/)).toBeTruthy();
-    expect(pi.getByText(/run `cortex agents install`/)).toBeTruthy();
-    pi.lifecycle.unmount();
-    const other = tab(handlers(threadState(), { memory: () => memoryState({ pi: false, view: null }) }));
+  test("explains a missing view, and shows a failed read with Retry", async () => {
+    const missing = tab(handlers(threadState(), { memory: () => memoryState({ view: null }) }));
     expect(
-      await other.findByText("This thread's agent has not started a session since the Cortex plugin loaded."),
+      await missing.findByText("This thread's agent has not started a session since the Cortex plugin loaded."),
     ).toBeTruthy();
-    other.lifecycle.unmount();
+    missing.lifecycle.unmount();
     let fail = true;
     const failing = tab(
       handlers(threadState(), {

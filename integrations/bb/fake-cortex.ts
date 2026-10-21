@@ -38,7 +38,7 @@ export type FakeFixture = {
   doctorFails?: boolean;
   tasks?: Record<string, FakeTask>;
   streams?: Record<string, Array<{ id: number; title: string; lane: string; status: string; activity: number }>>;
-  context?: { lane: string; primer: string; primerIds?: number[] };
+  context?: { lane: string; primer: string; primerIds?: number[]; hits?: number[]; hitsText?: string };
   /** `cortex watch --json`: lines (or raw byte chunks) to print, then wait for SIGTERM unless `exitCode` is set. */
   watch?: { lines?: string[]; chunks?: number[][]; exitCode?: number };
   /** Fails every `update` with this message. */
@@ -113,7 +113,7 @@ if (a === "schema") {
 } else if (a === "memory" && b === "search") {
   out("TEXT memory search " + c + (flag("boost") ? " boost=" + flag("boost") : "") + "\n");
 } else if (a === "memory" && b === "context") {
-  out({ lane: fixture.context?.lane ?? "lane", primer: fixture.context?.primer ?? "", primerIds: fixture.context?.primerIds ?? [], terms: [], recent: false, hits: [], hitsText: "" });
+  out({ lane: fixture.context?.lane ?? "lane", primer: fixture.context?.primer ?? "", primerIds: fixture.context?.primerIds ?? [], terms: [], recent: false, hits: (fixture.context?.hits ?? []).map(id => ({ id })), hitsText: fixture.context?.hitsText ?? "" });
 } else if (a === "search") {
   const q = (b || "").toLowerCase();
   out(Object.values(fixture.tasks || {}).map(taskJson).filter(t => t.title.toLowerCase().includes(q)));

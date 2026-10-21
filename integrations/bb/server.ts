@@ -1,9 +1,6 @@
-import {
-  type BbPluginApi,
-  defineRpcContract,
-  type ExperimentalPluginProviderEnvEntry,
-  type PluginSettingDescriptors,
-} from "@get-bb/plugin-sdk";
+import fs from "node:fs";
+import path from "node:path";
+import { type BbPluginApi, defineRpcContract, type PluginSettingDescriptors } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import { type CortexRunner, createCortexRunner, verifyCortexFeatures } from "./cli";
 import { STATUSES, splitNote } from "./detail";
@@ -12,12 +9,10 @@ import {
   effectiveMode,
   MEMORY_MODES,
   MEMORY_SETTINGS,
-  type MemoryMode,
   type MemoryState,
   type MemoryTracker,
   memorySetting,
   memoryStateSchema,
-  memoryViewSchema,
 } from "./memory";
 import {
   type CortexRealtimeChannel,
@@ -31,6 +26,7 @@ import {
   taskRowSchema,
   threadStateSchema,
 } from "./state";
+import { type MemoryTurns, registerMemoryTurns, STEER_PROVIDERS } from "./turns";
 import { registerCortexWatch } from "./watch";
 
 const THREAD_ID = /^thr_[0-9a-z]{6,40}$/;
@@ -50,14 +46,6 @@ const searchInputSchema = z.object({ query: z.string().trim().min(1).max(200) })
 const taskRowsSchema = z.object({ tasks: z.array(taskRowSchema) });
 const taskRowsInputSchema = z.object({ ids: z.array(z.number().int().positive()).max(500) });
 const setMemoryModeInputSchema = threadIdInputSchema.extend({ mode: z.enum(MEMORY_MODES).nullable() });
-/** A report from the Cortex pi extension (src/extensions/pi.ts reportToBb). */
-const memoryReportSchema = z.object({
-  threadId: z.string().regex(THREAD_ID),
-  sentAt: z.number().int().nonnegative(),
-  view: memoryViewSchema,
-});
-const REPORT_MAX_BYTES = 256 * 1024;
-const NOT_PI_REREAD = "Re-reading applies to pi threads; other providers read memory when bb starts their session.";
 
 export const rpcContract = defineRpcContract({
   threadState: { input: threadIdInputSchema, output: threadStateSchema },
@@ -76,7 +64,6 @@ export const rpcContract = defineRpcContract({
   memory: { input: threadIdInputSchema, output: memoryStateSchema },
   taskRows: { input: taskRowsInputSchema, output: taskRowsSchema },
   setMemoryMode: { input: setMemoryModeInputSchema, output: memoryStateSchema },
-  refreshMemory: { input: threadIdInputSchema, output: memoryStateSchema },
 });
 
 const doctorSchema = z.object({ author: z.string().min(1).optional() });
@@ -115,7 +102,7 @@ export const SETTINGS = {
     type: "select",
     label: "Agent memory",
     description:
-      "How agents use Cortex memory. Look up only keeps the matching tasks that arrive with a message and the recall tool, and leaves out the memory summary, the automatic save turn and the compaction notes; the agent can still post updates when its instructions say so. A thread's Memory tab can choose differently for that thread. A change applies from a pi thread's next message, and for other providers when bb next starts their session.",
+      "How agents use Cortex memory. Look up only keeps the matching tasks that arrive with a message and the recall tool, and leaves out the memory summary and the automatic save turn; the agent can still post updates when its instructions say so. A thread's Memory tab can choose differently for that thread. A change applies when bb next starts a thread's agent session.",
     options: [...MEMORY_SETTINGS],
     default: "auto",
     experimental_optionLabels: {
@@ -140,20 +127,57 @@ const USAGE_UPDATE =
   "- cortex_update posts an update on a cortex task, credited to this thread. Pass task_id, message (one or two plain sentences on what changed and what it means; no newlines, at most 4,096 characters), and optionally status (draft|open|review|blocked|done) and body (numbers, lists, logs).";
 const USAGE_RECALL =
   '- cortex_recall loads one memory stream ("@<id>", or "@<id>#<section>" for one section) with its staleness check, or searches memory by keywords across every lane, this project first. At most 3 calls per request and never the same query twice.';
+const USAGE_HITS =
+  "Matching tasks may arrive as a hidden cortex memory message shortly after a request starts; recall only what they do not cover.";
+const USAGE_NO_HITS =
+  "No matching tasks arrive on their own: call cortex_recall when the request refers to earlier work.";
 const USAGE_HINT =
   "Memory is a hint; the code and the user are the truth. When continuing a stream, follow its Next section and honour its Decisions.";
 const USAGE_CARD = 'A line ::cortex{id="<id>"} in your reply shows that task as a card the user can open.';
 
-/** The usage block; without recall (memory off) it describes cortex_update alone. */
-export function usageFor(recall: boolean): string {
-  if (recall) return [USAGE_TOOLS, USAGE_UPDATE, USAGE_RECALL, USAGE_HINT, USAGE_CARD].join("\n");
+/**
+ * Providers that get the plugin's skills. `cortex agents install` writes them to ~/.agents/skills, which every other
+ * provider reads; Claude Code reads only ~/.claude/skills, and bb does not drop a plugin skill a provider already has.
+ */
+export const PLUGIN_SKILL_PROVIDERS: ReadonlySet<string> = new Set(["claude-code"]);
+
+/** The plugin's skills a provider's configure selects. */
+export function skillsFor(providerId: string, shipped: readonly string[]): string[] {
+  return PLUGIN_SKILL_PROVIDERS.has(providerId) ? [...shipped] : [];
+}
+
+/** Sorted names of the skills under `<rootDir>/skills`: each a directory holding a SKILL.md file, as bb reads them. */
+export function pluginSkillNames(rootDir: string): string[] {
+  const dir = path.join(rootDir, "skills");
+  if (!fs.existsSync(dir)) return [];
+  return fs
+    .readdirSync(dir, { withFileTypes: true })
+    .filter(
+      entry =>
+        entry.isDirectory() &&
+        fs.statSync(path.join(dir, entry.name, "SKILL.md"), { throwIfNoEntry: false })?.isFile() === true,
+    )
+    .map(entry => entry.name)
+    .sort();
+}
+
+/**
+ * The usage block; without recall (memory off) it describes cortex_update alone. `hits` says whether matching tasks
+ * arrive with a request, which only providers that take a steer mid-turn get.
+ */
+export function usageFor(recall: boolean, hits = true): string {
+  const recallPart = `${USAGE_RECALL} ${hits ? USAGE_HITS : USAGE_NO_HITS}`;
+  if (recall) return [USAGE_TOOLS, USAGE_UPDATE, recallPart, USAGE_HINT, USAGE_CARD].join("\n");
   return [USAGE_TOOLS.replace("Two tools use it:", "One tool uses it:"), USAGE_UPDATE, USAGE_CARD].join("\n");
 }
 export const USAGE = usageFor(true);
 
 /** The usage block plus the project's cached primer, within bb's 4,096-character instruction limit. */
-export function instructionsFor(primer: string | null, options: { recall: boolean } = { recall: true }): string {
-  const usage = usageFor(options.recall);
+export function instructionsFor(
+  primer: string | null,
+  options: { recall: boolean; hits: boolean } = { recall: true, hits: true },
+): string {
+  const usage = usageFor(options.recall, options.hits);
   if (!primer) return usage;
   const open = "\n\n<cortex_memory>\n";
   const close = "\n</cortex_memory>";
@@ -223,8 +247,9 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
       memory: unavailable,
       taskRows: unavailable,
       setMemoryMode: unavailable,
-      refreshMemory: unavailable,
     });
+    // Without a configure, bb would give every provider the plugin's skills.
+    bb.agents.configure(() => ({ tools: [], skills: [] }));
     return;
   }
 
@@ -238,10 +263,28 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
   const state = createCortexState(bb, runner, { userAuthor });
   const tracker = createMemoryTracker(RECALL_BUDGET);
   const publish = (channel: CortexRealtimeChannel, payload: unknown): void => bb.realtime.publish(channel, payload);
-  registerCortexTools(bb, runner, state, tracker, publish);
+  const turns = registerMemoryTurns(bb, {
+    runner,
+    state,
+    tracker,
+    publish,
+    modeOf: async thread =>
+      effectiveMode(memorySetting(current.memory), await state.memoryOverride(thread.id), thread.parentThreadId !== null),
+  });
+  registerCortexTools(bb, runner, state, tracker, publish, turns);
+
+  // bb fails a configure that names a skill the plugin lacks, so only the skills its install holds are selected.
+  let shippedSkills: string[] = [];
+  bb.sdk.plugins
+    .list()
+    .then(({ plugins }) => {
+      const self = plugins.find(entry => entry.id === bb.pluginId);
+      if (!self) throw new Error(`${bb.pluginId} is not in bb's plugin list`);
+      shippedSkills = pluginSkillNames(self.rootDir);
+    })
+    .catch(err => bb.log.warn(`reading the plugin's skills failed, so no thread gets them: ${message(err)}`));
 
   bb.agents.configure(context => {
-    if (context.provider.id === "pi") return { tools: [], skills: [] };
     const child = context.thread.parentThreadId !== null;
     const mode = effectiveMode(memorySetting(current.memory), overrideFrom(context.pluginMetadata), child);
     // As in the pi extension, only writers get the summary; off also drops recall.
@@ -251,8 +294,11 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
     if (tracker.configured(context.thread.id, start)) publish("memory", { threadId: context.thread.id });
     return {
       tools: mode === "off" ? ["cortex_update"] : ["cortex_update", "cortex_recall"],
-      skills: [],
-      instructions: instructionsFor(primer, { recall: mode !== "off" }),
+      skills: skillsFor(context.provider.id, shippedSkills),
+      instructions: instructionsFor(primer, {
+        recall: mode !== "off",
+        hits: STEER_PROVIDERS.has(context.provider.id),
+      }),
     };
   });
 
@@ -285,84 +331,27 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
       publish("memory", { threadId });
       return memoryState(threadId);
     },
-    refreshMemory: async ({ threadId }) => {
-      const before = await memoryState(threadId);
-      if (!before.pi) throw new Error(NOT_PI_REREAD);
-      const refreshAt = tracker.requestRefresh(threadId);
-      publish("memory", { threadId });
-      return { ...before, refreshAt };
-    },
   });
 
   async function memoryState(threadId: string): Promise<MemoryState> {
     const [thread, override] = await Promise.all([bb.sdk.threads.get({ threadId }), state.memoryOverride(threadId)]);
     const setting = memorySetting(current.memory);
     const child = thread.parentThreadId !== null;
-    const entry = tracker.get(threadId);
     return {
       threadId,
-      pi: thread.providerId === "pi",
       setting,
       override,
       mode: effectiveMode(setting, override, child),
       child,
-      view: entry?.view ?? null,
-      reportedAt: entry?.at ?? null,
-      refreshAt: tracker.refreshAt(threadId),
+      view: tracker.get(threadId)?.view ?? null,
     };
   }
-
-  // The Cortex pi extension reports each change to its memory view here; the answer carries the last re-read request.
-  bb.http.route("POST", "/memory", async c => {
-    if (Number(c.req.header("content-length") ?? 0) > REPORT_MAX_BYTES) {
-      return c.json({ ok: false, error: "memory report too large" }, 413);
-    }
-    const text = await c.req.text();
-    if (text.length > REPORT_MAX_BYTES) return c.json({ ok: false, error: "memory report too large" }, 413);
-    let body: unknown;
-    try {
-      body = JSON.parse(text);
-    } catch {
-      return c.json({ ok: false, error: "memory report is not JSON" }, 400);
-    }
-    const report = memoryReportSchema.safeParse(body);
-    if (!report.success) return c.json({ ok: false, error: "invalid memory report" }, 400);
-    const { threadId, sentAt, view } = report.data;
-    if (tracker.report(threadId, view, sentAt)) publish("memory", { threadId });
-    return c.json({ refreshAt: tracker.refreshAt(threadId) });
-  });
-
-  // The report address always, and CORTEX_MEMORY only to look up only or turn memory off: the variable is
-  // process-wide and pi's `pi -p` children inherit it, so `write` would make them save too.
-  const reportAddress: ExperimentalPluginProviderEnvEntry = {
-    name: "CORTEX_BB_MEMORY_URL",
-    value: { serverPath: `/api/v1/plugins/${bb.pluginId}/http/memory` },
-    reason: "Where the Cortex pi extension reports this thread's memory to the Cortex plugin",
-  };
-  const memoryEnv = (mode: MemoryMode): ExperimentalPluginProviderEnvEntry[] =>
-    mode === "write"
-      ? [reportAddress]
-      : [reportAddress, { name: "CORTEX_MEMORY", value: mode, reason: "This thread's Cortex memory mode" }];
-  // A changed environment rebuilds the pi session, so a failed lookup repeats the thread's last entries.
-  const lastEnv = new Map<string, ExperimentalPluginProviderEnvEntry[]>();
-  bb.providers.experimental_contributeEnv("pi", async ({ threadId }) => {
-    try {
-      const [thread, override] = await Promise.all([bb.sdk.threads.get({ threadId }), state.memoryOverride(threadId)]);
-      const entries = memoryEnv(effectiveMode(memorySetting(current.memory), override, thread.parentThreadId !== null));
-      lastEnv.set(threadId, entries);
-      return entries;
-    } catch (err) {
-      bb.log.warn(`reading the memory mode of ${threadId} failed, so its environment stays: ${message(err)}`);
-      return lastEnv.get(threadId) ?? memoryEnv(effectiveMode(memorySetting(current.memory), null, false));
-    }
-  });
 
   bb.events.on("thread.active", ({ thread }) => {
     if (tracker.nextRequest(thread.id)) publish("memory", { threadId: thread.id });
   });
   const forgetMemory = ({ thread }: { thread: { id: string } }): void => {
     tracker.forget(thread.id);
-    lastEnv.delete(thread.id);
   };
   bb.events.on("thread.archived", forgetMemory);
   bb.events.on("thread.deleted", forgetMemory);
@@ -385,13 +374,14 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
   registerCortexWatch(bb, runner, state);
 }
 
-/** The two native tools, named and shaped like the Cortex pi extension's. */
+/** The two native tools every provider gets. */
 function registerCortexTools(
   bb: BbPluginApi,
   runner: CortexRunner,
   state: CortexState,
   tracker: MemoryTracker,
   publish: (channel: CortexRealtimeChannel, payload: unknown) => void,
+  turns: MemoryTurns,
 ): void {
   // Per thread for the current request: calls made and queries claimed (in flight or answered).
   const recalls = new Map<string, { count: number; claimed: Set<string> }>();
@@ -423,6 +413,7 @@ function registerCortexTools(
       }
       state.refreshTask(params.task_id).catch(err => bb.log.warn(`cortex refresh failed: ${message(err)}`));
       tracker.updated(ctx.threadId, params.task_id);
+      turns.wrote(ctx.threadId);
       publish("thread", { threadId: ctx.threadId });
       publish("task", { taskId: params.task_id });
       publish("memory", { threadId: ctx.threadId });

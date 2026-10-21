@@ -87,7 +87,7 @@ One line per rule; the linked doc holds the why. A code comment states its reaso
 - The desktop renderer renders Markdown ONLY through `src/ui/lib/markdown.ts` (`marked` then DOMPurify, failing closed), certified in real Chromium by `integrations/desktop/test/document-safety.test.ts`; a draft is NEVER dropped silently: close, reload and quit go through `src/desktop/draftGuard.ts`, and unsaved text of a deleted task is kept for export ([desktop](docs/desktop.md#document-safety)).
 - Lane/tag picker search (`src/lib/catalogSearch.ts`) NEVER caps results or forces refinement ([desktop](docs/desktop.md#pickers)).
 - Agent memory: the derived index is created on the first search (never in `migrate()`) and never backed up; never pass raw text to FTS5 MATCH; staleness runs in the CLI process, never the daemon; every memory read hides `memory_exclusions` tasks unless the caller passes `withExcluded` (the user's own views only), and a load by id never filters ([memory](docs/memory.md)).
-- The pi extension (`src/extensions/pi.ts`) keeps memory overhead bounded (at most one `cortex memory context` spawn per prompt, a frozen primer, budgeted `cortex_recall`, in bb one bounded report per prompt to the Cortex plugin); tool failures THROW; UI renders only through `src/extensions/memory-view.ts` ([memory](docs/memory.md#the-pi-extension)).
+- The pi extension (`src/extensions/pi.ts`) keeps memory overhead bounded (at most one `cortex memory context` spawn per prompt, a frozen primer, budgeted `cortex_recall`, and nothing at all in bb, where it steps aside for the Cortex plugin); tool failures THROW; UI renders only through `src/extensions/memory-view.ts` ([memory](docs/memory.md#the-pi-extension)).
 - `cortex init`/`cortex reset` touch ONLY the datastore; agent skills, the pi extension and the bb plugin belong to `cortex agents install|reset` (`src/commands/agents.ts`). The plugin's files are embedded by a Bun macro, never imported, so the root tsc never compiles them.
 - The desktop renderer's browser graph never reaches `src/store.ts`, `src/client.ts`, `src/lib/userAuthor.ts` or a `node:`/`bun:` module (`test/unit/ui/browser-graph.test.ts`); it reaches the daemon only through `window.cortex`, and main validates every bridge call (`src/desktop/guard.ts#parseBridgeRequest`). The app starts the daemon only by running `cortex serve`, leaves it running on quit, and never signals a pid or posts shutdown.
 - `src/ui/` imports helpers from `src/lib/`, `src/api.ts` and `src/events.ts`, and `src/store.ts` and `src/contracts.ts` only as types; nothing in `src/lib/` imports `src/ui/` (`test/unit/ui/browser-graph.test.ts` enforces the runtime half).
@@ -114,7 +114,7 @@ Two concentric layers plus the renderer tier; the boundary matters because each 
 - Locally green BEFORE pushing: `pnpm run style:check && pnpm test && pnpm run docs:check`.
 - CI runs the same gates (`.github/workflows/test.yml`); `docs:check` is the FIRST gate — fast-fail on doc drift.
 - `.github/workflows/desktop.yml` tests, packages and smoke-tests the desktop app on macOS (the x64 build on an Intel Mac too) and on Linux x64 and arm64, and keeps the release files 7 days. macOS builds are ad-hoc signed, and no signing material is ever committed.
-- Releasing: add a `CHANGELOG.md` section, run `pnpm version <x.y.z>` (its hooks check the changelog and keep `integrations/desktop/package.json` in step), then `git push --follow-tags`. `.github/workflows/release.yml` reruns both workflows, then publishes the GitHub Release and the Homebrew formula; an `x.y.z-rc.N` version publishes a prerelease to rehearse.
+- Releasing: add a `CHANGELOG.md` section, run `pnpm version <x.y.z>` (its hooks check the changelog and keep `integrations/desktop/package.json` in step), then `git push --follow-tags`. `.github/workflows/release.yml` reruns both workflows, then publishes the GitHub Release and the Homebrew formula; an `x.y.z-rc.N` version publishes a prerelease to rehearse. The `release` skill has the full steps.
 - Never commit `bin/` or `tmp/` — `.gitignore` excludes them.
 
 ## 8. Doc map
@@ -126,6 +126,7 @@ Two concentric layers plus the renderer tier; the boundary matters because each 
 - [docs/bb.md](docs/bb.md) — the bb plugin in `integrations/bb/` (its own npm package and Vitest tests): install, what pi and other providers get, the Cortex tab, and its rules.
 - Each doc runs user-first: plain-language sections, then "Under the hood" (how and why, citing `path#Symbol`), then "Rules to keep" (invariants and the test that enforces each).
 - `.agents/skills/docs/SKILL.md` — the `docs` skill that keeps all of the above true (sync, audit).
+- `.agents/skills/release/SKILL.md` — the `release` skill: cutting a version and installing it on this machine.
 - `src/skills/` — the product manual for agents USING cortex; `cortex schema` is the authoritative CLI contract.
 
 ## 9. Maintenance loop

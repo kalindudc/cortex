@@ -59,12 +59,10 @@
  *   - Tool failures THROW (on a non-zero exit OR a killed process): pi
  *     ignores a returned `isError`, and `pi.exec` resolves a timeout as
  *     `code: 0, killed: true`.
- *   - In bb (bb's own rpc-mode pi with CORTEX_BB_MEMORY_URL and a valid
- *     BB_THREAD_ID), the view goes to the Cortex bb plugin: at most ONE
- *     awaited local POST per prompt (BB_REPORT_TIMEOUT_MS, skipped while the
- *     last report failed) and one fire-and-forget POST per changed view
- *     (spinner frames change nothing). Reporting never throws and never
- *     counts as a memory error; outside bb it makes no call.
+ *   - In bb's own pi (RPC mode), when bb bridges the Cortex plugin's
+ *     `cortex_update` into pi (PI_BB_TOOLS_FILE), the extension registers
+ *     nothing: the plugin serves every provider there. A `pi -p` from that
+ *     thread's shell keeps the extension.
  *
  * The CLI defaults its author to the bb thread on its own; outside bb, humans
  * and fallback agents (no pi session) pass `--as` directly.
@@ -72,12 +70,34 @@
 
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { MemoryPanel, memoryReport, memoryStatus, memoryViewText } from "./memory-view.ts";
+import { readFileSync } from "node:fs";
+import { MemoryPanel, memoryStatus, memoryViewText } from "./memory-view.ts";
 
 const BB_THREAD_ID = /^thr_[0-9a-z]{6,40}$/;
 
 export function sessionAuthor(sessionId: string, threadId: string | undefined = process.env.BB_THREAD_ID): string {
   return threadId && BB_THREAD_ID.test(threadId) ? `bb-${threadId}` : `pi-${sessionId}`;
+}
+
+/**
+ * Whether bb's own pi bridges `toolName` from a bb plugin: pi runs in RPC mode
+ * and the tools file bb writes before starting pi lists it. A `pi -p` from the
+ * thread's shell inherits the file but not the mode. Any error means plain pi.
+ */
+export function shouldStepAside(
+  toolName = "cortex_update",
+  toolsFile = process.env.PI_BB_TOOLS_FILE,
+  argv: readonly string[] = process.argv,
+): boolean {
+  const mode = argv.indexOf("--mode");
+  const rpc = argv.includes("--mode=rpc") || (mode !== -1 && argv[mode + 1] === "rpc");
+  if (!rpc || !toolsFile) return false;
+  try {
+    const tools = JSON.parse(readFileSync(toolsFile, "utf8"));
+    return Array.isArray(tools) && tools.some(tool => tool?.name === toolName);
+  } catch {
+    return false;
+  }
 }
 
 const MEMORY_TIMEOUT_MS = 3000;
@@ -119,8 +139,6 @@ export const RECALL_CUE =
   /\b(last|latest|recent(ly)?|current(ly)?|lately|newest|yesterday|today|continu(e|ing)|resum(e|ing)|pick(ed)? up|left off|remember|previous(ly)?|earlier|again)\b|\b(where|what)\s+(was|were|did|is)\b|(?<![\w@])@\d+\b/i;
 /** How injected hits tell the model to load one. */
 const LOAD_HINT = 'cortex_recall "@<id>"';
-/** The longest a prompt waits for its report to the Cortex bb plugin, the only setter of CORTEX_BB_MEMORY_URL. */
-const BB_REPORT_TIMEOUT_MS = 500;
 
 /**
  * Who keeps memory in this session: the one human-driven session writes;
@@ -281,6 +299,8 @@ function freshStats() {
 }
 
 export default function (pi: ExtensionAPI): void {
+  // bb bridges the Cortex bb plugin's tools into pi, and that plugin serves this thread.
+  if (shouldStepAside()) return;
   // Session state: reset on session_start; the primer and shown hits also on compaction.
   let primer: string | null = null;
   let lane: string | null = null;
@@ -304,11 +324,6 @@ export default function (pi: ExtensionAPI): void {
   let saving = false;
   let frame = 0;
   let spinner: ReturnType<typeof setInterval> | null = null;
-  // Reports to the Cortex bb plugin: the last view sent, whether the last report was
-  // answered, and the newest re-read request applied.
-  let bbSent = "";
-  let bbAnswered = true;
-  let bbRefreshSeen = 0;
 
   function enter(id: number, via: "summary" | "prompt" | "recall", query?: string) {
     if (!Number.isInteger(id) || id <= 0 || inContext.has(id)) return;
@@ -342,52 +357,14 @@ export default function (pi: ExtensionAPI): void {
   /** Recompute the footer after every memory event (a UI-less session has no footer). */
   function showStatus(ctx) {
     if (ctx.hasUI) ctx.ui.setStatus(STATUS_KEY, memoryStatus(viewState(ctx), ctx.ui.theme));
-    void reportToBb(ctx, false);
   }
 
-  /** The primer and hits are fetched again on the next prompt (`/memory refresh`, or a re-read asked in bb). */
+  /** The primer and hits are fetched again on the next prompt (`/memory refresh`). */
   function reread(ctx) {
     primer = null;
     shown.clear();
     inContext.clear();
     showStatus(ctx);
-  }
-
-  /**
-   * Sends the view to the Cortex bb plugin. Only bb's own pi reports: a `pi -p`
-   * started from the thread's shell inherits both variables but runs in print
-   * mode. `wait` sends an unchanged view too; any answer with a newer
-   * `refreshAt` re-reads memory. Never throws and never sets the memory error.
-   */
-  async function reportToBb(ctx, wait: boolean): Promise<void> {
-    const url = process.env.CORTEX_BB_MEMORY_URL ?? "";
-    const threadId = process.env.BB_THREAD_ID ?? "";
-    if (ctx.mode !== "rpc" || !/^https?:\/\//.test(url) || !BB_THREAD_ID.test(threadId)) return;
-    try {
-      const view = memoryReport(viewState(ctx));
-      const key = JSON.stringify(view);
-      if (!wait && key === bbSent) return;
-      bbSent = key;
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ threadId, sentAt: Date.now(), view }),
-        signal: AbortSignal.timeout(BB_REPORT_TIMEOUT_MS),
-      });
-      bbAnswered = res.ok;
-      if (!res.ok) {
-        // An unread error body would keep its connection open.
-        await res.body?.cancel();
-        return;
-      }
-      const refreshAt = (await res.json().catch(() => null))?.refreshAt;
-      if (typeof refreshAt === "number" && Number.isFinite(refreshAt) && refreshAt > bbRefreshSeen) {
-        bbRefreshSeen = refreshAt;
-        reread(ctx);
-      }
-    } catch {
-      bbAnswered = false;
-    }
   }
 
   function startSpinner(ctx) {
@@ -439,9 +416,6 @@ export default function (pi: ExtensionAPI): void {
     stale = null;
     saving = false;
     frame = 0;
-    bbSent = "";
-    bbAnswered = true;
-    bbRefreshSeen = 0;
     showStatus(ctx);
   });
 
@@ -586,8 +560,6 @@ export default function (pi: ExtensionAPI): void {
     stale = null;
     const role = roleOf(ctx);
     if (role === "off") return undefined;
-    // In bb, a re-read asked while the thread was idle must apply before this prompt injects.
-    if (bbAnswered) await reportToBb(ctx, true);
     try {
       return await injectMemory(event, ctx, query, role === "reader");
     } catch (err) {

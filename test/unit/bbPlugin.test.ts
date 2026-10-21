@@ -75,7 +75,16 @@ describe("the embedded plugin", () => {
     expect(files.some(f => f.startsWith("node_modules/") || f.startsWith("dist/") || f.startsWith("."))).toBe(false);
     expect(files).not.toContain("fake-cortex.ts");
     expect(files).not.toContain("vitest.config.ts");
-    expect(JSON.parse(bbPluginFiles()["package.json"] ?? "{}").name).toBe("bb-plugin-cortex");
+    const pkg = JSON.parse(bbPluginFiles()["package.json"] ?? "{}");
+    expect(pkg.name).toBe("bb-plugin-cortex");
+    expect(pkg.bb.skills).toEqual(["skills"]);
+    for (const skill of ["cortex", "cortex-planner"]) {
+      const source = fs.readFileSync(
+        path.join(import.meta.dir, "..", "..", "src", "skills", skill, "SKILL.md"),
+        "utf8",
+      );
+      expect(bbPluginFiles()[`skills/${skill}/SKILL.md`]).toBe(source);
+    }
   });
 
   test("lives in cortex's config dir, never bb's state dir", () => {
