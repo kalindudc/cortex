@@ -46,6 +46,25 @@ describe("DialogFrame", () => {
     expect(d.classList.contains("dialog-frame")).toBe(true);
   });
 
+  test("lays the content on a sheet: a paper host holding a dotless PaperLayer, then the content", () => {
+    const { container } = render(
+      <DialogFrame label="Confirm" onClose={() => {}}>
+        <div class="modal">content</div>
+      </DialogFrame>,
+    );
+    const d = dialogOf(container);
+    expect(d.children.length).toBe(1);
+    const host = d.children[0] as HTMLElement;
+    expect(host.getAttribute("class")).toBe("dialog-paper paper-host");
+    const [layer, content] = Array.from(host.children);
+    // No dots and no card: the full sheet lift, as the document's paper.
+    expect(layer.getAttribute("class")).toBe("paper-layer");
+    expect(layer.getAttribute("aria-hidden")).toBe("true");
+    expect(layer.childNodes.length).toBe(0);
+    expect(content.getAttribute("class")).toBe("modal");
+    expect(content.textContent).toBe("content");
+  });
+
   test("initial focus lands INSIDE the dialog (first focusable) when no child claims it", async () => {
     const { container } = render(
       <DialogFrame label="Confirm" onClose={() => {}}>
@@ -100,6 +119,9 @@ describe("DialogFrame", () => {
       </DialogFrame>,
     );
     fireEvent.click(container.querySelector(".inner") as HTMLElement);
+    expect(onClose).toHaveBeenCalledTimes(0);
+    // The paper host is the sheet itself, not the backdrop.
+    fireEvent.click(container.querySelector(".dialog-paper") as HTMLElement);
     expect(onClose).toHaveBeenCalledTimes(0);
     fireEvent.click(dialogOf(container)); // target === dialog ⇒ ::backdrop
     expect(onClose).toHaveBeenCalledTimes(1);

@@ -3,7 +3,10 @@
    conventions mirror .tag-picker so both feel like the same component
    family — a future migration of TagPicker onto Picker would mostly mean
    replacing the .tag-picker* class names with .picker* (and moving the
-   create-row + footer rendering into the createRow / footer props). */
+   create-row + footer rendering into the createRow / footer props).
+   Both sit on a popover card (popover.css). Names a user wrote (lane and
+   tag names) are serif; search fields and the picker's own labels stay
+   sans-serif. */
 .picker {
   width: 280px;
   padding: 0;
@@ -13,13 +16,14 @@
 }
 .picker-search {
   padding: 8px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--rule);
   flex: 0 0 auto;
 }
 .picker-search input {
   width: 100%;
   height: 28px;
   padding: 4px 8px;
+  font-family: var(--font-sans);
   font-size: var(--fs-2);
   border: 1px solid var(--border);
   border-radius: var(--r-2);
@@ -50,6 +54,7 @@
   cursor: pointer;
   text-align: left;
   color: var(--text-2);
+  font: 13px/1.4 var(--font-serif);
   transition: background var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease);
 }
 .picker-row:hover { background: var(--tint); color: var(--text); }
@@ -74,7 +79,7 @@
   font-size: var(--fs-2);
 }
 .picker-foot {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--rule);
   padding: 4px;
   flex: 0 0 auto;
 }
@@ -93,13 +98,14 @@
 }
 .tag-picker-search {
   padding: 8px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--rule);
   flex: 0 0 auto;
 }
 .tag-picker-search input {
   width: 100%;
   height: 28px;
   padding: 4px 8px;
+  font-family: var(--font-sans);
   font-size: var(--fs-2);
   border: 1px solid var(--border);
   border-radius: var(--r-2);
@@ -131,6 +137,7 @@
   cursor: pointer;
   text-align: left;
   color: var(--text-2);
+  font: 12px/1.5 var(--font-sans);
   transition: background var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease);
 }
 .tag-picker-row:hover { background: var(--tint); color: var(--text); }
@@ -160,6 +167,9 @@
   white-space: nowrap;
   display: inline-block;
   line-height: 20px;
+  font-family: var(--font-serif);
+  font-size: 12px;
+  font-weight: 500;
 }
 .tag-picker-check {
   width: 14px; height: 14px;
@@ -178,7 +188,7 @@
   font-size: var(--fs-2);
 }
 .tag-picker-foot {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--rule);
   padding: 4px;
   flex: 0 0 auto;
 }

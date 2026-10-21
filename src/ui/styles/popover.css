@@ -1,9 +1,11 @@
 /* Shared menu/picker surface. Sizing applies to actual production classes,
-   including the generic Picker used for lanes and the multi-tag picker. */
-.popover { position: absolute; min-width: 180px; border: 1px solid var(--border); border-radius: var(--r-3); background: var(--bg); box-shadow: var(--shadow-pop); padding: 5px; z-index: 50; }
+   including the generic Picker used for lanes and the multi-tag picker.
+   Popovers and menus are small straight-edged cards cut from the sheet:
+   no uneven edge and no grain, at every window width. */
+.popover { position: absolute; min-width: 180px; border: 1px solid var(--rule); border-radius: var(--r-2); background: var(--sheet); box-shadow: var(--shadow-pop); padding: 5px; z-index: 50; }
 .popover-row { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; align-items: center; gap: 8px; width: 100%; min-height: var(--control-height); padding: 7px 10px; border-radius: var(--r-2); color: var(--text-2); font: 12px/1.5 var(--font-sans); text-align: left; }
-.popover-row:hover { background: var(--panel); color: var(--text); }
-.popover .picker-row, .popover .tag-picker-row { min-height: 36px; font: 12px/1.5 var(--font-sans); }
+.popover-row:hover { background: var(--tint); color: var(--text); }
+.popover .picker-row, .popover .tag-picker-row { min-height: 36px; }
 .popover .picker-search input, .popover .tag-picker-search input { height: 36px; }
 @media (max-width: 900px) {
   .popover {
@@ -17,8 +19,6 @@
     max-height: min(64dvh, 480px);
     overflow: auto;
     z-index: 120;
-    border-radius: var(--r-4);
-    box-shadow: var(--shadow-cmd);
   }
   /* Compound selectors beat the later fixed-width picker slice. Lists,
      not search fields, own the scroll area inside these flex sheets. */
