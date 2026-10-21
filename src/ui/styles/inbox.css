@@ -1,45 +1,61 @@
-/* Activity is part of the document, not a miniature inbox panel. Cards,
-   provenance and the inline composer share the document's bounded column. */
+/* Activity is part of the document: dated notes written down the sheet,
+   with no boxes. Each note keeps its time in a left margin column and its
+   words in the right one; the composer below the notes uses the same two
+   columns, so everything written lines up with the summaries. */
 .task-context { display: flex; flex-direction: column; min-height: 0; }
+.activity-thread, .activity-compose { --note-margin: 68px; --note-gap: 18px; --note-text: calc(var(--note-margin) + var(--note-gap)); }
 .inbox-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0; margin-bottom: 18px; }
-.activity-header { align-items: flex-start; margin-bottom: 24px; }
+.activity-header { align-items: baseline; margin-bottom: 14px; }
 .activity-title { display: flex; align-items: center; gap: 8px; }
-.activity-title h2 { margin: 0; color: var(--text); font: 620 19px/1.35 var(--font-sans); letter-spacing: -.02em; }
-.activity-intro { margin: 6px 0 0; color: var(--text-2); font: 12px/1.5 var(--font-sans); }
-.activity-order { color: var(--text-2); font: 10px/1.5 var(--font-sans); padding-top: 4px; white-space: nowrap; }
-.activity-thread { display: flex; flex-direction: column; gap: 12px; }
-.update-card { border: 1px solid var(--border); border-radius: var(--r-3); background: var(--bg); overflow: hidden; }
-.update-card-toggle { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 16px 14px; background: transparent; text-align: left; }
-.update-card-toggle:hover { background: color-mix(in srgb, var(--panel) 60%, transparent); }
-.update-card-toggle:focus-visible { outline-offset: -3px; }
-.update-card-toggle > .icon { margin-top: 3px; color: var(--text-2); }
-.update-card-main { flex: 1 1 auto; min-width: 0; }
-.update-card-byline { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; margin-bottom: 6px; color: var(--text-2); font: 10px/1.5 var(--font-sans); }
-.update-card-author { overflow-wrap: anywhere; min-width: 0; }
-.update-card-byline time { flex-shrink: 0; font-size: 10px; }
-.update-card-summary { display: block; color: var(--text); font: 550 13px/1.5 var(--font-sans); white-space: pre-wrap; overflow-wrap: anywhere; }
-.update-card-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; margin-top: 7px; color: var(--text-2); }
-.update-card-severity { text-transform: capitalize; font: 10px/1.5 var(--font-sans); }
+.activity-title h2 { margin: 0; color: var(--text); font: 600 22px/1.3 var(--font-serif); letter-spacing: 0; }
+.activity-intro { margin: 4px 0 0; color: var(--text-3); font: 12px/1.5 var(--font-sans); }
+.activity-order { color: var(--text-3); font: 11.5px/1.5 var(--font-sans); white-space: nowrap; }
+.activity-thread { display: flex; flex-direction: column; }
+.update-card { border-top: 1px solid var(--rule); }
+/* The toggle is the grid; its byline and main spans step aside
+   (display: contents) so the time can take the margin column while the
+   author, summary and kind line stack in the right one. The avatar would
+   repeat the author id, so a note does not show it. */
+.update-card-toggle {
+  display: grid; grid-template-columns: var(--note-margin) minmax(0, 1fr) 12px; grid-template-areas: "time by mark" "time say mark" "time kind mark";
+  column-gap: var(--note-gap); align-items: start; width: 100%; padding: 12px 0; border-radius: var(--r-1); background: transparent; text-align: left;
+}
+.update-card-toggle:focus-visible { outline-offset: 2px; }
+.update-card-toggle > .avatar { display: none; }
+.update-card-main, .update-card-byline { display: contents; }
+.update-card-byline time { grid-area: time; padding-top: 2px; color: var(--text-3); font: 12px/1.6 var(--font-sans); text-align: right; white-space: nowrap; }
+.update-card-author { grid-area: by; min-width: 0; color: var(--text-3); font: 11px/1.5 var(--font-mono); overflow-wrap: anywhere; }
+.update-card-summary { grid-area: say; display: block; margin: 3px 0 4px; color: var(--text); font: 400 16.5px/1.6 var(--font-serif); white-space: pre-wrap; overflow-wrap: anywhere; }
+.update-card-meta { grid-area: kind; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; color: var(--text-3); font: 11.5px/1.5 var(--font-sans); }
+.update-card-severity { text-transform: capitalize; }
+.update-card-toggle > .icon { grid-area: mark; margin-top: 5px; color: var(--text-3); }
+.update-card-toggle:hover time, .update-card-toggle:hover > .icon { color: var(--text-2); }
 .avatar { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--border); background: var(--panel); color: var(--text-2); font: 500 11px/1 var(--font-mono); flex-shrink: 0; }
-.update-card-body { margin: 0 15px; padding: 16px 0; border-top: 1px solid var(--border); }
-.update-card-body .markdown-view { font-size: 14px; max-width: none; }
-.update-card-body .markdown-view h2 { font-size: 16px; }
-.update-card-body .markdown-view h3 { font-size: 14px; }
-.update-card-nobody { margin: 0; font: 12px/1.6 var(--font-sans); color: var(--text-2); }
-.update-source { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--border); }
-.update-source summary { color: var(--text-2); font: 11px/1.5 var(--font-sans); cursor: pointer; }
-.update-source pre { margin: 12px 0 0; padding: 12px; border: 1px solid var(--border); border-radius: var(--r-2); background: var(--panel); font: 11px/1.7 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
-.activity-compose { display: flex; flex-direction: column; gap: 12px; margin-top: 24px; }
-.activity-compose .post-update-toggle { display: inline-flex; align-items: center; gap: 7px; align-self: flex-start; min-height: var(--control-height); padding: 4px 0; border: 0; border-radius: var(--r-1); background: transparent; color: var(--text-2); font: 12px/1.5 var(--font-sans); }
+.update-card-body { padding: 4px calc(12px + var(--note-gap)) 16px var(--note-text); }
+.update-card-body .markdown-view { font: 400 15px/1.65 var(--font-serif); max-width: none; }
+.update-card-body .markdown-view h1, .update-card-body .markdown-view h2 { font-size: 17px; }
+.update-card-body .markdown-view h3 { font-size: 15.5px; }
+.update-card-body .markdown-view > :last-child { margin-bottom: 0; }
+.update-card-nobody { margin: 0; font: 12px/1.6 var(--font-sans); color: var(--text-3); }
+.update-source { margin-top: 14px; }
+.update-source summary { color: var(--text-3); font: 11.5px/1.5 var(--font-sans); cursor: pointer; }
+.update-source summary:hover { color: var(--text-2); }
+.update-source pre { margin: 10px 0 0; padding: 12px 14px; border: 1px solid var(--rule); border-radius: var(--r-2); background: var(--tint); font: 11px/1.7 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.activity-compose {
+  display: grid; grid-template-columns: var(--note-margin) minmax(0, 1fr); column-gap: var(--note-gap); row-gap: 8px;
+  margin-top: 6px; padding-top: 10px; border-top: 1px dashed var(--rule-strong);
+}
+.activity-compose > * { grid-column: 1 / -1; }
+.activity-compose .post-update-toggle { grid-column: 2; display: inline-flex; align-items: center; gap: 7px; justify-self: start; min-height: var(--control-height); padding: 4px 0; border: 0; border-radius: var(--r-1); background: transparent; color: var(--text-2); font: 12px/1.5 var(--font-sans); }
 .activity-compose .post-update-toggle:hover { color: var(--text); }
-.activity-compose .post-update-toggle .kbd { margin-left: 8px; background: transparent; font-size: 10px; color: var(--text-2); }
+.activity-compose .post-update-toggle .kbd { margin-left: 8px; background: transparent; font-size: 10px; color: var(--text-3); }
 
 /* Shared empty/related states and the scoped Authors roll-up. */
 .empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 44px 24px; color: var(--text-2); text-align: center; flex: 1; }
 .empty .icon { width: 32px; height: 32px; color: var(--text-3); }
 .empty .empty-title { color: var(--text); font: 550 14px/1.5 var(--font-sans); }
 .empty .empty-sub { color: var(--text-2); font: 12px/1.6 var(--font-sans); max-width: 46ch; }
-.activity-thread .empty { border: 1px dashed var(--border-strong); border-radius: var(--r-3); }
+.activity-thread .empty { border: 1px dashed var(--rule-strong); border-radius: var(--r-3); }
 .authors-table { width: 100%; border-collapse: collapse; }
 .authors-table th, .authors-table td { text-align: left; padding: 12px 8px; font: 12px/1.6 var(--font-sans); border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
 .authors-table th { color: var(--text-2); font-weight: 500; }
@@ -56,9 +72,11 @@
 .related-title { color: var(--text); font: 500 13px/1.5 var(--font-sans); overflow-wrap: anywhere; }
 .chip-id { color: var(--text-2); font: 11px/1.5 var(--font-mono); flex-shrink: 0; }
 @media (max-width: 900px) {
-  .activity-header { margin-bottom: 18px; }
-  .update-card-toggle { padding: 14px 12px; }
-  .update-card-body { margin: 0 12px; }
   .activity-compose .post-update-toggle, .update-source summary { min-height: 44px; }
   .update-source summary { padding: 12px 0; }
+}
+/* On a phone-wide sheet the margin narrows, and a long age may wrap in it. */
+@media (max-width: 520px) {
+  .activity-thread, .activity-compose { --note-margin: 52px; --note-gap: 12px; }
+  .update-card-byline time { white-space: normal; }
 }

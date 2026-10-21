@@ -1,17 +1,24 @@
-/* Inline Activity composer. Labels and controls share the same family as
-   the document metadata; no miniature fixed-height submit overrides. */
-.compose { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--r-3); background: var(--bg); min-width: 0; }
-.compose:focus-within { border-color: var(--border-strong); box-shadow: 0 0 0 2px var(--panel); }
-.compose-label { padding: 14px 14px 0; color: var(--text-2); font: 500 12px/1.5 var(--font-sans); }
-.compose textarea { border: 0; box-shadow: none; padding: 10px 14px 14px; background: transparent; resize: none; font: 14px/1.7 var(--font-sans); }
-.compose textarea:focus { outline: none; box-shadow: none; }
-.compose-foot { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 16px; padding: 10px 12px; border-top: 1px solid var(--border); background: color-mix(in srgb, var(--panel) 45%, transparent); border-radius: 0 0 var(--r-3) var(--r-3); }
+/* Inline Activity composer, written on the sheet below the notes in their
+   two columns: its label sits in the margin where a note's time does, and
+   the summary is typed in the serif straight onto the paper, on a writing
+   line that takes the accent while it has focus. The author field and the
+   submit row stay in the sans-serif UI family. */
+.compose { display: grid; grid-template-columns: var(--note-margin, 68px) minmax(0, 1fr); column-gap: var(--note-gap, 18px); min-width: 0; }
+.compose > * { grid-column: 2; }
+.compose > .compose-label { grid-column: 1; padding-top: 3px; color: var(--text-3); font: 12px/1.6 var(--font-sans); text-align: right; }
+.compose:focus-within > .compose-label { color: var(--text-2); }
+.compose textarea { min-width: 0; padding: 0 0 8px; border: 0; border-bottom: 1px solid var(--rule-strong); border-radius: 0; box-shadow: none; background: transparent; resize: none; color: var(--text); font: 400 16px/1.6 var(--font-serif); }
+.compose textarea.autosize { min-height: 60px; }
+.compose textarea::placeholder { font-style: italic; }
+.compose textarea:hover { border-bottom-color: var(--text-4); }
+.compose textarea:focus { outline: none; border-bottom-color: var(--accent); box-shadow: 0 1px 0 var(--accent); }
+.compose-foot { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 16px; padding: 12px 0 0; font-family: var(--font-sans); }
 .compose-author { display: flex; align-items: center; gap: 8px; flex: 1 1 180px; min-width: 0; }
-.compose-author label { color: var(--text-2); font: 11px/1.5 var(--font-sans); }
-.compose-foot input.author { height: var(--control-height); width: 140px; flex: 1 1 auto; min-width: 0; max-width: 220px; padding: 0 8px; border: 1px solid var(--border); background: var(--bg); font: 12px/1.5 var(--font-sans); }
-.compose-foot input.author:hover { border-color: var(--border-strong); }
+.compose-author label { color: var(--text-3); font: 11.5px/1.5 var(--font-sans); }
+.compose-foot input.author { height: var(--control-height); width: 140px; flex: 1 1 auto; min-width: 0; max-width: 220px; padding: 0 8px; border: 1px solid var(--rule-strong); background: transparent; font: 12px/1.5 var(--font-sans); }
+.compose-foot input.author:hover { border-color: var(--text-4); }
 .compose-submit-row { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-left: auto; }
-.char-counter { color: var(--text-2); font: 10px/1.5 var(--font-mono); white-space: nowrap; }
+.char-counter { color: var(--text-3); font: 10px/1.5 var(--font-mono); white-space: nowrap; }
 .char-counter.warn { color: var(--err); }
 /* Hotkey hint chip in the compose-foot. Sits inline with the char counter
    and Post button so it stays visible while typing (placeholders vanish on
