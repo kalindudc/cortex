@@ -286,4 +286,55 @@ describe("DetailsTab on paper", () => {
       "Shared tags",
     ]);
   });
+
+  // happy-dom applies width media queries but does no layout, so this pins
+  // the declared targets; the measured heights need a real browser. It keeps
+  // a computed style until the DOM changes, so each width renders afresh.
+  test("on a narrow window every related task and Retry is a 44px touch target, and a wide one keeps compact rows", () => {
+    type Viewport = { setViewport(size: { width: number; height: number }): void };
+    const happyDOM = (globalThis as unknown as { happyDOM: Viewport }).happyDOM;
+    // The narrow rules are scoped to the panel, so the tab is mounted inside it.
+    const at = (width: number): { container: Element; unmount: () => void } => {
+      happyDOM.setViewport({ width, height: 800 });
+      return render(
+        <aside class="context-panel">
+          <DetailsTab />
+        </aside>,
+      );
+    };
+    const rows = (root: ParentNode): Element[] =>
+      Array.from(root.querySelectorAll(".ctx-card .related-section .related-row"));
+    const retry = (root: ParentNode): Element | null => root.querySelector(".ctx-card .related-error button");
+    try {
+      relatedTasks.value = { referencedBy: [tasks.value[1]], references: [tasks.value[1]], shared: [tasks.value[1]] };
+      const wide = at(1280);
+      expect(rows(wide.container)).toHaveLength(3);
+      for (const row of rows(wide.container)) expect(style(row).minHeight).not.toBe("44px");
+      wide.unmount();
+      for (const width of [900, 390, 320]) {
+        const { container, unmount } = at(width);
+        expect(rows(container)).toHaveLength(3);
+        for (const row of rows(container)) {
+          const r = style(row);
+          expect([r.minHeight, r.display, r.alignItems], `${width}px`).toEqual(["44px", "flex", "center"]);
+          // The title's line may shrink, so a long one ends in an ellipsis.
+          expect(["0", "0px"], `${width}px`).toContain(style(row.querySelector(".row")).minWidth);
+        }
+        unmount();
+      }
+
+      relatedTasks.value = null;
+      relatedError.value = { taskId: 1, message: "backend unavailable" };
+      const wideError = at(1280);
+      expect(style(retry(wideError.container)).minHeight).not.toBe("44px");
+      wideError.unmount();
+      for (const width of [900, 320]) {
+        const { container, unmount } = at(width);
+        expect(style(retry(container)).minHeight, `${width}px`).toBe("44px");
+        unmount();
+      }
+    } finally {
+      happyDOM.setViewport({ width: 1280, height: 800 });
+    }
+  });
 });

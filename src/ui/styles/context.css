@@ -63,5 +63,8 @@
   .ctx-chip { height: 44px; padding: 0 14px; }
   .ctx-inbox .notif-row-controls { opacity: 1; }
   .ctx-inbox .notif-row-controls .hint-button { width: 44px; height: 44px; }
-  .context-panel .doc-outline-link, .author-resume { min-height: 44px; }
+  .context-panel .doc-outline-link, .author-resume, .context-panel .related-error .btn { min-height: 44px; }
+  /* A related task stays one line, centred in its 44px target. */
+  .context-panel .related-row { display: flex; align-items: center; min-height: 44px; }
+  .context-panel .related-row > .row { flex: 1 1 auto; min-width: 0; }
 }
