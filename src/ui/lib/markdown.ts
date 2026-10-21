@@ -16,10 +16,15 @@
 // cortex:// handler) on the first runMermaid call that actually
 // sees a diagram — source-only documents never pay the module cost. A
 // failed module load is NOT cached; the next call retries.
+//
+// Diagrams are drawn in Mermaid's hand-drawn look with a fixed seed, in the
+// ink of the current palette (resolved CSS tokens) with --font-serif labels;
+// see mermaidConfig.
 
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import type { Config as DOMPurifyConfig } from "dompurify";
+import type { MermaidConfig } from "mermaid";
 
 // Thrown when the environment cannot provide a working sanitizer
 // (DOMPurify.isSupported false). Callers MUST fail closed: show the raw
@@ -175,8 +180,9 @@ export function renderMarkdown(md: string): string {
 
 // Diagram lifecycle state written onto each `pre.mermaid` node:
 //   (none)  — source visible, never attempted
-//   done    — sanitized SVG committed; data-mermaid-theme records which
-//             theme produced it so theme flips re-render only stale nodes
+//   done    — sanitized SVG committed; data-mermaid-theme records the
+//             mermaidThemeKey that produced it so palette flips re-render
+//             only stale nodes
 //   error   — render/load failed; raw source stays visible and
 //             data-mermaid-error carries the message. Callers surface an
 //             explicit retry affordance (MarkdownView does).
@@ -208,9 +214,144 @@ function enqueue<T>(job: () => Promise<T>): Promise<T> {
   return next;
 }
 
-function detectTheme(): "dark" | "default" {
-  if (typeof document === "undefined") return "default";
-  return document.documentElement.dataset.theme === "dark" ? "dark" : "default";
+// Names the resolved palette of tokens.css: high contrast replaces every
+// token the diagrams use whatever data-theme says, and without data-theme the
+// palette follows the system.
+export type MermaidThemeKey = "light" | "dark" | "high-contrast";
+
+export function mermaidThemeKey(root: HTMLElement = document.documentElement): MermaidThemeKey {
+  if (root.dataset.contrast === "high") return "high-contrast";
+  const theme =
+    root.dataset.theme ??
+    (typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  return theme === "dark" ? "dark" : "light";
+}
+
+// Resolved values of the CSS tokens a diagram is drawn with.
+export interface MermaidTokens {
+  sheet: string; // --sheet
+  text: string; // --text
+  text3: string; // --text-3
+  fontSerif: string; // --font-serif
+}
+
+export function readMermaidTokens(root: HTMLElement = document.documentElement): MermaidTokens {
+  const style = getComputedStyle(root);
+  const token = (name: string): string => style.getPropertyValue(name).trim();
+  return { sheet: token("--sheet"), text: token("--text"), text3: token("--text-3"), fontSerif: token("--font-serif") };
+}
+
+const RGB_RE = /^rgba?\(\s*([\d.]+%?)[\s,]+([\d.]+%?)[\s,]+([\d.]+%?)(?:\s*[,/]\s*([\d.]+%?))?\s*\)$/i;
+const HEX6_RE = /^#([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i;
+
+function channel(v: string, scale: number): number {
+  return v.endsWith("%") ? (Number.parseFloat(v) / 100) * scale : Number.parseFloat(v);
+}
+
+/**
+ * A CSS colour as Mermaid can use it: an rgb()/rgba() value becomes opaque
+ * #rrggbb, its alpha composited over `backdrop` (a #rrggbb colour) or dropped
+ * without one, because Mermaid derives shades from these colours and roughjs
+ * fills with them. Any other value (hex, a named colour) is returned as is.
+ */
+export function solidColour(value: string, backdrop?: string): string {
+  const m = RGB_RE.exec(value.trim());
+  if (!m) return value.trim();
+  const alpha = m[4] === undefined ? 1 : Math.min(1, Math.max(0, channel(m[4], 1)));
+  const under = backdrop ? HEX6_RE.exec(backdrop) : null;
+  const hex = [m[1], m[2], m[3]].map((c, i) => {
+    const fg = Math.min(255, Math.max(0, channel(c, 255)));
+    const bg = under ? Number.parseInt(under[i + 1], 16) : fg;
+    return Math.round(fg * alpha + bg * (1 - alpha))
+      .toString(16)
+      .padStart(2, "0");
+  });
+  return `#${hex.join("")}`;
+}
+
+// Fixed so that a diagram draws the same strokes on every render.
+export const HAND_DRAWN_SEED = 3;
+
+/**
+ * The mermaid.initialize config for one palette. Mermaid needs real colour
+ * values, so the tokens are resolved values (getComputedStyle), never var().
+ * Everything that sets the look, colours and fonts is in `secure`, so an
+ * in-diagram init directive or front matter cannot change it.
+ */
+export function mermaidConfig(key: MermaidThemeKey, tokens: MermaidTokens): MermaidConfig {
+  const sheet = solidColour(tokens.sheet);
+  const ink = solidColour(tokens.text, sheet);
+  const line = solidColour(tokens.text3, sheet);
+  return {
+    startOnLoad: false,
+    securityLevel: "strict",
+    htmlLabels: false,
+    flowchart: { htmlLabels: false },
+    look: "handDrawn",
+    handDrawnSeed: HAND_DRAWN_SEED,
+    theme: "base",
+    fontFamily: tokens.fontSerif,
+    themeVariables: {
+      darkMode: key !== "light",
+      background: sheet,
+      primaryColor: sheet,
+      secondaryColor: sheet,
+      tertiaryColor: sheet,
+      edgeLabelBackground: sheet,
+      primaryBorderColor: line,
+      secondaryBorderColor: line,
+      lineColor: line,
+      primaryTextColor: ink,
+      textColor: ink,
+      titleColor: ink,
+      fontFamily: tokens.fontSerif,
+      fontSize: "15px",
+    },
+    // Protect security/label/look/style config from in-diagram directives.
+    secure: [
+      "secure",
+      "securityLevel",
+      "startOnLoad",
+      "maxTextSize",
+      "htmlLabels",
+      "look",
+      "handDrawnSeed",
+      "theme",
+      "themeCSS",
+      "themeVariables",
+      "fontFamily",
+    ],
+  };
+}
+
+// Mermaid measures label text to size its boxes, so the label font must be
+// loaded before a render. The wait is bounded so that a font that never
+// loads only delays the diagram, which then draws in a fallback serif.
+const LABEL_FONT = "15px Literata";
+const FONT_WAIT_MS = 1000;
+
+/** Resolves once `font` is loaded, its load fails, or `ms` pass; never rejects. */
+export async function waitForFont(
+  fonts: Pick<FontFaceSet, "load"> | undefined,
+  font: string,
+  ms: number,
+): Promise<void> {
+  if (!fonts) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<void>(resolve => {
+    timer = setTimeout(resolve, ms);
+  });
+  const loaded = Promise.resolve()
+    .then(() => fonts.load(font))
+    .then(
+      () => undefined,
+      () => undefined,
+    );
+  try {
+    await Promise.race([loaded, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function loadMermaid(): Promise<typeof import("mermaid").default> {
@@ -248,14 +389,14 @@ let idSeq = 0; // unique DOM ids for mermaid.render
  *   `data-mermaid-error=<msg>`) and leave the source visible; the promise
  *   REJECTS on module-load failure so callers can show an explicit
  *   error/retry. No silent success on failure.
- * - Nodes already rendered for the current theme are skipped, so theme
- *   changes regenerate only diagrams that need it.
+ * - Nodes already rendered for the current palette (mermaidThemeKey) are
+ *   skipped, so palette changes regenerate only diagrams that need it.
  */
 export async function runMermaid(root: HTMLElement, isCurrent?: () => boolean): Promise<void> {
-  const theme = detectTheme();
+  const theme = mermaidThemeKey();
   const pending = Array.from(root.querySelectorAll<HTMLElement>("pre.mermaid")).filter(node => {
     const state = node.dataset.mermaidState;
-    if (state === "done") return node.dataset.mermaidTheme !== theme; // theme-stale only
+    if (state === "done") return node.dataset.mermaidTheme !== theme; // palette-stale only
     return state !== "error"; // untouched nodes; errors wait for explicit retry
   });
   if (pending.length === 0) return;
@@ -272,29 +413,17 @@ export async function runMermaid(root: HTMLElement, isCurrent?: () => boolean): 
     node.dataset.mermaidJob = jobId;
     sources.set(node, source);
   }
+  const config = mermaidConfig(theme, readMermaidTokens());
+  const stillWanted = (node: HTMLElement): boolean =>
+    node.isConnected && node.dataset.mermaidJob === jobId && (isCurrent?.() ?? true);
 
   await enqueue(async () => {
     if (!DOMPurify.isSupported) throw new MarkdownUnsupportedError();
-    const mermaid = await loadMermaid(); // rejects propagate to the caller
-    mermaid.initialize({
-      startOnLoad: false,
-      securityLevel: "strict",
-      htmlLabels: false,
-      flowchart: { htmlLabels: false },
-      theme,
-      // Protect security/label/style config from in-diagram directives.
-      secure: [
-        "secure",
-        "securityLevel",
-        "startOnLoad",
-        "maxTextSize",
-        "htmlLabels",
-        "theme",
-        "themeCSS",
-        "themeVariables",
-        "fontFamily",
-      ],
-    });
+    // A run superseded before it started renders nothing, so it skips the font
+    // wait. Module-load rejections propagate to the caller; the wait never rejects.
+    const fontReady = pending.some(stillWanted) ? waitForFont(document.fonts, LABEL_FONT, FONT_WAIT_MS) : undefined;
+    const [mermaid] = await Promise.all([loadMermaid(), fontReady]);
+    mermaid.initialize(config);
 
     // Inert offscreen staging container — NEVER the live reader.
     const staging = document.createElement("div");
@@ -304,12 +433,10 @@ export async function runMermaid(root: HTMLElement, isCurrent?: () => boolean): 
     try {
       for (const node of pending) {
         const source = sources.get(node) ?? "";
-        const stillWanted = (): boolean =>
-          node.isConnected && node.dataset.mermaidJob === jobId && (isCurrent?.() ?? true);
-        if (!stillWanted()) continue;
+        if (!stillWanted(node)) continue;
         try {
           const { svg } = await mermaid.render(`cortex-mermaid-${++idSeq}`, source, staging);
-          if (!stillWanted()) continue; // discard obsolete/disconnected generations
+          if (!stillWanted(node)) continue; // discard obsolete/disconnected generations
           svgPass = true;
           let clean: string;
           try {
@@ -322,7 +449,7 @@ export async function runMermaid(root: HTMLElement, isCurrent?: () => boolean): 
           node.dataset.mermaidTheme = theme;
           delete node.dataset.mermaidError;
         } catch (err) {
-          if (!stillWanted()) continue;
+          if (!stillWanted(node)) continue;
           // Preserve the raw source with an explicit error state; the
           // caller renders the retry affordance.
           node.textContent = source;

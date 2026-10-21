@@ -5,6 +5,8 @@
 // labeled task-actions menu, and draft save/conflict feedback.
 
 import { describe, test, expect, mock, beforeEach } from "bun:test";
+import fs from "node:fs";
+import path from "node:path";
 
 const setStatusMock = mock(() => Promise.resolve({}));
 mock.module("../../../../src/ui/api/client.ts", () => ({
@@ -149,6 +151,58 @@ function stubTitleMetrics(scrollHeight: number): () => void {
     globalThis.getComputedStyle = originalGetComputedStyle;
   };
 }
+
+/** Every style rule of document.css (with its @media prelude, or null) whose selector list matches `pick`. */
+interface CssRule {
+  media: string | null;
+  selector: string;
+  decls: Map<string, string>;
+}
+function documentRules(pick: (selector: string) => boolean): CssRule[] {
+  const file = path.resolve(import.meta.dir, "../../../../src/ui/styles/document.css");
+  const text = fs.readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const out: CssRule[] = [];
+  const walk = (src: string, media: string | null): void => {
+    let at = 0;
+    for (let open = src.indexOf("{", at); open >= 0; open = src.indexOf("{", at)) {
+      let depth = 1;
+      let close = open + 1;
+      for (; depth > 0; close++) depth += src[close] === "{" ? 1 : src[close] === "}" ? -1 : 0;
+      const prelude = src.slice(at, open).trim().replace(/\s+/g, " ");
+      const body = src.slice(open + 1, close - 1);
+      if (prelude.startsWith("@")) walk(body, prelude);
+      else if (pick(prelude)) {
+        const decls = new Map<string, string>();
+        for (const decl of body.split(";")) {
+          const colon = decl.indexOf(":");
+          if (colon > 0)
+            decls.set(
+              decl.slice(0, colon).trim(),
+              decl
+                .slice(colon + 1)
+                .trim()
+                .replace(/\s+/g, " "),
+            );
+        }
+        out.push({ media, selector: prelude, decls });
+      }
+      at = close;
+    }
+  };
+  walk(text, null);
+  return out;
+}
+
+const TITLE_TYPE = [
+  "font",
+  "font-size",
+  "font-weight",
+  "font-family",
+  "line-height",
+  "font-variation-settings",
+  "letter-spacing",
+];
+const INPUT_SELECTOR = ".task-header .title-input-wrap > .title-input, .task-header .title-input-wrap::after";
 
 describe("TaskHeader", () => {
   beforeEach(() => {
@@ -532,6 +586,28 @@ describe("TaskHeader", () => {
     fireEvent.click(retry);
     expect(draft.calls.reload).toBe(2);
     expect(container.querySelector("textarea.title-input")).toBeNull();
+  });
+
+  test("the title input is set in the display title's serif type at every width, so editing never moves the title", () => {
+    const display = documentRules(s => s === ".task-title-display");
+    const input = documentRules(s => s === INPUT_SELECTOR);
+    expect(display).toHaveLength(1);
+    expect(input).toHaveLength(1);
+    expect(display[0].decls.get("font")).toBe("600 31px/1.2 var(--font-serif)");
+    expect(display[0].decls.get("font-variation-settings")).toBe('"opsz" 48');
+    expect(display[0].decls.get("letter-spacing")).toBe("-.012em");
+    for (const prop of TITLE_TYPE) expect(input[0].decls.get(prop), prop).toBe(display[0].decls.get(prop));
+    // Any other rule that changes the title's type (the narrow-window size)
+    // names the display title and both halves of the input together.
+    const others = documentRules(
+      s => s !== ".task-title-display" && s !== INPUT_SELECTOR && /task-title-display|title-input-wrap/.test(s),
+    ).filter(rule => TITLE_TYPE.some(prop => rule.decls.has(prop)));
+    expect(others.map(rule => rule.media)).toEqual(["@media (max-width: 900px)"]);
+    for (const rule of others) {
+      const selectors = rule.selector.split(",").map(s => s.trim());
+      expect(selectors).toContain(".task-title-display");
+      for (const half of INPUT_SELECTOR.split(",")) expect(selectors).toContain(half.trim());
+    }
   });
 
   test("editing a clamped title shows the whole title in the textarea with no clamp in the DOM", async () => {

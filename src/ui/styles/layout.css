@@ -75,13 +75,12 @@ main:has(> .ctx-open) { --ctx-w: 300px; }
 .sidebar-pane .pane-section.open > .section-body::-webkit-scrollbar-track   { background: transparent; }
 .sidebar-pane .pane-section.open > .section-body::-webkit-scrollbar-thumb   { background: var(--border-strong); border-radius: 4px; }
 .sidebar-pane .pane-section.open > .section-body::-webkit-scrollbar-thumb:hover { background: var(--text-3); }
-/* Document workspace pane. Plain reading surface — the paper-dot texture
-   moved to the EDITOR surface only (no texture behind rendered prose).
-   Padding gives the document a comfortable gutter; the reader's max
-   measure (document.css) bounds the prose line length. */
+/* Document workspace pane: the desk. The toolbar sits on it and the task
+   lies on it as one sheet (document.css .doc-sheet), which carries its own
+   insets and paper; the reader's measure bounds the prose line length. */
 .pane-active {
   grid-area: active;
-  background-color: var(--bg);
+  background-color: var(--desk);
   padding: 0;
   min-width: 0;
   overflow: hidden;
