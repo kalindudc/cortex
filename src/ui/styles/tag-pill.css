@@ -17,7 +17,9 @@
   font-weight: 600;
   line-height: 1;
   border-radius: var(--r-pill);
-  border: 1px solid var(--border);
+  /* A rule, not --border, so the outline reads the same on the desk and on
+     a sheet such as the selected row's card. */
+  border: 1px solid var(--rule);
   background: var(--tint);
   color: var(--text-2);
   white-space: nowrap;     /* names never break mid-word */
