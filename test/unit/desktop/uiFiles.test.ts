@@ -11,7 +11,16 @@ beforeAll(() => {
   base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "cortex-ui-")));
   ui = path.join(base, "ui");
   fs.mkdirSync(path.join(ui, "mermaid"), { recursive: true });
-  for (const name of ["index.html", "bundle.js", "bundle.css", "bundle.js.map", "mermaid/chunk.mjs", "data.bin"]) {
+  fs.mkdirSync(path.join(ui, "fonts"), { recursive: true });
+  for (const name of [
+    "index.html",
+    "bundle.js",
+    "bundle.css",
+    "bundle.js.map",
+    "mermaid/chunk.mjs",
+    "fonts/literata-latin-opsz-normal.woff2",
+    "data.bin",
+  ]) {
     fs.writeFileSync(path.join(ui, name), name);
   }
   fs.writeFileSync(path.join(base, "secret.js"), "secret");
@@ -32,6 +41,13 @@ describe("resolveUiFile", () => {
     expect(resolveUiFile(ui, "/mermaid/chunk.mjs")?.mime).toBe("text/javascript; charset=utf-8");
     expect(resolveUiFile(ui, "/bundle.css")?.mime).toBe("text/css; charset=utf-8");
     expect(resolveUiFile(ui, "/bundle.js.map")?.mime).toBe("application/json; charset=utf-8");
+  });
+
+  test("serves a bundled font from /fonts as font/woff2", () => {
+    expect(resolveUiFile(ui, "/fonts/literata-latin-opsz-normal.woff2")).toEqual({
+      file: path.join(ui, "fonts", "literata-latin-opsz-normal.woff2"),
+      mime: "font/woff2",
+    });
   });
 
   test("falls back to index.html only for extensionless paths", () => {
