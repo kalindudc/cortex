@@ -203,6 +203,18 @@
   .panel-input { width: 100%; min-height: 44px; }
   .panel-input-number { width: 120px; }
   .panel-view .btn, .panel-task { min-height: 44px; }
-  .panel-card .color-grid { grid-template-columns: repeat(8, 32px); }
-  .panel-card .color-swatch { width: 32px; }
+  /* The colour picker takes its own line under the label. Each swatch keeps
+     its drawn 32px, and a transparent layer 7px past its padding box makes
+     a 44px target; the 12px gaps keep neighbouring targets from
+     overlapping. Eight columns become four, then two, as the row narrows. */
+  .panel-row-colour { container-type: inline-size; }
+  .panel-card .color-grid { flex: 1 1 100%; grid-template-columns: repeat(8, 32px); gap: 12px; }
+  .panel-card .color-swatch { position: relative; width: 32px; }
+  .panel-card .color-swatch::before { content: ""; position: absolute; inset: -7px; }
+  @container (width < 340px) {
+    .panel-card .color-grid { grid-template-columns: repeat(4, 32px); }
+  }
+  @container (width < 164px) {
+    .panel-card .color-grid { grid-template-columns: repeat(2, 32px); }
+  }
 }

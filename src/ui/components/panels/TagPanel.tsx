@@ -84,7 +84,7 @@ function TagForm({ tag }: { tag: TagWithCount }): VNode {
           onInput={(e: JSX.TargetedInputEvent<HTMLInputElement>) => (renameTo.value = e.currentTarget.value)}
         />
       </div>
-      <div class="panel-row panel-row-top">
+      <div class="panel-row panel-row-top panel-row-colour">
         <div class="panel-row-label">
           <b>Colour</b>
           <span>The colour of the tag's pill everywhere.</span>

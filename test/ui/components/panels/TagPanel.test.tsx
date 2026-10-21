@@ -96,6 +96,8 @@ describe("TagPanel", () => {
     const headings = Array.from(body.querySelectorAll(".panel-card-title"));
     expect(headings.map(h => h.textContent)).toEqual(["Tag", "Tasks with #bug", "Delete"]);
     expect(headings[1]?.querySelector(".panel-card-title-name")?.textContent).toBe("#bug");
+    // The colour row is the container its swatch grid reflows in on a narrow window.
+    expect(body.querySelectorAll(".panel-row-colour > .color-grid > .color-swatch")).toHaveLength(16);
   });
 
   test("a rename sends only { rename }, swaps the filter entry and moves the selection", async () => {

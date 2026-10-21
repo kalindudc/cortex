@@ -104,6 +104,8 @@ describe("LanePanel", () => {
       "Delete",
     ]);
     expect(body.querySelector("#lane-panel-name")).not.toBeNull();
+    // The colour row is the container its swatch grid reflows in on a narrow window.
+    expect(body.querySelectorAll(".panel-row-colour > .color-grid > .color-swatch")).toHaveLength(16);
   });
 
   test("a rename sends only { rename }, follows the lane filter and moves the selection", async () => {

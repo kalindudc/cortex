@@ -75,7 +75,7 @@ function LaneForm({ lane }: { lane: Lane }): VNode {
           title={isDefault ? "the 'now' lane cannot be renamed" : ""}
         />
       </div>
-      <div class="panel-row panel-row-top">
+      <div class="panel-row panel-row-top panel-row-colour">
         <div class="panel-row-label">
           <b>Colour</b>
           <span>Shown in the task list, headers and filters.</span>
