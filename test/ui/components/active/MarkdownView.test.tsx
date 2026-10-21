@@ -7,7 +7,7 @@
 // failure, defensive input tightening, DOM stability across unrelated
 // re-renders, and the fail-closed sanitizer-unsupported view.
 
-import { describe, test, expect, mock, beforeEach } from "bun:test";
+import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
 
 const purifyCtrl = { supported: true };
 mock.module("dompurify", () => ({
@@ -21,9 +21,10 @@ mock.module("dompurify", () => ({
   },
 }));
 
-import { render, fireEvent } from "@testing-library/preact";
+import { render, fireEvent, act } from "@testing-library/preact";
 import { MarkdownView, type MarkdownHeading } from "../../../../src/ui/components/active/MarkdownView.tsx";
 import { tasks, selectedId, filters, workspaceQuery } from "../../../../src/ui/state/signals.ts";
+import { appearance, setAppearance, type Appearance } from "../../../../src/ui/state/theme.ts";
 import type { Task } from "../../../../src/ui/api/types.ts";
 
 const mkTask = (id: number): Task => ({
@@ -240,5 +241,35 @@ describe("MarkdownView", () => {
     expect(node.dataset.mermaidState).toBe("error");
     expect(container.querySelector(".md-mermaid-error .md-mermaid-retry")).not.toBeNull();
     expect(container.textContent).toContain("Diagram failed to render");
+  });
+
+  describe("appearance changes", () => {
+    let saved: Appearance;
+    beforeEach(() => {
+      saved = appearance.peek();
+    });
+    afterEach(() => {
+      setAppearance(saved);
+    });
+
+    test("dark to high contrast re-renders diagrams although the resolved theme stays dark", async () => {
+      setAppearance("dark");
+      const { container } = render(<MarkdownView source={"```mermaid\ngraph TD; A-->B;\n```"} idPrefix="t" />);
+      await new Promise(r => setTimeout(r, 20));
+      const node = container.querySelector<HTMLElement>("pre.mermaid");
+      if (!node) throw new Error("expected mermaid node");
+      // As if the diagram had rendered in dark ink (Mermaid cannot load here).
+      node.dataset.mermaidState = "done";
+      node.dataset.mermaidTheme = "dark";
+      const job = node.dataset.mermaidJob;
+      expect(job).toBeDefined();
+
+      await act(() => {
+        setAppearance("high-contrast");
+      });
+      // runMermaid stamps a new job on every stale diagram it renders again.
+      expect(node.dataset.mermaidJob).toBeDefined();
+      expect(node.dataset.mermaidJob).not.toBe(job);
+    });
   });
 });

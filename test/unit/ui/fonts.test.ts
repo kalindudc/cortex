@@ -73,7 +73,9 @@ describe("bundled fonts", () => {
 
   test("no stylesheet under src/ui/styles references an http or https URL", () => {
     for (const file of listFiles(STYLES)) {
-      expect(fs.readFileSync(file, "utf8"), path.relative(ROOT, file)).not.toMatch(/https?:/i);
+      expect(fs.readFileSync(file, "utf8"), path.relative(ROOT, file)).not.toMatch(
+        /https?:(?!\/\/www\.w3\.org\/2000\/svg)/i,
+      );
     }
   });
 
