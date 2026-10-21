@@ -58,9 +58,10 @@ const main = defineCommand({
 // consumes a dash-leading token as a string flag's value (see src/args.ts):
 // rewrite `--flag -value` into `--flag=-value` first so anchors like
 // `--body-search "- item"` parse as values, not flags.
-runMain(main, {
-  rawArgs: await normalizeArgv(
-    entryArgs(process.argv.slice(2), () => isatty(0) && isatty(1)),
-    subCommands,
-  ),
-});
+const rawArgs = await normalizeArgv(
+  entryArgs(process.argv.slice(2), () => isatty(0) && isatty(1)),
+  subCommands,
+);
+// citty prints --version through consola, which prefixes "[log] " when CI is set; scripts read this line.
+if (rawArgs.length === 1 && rawArgs[0] === "--version") console.log(pkg.version);
+else await runMain(main, { rawArgs });

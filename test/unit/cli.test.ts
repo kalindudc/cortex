@@ -105,9 +105,8 @@ describe("no-argument entry", () => {
   test("src/cli.ts routes runMain through entryArgs with a stdin+stdout TTY check", async () => {
     const src = await cliSourcePromise;
     // entryArgs decides plain `cortex` -> `app` first; normalizeArgv (src/args.ts) then rewrites dash-leading values.
-    expect(src).toMatch(
-      /runMain\(main,\s*\{\s*rawArgs:\s*await normalizeArgv\(\s*entryArgs\(process\.argv\.slice\(2\),/,
-    );
+    expect(src).toMatch(/const rawArgs = await normalizeArgv\(\s*entryArgs\(process\.argv\.slice\(2\),/);
+    expect(src).toMatch(/runMain\(main,\s*\{\s*rawArgs\s*\}\)/);
     expect(src).toMatch(/isatty\(0\)\s*&&\s*isatty\(1\)/);
   });
 });

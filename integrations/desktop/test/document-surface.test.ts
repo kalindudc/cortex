@@ -170,6 +170,9 @@ describe("document surface", () => {
     await banner.getByRole("button", { name: "Keep my changes" }).click();
     await banner.waitFor({ state: "detached" });
     await expect.poll(() => bodyOf(keepId), POLL).toBe(`# Conflict\n\nbase${typed}`);
+    // The daemon has our text a moment before this window sees its save land; leaving while the draft still
+    // counts as unsaved stops at the close guard and aborts the navigation.
+    await page.locator(".draft-state").waitFor({ state: "detached" });
 
     const applyId = await addTask("conflict apply", "# Conflict\n\nbase");
     await openTask(page, `cortex://app/task/${applyId}`);

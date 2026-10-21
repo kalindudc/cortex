@@ -1,4 +1,5 @@
 import { test, expect, beforeAll, afterAll } from "bun:test";
+import pkg from "../../package.json" with { type: "json" };
 import { runCli, mkTmpEnv } from "./helpers.ts";
 
 let testEnv: Record<string, string>;
@@ -13,6 +14,14 @@ beforeAll(() => {
 afterAll(() => cleanup());
 
 const run = (...args: string[]) => runCli({ args, env: testEnv });
+
+test("--version prints the bare version, also under CI", async () => {
+  for (const ci of ["", "true"]) {
+    const r = await runCli({ args: ["--version"], env: { ...testEnv, CI: ci } });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toBe(`${pkg.version}\n`);
+  }
+});
 const runWithInput = (input: string, ...args: string[]) => runCli({ args, env: testEnv, stdin: input });
 
 test("reset wipes and re-inits when RESET is typed; aborts otherwise", async () => {
