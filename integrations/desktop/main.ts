@@ -412,6 +412,8 @@ async function start(): Promise<void> {
   try {
     await connect();
   } catch (err) {
+    // Also on stderr: the dialog blocks, and a launch from a terminal or a test reads stderr.
+    console.error(`Cortex could not reach its daemon: ${(err as Error).message}`);
     dialog.showErrorBox("Cortex could not reach its daemon", (err as Error).message);
     app.exit(1);
     return;

@@ -84,11 +84,22 @@ jobs:
         with:
           name: cortex-release-macOS-ARM64
           path: release
-      - name: the x64 CLI and app run
+      - name: the x64 CLI runs
         run: |
           version="$(node -p "require('./package.json').version")"
           tar -xzf "release/cortex-$version-darwin-x64.tar.gz" -C "$RUNNER_TEMP"
           test "$("$RUNNER_TEMP/cortex" --version)" = "$version"
           ditto -x -k "release/Cortex-$version-mac-x64.zip" "$RUNNER_TEMP/app"
           test "$(lipo -archs "$RUNNER_TEMP/app/Cortex.app/Contents/MacOS/Cortex")" = x86_64
-          CORTEX_DESKTOP_APP="$RUNNER_TEMP/app/Cortex.app" npm --prefix integrations/desktop test -- packaged
+      - name: the x64 app's daemon runs
+        run: |
+          export CORTEX_DB="$RUNNER_TEMP/db/cortex.db" XDG_CONFIG_HOME="$RUNNER_TEMP/cfg" XDG_RUNTIME_DIR="$RUNNER_TEMP/run"
+          mkdir -p "$RUNNER_TEMP/db" "$XDG_CONFIG_HOME" "$XDG_RUNTIME_DIR"
+          chmod 700 "$XDG_RUNTIME_DIR"
+          cortex="$RUNNER_TEMP/app/Cortex.app/Contents/Resources/cortex"
+          time "$cortex" init
+          time "$cortex" serve
+          time "$cortex" doctor --json
+          "$cortex" stop
+      - name: the x64 app runs
+        run: CORTEX_DESKTOP_APP="$RUNNER_TEMP/app/Cortex.app" npm --prefix integrations/desktop test -- packaged

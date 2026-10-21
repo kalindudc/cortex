@@ -73,7 +73,11 @@ describe.skipIf(!target)("packaged app", () => {
   });
 
   afterAll(async () => {
-    await app?.close().catch(() => {});
+    // An app stuck on an error dialog never finishes closing; kill it after a while.
+    const closing = app?.close().catch(() => {});
+    const killer = setTimeout(() => app?.process().kill("SIGKILL"), 10_000);
+    await closing;
+    clearTimeout(killer);
     if (root) await run(cortexBin ?? bundledCortex(target as string), ["stop"], env).catch(() => {});
     if (root) fs.rmSync(root, { recursive: true, force: true });
   });
@@ -84,6 +88,8 @@ describe.skipIf(!target)("packaged app", () => {
       args: [`--cortex-db=${db}`, `--user-data-dir=${path.join(root, "ud")}`],
       env,
     });
+    const output: string[] = [];
+    app.process().stderr?.on("data", (chunk: Buffer) => output.push(String(chunk)));
     expect(await app.evaluate(({ app }) => app.isPackaged)).toBe(true);
 
     const resources = await app.evaluate(() => process.resourcesPath);
@@ -92,7 +98,10 @@ describe.skipIf(!target)("packaged app", () => {
     }
     cortexBin = path.join(resources, "cortex");
 
-    const page = await app.firstWindow();
+    // The window opens only once the bundled daemon answers; when it does not, say what the app printed.
+    const page = await app.firstWindow({ timeout: 60_000 }).catch((err: Error) => {
+      throw new Error(`${err.message}\n--- the app's stderr ---\n${output.join("")}`);
+    });
     await page.waitForURL(url => url.href.startsWith("cortex://app/"), { timeout: 15_000 });
     await expect.poll(() => fs.existsSync(`${db}.daemon.json`), { timeout: 20_000 }).toBe(true);
 
@@ -106,5 +115,5 @@ describe.skipIf(!target)("packaged app", () => {
 
     await run(cortexBin, ["stop"], env);
     expect(fs.existsSync(`${db}.daemon.json`)).toBe(false);
-  });
+  }, 180_000);
 });
