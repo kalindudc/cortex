@@ -2,6 +2,14 @@
 
 Cortex follows [semantic versioning](https://semver.org). Each release has a section below, newest first.
 
+## 0.100.0 - 2026-10-21
+
+- **The desktop app alone.** The install script takes `CORTEX_NO_CLI=1` to install only the desktop app, for when
+  Homebrew provides the CLI. It then restarts the daemon with the `cortex` already on your PATH.
+- **Homebrew.** After `brew install`, the formula prints the command that installs the desktop app of the same
+  version. The README now taps first (`brew tap kalindudc/tap`), because current Homebrew installs only from taps you
+  have added.
+
 ## 0.99.1 - 2026-10-21
 
 - **Cortex in bb for every provider.** The bb plugin gives pi, Claude Code, Codex and every other provider the same
