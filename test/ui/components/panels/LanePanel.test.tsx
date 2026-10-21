@@ -33,6 +33,7 @@ import { fireEvent, render } from "@testing-library/preact";
 import { LanePanel } from "../../../../src/ui/components/panels/LanePanel.tsx";
 import { filters, lanes, modal, selectedLane, tasks, view } from "../../../../src/ui/state/signals.ts";
 import type { Task } from "../../../../src/ui/api/types.ts";
+import { sheetBody } from "./sheet.ts";
 
 const task = (id: number, lane: string, status: Task["status"]): Task => ({
   id,
@@ -90,6 +91,19 @@ describe("LanePanel", () => {
     fireEvent.click(button(container, "Discard changes"));
     expect(input(container, "Position").value).toBe("5");
     expect(button(container, "Save changes").disabled).toBe(true);
+  });
+
+  test("lies on one dotted sheet: the title, breakdown, form and delete section scroll inside it", () => {
+    const { container } = render(<LanePanel />);
+    const body = sheetBody(container);
+    expect(body.querySelector(".panel-title")?.textContent).toBe("next");
+    expect(body.querySelector(".panel-title-swatch")?.getAttribute("style")).toContain("background: #dc2626");
+    expect(Array.from(body.querySelectorAll(".panel-card-title")).map(h => h.textContent)).toEqual([
+      "Breakdown",
+      "Lane",
+      "Delete",
+    ]);
+    expect(body.querySelector("#lane-panel-name")).not.toBeNull();
   });
 
   test("a rename sends only { rename }, follows the lane filter and moves the selection", async () => {
@@ -178,7 +192,7 @@ describe("LanePanel", () => {
   test("no lanes: an empty state pointing to the + button", () => {
     lanes.value = [];
     const { container } = render(<LanePanel />);
-    expect(container.querySelector(".empty-title")?.textContent).toBe("No lanes yet");
+    expect(sheetBody(container).querySelector(".empty-title")?.textContent).toBe("No lanes yet");
     expect(container.querySelector("input")).toBeNull();
   });
 });

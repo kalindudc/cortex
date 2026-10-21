@@ -29,6 +29,7 @@ import { plural } from "../../../lib/format.ts";
 import { onSubmitKeys } from "../../lib/keys.ts";
 import { Icon } from "../Icon.tsx";
 import { TagPill } from "../chips/TagPill.tsx";
+import { PanelSheet } from "./PanelSheet.tsx";
 
 function TagForm({ tag }: { tag: TagWithCount }): VNode {
   const renameTo = useSignal(tag.name);
@@ -125,13 +126,13 @@ export function TagPanel(): VNode {
             <b>Tags</b>
           </div>
         </header>
-        <div class="panel-body">
+        <PanelSheet>
           <div class="empty">
             <Icon name="hash" size={32} />
             <div class="empty-title">No tags yet</div>
             <div class="empty-sub">Create one with the + button beside "Tags".</div>
           </div>
-        </div>
+        </PanelSheet>
       </section>
     );
   }
@@ -160,7 +161,7 @@ export function TagPanel(): VNode {
           Show its tasks
         </button>
       </header>
-      <div class="panel-body">
+      <PanelSheet>
         <div class="panel-inner">
           <h1 class="panel-title">
             <TagPill name={tag.name} color={tag.color} />
@@ -170,7 +171,9 @@ export function TagPanel(): VNode {
           <h2 class="panel-card-title">Tag</h2>
           <TagForm key={tag.name} tag={tag} />
 
-          <h2 class="panel-card-title">Tasks with #{tag.name}</h2>
+          <h2 class="panel-card-title">
+            Tasks with <span class="panel-card-title-name">#{tag.name}</span>
+          </h2>
           <div class="panel-card panel-task-list">
             {carrying.length === 0 ? (
               <p class="meta panel-empty-line">No task carries this tag.</p>
@@ -215,7 +218,7 @@ export function TagPanel(): VNode {
             </div>
           </div>
         </div>
-      </div>
+      </PanelSheet>
     </section>
   );
 }

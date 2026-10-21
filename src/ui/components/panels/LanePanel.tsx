@@ -20,6 +20,7 @@ import { LANE_COLORS, STATUS, STATUS_LABEL } from "../../../lib/constants.ts";
 import { plural } from "../../../lib/format.ts";
 import { onSubmitKeys } from "../../lib/keys.ts";
 import { Icon } from "../Icon.tsx";
+import { PanelSheet } from "./PanelSheet.tsx";
 
 function LaneForm({ lane }: { lane: Lane }): VNode {
   const renameTo = useSignal(lane.name);
@@ -130,13 +131,13 @@ export function LanePanel(): VNode {
             <b>Lanes</b>
           </div>
         </header>
-        <div class="panel-body">
+        <PanelSheet>
           <div class="empty">
             <Icon name="layers" size={32} />
             <div class="empty-title">No lanes yet</div>
             <div class="empty-sub">Create one with the + button beside "Lanes".</div>
           </div>
-        </div>
+        </PanelSheet>
       </section>
     );
   }
@@ -175,7 +176,7 @@ export function LanePanel(): VNode {
           Show its tasks
         </button>
       </header>
-      <div class="panel-body">
+      <PanelSheet>
         <div class="panel-inner">
           <h1 class="panel-title">
             <span class="lane-color panel-title-swatch" style={lane.color ? `background: ${lane.color}` : ""}></span>
@@ -226,7 +227,7 @@ export function LanePanel(): VNode {
             </div>
           </div>
         </div>
-      </div>
+      </PanelSheet>
     </section>
   );
 }
