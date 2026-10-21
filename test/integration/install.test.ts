@@ -93,6 +93,40 @@ describe("scripts/install.sh", () => {
     expect(res.stderr).toContain("CORTEX_INSTALL_FROM needs CORTEX_VERSION");
   });
 
+  test("CORTEX_NO_CLI=1 skips the CLI archive and stops the daemon with the cortex on PATH", async () => {
+    const folder = path.join(sandbox.tmpDir, "release-app-only");
+    fs.mkdirSync(folder);
+    fs.writeFileSync(path.join(folder, "SHA256SUMS"), "");
+    // Stands in for Homebrew's cortex; PATH is pinned so no other cortex can answer.
+    const pathBin = path.join(sandbox.tmpDir, "path-bin");
+    fs.mkdirSync(pathBin);
+    fs.symlinkSync(BIN, path.join(pathBin, "cortex"));
+    const binDir = path.join(sandbox.tmpDir, "bin-app-only");
+    const res = await install({
+      CORTEX_INSTALL_FROM: folder,
+      CORTEX_VERSION: pkg.version,
+      CORTEX_BIN_DIR: binDir,
+      CORTEX_NO_CLI: "1",
+      PATH: `${pathBin}:/usr/bin:/bin:/usr/sbin:/sbin`,
+    });
+    expect(res.code, res.stderr).toBe(0);
+    expect(res.stdout).toContain(`note: no desktop package for cortex ${pkg.version}`);
+    expect(res.stdout).not.toContain("Installed cortex");
+    expect(res.stdout).toContain("not running");
+    expect(fs.existsSync(binDir)).toBe(false);
+  });
+
+  test("CORTEX_NO_CLI=1 and CORTEX_NO_APP=1 together fail", async () => {
+    const res = await install({
+      CORTEX_INSTALL_FROM: release,
+      CORTEX_VERSION: pkg.version,
+      CORTEX_NO_CLI: "1",
+      CORTEX_NO_APP: "1",
+    });
+    expect(res.code).not.toBe(0);
+    expect(res.stderr).toContain("leave nothing to install");
+  });
+
   test("a folder without a desktop package installs the CLI and says how to build the app", async () => {
     const binDir = path.join(sandbox.tmpDir, "bin-noapp");
     const res = await install({

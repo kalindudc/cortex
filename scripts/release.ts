@@ -106,8 +106,8 @@ ${archive("linux", "x64")}
   def caveats
     <<~EOS
       Create your database with \`cortex init\`, then set up your agents with \`cortex agents install\`.
-      The desktop app is on the release page, or comes with the install script:
-        ${REPO}#install
+      For the desktop app of the same version, run the install script for the app alone:
+        curl -fsSL ${REPO}/releases/download/v${version}/install.sh | CORTEX_NO_CLI=1 sh
     EOS
   end
 

@@ -7,6 +7,7 @@
 #   CORTEX_VERSION=0.99.0   the version to install (default: the latest release)
 #   CORTEX_BIN_DIR=<dir>    where the cortex CLI goes (default: ~/.local/bin)
 #   CORTEX_NO_APP=1         install the CLI only
+#   CORTEX_NO_CLI=1         install the desktop app only, for example when Homebrew provides the CLI
 #   CORTEX_INSTALL_FROM=<dir>  read the release files from a folder instead of GitHub (needs
 #                           CORTEX_VERSION); `pnpm run deploy` installs a local build this way
 #
@@ -49,6 +50,11 @@ if [ -z "$version" ]; then
   [ "$version" != "$latest" ] || fail "found no release at $REPO/releases"
 fi
 bin_dir="${CORTEX_BIN_DIR:-$HOME/.local/bin}"
+want_cli=1
+want_app=1
+[ "${CORTEX_NO_CLI:-}" != 1 ] || want_cli=""
+[ "${CORTEX_NO_APP:-}" != 1 ] || want_app=""
+[ -n "$want_cli$want_app" ] || fail "CORTEX_NO_CLI and CORTEX_NO_APP together leave nothing to install"
 
 tmp="$(mktemp -d)"
 mnt=""
@@ -82,14 +88,16 @@ verify() {
 
 fetch SHA256SUMS || fail "$from has no SHA256SUMS"
 
-cli="cortex-$version-$os-$arch.tar.gz"
-fetch "$cli" || fail "$from has no $cli"
-verify "$cli"
-mkdir "$tmp/cli"
-tar -xzf "$tmp/$cli" -C "$tmp/cli"
+if [ -n "$want_cli" ]; then
+  cli="cortex-$version-$os-$arch.tar.gz"
+  fetch "$cli" || fail "$from has no $cli"
+  verify "$cli"
+  mkdir "$tmp/cli"
+  tar -xzf "$tmp/$cli" -C "$tmp/cli"
+fi
 
 app=""
-if [ "${CORTEX_NO_APP:-}" != 1 ]; then
+if [ -n "$want_app" ]; then
   if [ "$os" = darwin ]; then
     app="Cortex-$version-mac-$arch.dmg"
   elif command -v apt-get >/dev/null 2>&1; then
@@ -106,16 +114,18 @@ if [ "${CORTEX_NO_APP:-}" != 1 ]; then
   fi
 fi
 
-mkdir -p "$bin_dir"
-# A new file, then a rename: macOS kills a signed binary that was overwritten in place.
-cp "$tmp/cli/cortex" "$bin_dir/.cortex.new"
-chmod 755 "$bin_dir/.cortex.new"
-mv -f "$bin_dir/.cortex.new" "$bin_dir/cortex"
-say "✓ Installed cortex $version to $bin_dir/cortex"
-case ":$PATH:" in
-  *":$bin_dir:"*) ;;
-  *) say "  $bin_dir is not on your PATH; add it, for example: export PATH=\"$bin_dir:\$PATH\"" ;;
-esac
+if [ -n "$want_cli" ]; then
+  mkdir -p "$bin_dir"
+  # A new file, then a rename: macOS kills a signed binary that was overwritten in place.
+  cp "$tmp/cli/cortex" "$bin_dir/.cortex.new"
+  chmod 755 "$bin_dir/.cortex.new"
+  mv -f "$bin_dir/.cortex.new" "$bin_dir/cortex"
+  say "✓ Installed cortex $version to $bin_dir/cortex"
+  case ":$PATH:" in
+    *":$bin_dir:"*) ;;
+    *) say "  $bin_dir is not on your PATH; add it, for example: export PATH=\"$bin_dir:\$PATH\"" ;;
+  esac
+fi
 
 case "$app" in
   *.dmg)
@@ -151,7 +161,12 @@ case "$app" in
 esac
 
 # A daemon left over from an older cortex keeps serving it; it starts again on the new version when next needed.
-"$bin_dir/cortex" stop || true
+# Without the CLI from this script, the cortex on PATH (Homebrew's, say) stops it.
+if [ -n "$want_cli" ]; then
+  "$bin_dir/cortex" stop || true
+elif command -v cortex >/dev/null 2>&1; then
+  cortex stop || true
+fi
 
 say ""
 say "Next: cortex init creates (or updates) your database, and cortex agents install sets up your agents."

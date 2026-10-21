@@ -23,8 +23,10 @@ instead of researching it again. The sources of truth, if a step below stops mat
 - Version: semantic versioning, as CHANGELOG.md promises, read from the changelog section you wrote. Below 1.0,
   any new feature or changed behaviour bumps the minor (0.99.1 to 0.100.0); only fixes bump the patch
   (0.100.0 to 0.100.1). NEVER choose 1.0.0 or a new major on your own.
-- This machine keeps the CLI in `~/bin/cortex`. The installer puts the desktop app in `/Applications/Cortex.app`
-  when that folder is writable (it is here), else in `~/Applications`; an older copy in the other folder stays behind.
+- This machine gets the CLI from Homebrew (`kalindudc/tap/cortex`, at `/opt/homebrew/bin/cortex`), and it is the only
+  `cortex` on PATH; keep it that way, so never install the CLI into `~/bin` or `~/.local/bin` here. The installer puts
+  the desktop app in `/Applications/Cortex.app` when that folder is writable (it is here), else in `~/Applications`;
+  an older copy in the other folder stays behind.
 
 ## Steps
 
@@ -41,19 +43,23 @@ instead of researching it again. The sources of truth, if a step below stops mat
    the release: do it only when the user asked for one.
 6. Watch: `gh run list --workflow release.yml --limit 1`, then `gh run watch <id> --exit-status`. The desktop jobs
    take the longest. Then `gh release view vX.Y.Z --json assets --jq '.assets | length'` prints 14.
-7. Update this machine from the published release. Quit the desktop app first, since the installer replaces its
-   bundle: `osascript -e 'tell application "Cortex" to quit'` (it asks about unsaved drafts; wait until
-   `pgrep -f Cortex.app/Contents/MacOS/Cortex` prints nothing). The installer checks every file against
-   `SHA256SUMS`, installs the CLI and the app, and stops the old daemon. Afterwards move any older
-   `~/Applications/Cortex.app` to the Trash and `open /Applications/Cortex.app`, which starts the new daemon:
+7. Update this machine from the published release: the CLI with Homebrew, the app with the installer. A prerelease
+   leaves the tap alone, so do this for a stable version only. Quit the desktop app first, since the installer
+   replaces its bundle: `osascript -e 'tell application "Cortex" to quit'` (it asks about unsaved drafts; wait until
+   `pgrep -f Cortex.app/Contents/MacOS/Cortex` prints nothing). `brew upgrade` refreshes the tap, which the release's
+   `homebrew` job updated. With `CORTEX_NO_CLI=1` the installer checks the app against `SHA256SUMS`, installs it, and
+   stops the old daemon with Homebrew's `cortex`. Afterwards move any older `~/Applications/Cortex.app` to the Trash
+   and `open /Applications/Cortex.app`, which starts the new daemon:
 
    ```bash
+   brew upgrade kalindudc/tap/cortex
    curl -fsSL https://github.com/kalindudc/cortex/releases/download/vX.Y.Z/install.sh \
-     | CORTEX_VERSION=X.Y.Z CORTEX_BIN_DIR="$HOME/bin" sh
+     | CORTEX_VERSION=X.Y.Z CORTEX_NO_CLI=1 sh
    ```
 
-8. Check `cortex --version` prints X.Y.Z and `cortex doctor` reports no pending migrations (run `cortex init` if it
-   does), then run `cortex agents install` with bb running; it reports the bb plugin reloaded or up to date.
+8. Check `which -a cortex` prints only `/opt/homebrew/bin/cortex`, `cortex --version` prints X.Y.Z and
+   `cortex doctor` reports the daemon on X.Y.Z with no pending migrations (run `cortex init` if it has some), then run
+   `cortex agents install` with bb running; it reports the bb plugin reloaded or up to date.
 
 ## On failure
 
@@ -61,4 +67,6 @@ instead of researching it again. The sources of truth, if a step below stops mat
   re-push a tag that was pushed, and never delete a published release, without the user's say-so.
 - A failed `homebrew` job after `publish` succeeded: the release is out; rerun the job (`gh run rerun <id> --failed`)
   once the cause is fixed.
-- To install a local build without releasing, `pnpm run deploy` uses the same installer.
+- To install a local build without releasing, `pnpm run deploy` uses the same installer. It puts the CLI in `~/bin`,
+  which comes after `/opt/homebrew/bin` on this machine's PATH: run that build as `~/bin/cortex`, and delete it when
+  done so Homebrew's stays the only `cortex`.

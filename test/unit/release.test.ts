@@ -89,6 +89,7 @@ describe("homebrewFormula", () => {
     expect(formula).toContain('version "1.0.0"');
     expect(formula).toContain('license "MIT"');
     expect(formula).toContain('bin.install "cortex"');
+    expect(formula).toContain("releases/download/v1.0.0/install.sh | CORTEX_NO_CLI=1 sh");
     expect(formula).toContain('assert_match version.to_s, shell_output("#{bin}/cortex --version")');
   });
 

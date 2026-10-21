@@ -32,11 +32,20 @@ cortex agents install  # teach your agents: skills, plus pi and bb support if yo
 Then run `cortex` to open the app. The script installs the `cortex` CLI into `~/.local/bin` and the desktop app of the
 same version: into `/Applications` on macOS, with apt on Debian and Ubuntu, and as an AppImage in `~/Applications`
 elsewhere. It checks every file against the release's checksums first. Set `CORTEX_VERSION` for another version,
-`CORTEX_BIN_DIR` for another folder, or `CORTEX_NO_APP=1` for the CLI alone. Run it again to upgrade; it also restarts
-the cortex daemon on the new version.
+`CORTEX_BIN_DIR` for another folder, `CORTEX_NO_APP=1` for the CLI alone or `CORTEX_NO_CLI=1` for the app alone. Run it
+again to upgrade; it also restarts the cortex daemon on the new version.
 
-With Homebrew, `brew install kalindudc/tap/cortex` installs the CLI on macOS or Linux (the full name matters, because
-Homebrew's own `cortex` is an unrelated project); after `brew upgrade`, run `cortex stop`. Every package is also on the
+With Homebrew, on macOS or Linux, tap first (Homebrew installs only from taps you have added) and use the full name,
+because Homebrew's own `cortex` is an unrelated project:
+
+```bash
+brew tap kalindudc/tap
+brew install kalindudc/tap/cortex
+curl -fsSL https://github.com/kalindudc/cortex/releases/latest/download/install.sh | CORTEX_NO_CLI=1 sh  # the app
+```
+
+To upgrade, run `brew upgrade kalindudc/tap/cortex`, then the app line again; it also restarts the daemon (without
+the app, run `cortex stop`). Every package is also on the
 [releases page](https://github.com/kalindudc/cortex/releases), for example a deb for
 `sudo apt install ./Cortex-<version>-linux-amd64.deb`. The macOS app is not signed by Apple yet, so a dmg downloaded
 in a browser opens only after Open Anyway in System Settings, under Privacy & Security.
