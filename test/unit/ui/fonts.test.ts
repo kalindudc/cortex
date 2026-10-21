@@ -73,10 +73,9 @@ describe("bundled fonts", () => {
 
   test("no stylesheet under src/ui/styles references an http or https URL", () => {
     for (const file of listFiles(STYLES)) {
-      // The SVG namespace inside a data: URI (the paper grain in tokens.css)
-      // names the XML vocabulary; the browser never fetches it.
-      const text = fs.readFileSync(file, "utf8").replaceAll("xmlns='http://www.w3.org/2000/svg'", "");
-      expect(text, path.relative(ROOT, file)).not.toMatch(/https?:/i);
+      expect(fs.readFileSync(file, "utf8"), path.relative(ROOT, file)).not.toMatch(
+        /https?:(?!\/\/www\.w3\.org\/2000\/svg)/i,
+      );
     }
   });
 

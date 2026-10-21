@@ -334,6 +334,11 @@ button.prop-trigger.priority-chip-unset:focus-visible { border-color: var(--text
   .task-document.mode-read > .doc-sheet, .task-document.mode-edit > .doc-sheet { width: calc(100% - 12px); }
   .task-header { margin-top: 20px; margin-bottom: 20px; }
   .task-title-display, .task-header .title-input-wrap > .title-input, .task-header .title-input-wrap::after { font-size: 26px; }
+  /* The title is the edit button, and one line of it is under 44px: pad its
+     box out to a 44px target and take the padding back with an equal
+     negative margin, so the text sits exactly where the title input sets
+     it. The hover wash stays on the text. */
+  .task-title-trigger { min-height: 44px; padding-block: max(0px, (44px - 1lh) / 2); margin-block: min(0px, (1lh - 44px) / 2); background-clip: content-box; }
   .task-header-trailing { gap: 4px 8px; margin-top: 12px; }
   .task-props { display: contents; }
   .task-header .tag-pill-removable { --tag-remove-size: 40px; height: 44px; }
