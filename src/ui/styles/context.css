@@ -1,82 +1,70 @@
 /* ---------- side panel ----------
-   The panel beside the document (ContextPanel): a 44px row of tabs over one
-   scrolling tabpanel. App places it in the grid's ctx column on a wide
-   window and inside the right-hand sheet (modal.css) on a narrow one. */
-.context-panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; background: var(--panel); border-left: 1px solid var(--border); }
-.ctx-head { display: flex; align-items: center; flex-shrink: 0; height: 44px; padding: 0 8px; border-bottom: 1px solid var(--border); }
-.ctx-tabs { display: flex; align-items: center; gap: 2px; min-width: 0; }
-.ctx-tab { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: var(--r-pill); color: var(--text-3); font: 500 12.5px/1 var(--font-sans); white-space: nowrap; }
-.ctx-tab:hover { color: var(--text); background: var(--tint); }
-.ctx-tab.active { color: var(--text); background: var(--tint-strong); }
+   The panel beside the document (ContextPanel), lying on the desk with a
+   rule on its left: a 44px row of tabs over one scrolling tabpanel. The
+   active tab is a small straight-edged card. App places the panel in the
+   grid's ctx column on a wide window and inside the right-hand sheet
+   (modal.css) on a narrow one. */
+.context-panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; background: var(--desk); border-left: 1px solid var(--rule); }
+.ctx-head { display: flex; align-items: center; flex-shrink: 0; height: 44px; padding: 0 12px; }
+.ctx-tabs { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.ctx-tab { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: var(--r-2); color: var(--text-3); font: 500 12.5px/1 var(--font-sans); white-space: nowrap; }
+.ctx-tab:hover { color: var(--text); }
+.ctx-tab.active { color: var(--text); background: var(--sheet); box-shadow: var(--shadow-card); }
 .ctx-tab-badge { display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--err); color: #fff; font: 500 10.5px/1 var(--font-mono); }
-.ctx-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 12px 14px; font-size: 12.5px; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+/* Side padding leaves room for a card's lift, which the scroller would clip. */
+.ctx-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 2px 12px 12px; font-size: 12.5px; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
 .context-panel .empty { padding: 32px 12px; }
 .context-panel .empty .icon { width: 24px; height: 24px; }
 .context-panel .empty .empty-title { font-size: 13px; }
 
-/* Details: section titles, the properties grid, authors and related tasks. */
-.ctx-section-title { display: flex; align-items: center; gap: 6px; margin: 16px 0 8px; color: var(--text-3); font: 600 11px/1.4 var(--font-sans); letter-spacing: .06em; text-transform: uppercase; }
-.ctx-section-title:first-child { margin-top: 2px; }
+/* Details: Properties, Authors and Related are index cards. Each is a
+   paper host whose PaperLayer paints plain paper with an uneven edge, so
+   the card's own box paints nothing. The author and related rows inside
+   them live in inbox.css. */
+.ctx-card { padding: 13px 15px; }
+.ctx-card + .ctx-card { margin-top: 10px; }
+.ctx-section-title { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; color: var(--text-3); font: 600 10.5px/1 var(--font-sans); letter-spacing: .09em; text-transform: uppercase; }
 .ctx-section-count { font-weight: 500; }
-.ctx-props { display: grid; grid-template-columns: 82px minmax(0, 1fr); align-items: center; gap: 9px 8px; margin: 0; }
+.ctx-props { display: grid; grid-template-columns: 78px minmax(0, 1fr); align-items: center; gap: 8px 10px; margin: 0; font-size: 13px; }
 .ctx-props dt { color: var(--text-3); }
 .ctx-props dd { display: flex; align-items: center; gap: 6px; min-width: 0; margin: 0; color: var(--text); }
 .ctx-prop-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ctx-none { margin: 2px 0; color: var(--text-3); font-size: 12px; }
-.author-list { margin: 0; padding: 0; list-style: none; }
-.author-row { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 6px 0; }
-.author-row .avatar { width: 26px; height: 26px; font-size: 10px; }
-.author-main { display: flex; flex-direction: column; min-width: 0; }
-.author-name { overflow: hidden; color: var(--text); font: 12px/1.4 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
-.author-meta { color: var(--text-3); font-size: 11.5px; }
-.author-resume { height: 24px; padding: 0 9px; border-color: var(--border-strong); color: var(--text); font-size: 12px; }
-.context-panel .resume-outcome { margin: 4px 0 0; font-size: 11.5px; }
-.context-panel .resume-outcome:empty { margin: 0; }
-.context-panel .related-section + .related-section { margin-top: 0; }
-.context-panel .related-section .inbox-header { justify-content: flex-start; gap: 6px; margin: 10px 0 4px; }
-.context-panel .related-section .eyebrow { flex: 0 1 auto; color: var(--text-2); font: 400 11.5px/1.5 var(--font-sans); }
-.context-panel .related-section .meta { color: var(--text-3); font-size: 11.5px; }
-.context-panel .related-empty { padding: 2px 0; color: var(--text-4); font-size: 12px; }
-.context-panel .related-row { width: calc(100% + 12px); margin: 0 -6px; padding: 4px 6px; border-bottom: 0; border-radius: var(--r-2); }
-.context-panel .related-row:hover { background: var(--tint); }
-.context-panel .related-title { overflow: hidden; color: var(--text-content); font: 400 12.5px/1.5 var(--font-sans); text-overflow: ellipsis; white-space: nowrap; }
-.context-panel .chip-id { color: var(--text-3); }
+.ctx-none { margin: 0; color: var(--text-3); font-size: 12px; }
+/* Loading, error and retry sit inside the Related card, so they stay small. */
+.ctx-card .empty { align-items: flex-start; gap: 6px; padding: 2px 0; text-align: left; }
+.ctx-card .empty .empty-title { font-size: 12.5px; font-weight: 500; }
+
+/* High contrast has no grain, and the lifts barely show on its dark desk:
+   a card gets a 1px line that follows its uneven edge, and the active tab
+   and filter get an outline. */
+:root[data-contrast="high"] .ctx-card > .paper-layer {
+  filter: drop-shadow(1px 0 0 var(--rule)) drop-shadow(-1px 0 0 var(--rule)) drop-shadow(0 1px 0 var(--rule)) drop-shadow(0 -1px 0 var(--rule));
+}
+:root[data-contrast="high"] :is(.ctx-tab.active, .ctx-chip.is-on) { box-shadow: inset 0 0 0 1px var(--rule-strong); }
 
 /* Inbox: filter chips, then the rows scroll above a pinned footer, so the
-   Inbox tabpanel itself does not scroll. */
+   Inbox tabpanel itself does not scroll. The rows and chips are drawn in
+   notifications.css. */
 .ctx-body-inbox { display: flex; flex-direction: column; overflow: hidden; padding: 0; }
 .ctx-inbox { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
-.ctx-chips { display: flex; flex-wrap: wrap; gap: 5px; flex-shrink: 0; min-width: 0; margin: 0; padding: 12px 14px 8px; border: 0; }
-.ctx-chip { display: inline-flex; align-items: center; height: 24px; padding: 0 9px; border: 1px solid var(--border); border-radius: var(--r-pill); color: var(--text-2); font: 12px/1 var(--font-sans); }
-.ctx-chip:hover { border-color: var(--border-strong); color: var(--text); }
-.ctx-chip.is-on { border-color: transparent; background: var(--accent-tint); color: var(--accent); }
-.ctx-inbox .notif-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 6px 8px; scrollbar-width: thin; }
-.ctx-inbox .notif-row { border-bottom: 0; border-radius: var(--r-3); }
-.ctx-inbox .notif-row.is-read { background: transparent; }
-.ctx-inbox .notif-row:hover { background: var(--tint); }
-.ctx-inbox .notif-row-body { padding: 9px 8px; }
-.ctx-inbox .notif-row-body .summary { font: 400 12.5px/1.35 var(--font-sans); }
-.ctx-inbox .notif-row:not(.is-read) .notif-row-body .summary { font-weight: 500; }
-.ctx-inbox .notif-row-body .meta { gap: 5px; margin-top: 2px; font-size: 11.5px; }
-.ctx-inbox .notif-row-controls { padding: 6px 4px 0 0; opacity: 0; transition: opacity var(--dur-1) var(--ease); }
-.ctx-inbox .notif-row:hover .notif-row-controls,
-.ctx-inbox .notif-row:focus-within .notif-row-controls { opacity: 1; }
-.ctx-inbox .notif-row-controls .hint-button { width: 24px; height: 24px; }
+.ctx-inbox .notif-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 8px 8px; scrollbar-width: thin; }
 .ctx-inbox > .empty { flex: 1 1 auto; }
-.ctx-inbox .notif-foot { justify-content: space-between; flex-shrink: 0; padding: 8px 14px; }
-.ctx-inbox .notif-foot .hint-button { display: inline-flex; align-items: center; gap: 6px; border-color: transparent; }
+.ctx-inbox .notif-foot { justify-content: space-between; flex-shrink: 0; }
 
-/* Outline: the document's headings as one bordered column of links. The
-   panel's surface is --panel, so hover and the current heading use --tint. */
-.context-panel .doc-outline { display: flex; flex-direction: column; }
-.context-panel .doc-outline-link { font-size: 12.5px; }
-.context-panel .doc-outline-link:hover { background: var(--tint); }
-.context-panel .doc-outline-link[aria-current="location"] { background: var(--tint); }
+/* Outline: the document's headings as one column of serif links on the
+   desk, beside a faint rule; the current heading takes the accent. */
+.context-panel .doc-outline { display: flex; flex-direction: column; padding-top: 2px; }
+.context-panel .doc-outline-link { min-height: 0; padding: 6px 10px; border-left-color: var(--rule); color: var(--text-2); font: 400 13.5px/1.4 var(--font-serif); }
+.context-panel .doc-outline-link:hover { background: transparent; color: var(--text); border-left-color: var(--rule-strong); }
+.context-panel .doc-outline-link[aria-current="location"] { background: transparent; color: var(--text); border-left-color: var(--accent); }
 
 @media (max-width: 900px) {
   .ctx-tab { height: 44px; }
   .ctx-chip { height: 44px; padding: 0 14px; }
   .ctx-inbox .notif-row-controls { opacity: 1; }
   .ctx-inbox .notif-row-controls .hint-button { width: 44px; height: 44px; }
-  .context-panel .doc-outline-link, .author-resume { min-height: 44px; }
+  .context-panel .doc-outline-link, .author-resume, .context-panel .related-error .btn { min-height: 44px; }
+  /* A related task stays one line, centred in its 44px target. */
+  .context-panel .related-row { display: flex; align-items: center; min-height: 44px; }
+  .context-panel .related-row > .row { flex: 1 1 auto; min-width: 0; }
 }

@@ -50,27 +50,35 @@
 .activity-compose .post-update-toggle:hover { color: var(--text); }
 .activity-compose .post-update-toggle .kbd { margin-left: 8px; background: transparent; font-size: 10px; color: var(--text-3); }
 
-/* Shared empty/related states and the scoped Authors roll-up. */
+/* Shared empty states, then the rows inside the side panel's Authors and
+   Related cards (components/context/DetailsTab.tsx); context.css draws the
+   cards themselves. */
 .empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 44px 24px; color: var(--text-2); text-align: center; flex: 1; }
 .empty .icon { width: 32px; height: 32px; color: var(--text-3); }
 .empty .empty-title { color: var(--text); font: 550 14px/1.5 var(--font-sans); }
 .empty .empty-sub { color: var(--text-2); font: 12px/1.6 var(--font-sans); max-width: 46ch; }
 .activity-thread .empty { border: 1px dashed var(--rule-strong); border-radius: var(--r-3); }
-.authors-table { width: 100%; border-collapse: collapse; }
-.authors-table th, .authors-table td { text-align: left; padding: 12px 8px; font: 12px/1.6 var(--font-sans); border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
-.authors-table th { color: var(--text-2); font-weight: 500; }
-.resume-outcome { padding: 8px; }
-.authors-table td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.author-list { margin: 0; padding: 0; list-style: none; }
+.author-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 0; }
+.author-main { display: flex; flex-direction: column; min-width: 0; }
+.author-name { overflow: hidden; color: var(--text); font: 11.5px/1.5 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.author-meta { color: var(--text-3); font: 11.5px/1.5 var(--font-sans); }
+.author-resume { height: 24px; padding: 0 10px; border-color: var(--rule-strong); background: transparent; color: var(--text-2); font-size: 12px; }
+.author-resume:hover { border-color: var(--text-3); background: transparent; color: var(--text); }
+.resume-outcome { margin: 4px 0 0; color: var(--text-3); font-size: 11.5px; }
+.resume-outcome:empty { margin: 0; }
 .cortex-ref { color: var(--code-accent); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .cortex-ref:hover { color: var(--text); }
-.related-section + .related-section { margin-top: 28px; }
-.related-section .inbox-header { margin-bottom: 8px; }
-.related-section .eyebrow { color: var(--text); font: 600 15px/1.5 var(--font-sans); letter-spacing: 0; text-transform: none; }
-.related-empty { padding: 12px 0; color: var(--text-2); }
-.inbox-row { display: block; width: 100%; padding: 14px 10px; border-bottom: 1px solid var(--border); text-align: left; color: inherit; font: inherit; border-radius: var(--r-2); }
-.inbox-row:hover { background: var(--panel); }
-.related-title { color: var(--text); font: 500 13px/1.5 var(--font-sans); overflow-wrap: anywhere; }
-.chip-id { color: var(--text-2); font: 11px/1.5 var(--font-mono); flex-shrink: 0; }
+.related-section + .related-section { margin-top: 10px; }
+.related-section .inbox-header { justify-content: flex-start; gap: 6px; margin: 0 0 2px; }
+.related-section .eyebrow { flex: 0 1 auto; color: var(--text-2); font: 400 11.5px/1.5 var(--font-sans); letter-spacing: 0; text-transform: none; }
+.related-section .meta { color: var(--text-3); font-size: 11.5px; }
+.related-empty { padding: 0 0 2px; color: var(--text-3); font: 12px/1.5 var(--font-sans); }
+.inbox-row { display: block; width: calc(100% + 12px); margin: 0 -6px; padding: 4px 6px; border: 0; border-radius: var(--r-1); background: transparent; text-align: left; color: inherit; font: inherit; }
+.inbox-row:hover { background: var(--tint); }
+.related-row .row { align-items: baseline; gap: 8px; }
+.related-title { min-width: 0; overflow: hidden; color: var(--text); font: 400 14px/1.45 var(--font-serif); text-overflow: ellipsis; white-space: nowrap; }
+.chip-id { flex-shrink: 0; color: var(--text-3); font: 11px/1.5 var(--font-mono); }
 @media (max-width: 900px) {
   .activity-compose .post-update-toggle, .update-source summary { min-height: 44px; }
   .update-source summary { padding: 12px 0; }

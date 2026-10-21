@@ -1,7 +1,8 @@
 // ContextPanel — the side panel's tablist (Details, Inbox, Outline) over one
 // tabpanel: tab switching through contextTab, the Inbox tab's unread badge,
 // the Outline tab (only the active task's headings; a click hands the
-// heading to pendingHeadingFragment) and the APG keyboard.
+// heading to pendingHeadingFragment) and the APG keyboard. The last block
+// reads the real stylesheet for the panel's paper look in every appearance.
 
 import { describe, test, expect, mock, beforeEach } from "bun:test";
 
@@ -23,6 +24,19 @@ import { contextTab, docOutline } from "../../../../src/ui/state/context.ts";
 import { notifications, localErrors } from "../../../../src/ui/state/notifications.ts";
 import { tasks, selectedId, pendingHeadingFragment, relatedTasks } from "../../../../src/ui/state/signals.ts";
 import type { Notification, Task } from "../../../../src/ui/api/types.ts";
+import {
+  SANS,
+  SERIF,
+  declared,
+  family,
+  noBorder,
+  noFill,
+  noShadow,
+  paintsNothing,
+  rootToken,
+  style,
+  withStyles,
+} from "./paper.ts";
 
 function task(over: Partial<Task> = {}): Task {
   return {
@@ -176,5 +190,101 @@ describe("ContextPanel", () => {
       t => t.getAttribute("tabindex") === "0",
     );
     expect(inSequence.map(t => t.id)).toEqual(["ctx-tab-outline"]);
+  });
+});
+
+describe("ContextPanel on paper", () => {
+  withStyles();
+  beforeEach(() => {
+    tasks.value = [task()];
+    selectedId.value = 5;
+    relatedTasks.value = { referencedBy: [], references: [], shared: [] };
+    contextTab.value = "details";
+    docOutline.value = null;
+    notifications.value = [];
+    localErrors.value = [];
+  });
+
+  test("the panel lies on the desk with a rule on its left, and the tab row has no bottom border", () => {
+    const { container } = render(<ContextPanel />);
+    const panel = style(container.querySelector("aside.context-panel"));
+    expect(panel.backgroundColor).toBe(rootToken("--desk"));
+    expect([panel.borderLeftWidth, panel.borderLeftStyle, panel.borderLeftColor]).toEqual([
+      "1px",
+      "solid",
+      rootToken("--rule"),
+    ]);
+    expect(noBorder(style(container.querySelector(".ctx-head")).borderBottomWidth)).toBe(true);
+  });
+
+  // getByRole cannot see through the mounted stylesheet (happy-dom computes
+  // display: none on <html>), so the tabs are found by id.
+  const tabStyle = (root: ParentNode, id: string): CSSStyleDeclaration => style(root.querySelector(`#ctx-tab-${id}`));
+
+  test("the active tab is a small straight-edged card, and the others are bare", async () => {
+    const { container } = render(<ContextPanel />);
+    const expectCard = (id: string): void => {
+      const s = tabStyle(container, id);
+      expect(s.backgroundColor).toBe(rootToken("--sheet"));
+      expect(s.boxShadow).toBe(rootToken("--shadow-card"));
+      expect(s.borderRadius).toBe("6px");
+      expect(s.color).toBe(rootToken("--text"));
+    };
+    const expectBare = (id: string): void => {
+      const s = tabStyle(container, id);
+      expect(noFill(s)).toBe(true);
+      expect(noShadow(s)).toBe(true);
+      expect(s.color).toBe(rootToken("--text-3"));
+      expect(family(s.fontFamily)).toBe(SANS());
+    };
+    expectCard("details");
+    expectBare("inbox");
+    expectBare("outline");
+    fireEvent.click(container.querySelector("#ctx-tab-outline") as HTMLButtonElement);
+    await tick();
+    expectBare("details");
+    expectCard("outline");
+  });
+
+  test("outline links are the serif at 13.5px in --text-2, and the current heading is --text with an --accent rule", () => {
+    contextTab.value = "outline";
+    docOutline.value = { taskId: 5, headings: HEADINGS, active: "task-5-beta" };
+    const { container } = render(<ContextPanel />);
+    const [other, current] = Array.from(container.querySelectorAll(".doc-outline-link")).map(style);
+    for (const s of [other, current]) {
+      expect([family(s.fontFamily), s.fontSize]).toEqual([SERIF(), "13.5px"]);
+      expect([s.borderLeftWidth, s.borderLeftStyle]).toEqual(["2px", "solid"]);
+      expect(noFill(s)).toBe(true);
+    }
+    expect([other.color, other.borderLeftColor]).toEqual([rootToken("--text-2"), rootToken("--rule")]);
+    expect([current.color, current.borderLeftColor]).toEqual([rootToken("--text"), rootToken("--accent")]);
+  });
+
+  // happy-dom cannot switch appearances (see `declared`), so this reads the
+  // declared rules: the cards paint no surface of their own, so the theme's
+  // paper tokens alone draw them; dark has its own paper; high contrast drops
+  // the grain, and its own rules outline the cards and the active tab.
+  test("dark and high contrast draw the cards from that theme's tokens, with no grain in high contrast", () => {
+    const { container } = render(<ContextPanel />);
+    const cards = Array.from(container.querySelectorAll(".ctx-card"));
+    expect(cards).toHaveLength(3);
+    for (const card of cards) {
+      expect(paintsNothing(style(card))).toBe(true);
+      expect(card.firstElementChild?.className).toBe("paper-layer is-card");
+    }
+    const LIGHT = ":root";
+    const DARK = ':root[data-theme="dark"]';
+    const HIGH = ':root[data-contrast="high"]';
+    for (const token of ["--sheet", "--card-lift", "--paper-grain"]) {
+      expect(declared(DARK, token)).not.toBe(declared(LIGHT, token));
+    }
+    expect(declared(DARK, "--paper-grain")).toMatch(/^url\(/);
+    expect(declared(HIGH, "--paper-grain")).toBe("none");
+    expect(declared(HIGH, "--sheet")).toBe("var(--bg)");
+    const edgeLine = ["1px 0", "-1px 0", "0 1px", "0 -1px"].map(o => `drop-shadow(${o} 0 var(--rule))`).join(" ");
+    expect(declared(`${HIGH} .ctx-card > .paper-layer`, "filter")).toBe(edgeLine);
+    expect(declared(`${HIGH} :is(.ctx-tab.active, .ctx-chip.is-on)`, "box-shadow")).toBe(
+      "inset 0 0 0 1px var(--rule-strong)",
+    );
   });
 });

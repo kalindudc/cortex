@@ -1,20 +1,23 @@
 // DetailsTab — the side panel's Details tab for the active task: its
 // properties (read-only; editing stays in the document header's chips), its
 // authors with a Resume button on each resumable one, and its related tasks
-// in three groups. Related data is fetched for the active task after every
-// snapshot (state/refresh.ts), so this tab adds no fetch of its own.
+// in three groups. Each of the three is an index card on the desk, whose
+// PaperLayer paints the paper. Related data is fetched for the active task
+// after every snapshot (state/refresh.ts), so this tab adds no fetch of its
+// own.
 
-import type { VNode } from "preact";
+import type { ComponentChildren, VNode } from "preact";
 
 import type { Task } from "../../api/types.ts";
 import { STATUS_LABEL } from "../../../lib/constants.ts";
-import { fmtTime, initial } from "../../../lib/format.ts";
+import { fmtTime } from "../../../lib/format.ts";
 import { resumeOutcome, resumeSession } from "../../lib/resume.ts";
 import { activeTask, resumeCandidatesForTask, taskAuthors } from "../../state/computed.ts";
 import { retryRelated } from "../../state/refresh.ts";
 import { clearAllFilters, lanes, relatedError, relatedLoading, relatedTasks, selectedId } from "../../state/signals.ts";
 import { PriorityChip } from "../chips/PriorityChip.tsx";
 import { Icon } from "../Icon.tsx";
+import { PaperLayer } from "../PaperLayer.tsx";
 
 export function DetailsTab(): VNode {
   const at = activeTask.value;
@@ -30,16 +33,27 @@ export function DetailsTab(): VNode {
     <>
       <Properties task={at} />
       <AuthorsView />
-      <h2 class="ctx-section-title">Related</h2>
-      <RelatedView />
+      <Card>
+        <h2 class="ctx-section-title">Related</h2>
+        <RelatedView />
+      </Card>
     </>
+  );
+}
+
+function Card({ children }: { children: ComponentChildren }): VNode {
+  return (
+    <div class="ctx-card paper-host">
+      <PaperLayer card />
+      {children}
+    </div>
   );
 }
 
 function Properties({ task }: { task: Task }): VNode {
   const laneColor = lanes.value.find(l => l.name === task.lane)?.color ?? null;
   return (
-    <>
+    <Card>
       <h2 class="ctx-section-title">Properties</h2>
       <dl class="ctx-props">
         <dt>Status</dt>
@@ -61,7 +75,7 @@ function Properties({ task }: { task: Task }): VNode {
         <dt>Updated</dt>
         <dd>{fmtTime(task.updated)}</dd>
       </dl>
-    </>
+    </Card>
   );
 }
 
@@ -71,7 +85,7 @@ function AuthorsView(): VNode {
   const resumable = new Set(resumeCandidatesForTask.value.map(c => c.author));
   const outcome = resumeOutcome.value;
   return (
-    <>
+    <Card>
       <h2 class="ctx-section-title">
         Authors <span class="ctx-section-count num">{rows.length}</span>
       </h2>
@@ -81,9 +95,6 @@ function AuthorsView(): VNode {
         <ul class="author-list">
           {rows.map(a => (
             <li key={a.author} class="author-row">
-              <span class="avatar" aria-hidden="true">
-                {initial(a.author)}
-              </span>
               <span class="author-main">
                 <span class="author-name">{a.author}</span>
                 <span class="author-meta">
@@ -108,7 +119,7 @@ function AuthorsView(): VNode {
       <p class="meta resume-outcome" role="status">
         {outcome && at && outcome.taskId === at.id ? outcome.text : ""}
       </p>
-    </>
+    </Card>
   );
 }
 
@@ -159,7 +170,7 @@ function RelatedSection({ title, kind, tasks }: { title: string; kind: string; t
   return (
     <div class="related-section">
       <div class="inbox-header">
-        <h2 class="eyebrow grow">{title}</h2>
+        <h3 class="eyebrow grow">{title}</h3>
         <span class="meta num">{tasks.length}</span>
       </div>
       {tasks.length === 0 ? (
@@ -174,7 +185,7 @@ function RelatedSection({ title, kind, tasks }: { title: string; kind: string; t
               selectedId.value = t.id;
             }}
           >
-            <div class="row" style="gap:8px; align-items:center">
+            <div class="row">
               <span class="chip-id num">[{t.id}]</span>
               <span class="related-title grow">{t.title}</span>
             </div>

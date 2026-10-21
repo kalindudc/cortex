@@ -1,7 +1,8 @@
 // InboxTab — the side panel's notification list: server rows and local
 // errors, the row actions (open, dismiss, mark unread), the footer actions,
 // and the All, Unread and Blocked filters. The panel is not a popover, so
-// no row action and no outside click ever hides it.
+// no row action and no outside click ever hides it. On paper the rows lie on
+// the desk; the last block reads the real stylesheet.
 
 import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
 import { fireEvent, render } from "@testing-library/preact";
@@ -36,6 +37,7 @@ import { closeAllPopovers } from "../../../../src/ui/state/popovers.ts";
 import { contextOpen, contextShown } from "../../../../src/ui/state/context.ts";
 import { selectedId } from "../../../../src/ui/state/signals.ts";
 import type { Notification } from "../../../../src/ui/api/types.ts";
+import { SANS, SERIF, family, noBorder, noFill, noShadow, rootToken, style, withStyles } from "./paper.ts";
 
 function notif(over: Partial<Notification> = {}): Notification {
   return {
@@ -228,5 +230,81 @@ describe("InboxTab filters", () => {
     expect(container.textContent).toContain("No blocked notifications.");
     // The footer still acts on the whole inbox.
     expect(container.querySelector(".notif-foot")).not.toBeNull();
+  });
+});
+
+describe("InboxTab on paper", () => {
+  withStyles();
+  beforeEach(() => {
+    localErrors.value = [];
+    notifications.value = [
+      notif({ id: 1, title: "blocked row", status: "blocked", created: 3 }),
+      notif({ id: 2, title: "review row", status: "review", created: 2 }),
+      notif({ id: 3, title: "read row", status: "done", read: true, created: 1 }),
+    ];
+  });
+
+  test("rows lie on the desk, separated by --rule, with serif titles at 14px", () => {
+    const { container } = render(<InboxTab />);
+    const rows = Array.from(container.querySelectorAll(".notif-row"));
+    expect(rows).toHaveLength(3);
+    for (const row of rows) {
+      const s = style(row);
+      expect(noFill(s)).toBe(true);
+      expect(noShadow(s)).toBe(true);
+      expect(noBorder(s.borderBottomWidth)).toBe(true);
+    }
+    expect(noBorder(style(rows[0]).borderTopWidth)).toBe(true);
+    for (const row of rows.slice(1)) {
+      const s = style(row);
+      expect([s.borderTopWidth, s.borderTopStyle, s.borderTopColor]).toEqual(["1px", "solid", rootToken("--rule")]);
+    }
+    const summaries = rows.map(row => style(row.querySelector(".summary")));
+    for (const s of summaries) {
+      expect([family(s.fontFamily), s.fontSize]).toEqual([SERIF(), "14px"]);
+    }
+    // Unread titles are full-strength ink; a read one is dimmed.
+    expect(summaries.map(s => s.color)).toEqual([rootToken("--text"), rootToken("--text"), rootToken("--text-2")]);
+    const meta = style(rows[0].querySelector(".meta"));
+    expect([family(meta.fontFamily), meta.color]).toEqual([SANS(), rootToken("--text-3")]);
+  });
+
+  test("the unread pip and the blocked colour are kept", () => {
+    const { container } = render(<InboxTab />);
+    const rows = Array.from(container.querySelectorAll(".notif-row"));
+    const pips = rows.map(row => row.querySelector(".notif-unread-pip[role='img'][aria-label='Unread']"));
+    expect(pips.map(Boolean)).toEqual([true, true, false]);
+    expect(style(pips[0]).backgroundColor).toBe(rootToken("--accent"));
+    const blocked = rows[0].querySelector(".dot");
+    expect(blocked?.classList.contains("dot-status-blocked")).toBe(true);
+    expect(style(blocked).color).toBe(rootToken("--err"));
+  });
+
+  test("the filters are outlined pills, and the active one is a small straight-edged card", () => {
+    const { container } = render(<InboxTab />);
+    const expectPill = (button: HTMLButtonElement): void => {
+      const s = style(button);
+      expect([s.borderTopWidth, s.borderTopStyle, s.borderTopColor]).toEqual([
+        "1px",
+        "solid",
+        rootToken("--rule-strong"),
+      ]);
+      expect(s.borderRadius).toBe(rootToken("--r-pill"));
+      expect(noFill(s)).toBe(true);
+      expect(noShadow(s)).toBe(true);
+    };
+    const expectCard = (button: HTMLButtonElement): void => {
+      const s = style(button);
+      expect(s.backgroundColor).toBe(rootToken("--sheet"));
+      expect(s.boxShadow).toBe(rootToken("--shadow-card"));
+      expect(s.borderRadius).toBe("6px");
+      expect(s.color).toBe(rootToken("--text"));
+    };
+    expectCard(chip(container, /^All$/));
+    expectPill(chip(container, /^Unread/));
+    expectPill(chip(container, /^Blocked$/));
+    fireEvent.click(chip(container, /^Unread/));
+    expectPill(chip(container, /^All$/));
+    expectCard(chip(container, /^Unread/));
   });
 });
