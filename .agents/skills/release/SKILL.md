@@ -22,7 +22,8 @@ instead of researching it again. The sources of truth, if a step below stops mat
   config does it); tags are annotated and unsigned, as `pnpm version` makes them.
 - Version: use the one the user gives. Otherwise default to the next patch (0.99.0 to 0.99.1) and say so; NEVER
   choose 1.0.0 or a new major on your own.
-- This machine keeps the CLI in `~/bin/cortex` and the desktop app in `~/Applications/Cortex.app`.
+- This machine keeps the CLI in `~/bin/cortex`. The installer puts the desktop app in `/Applications/Cortex.app`
+  when that folder is writable (it is here), else in `~/Applications`; an older copy in the other folder stays behind.
 
 ## Steps
 
@@ -37,8 +38,11 @@ instead of researching it again. The sources of truth, if a step below stops mat
    the release: do it only when the user asked for one.
 5. Watch: `gh run list --workflow release.yml --limit 1`, then `gh run watch <id> --exit-status`. The desktop jobs
    take the longest. Then `gh release view vX.Y.Z --json assets --jq '.assets | length'` prints 14.
-6. Update this machine from the published release (it checks every file against `SHA256SUMS`, installs the app, and
-   stops the old daemon, which restarts on the new version when next needed):
+6. Update this machine from the published release. Quit the desktop app first, since the installer replaces its
+   bundle: `osascript -e 'tell application "Cortex" to quit'` (it asks about unsaved drafts; wait until
+   `pgrep -f Cortex.app/Contents/MacOS/Cortex` prints nothing). The installer checks every file against
+   `SHA256SUMS`, installs the CLI and the app, and stops the old daemon. Afterwards move any older
+   `~/Applications/Cortex.app` to the Trash and `open /Applications/Cortex.app`, which starts the new daemon:
 
    ```bash
    curl -fsSL https://github.com/kalindudc/cortex/releases/download/vX.Y.Z/install.sh \
