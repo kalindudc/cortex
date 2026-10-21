@@ -24,6 +24,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Subprocess } from "bun";
+import pkg from "../package.json" with { type: "json" };
 import {
   CONTROL_PATHS,
   createApi,
@@ -275,7 +276,21 @@ async function inspect(canonical: string, probeTimeoutMs: number): Promise<Inspe
       `${metadataFile} does not match the daemon answering at ${where} (instance ${live.instanceId}); stop it, then retry`,
     );
   }
+  const version = isRecord(probe.health) ? probe.health.version : undefined;
+  if (typeof version === "string") live.version = version;
   return { kind: "attach", identity: live };
+}
+
+/**
+ * One line for stderr when the daemon serving this database runs another cortex version (a daemon keeps
+ * running across an upgrade); null when the versions match or the daemon's is unknown.
+ */
+export function daemonVersionWarning(cliVersion: string, daemonVersion: string | undefined): string | null {
+  if (daemonVersion === undefined || daemonVersion === cliVersion) return null;
+  return (
+    `cortex: this is cortex ${cliVersion}, but the daemon serving this database runs cortex ${daemonVersion}; ` +
+    "run `cortex stop` to restart it, and keep the desktop app at the same version (it starts the daemon)"
+  );
 }
 
 /**
@@ -385,6 +400,8 @@ export async function withClient<T>(
   ensureConfigDir(); // Store.open's precondition for the default database's directory.
   const claim = await claimOrAttach(canonicalDatabasePath(databasePath), options);
   if (claim.identity !== undefined) {
+    const warning = daemonVersionWarning(pkg.version, claim.identity.version);
+    if (warning !== null) console.warn(warning);
     const client = createClient(claim.identity.endpoint, { instanceId: claim.identity.instanceId });
     return run(client, { daemon: claim.identity });
   }

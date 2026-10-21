@@ -6,9 +6,11 @@ import path from "node:path";
 import type { Subprocess } from "bun";
 
 type Server = ReturnType<typeof Bun.serve>;
+import pkg from "../../package.json" with { type: "json" };
 import {
   DAEMON_CAPABILITIES,
   DaemonError,
+  daemonVersionWarning,
   discoverDaemon,
   ensureDaemon,
   publishDaemonMetadata,
@@ -225,6 +227,21 @@ function taskCount(databasePath: string): number {
 
 // ---------- discovery ----------
 
+describe("daemonVersionWarning", () => {
+  test("is null when the versions match or the daemon's is unknown", () => {
+    expect(daemonVersionWarning("1.0.0", "1.0.0")).toBeNull();
+    expect(daemonVersionWarning("1.0.0", undefined)).toBeNull();
+  });
+
+  test("is one line naming both versions and how to restart the daemon", () => {
+    const warning = daemonVersionWarning("1.0.0", "0.99.0") ?? "";
+    expect(warning).not.toContain("\n");
+    expect(warning).toContain("this is cortex 1.0.0, but the daemon serving this database runs cortex 0.99.0");
+    expect(warning).toContain("`cortex stop`");
+    expect(warning).toContain("desktop app");
+  });
+});
+
 describe("discoverDaemon (N4)", () => {
   test("no metadata: null, and discovery never takes the lease or creates files", async () => {
     expect(await discoverDaemon(db)).toBeNull();
@@ -246,7 +263,7 @@ describe("discoverDaemon (N4)", () => {
     fs.symlinkSync(root, dirLink);
     cleanups.push(() => fs.rmSync(dirLink, { force: true }));
     for (const alias of [db, fileLink, path.join(dirLink, "cortex.db")]) {
-      expect(await discoverDaemon(alias)).toEqual(fake.identity);
+      expect(await discoverDaemon(alias)).toEqual({ ...fake.identity, version: pkg.version });
     }
   });
 
@@ -427,7 +444,7 @@ describe("withClient paths (N6)", () => {
     const dummy = spawnDummy();
     const fake = await startFakeDaemon(db, { pid: dummy.pid });
     const attached = await withClient(async (_client, target) => target.daemon, { databasePath: db });
-    expect(attached).toEqual(fake.identity);
+    expect(attached).toEqual({ ...fake.identity, version: pkg.version });
   });
 
   test("offline: handler errors surface as HttpError and still release the lease", async () => {
@@ -475,8 +492,8 @@ describe("ensureDaemon and stopDaemon", () => {
     const fake = await startFakeDaemon(db, { pid: dummy.pid });
     const marker = path.join(root, "spawned");
     const command = [process.execPath, "-e", `require("fs").writeFileSync(${JSON.stringify(marker)}, "x")`];
-    expect(await ensureDaemon({ databasePath: db, command })).toEqual(fake.identity);
-    expect(await ensureDaemon({ databasePath: db, command })).toEqual(fake.identity);
+    expect(await ensureDaemon({ databasePath: db, command })).toEqual({ ...fake.identity, version: pkg.version });
+    expect(await ensureDaemon({ databasePath: db, command })).toEqual({ ...fake.identity, version: pkg.version });
     expect(fake.controlCalls).toEqual([]);
     expect(fs.existsSync(marker)).toBe(false);
   });
@@ -524,7 +541,7 @@ describe("ensureDaemon and stopDaemon", () => {
     const err = await rejection(stopDaemon({ ...fake.identity, instanceId: randomUUID() }));
     expect(err).toMatchObject({ status: 421 });
     expect(fake.controlCalls).toEqual([]);
-    expect(await discoverDaemon(db)).toEqual(fake.identity);
+    expect(await discoverDaemon(db)).toEqual({ ...fake.identity, version: pkg.version });
     expect(leaseIsFree(db)).toBe(false);
   });
 
@@ -564,7 +581,7 @@ describe("daemon metadata", () => {
   test("an older daemon's extra `webUrl` is ignored, not rejected: it is still discovered and attached (plan @417 N6)", async () => {
     const dummy = spawnDummy();
     const fake = await startFakeDaemon(db, { pid: dummy.pid });
-    const current = { ...fake.identity };
+    const current = { ...fake.identity, version: pkg.version };
     // An older binary published (and answers with) an extra URL member.
     Object.assign(fake.identity, { webUrl: "http://cortex.localhost:7777" });
     publishDaemonMetadata(fake.identity);

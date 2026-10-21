@@ -6,6 +6,7 @@ import { Store } from "../../../src/store.ts";
 import { canonicalDatabasePath } from "../../../src/ownership.ts";
 import { ownerLockPath } from "../../../src/paths.ts";
 import { mkTmpEnv, ROOT } from "../helpers.ts";
+import pkg from "../../../package.json" with { type: "json" };
 import {
   isRunning,
   leaseIsFree,
@@ -289,10 +290,14 @@ describe("doctor reports; it never starts a daemon or takes the lease", () => {
     expect(Date.now() - startedAt).toBeLessThan(5_000);
     report = JSON.parse(r.stdout);
     const socket = daemon.identity.endpoint.kind === "unix" ? daemon.identity.endpoint.socketPath : "";
-    expect(report.daemon).toEqual({ running: true, pid: daemon.proc.pid, socket });
+    expect(report.daemon).toEqual({ running: true, pid: daemon.proc.pid, socket, version: pkg.version });
     expect(report.counts).toEqual({ tasks: 1, lanes: 1, tags: 1 });
     const human = await ok(env, "doctor");
-    expect(human).toContain(`running (pid ${daemon.proc.pid}, ${socket})`);
+    expect(human).toContain(`running (pid ${daemon.proc.pid}, ${socket}, cortex ${pkg.version})`);
+    // A daemon of this cortex's own version draws no version warning on a routed command.
+    const routed = await runBounded(["ls"], env);
+    expect(routed.code, routed.stderr).toBe(0);
+    expect(routed.stderr).not.toContain("the daemon serving this database runs cortex");
     expect(leaseIsFree(db)).toBe(false);
     expect(isRunning(daemon)).toBe(true);
   }, 30_000);

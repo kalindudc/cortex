@@ -3,6 +3,7 @@
   "version": "0.2.0",
   "type": "module",
   "private": true,
+  "license": "MIT",
   "packageManager": "pnpm@10.28.0",
   "bin": {
     "cortex": "./index.ts"
@@ -11,6 +12,7 @@
     "up": "pnpm install",
     "build": "bash scripts/build.sh",
     "desktop:dist": "bash scripts/desktop-dist.sh",
+    "cli:dist": "bash scripts/cli-dist.sh",
     "ui:build": "bash scripts/build-css.sh && pnpm exec bun scripts/copy-mermaid.ts && pnpm exec bun build src/ui/index.tsx --target browser --outdir out/ui --sourcemap=external --minify --entry-naming bundle.[ext] --asset-naming bundle.[ext] && cp src/ui/index.html out/ui/index.html",
     "desktop:build": "pnpm exec bun build integrations/desktop/main.ts integrations/desktop/preload.ts --target node --format cjs --external electron --entry-naming \"[name].cjs\" --outdir out/desktop",
     "desktop:dev": "bash scripts/dev-desktop.sh",
@@ -22,6 +24,8 @@
     "test:bb": "npm --prefix integrations/bb test && npm --prefix integrations/bb run typecheck",
     "dev": "bash scripts/dev-cli.sh",
     "deploy": "bash scripts/deploy.sh",
+    "preversion": "pnpm exec bun scripts/release.ts check \"$npm_new_version\"",
+    "version": "npm --prefix integrations/desktop version \"$npm_new_version\" --no-git-tag-version --allow-same-version && git add integrations/desktop/package.json integrations/desktop/package-lock.json",
     "style": "node node_modules/@biomejs/biome/bin/biome check --error-on-warnings --write . && pnpm exec tsc",
     "style:check": "node node_modules/@biomejs/biome/bin/biome check --error-on-warnings . && pnpm exec tsc --noEmit && pnpm exec bun scripts/check-docs.ts",
     "docs:check": "pnpm exec bun scripts/check-docs.ts"

@@ -73,6 +73,8 @@ export interface DaemonIdentity {
   pid: number;
   /** Optional protocol-1 features (`control.shutdown`); always present in published metadata. */
   capabilities?: string[];
+  /** The daemon's cortex version, from its health answer; never read from or written to metadata. */
+  version?: string;
 }
 
 /** `GET /api/health`. A published daemon adds its identity; an in-process app has none. */

@@ -16,14 +16,14 @@ cortex doctor --json   # machine-readable report
   "version": "0.2.0",
   "dbPath": "/Users/you/.config/cortex/cortex.db",
   "initialized": true,              // false: no database yet (run `cortex init`)
-  "daemon": { "running": false, "url": null },
+  "daemon": { "running": false },
   "pendingMigrations": [],
   "counts": { "tasks": 42, "lanes": 3, "tags": 7 },
   "author": "you"                   // the user's author name: what the desktop app and `update --as-me` credit
 }
 ```
 
-With a daemon serving the database, `daemon` is `{ "running": true, "pid": 41218, "socket": "<private socket>" }`; without one it is `{ "running": false }`, and a discovery problem shows as `{ "running": false, "error": "<message>" }`.
+With a daemon serving the database, `daemon` is `{ "running": true, "pid": 41218, "socket": "<private socket>", "version": "0.99.0" }`, where `version` is the cortex the daemon runs (the human summary says when it differs from this cortex; `cortex stop` restarts it); without one it is `{ "running": false }`, and a discovery problem shows as `{ "running": false, "error": "<message>" }`.
 
 ## When to use
 

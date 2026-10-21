@@ -21,18 +21,25 @@ session picks up where the last one stopped.
 
 ## Install
 
-You need Node.js and pnpm; Bun comes in as a dev dependency.
+On macOS or Linux:
 
 ```bash
-pnpm install --frozen-lockfile
-pnpm run desktop:dist  # package the desktop app (skip it for the CLI alone)
-pnpm run deploy        # install cortex into ~/bin (keep it on your PATH) and the desktop app
+curl -fsSL https://github.com/kalindudc/cortex/releases/latest/download/install.sh | sh
 cortex init            # create your database
 cortex agents install  # teach your agents: skills, plus pi and bb support if you use them
 ```
 
-Then run `cortex` to open the app. It is signed ad hoc, so a copy downloaded from elsewhere needs a right-click and
-Open the first time.
+Then run `cortex` to open the app. The script installs the `cortex` CLI into `~/.local/bin` and the desktop app of the
+same version: into `/Applications` on macOS, with apt on Debian and Ubuntu, and as an AppImage in `~/Applications`
+elsewhere. It checks every file against the release's checksums first. Set `CORTEX_VERSION` for another version,
+`CORTEX_BIN_DIR` for another folder, or `CORTEX_NO_APP=1` for the CLI alone. Run it again to upgrade; it also restarts
+the cortex daemon on the new version.
+
+With Homebrew, `brew install kalindudc/tap/cortex` installs the CLI on macOS or Linux (the full name matters, because
+Homebrew's own `cortex` is an unrelated project); after `brew upgrade`, run `cortex stop`. Every package is also on the
+[releases page](https://github.com/kalindudc/cortex/releases), for example a deb for
+`sudo apt install ./Cortex-<version>-linux-amd64.deb`. The macOS app is not signed by Apple yet, so a dmg downloaded
+in a browser opens only after Open Anyway in System Settings, under Privacy & Security.
 
 ## Quick start
 
@@ -61,6 +68,8 @@ Markdown beside its preview.</sub></p>
 
 ## Development
 
+You need Node.js and pnpm; Bun comes in as a dev dependency. After `pnpm install --frozen-lockfile`,
 `pnpm run desktop:dev` and `pnpm run dev -- <command>` run cortex from source on a sandbox in `tmp/dev/`, so
-unreleased code never touches your real data. [AGENTS.md](AGENTS.md) has the commands, tests, conventions and the
+unreleased code never touches your real data. `pnpm run desktop:dist` packages the desktop app, and `pnpm run deploy`
+installs your build into `~/bin` (keep it on your PATH) through the same install script users run. [AGENTS.md](AGENTS.md) has the commands, tests, conventions and the
 checks to run before a PR.

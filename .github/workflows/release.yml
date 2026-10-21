@@ -1,0 +1,102 @@
+name: release
+
+# Pushing a tag vX.Y.Z (made by `pnpm version X.Y.Z`) runs the same tests and
+# packaging as every push, then publishes a GitHub Release and updates the
+# Homebrew formula. A vX.Y.Z-rc.N tag publishes a prerelease and leaves the tap
+# alone, to rehearse a release.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    # The tag, both package.json versions and CHANGELOG.md must agree before anything is built.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+      - run: bun scripts/release.ts check --tag "$GITHUB_REF_NAME"
+
+  test:
+    needs: check
+    uses: ./.github/workflows/test.yml
+
+  desktop:
+    needs: check
+    uses: ./.github/workflows/desktop.yml
+
+  publish:
+    needs: [test, desktop]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cortex-release-*
+          merge-multiple: true
+          path: release
+      - name: add the install script and the checksums
+        run: |
+          cp scripts/install.sh release/
+          (cd release && sha256sum -- *) > SHA256SUMS
+          mv SHA256SUMS release/
+          ls -l release
+          # 4 CLI archives, a dmg and a zip per Mac architecture, an AppImage and a deb per Linux
+          # architecture, the install script and SHA256SUMS.
+          test "$(find release -type f | wc -l)" -eq 14
+      - name: publish the release
+        # A draft is invisible to releases/latest until every file is attached.
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          bun scripts/release.ts notes "$version" > notes.md
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "cortex $version" --notes-file notes.md release/*
+          case "$version" in
+            *-*) gh release edit "$GITHUB_REF_NAME" --draft=false --prerelease ;;
+            *) gh release edit "$GITHUB_REF_NAME" --draft=false --latest ;;
+          esac
+
+  homebrew:
+    needs: publish
+    if: ${{ !contains(github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+      - run: gh release download "$GITHUB_REF_NAME" -p SHA256SUMS
+      - uses: actions/checkout@v4
+        with:
+          repository: kalindudc/homebrew-tap
+          ssh-key: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+          path: tap
+      - name: update the formula
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          mkdir -p tap/Formula
+          bun scripts/release.ts formula "$version" SHA256SUMS > tap/Formula/cortex.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/cortex.rb
+          git commit -m "cortex $version"
+          git push

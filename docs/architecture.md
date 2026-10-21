@@ -102,6 +102,8 @@ the next command or daemon takes over and cleans up after it. For you, this mean
   shell, from opening the file.
 - Upgrading from a binary older than the database-scoped daemon? Stop its daemon with the old binary first. This
   cortex no longer looks for one (every current daemon publishes its metadata), so one left running goes unnoticed.
+- A daemon keeps running across an upgrade, so commands warn when it runs another cortex version; `cortex stop`
+  restarts it (the install script does), and the desktop app should be upgraded too, because it starts the daemon.
 
 ## Under the hood
 
@@ -135,7 +137,8 @@ the next command or daemon takes over and cleans up after it. For you, this mean
   rejects hard links (each would get its own lock), dangling symlinks and `:memory:` (which needs no lease).
 - Metadata (`src/paths.ts#daemonMetadataPath`) is written to a temp file and renamed, and removed only by the instance
   it names (`src/daemon.ts#removeDaemonMetadata`). Discovery attaches only when the identity in the endpoint's health
-  answer matches the published one; a silent endpoint is stale. An owner that has not published yet (a daemon
+  answer matches the published one; a silent endpoint is stale. That answer's `version` is copied onto the attached
+  identity, never into metadata, for `src/daemon.ts#daemonVersionWarning` and `cortex doctor`. An owner that has not published yet (a daemon
   starting, an offline command) is retried with backoff until a deadline.
 - Only the lease holder recovers stale metadata and sockets (`src/daemon.ts#recoverStaleDaemonState`): every daemon
   holds the lease while it serves, so the holder knows none is alive (and Bun cannot bind over a stale socket).

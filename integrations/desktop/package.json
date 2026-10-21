@@ -2,6 +2,7 @@
   "name": "cortex-desktop",
   "version": "0.2.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "main": "../../out/desktop/main.cjs",
   "scripts": {

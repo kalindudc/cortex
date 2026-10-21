@@ -50,4 +50,5 @@ done
 
 version="$(node -p "require('./package.json').version")"
 # shellcheck disable=SC2086 # arch_flags is a list of separate flags
-npm --prefix integrations/desktop run dist -- "-c.extraMetadata.version=$version" $arch_flags
+# electron-builder publishes by itself when CI builds a git tag; only release.yml publishes.
+npm --prefix integrations/desktop run dist -- --publish never "-c.extraMetadata.version=$version" $arch_flags

@@ -1,5 +1,7 @@
 appId: com.kalindu.cortex.desktop
 productName: Cortex
+# Every file names its platform and architecture; the defaults leave the architecture off x64 builds.
+artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
 directories:
   output: dist
   buildResources: build
@@ -29,7 +31,7 @@ linux:
   executableName: cortex-desktop
   category: Utility
   icon: build/icon.png
-  maintainer: Kalindu De Costa <kalindu.decosta@shopify.com>
+  maintainer: Kalindu De Costa <kalinduk.decosta@gmail.com>
   target: [AppImage, deb]
   extraResources:
     - from: ../../bin/cortex-linux-${arch}

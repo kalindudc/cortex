@@ -39,7 +39,8 @@ Every command below is a real script in `package.json` (`docs:check` fails on a 
 - `pnpm run style` — biome `--write` + `tsc --noEmit`.
 - `pnpm run style:check` — biome + `tsc --noEmit` + `scripts/check-docs.ts`, read-only (CI-friendly).
 - `pnpm run docs:check` — `scripts/check-docs.ts`: doc budgets, cited paths and `path#Symbol`s, links and scripts; `--base <ref>` also warns on docs whose sources changed since `<ref>`.
-- `pnpm run deploy` — local install: rebuild the CLI to `~/bin/cortex` and install the newest `desktop:dist` package on this machine (`scripts/deploy.sh`).
+- `pnpm run deploy` — local install through the installer users run: `cli:dist` for this machine, then `scripts/install.sh` into `~/bin`, with the desktop app when `desktop:dist` built this version (`scripts/deploy.sh`).
+- `pnpm run cli:dist` — the release files for this OS in `out/release/`: a CLI archive per architecture, the packages `desktop:dist` built, and `SHA256SUMS` (`scripts/cli-dist.sh`).
 - `pnpm run desktop:dist` — package the desktop app for this OS into `integrations/desktop/dist/` (`scripts/desktop-dist.sh`; `CORTEX_DESKTOP_ARCHS=arm64` builds one macOS architecture; installs nothing).
 
 ## 4. Architecture map
@@ -112,7 +113,8 @@ Two concentric layers plus the renderer tier; the boundary matters because each 
 - Small, focused PRs. One concern per PR.
 - Locally green BEFORE pushing: `pnpm run style:check && pnpm test && pnpm run docs:check`.
 - CI runs the same gates (`.github/workflows/test.yml`); `docs:check` is the FIRST gate — fast-fail on doc drift.
-- `.github/workflows/desktop.yml` tests, packages and smoke-tests the desktop app on macOS and Linux and keeps the artifacts 7 days; it never publishes. macOS builds are ad-hoc signed; a release overrides the identity and sets the `APPLE_*` notarisation variables outside the repo, and none of them is ever committed.
+- `.github/workflows/desktop.yml` tests, packages and smoke-tests the desktop app on macOS (the x64 build on an Intel Mac too) and on Linux x64 and arm64, and keeps the release files 7 days. macOS builds are ad-hoc signed, and no signing material is ever committed.
+- Releasing: add a `CHANGELOG.md` section, run `pnpm version <x.y.z>` (its hooks check the changelog and keep `integrations/desktop/package.json` in step), then `git push --follow-tags`. `.github/workflows/release.yml` reruns both workflows, then publishes the GitHub Release and the Homebrew formula; an `x.y.z-rc.N` version publishes a prerelease to rehearse.
 - Never commit `bin/` or `tmp/` — `.gitignore` excludes them.
 
 ## 8. Doc map

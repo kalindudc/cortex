@@ -13,6 +13,8 @@ type DaemonReport = {
   pid?: number;
   /** Its private socket. */
   socket?: string;
+  /** The cortex version it runs, from its health answer. */
+  version?: string;
   /** Discovery failed: the metadata names another database or protocol. */
   error?: string;
 };
@@ -21,7 +23,9 @@ async function daemonReport(databasePath: string): Promise<DaemonReport> {
   try {
     const identity = await discoverDaemon(databasePath);
     if (identity !== null) {
-      return { running: true, pid: identity.pid, socket: identity.endpoint.socketPath };
+      const report: DaemonReport = { running: true, pid: identity.pid, socket: identity.endpoint.socketPath };
+      if (identity.version !== undefined) report.version = identity.version;
+      return report;
     }
     return { running: false };
   } catch (err) {
@@ -32,7 +36,12 @@ async function daemonReport(databasePath: string): Promise<DaemonReport> {
 function describeDaemon(daemon: DaemonReport): string {
   if (daemon.error !== undefined) return `unknown (${daemon.error})`;
   if (!daemon.running) return "not running";
-  return `running (pid ${daemon.pid}, ${daemon.socket ?? "private socket"})`;
+  const version = daemon.version === undefined ? "" : `, cortex ${daemon.version}`;
+  const differs =
+    daemon.version !== undefined && daemon.version !== pkg.version
+      ? "; differs from this cortex, run `cortex stop`"
+      : "";
+  return `running (pid ${daemon.pid}, ${daemon.socket ?? "private socket"}${version})${differs}`;
 }
 
 /**

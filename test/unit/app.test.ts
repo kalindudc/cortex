@@ -145,7 +145,8 @@ describe("CORTEX_DESKTOP_APP override", () => {
   });
 });
 
-test("NOT_INSTALLED is one line that names pnpm run desktop:dist", () => {
+test("NOT_INSTALLED is one line that names the install instructions and pnpm run desktop:dist", () => {
   expect(NOT_INSTALLED).not.toContain("\n");
+  expect(NOT_INSTALLED).toContain("https://github.com/kalindudc/cortex#install");
   expect(NOT_INSTALLED).toContain("pnpm run desktop:dist");
 });

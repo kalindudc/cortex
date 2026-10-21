@@ -33,7 +33,8 @@ export interface AppHost {
 
 export type AppLaunch = { argv: string[]; wait: boolean } | { missing: string };
 
-export const NOT_INSTALLED = "cortex app: the desktop app is not installed; build it with `pnpm run desktop:dist`";
+export const NOT_INSTALLED =
+  "cortex app: the desktop app is not installed; see https://github.com/kalindudc/cortex#install (from a checkout: `pnpm run desktop:dist`)";
 
 // The app accepts the same heading anchors (src/desktop/deepLink.ts).
 const HEADING_SLUG = /^[a-z0-9-]{1,256}$/i;

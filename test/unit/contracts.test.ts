@@ -93,9 +93,9 @@ describe("contracts: shapes (compile-time, checked by tsc)", () => {
     expectTypeOf<DaemonIdentity["protocol"]>().toEqualTypeOf<1>();
     expectTypeOf<DaemonIdentity["databaseId"]>().toEqualTypeOf<string>();
     expectTypeOf<DaemonIdentity["endpoint"]>().toEqualTypeOf<Endpoint>();
-    // A socket-only daemon publishes no web URL (plan @417 N5).
+    // A socket-only daemon publishes no web URL (plan @417 N5); `version` comes from the health answer only.
     expectTypeOf<keyof DaemonIdentity>().toEqualTypeOf<
-      "protocol" | "instanceId" | "databaseId" | "databasePath" | "endpoint" | "pid" | "capabilities"
+      "protocol" | "instanceId" | "databaseId" | "databasePath" | "endpoint" | "pid" | "capabilities" | "version"
     >();
     const identity: DaemonIdentity = {
       protocol: 1,

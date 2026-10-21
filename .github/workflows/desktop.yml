@@ -4,18 +4,20 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read
 
 jobs:
   desktop:
-    # Tests, packages and smoke-tests the desktop app; the packages are kept
-    # for seven days and never published.
+    # Tests, packages and smoke-tests the desktop app, and builds the release
+    # files (the CLI archives and the desktop packages). They are kept for
+    # seven days; only release.yml publishes them.
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest]
+        os: [macos-latest, ubuntu-latest, ubuntu-24.04-arm]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -34,6 +36,9 @@ jobs:
       - name: allow Electron's sandbox (Ubuntu restricts unprivileged user namespaces)
         if: runner.os == 'Linux'
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: install xvfb (the Arm runner image may lack it)
+        if: runner.os == 'Linux' && runner.arch == 'ARM64'
+        run: command -v xvfb-run || { sudo apt-get update && sudo apt-get install -y xvfb; }
       - name: real-window tests (macOS)
         if: runner.os == 'macOS'
         run: pnpm run test:desktop
@@ -50,15 +55,40 @@ jobs:
       - name: packaged smoke test (Linux)
         if: runner.os == 'Linux'
         run: |
-          CORTEX_DESKTOP_APP="$PWD/integrations/desktop/dist/linux-unpacked/cortex-desktop" \
+          if [ "$(uname -m)" = "aarch64" ]; then dir=linux-arm64-unpacked; else dir=linux-unpacked; fi
+          CORTEX_DESKTOP_APP="$PWD/integrations/desktop/dist/$dir/cortex-desktop" \
             xvfb-run --auto-servernum npm --prefix integrations/desktop test -- packaged
+      - name: release files
+        run: pnpm run cli:dist
       - uses: actions/upload-artifact@v4
         with:
-          name: cortex-desktop-${{ runner.os }}
+          name: cortex-release-${{ runner.os }}-${{ runner.arch }}
           path: |
-            integrations/desktop/dist/*.dmg
-            integrations/desktop/dist/*.zip
-            integrations/desktop/dist/*.AppImage
-            integrations/desktop/dist/*.deb
+            out/release/cortex-*.tar.gz
+            out/release/Cortex-*
           if-no-files-found: error
           retention-days: 7
+
+  intel:
+    # The x64 macOS CLI and app are cross-built on Apple silicon; this runs them on an Intel Mac.
+    needs: desktop
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: install desktop dependencies
+        run: npm --prefix integrations/desktop ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: cortex-release-macOS-ARM64
+          path: release
+      - name: the x64 CLI and app run
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          tar -xzf "release/cortex-$version-darwin-x64.tar.gz" -C "$RUNNER_TEMP"
+          test "$("$RUNNER_TEMP/cortex" --version)" = "$version"
+          ditto -x -k "release/Cortex-$version-mac-x64.zip" "$RUNNER_TEMP/app"
+          test "$(lipo -archs "$RUNNER_TEMP/app/Cortex.app/Contents/MacOS/Cortex")" = x86_64
+          CORTEX_DESKTOP_APP="$RUNNER_TEMP/app/Cortex.app" npm --prefix integrations/desktop test -- packaged
