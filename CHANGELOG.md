@@ -2,6 +2,20 @@
 
 Cortex follows [semantic versioning](https://semver.org). Each release has a section below, newest first.
 
+## 0.101.0 - 2026-10-21
+
+- **A paper look for the desktop app.** The app now looks like paper on a desk. The document and the full panels
+  (Settings, Lanes, Tags, Backup and Agent tools) are sheets with a faint dot grid and slightly uneven edges, and the
+  side panel's sections are plain cards. Dark mode becomes night paper, a warm charcoal; high contrast keeps its 7:1
+  text and drops the grain and dots.
+- **Writing type.** Titles, prose, task names and agent updates are set in Literata. The Markdown editor uses
+  iA Writer Mono with faint line numbers, so tables and lists still line up. Both fonts ship with the app and never
+  load from the network.
+- **Activity reads like notes.** Each update is a dated note down one page instead of a boxed card, with the
+  composer at the end.
+- **Hand-drawn diagrams.** Mermaid diagrams are drawn in a pen-sketch style in the current palette's ink, and redraw
+  when you switch between dark and high contrast.
+
 ## 0.100.0 - 2026-10-21
 
 - **The desktop app alone.** The install script takes `CORTEX_NO_CLI=1` to install only the desktop app, for when
