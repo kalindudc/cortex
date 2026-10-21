@@ -34,7 +34,7 @@ import { renderMarkdown, runMermaid, resetMermaidNode } from "../../lib/markdown
 import { parseRefs } from "../../lib/refs.ts";
 import { navigateRef } from "../../lib/refs.ts";
 import { slugify } from "../../../lib/slug.ts";
-import { theme } from "../../state/theme.ts";
+import { appearance, theme } from "../../state/theme.ts";
 
 export interface MarkdownHeading {
   id: string;
@@ -245,14 +245,16 @@ export function MarkdownView(props: MarkdownViewProps): VNode {
     };
   }, [rendered, idPrefix]);
 
-  // Theme flips re-run mermaid only; runMermaid itself skips diagrams
-  // already rendered for the active theme.
+  // Palette flips re-run mermaid only; runMermaid itself skips diagrams
+  // already rendered for the active palette. The appearance is a dependency
+  // too: dark and high contrast share the resolved theme "dark".
   useEffect(() => {
     void theme.value; // subscribe
+    void appearance.value;
     const host = hostRef.current;
     if (!host) return;
     runDiagrams(host, genRef.current);
-  }, [theme.value]);
+  }, [theme.value, appearance.value]);
 
   // Event delegation for post-processed controls: ref navigation, code
   // copy (with VISIBLE failure), mermaid retry.
