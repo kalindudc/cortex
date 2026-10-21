@@ -4,10 +4,10 @@
    side has no viewport room — escapes any `overflow: hidden` ancestor that
    would clip a CSS-only ::after.
 
-   Visual: high-contrast inverted surface (background: var(--text), color:
-   var(--bg)) so the tip reads as system chrome rather than another panel.
-   Mirrors the GitHub / Linear / macOS native-tooltip aesthetic and works in
-   both themes without per-theme rules. */
+   Visual: a small straight-edged card cut from the sheet, like a popover
+   (--sheet, a --rule outline, --shadow-pop, no grain), with --text-2 text.
+   Every value is a token, so it works in every theme without per-theme
+   rules. */
 .tooltip {
   position: fixed;
   top: 0;
@@ -15,8 +15,9 @@
   z-index: 1000;
   max-width: min(60vw, 480px);
   padding: 5px 9px;
-  background: var(--text);
-  color: var(--bg);
+  background: var(--sheet);
+  color: var(--text-2);
+  border: 1px solid var(--rule);
   border-radius: var(--r-2);
   font-size: var(--fs-2);
   font-weight: 500;
@@ -32,7 +33,7 @@
   transition:
     opacity var(--dur-1) var(--ease),
     transform var(--dur-1) var(--ease);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--shadow-pop);
   /* Ensure the tip is rendered before its first measure-and-place pass
      (placeTooltip needs offsetWidth/Height) without flashing at 0,0. The
      opacity:0 default keeps it invisible until the visibility class lands. */

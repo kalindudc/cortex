@@ -21,10 +21,27 @@ dialog.dialog-frame {
   outline: none;
 }
 dialog.dialog-frame:not([open]) { display: none; }
-dialog.dialog-frame::backdrop { background: rgba(0, 0, 0, .32); }
+/* The desk shows through the backdrop, so a dialog reads as a sheet laid on it. */
+dialog.dialog-frame::backdrop { background: color-mix(in srgb, var(--desk) 60%, transparent); }
+
+/* DialogFrame's paper host: it takes the size of the content inside it, so
+   its PaperLayer is exactly the sheet under that content. Content boxes
+   set a fixed width capped by max-width: 100%, because a percentage width
+   could not size this host. */
+.dialog-paper { flex: 0 1 auto; min-width: 0; min-height: 0; }
+/* The sheet arrives with its content: the same keyframes and timing that
+   motion.css gives .modal, on the layer, which holds no content. */
+dialog.dialog-frame:not(.dialog-frame--sheet) > .dialog-paper > .paper-layer { animation: ui-dialog-in var(--dur-2) var(--ease); }
+/* High contrast has no grain and its lift barely shows on the dark desk,
+   so the sheet gets a 1px line that follows its uneven edge. */
+:root[data-contrast="high"] dialog.dialog-frame > .dialog-paper > .paper-layer {
+  filter: drop-shadow(1px 0 0 var(--rule)) drop-shadow(-1px 0 0 var(--rule)) drop-shadow(0 1px 0 var(--rule)) drop-shadow(0 -1px 0 var(--rule));
+}
+
+/* The paper layer is the surface, so the box itself paints nothing. */
 .modal {
-  width: 100%;
-  max-width: 480px;
+  width: 480px;
+  max-width: 100%;
   min-width: 0;
   min-height: 0;
   max-height: calc(100dvh - var(--dialog-top) - var(--dialog-bottom));
@@ -33,33 +50,37 @@ dialog.dialog-frame::backdrop { background: rgba(0, 0, 0, .32); }
   gap: 16px;
   padding: 24px;
   overflow: auto;
-  border: 1px solid var(--border);
-  border-radius: var(--r-4);
-  background: var(--bg);
-  box-shadow: var(--shadow-cmd);
 }
-.modal h2 { margin: 0; color: var(--text); font: 600 19px/1.35 var(--font-sans); letter-spacing: -.02em; }
+.modal h2 { margin: 0; color: var(--text); font: 600 20px/1.3 var(--font-serif); letter-spacing: 0; }
 .modal .meta { color: var(--text-2); line-height: 1.6; }
 .modal input:not([type="checkbox"]), .modal select { min-height: var(--control-height); font-family: var(--font-sans); }
 .modal-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; padding-top: 4px; }
-.modal--wide { max-width: 760px; overflow: hidden; }
-.modal--render-markdown { max-width: 960px; }
+.modal--narrow { width: 420px; }
+.modal--wide { width: 760px; overflow: hidden; }
+.modal--render-markdown { width: 960px; }
 .update-body { flex: 1 1 auto; min-height: 0; overflow: auto; scrollbar-width: thin; }
 .update-body .markdown-view { margin: 0 auto; }
 
 /* The left sheet holds the rail (as a row) above the list. The rail keeps
    clear of the absolutely positioned close button instead of stacking
-   another application header. */
+   another application header. It is the desk pulled out, not a sheet, so
+   it paints its own surface and hides DialogFrame's paper. */
 dialog.dialog-frame--sheet { --dialog-top: 0px; --dialog-bottom: 0px; padding: 0; align-items: stretch; justify-content: flex-start; }
+dialog.nav-drawer > .dialog-paper > .paper-layer { display: none; }
 .nav-drawer-body { position: relative; width: min(320px, calc(100vw - 24px)); height: 100dvh; min-width: 0; display: flex; flex-direction: column; background: var(--panel); border-right: 1px solid var(--border); box-shadow: var(--shadow-cmd); }
 .nav-drawer-head { position: absolute; top: 14px; right: 10px; display: flex; z-index: 1; }
 .nav-drawer-body .nav-rail { padding-right: 64px; flex-wrap: wrap; }
 .nav-drawer-body .pane-lanes { flex: 1 1 auto; min-height: 0; height: auto; border-right: 0; }
 /* The side panel's sheet opens from the right, mirroring the navigation
-   drawer; its close button sits in the panel's tab row. */
+   drawer; its close button sits in the panel's tab row. It is a sheet of
+   paper: the panel inside is transparent over DialogFrame's paper, which
+   runs past the window on the top, right and bottom so only its uneven
+   left edge shows; the body keeps 2px clear of that edge. */
 dialog.ctx-sheet { justify-content: flex-end; }
-.ctx-sheet-body { position: relative; width: min(320px, calc(100vw - 24px)); height: 100dvh; min-width: 0; display: flex; flex-direction: column; background: var(--panel); border-left: 1px solid var(--border); box-shadow: var(--shadow-cmd); }
-.ctx-sheet-body .context-panel { flex: 1 1 auto; min-height: 0; border-left: 0; }
+dialog.ctx-sheet > .dialog-paper > .paper-layer { inset: -4px -4px -4px 0; }
+.ctx-sheet-body { position: relative; width: min(320px, calc(100vw - 24px)); height: 100dvh; min-width: 0; display: flex; flex-direction: column; padding-left: 2px; }
+.ctx-sheet-body .context-panel { flex: 1 1 auto; min-height: 0; border-left: 0; background: transparent; }
+.ctx-sheet-body .notif-foot { background: transparent; }
 .ctx-sheet-body .ctx-head { padding-right: 56px; }
 .ctx-sheet-close { position: absolute; top: 0; right: 6px; z-index: 1; width: 44px; height: 44px; }
 @media (max-height: 560px), (max-width: 900px) {
