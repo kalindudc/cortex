@@ -45,10 +45,12 @@ export function alerts(page: Page): Promise<Alert[]> {
 
 /** Wait until a `.task-row` in the task list shows `title`. */
 export async function waitForRow(page: Page, title: string, timeout = 5_000): Promise<void> {
+  // Poll on a timer: the default polls on animation frames, which a never-shown test window gets about once a second
+  // on Linux, so a row that renders in 50 ms would only be seen a second later.
   await page.waitForFunction(
     expected => Array.from(document.querySelectorAll(".task-row")).some(row => row.textContent?.includes(expected)),
     title,
-    { timeout },
+    { timeout, polling: 50 },
   );
 }
 
