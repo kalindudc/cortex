@@ -204,6 +204,48 @@ describe("global shortcuts", () => {
 });
 
 describe("narrow window", () => {
+  test("a one-line title is a 44 px edit target at 900 and 390 px, and editing it never moves the text", async () => {
+    const { page } = desktop;
+    await addTask(desktop, "Short title");
+    await openTask("Short title");
+    const trigger = page.locator("button.task-title-trigger");
+    const rect = (selector: string) =>
+      page.locator(selector).evaluate(el => {
+        const r = el.getBoundingClientRect();
+        return { left: r.left, top: r.top, width: r.width, height: r.height };
+      });
+    for (const width of [900, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      await expect.poll(() => page.evaluate(() => window.innerWidth), POLL).toBe(width);
+      const lineHeight = await page
+        .locator(".task-title-text")
+        .evaluate(el => Number.parseFloat(getComputedStyle(el).lineHeight));
+      const text = await rect(".task-title-text");
+      expect(text.height, `${width}px: one line`).toBeLessThan(lineHeight * 1.5);
+      expect(lineHeight, `${width}px: a line alone is under 44px`).toBeLessThan(44);
+
+      const box = await rect("button.task-title-trigger");
+      expect(box.height, `${width}px: target height`).toBeGreaterThanOrEqual(44);
+      // The whole target takes the click, up to its top and bottom edges.
+      const hits = await page.evaluate(
+        ({ x, ys }) => ys.map(y => document.elementFromPoint(x, y)?.closest("button.task-title-trigger") != null),
+        { x: box.left + 4, ys: [box.top + 1, box.top + box.height - 1] },
+      );
+      expect(hits, `${width}px: edges hit the title`).toEqual([true, true]);
+
+      await trigger.click();
+      const input = page.locator("textarea.title-input");
+      await input.waitFor();
+      const field = await rect("textarea.title-input");
+      expect(field.left, `${width}px: left`).toBeCloseTo(text.left, 1);
+      expect(field.top, `${width}px: top`).toBeCloseTo(text.top, 1);
+      expect(field.height, `${width}px: height`).toBeCloseTo(text.height, 1);
+      await expect.poll(() => focused(page, "textarea.title-input"), POLL).toBe(true);
+      await page.keyboard.press("Escape");
+      await input.waitFor({ state: "detached" });
+    }
+  });
+
   test("a modal and a metadata popover stay inside a 390 px viewport with no horizontal scroll", async () => {
     const { page } = desktop;
     await addTask(desktop, "narrow target");
