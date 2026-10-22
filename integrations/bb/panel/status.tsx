@@ -39,25 +39,25 @@ export const NEXT_LABEL: Record<CortexStatus, string> = {
 export const STATUS_KEY: Record<CortexStatus, string> = { draft: "d", open: "o", review: "r", blocked: "b", done: "x" };
 const BY_KEY = new Map(STATUSES.map(status => [STATUS_KEY[status], status]));
 
-// Status colours: draft info, open muted, review warning, blocked
+// Status colours: draft muted, open info, review warning, blocked
 // destructive, done success; host tokens only.
 const DOT: Record<CortexStatus, string> = {
-  draft: "bg-file-accent",
-  open: "bg-muted-foreground",
+  draft: "bg-muted-foreground",
+  open: "bg-file-accent",
   review: "bg-warning",
   blocked: "bg-destructive",
   done: "bg-success",
 };
 export const STATUS_TEXT: Record<CortexStatus, string> = {
-  draft: "text-file-accent",
-  open: "text-foreground",
+  draft: "text-foreground",
+  open: "text-file-accent",
   review: "text-warning-text",
   blocked: "text-destructive-text",
   done: "text-success",
 };
 const PILL: Record<CortexStatus, string> = {
-  draft: "border-file-accent/45 bg-file-accent/15",
-  open: "border-muted-foreground/45 bg-muted-foreground/15",
+  draft: "border-muted-foreground/45 bg-muted-foreground/15",
+  open: "border-file-accent/45 bg-file-accent/15",
   review: "border-warning/45 bg-warning/15",
   blocked: "border-destructive/45 bg-destructive/15",
   done: "border-success/45 bg-success/15",

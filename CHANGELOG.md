@@ -2,6 +2,11 @@
 
 Cortex follows [semantic versioning](https://semver.org). Each release has a section below, newest first.
 
+## 0.101.2 - 2026-10-22
+
+- **Status colours in bb.** In the bb plugin's Cortex tab and task chip, drafts are now grey and open tasks are
+  blue. Before, drafts were blue and open tasks grey.
+
 ## 0.101.1 - 2026-10-21
 
 - **A paper look for the desktop app.** The app now looks like paper on a desk. The document and the full panels
