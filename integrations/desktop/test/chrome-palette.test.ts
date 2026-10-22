@@ -4,7 +4,7 @@
 
 import type { Page } from "playwright-core";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { addTask, laneFilter, MOD } from "./chrome.ts";
+import { addTask, laneFilter, MOD, setViewportWidth } from "./chrome.ts";
 import { type DesktopApp, launchDesktop, waitForDashboard } from "./harness.ts";
 import { waitForLive, waitForRow } from "./live.ts";
 
@@ -215,8 +215,7 @@ describe("narrow window", () => {
         return { left: r.left, top: r.top, width: r.width, height: r.height };
       });
     for (const width of [900, 390]) {
-      await page.setViewportSize({ width, height: 844 });
-      await expect.poll(() => page.evaluate(() => window.innerWidth), POLL).toBe(width);
+      await setViewportWidth(page, width);
       const lineHeight = await page
         .locator(".task-title-text")
         .evaluate(el => Number.parseFloat(getComputedStyle(el).lineHeight));
@@ -249,8 +248,7 @@ describe("narrow window", () => {
   test("a modal and a metadata popover stay inside a 390 px viewport with no horizontal scroll", async () => {
     const { page } = desktop;
     await addTask(desktop, "narrow target");
-    await page.setViewportSize({ width: 390, height: 844 });
-    await expect.poll(() => page.evaluate(() => window.innerWidth), POLL).toBe(390);
+    await setViewportWidth(page, 390);
     const overflow = () => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     const inside = (selector: string) =>
       page.locator(selector).evaluate(el => {

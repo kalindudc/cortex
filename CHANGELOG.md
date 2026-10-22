@@ -2,7 +2,7 @@
 
 Cortex follows [semantic versioning](https://semver.org). Each release has a section below, newest first.
 
-## 0.101.0 - 2026-10-21
+## 0.101.1 - 2026-10-21
 
 - **A paper look for the desktop app.** The app now looks like paper on a desk. The document and the full panels
   (Settings, Lanes, Tags, Backup and Agent tools) are sheets with a faint dot grid and slightly uneven edges, and the
@@ -15,6 +15,12 @@ Cortex follows [semantic versioning](https://semver.org). Each release has a sec
   composer at the end.
 - **Hand-drawn diagrams.** Mermaid diagrams are drawn in a pen-sketch style in the current palette's ink, and redraw
   when you switch between dark and high contrast.
+- 0.101.0 was tagged but never published: two of its new narrow-window desktop tests measured the layout on Linux
+  before the app had switched to it. The tests now wait for the switch; the app itself is unchanged.
+
+## 0.101.0 - 2026-10-21
+
+Tagged but not published; its changes ship in 0.101.1.
 
 ## 0.100.0 - 2026-10-21
 

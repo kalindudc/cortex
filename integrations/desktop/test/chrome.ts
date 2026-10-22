@@ -27,6 +27,20 @@ export async function listTasks(desktop: DesktopApp): Promise<Listed[]> {
   return JSON.parse(await desktop.cortex(["ls", "--json"])) as Listed[];
 }
 
+/**
+ * Resize the viewport and wait until the app has laid itself out for that width. The narrow layout
+ * follows a matchMedia change event, which on Linux arrives after window.innerWidth has already
+ * changed, so waiting for the width alone can measure the wide component tree under the narrow CSS.
+ */
+export async function setViewportWidth(page: Page, width: number, height = 844): Promise<void> {
+  await page.setViewportSize({ width, height });
+  await page.waitForFunction(
+    w => window.innerWidth === w && (document.querySelector("main .mobile-bar") !== null) === w <= 900,
+    width,
+    { timeout: 10_000 },
+  );
+}
+
 export const statusFilter = (page: Page) => page.getByRole("button", { name: "Status filter", exact: true });
 export const laneFilter = (page: Page) => page.getByRole("button", { name: "Lane filter", exact: true });
 export const tagsFilter = (page: Page) => page.getByRole("button", { name: "Filter by tags", exact: true });

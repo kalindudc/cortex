@@ -6,6 +6,7 @@
 
 import type { Page } from "playwright-core";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { setViewportWidth } from "./chrome.ts";
 import { type DesktopApp, launchDesktop, waitForDashboard } from "./harness.ts";
 import { waitForLive } from "./live.ts";
 
@@ -21,7 +22,6 @@ afterEach(async () => {
   await desktop?.close();
 });
 
-const POLL = { timeout: 10_000, interval: 50 };
 const WIDTHS = [900, 390, 320];
 
 const PANELS = [
@@ -31,11 +31,6 @@ const PANELS = [
   { rail: "Backup", panel: ".backup-panel", ready: ".backup-panel #setting-backup" },
   { rail: "Agent tools", panel: ".agents-panel", ready: ".agents-panel [data-agent-tool]" },
 ] as const;
-
-async function resize(page: Page, width: number): Promise<void> {
-  await page.setViewportSize({ width, height: 844 });
-  await expect.poll(() => page.evaluate(() => window.innerWidth), POLL).toBe(width);
-}
 
 type Measured = { controls: number; swatches: number[]; small: string[]; overflow: string[] };
 
@@ -96,11 +91,11 @@ describe("full panels on a narrow window", () => {
     const { page } = desktop;
     await desktop.cortex(["tag", "add", "release", "--color", "#16a34a"]);
     for (const { rail, panel, ready } of PANELS) {
-      await resize(page, 1280);
+      await setViewportWidth(page, 1280);
       await page.locator(`.nav-rail button[aria-label="${rail}"]`).click();
       await page.locator(ready).first().waitFor();
       for (const width of WIDTHS) {
-        await resize(page, width);
+        await setViewportWidth(page, width);
         const m = await measure(page, panel);
         expect(m.controls, `${rail} at ${width}px: controls`).toBeGreaterThan(0);
         expect(m.small, `${rail} at ${width}px: targets under 44px`).toEqual([]);
