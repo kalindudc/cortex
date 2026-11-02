@@ -20,6 +20,10 @@ afterAll(async () => {
 });
 
 async function scroll(top: number): Promise<void> {
+  // Markdown is inserted after paint; a premature scroll is clamped to zero.
+  if (top > 0) {
+    await expect.poll(() => desktop.page.locator(".doc-page").evaluate(el => el.scrollHeight - el.clientHeight), POLL).toBeGreaterThanOrEqual(top);
+  }
   await desktop.page.locator(".doc-page").evaluate((el, offset) => { el.scrollTop = offset; }, top);
   await expect.poll(() => desktop.page.locator(".doc-sheet").evaluate(el => el.style.getPropertyValue("--paper-scroll")), POLL).toBe(`${top}px`);
 }
@@ -107,6 +111,30 @@ describe("scrolling task paper", () => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.setViewportSize({ width: 1440, height: 900 });
     await desktop.cortex(["edit", String(taskId), "--title", "A scrolling paper task"]);
+  });
+
+  test("an immediate scroll after returning to Edit is not overwritten by delayed restoration", async () => {
+    const { page } = desktop;
+    await openTask();
+    await page.getByRole("button", { name: "Edit", exact: true }).click();
+    await page.locator(".cm-content").waitFor();
+    await page.getByRole("tab", { name: "Activity", exact: true }).click();
+    await scroll(0);
+    const applied = await page.evaluate(async () => {
+      const tab = document.querySelector<HTMLButtonElement>("#doc-tab-document");
+      if (!tab) throw new Error("expected document tab");
+      tab.click();
+      await Promise.resolve();
+      await Promise.resolve();
+      const host = document.querySelector(".doc-page");
+      if (!host) throw new Error("expected document page");
+      host.scrollTop = 173;
+      return host.scrollTop;
+    });
+    expect(applied).toBe(173);
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await expect.poll(() => page.locator(".doc-page").evaluate(el => el.scrollTop), POLL).toBe(173);
+    await expect.poll(() => page.locator(".doc-sheet").evaluate(el => el.style.getPropertyValue("--paper-scroll")), POLL).toBe("173px");
   });
 
   test("Read position survives Activity and mode switches, and an outline jump wins over the saved position", async () => {

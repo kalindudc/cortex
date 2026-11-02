@@ -29,7 +29,7 @@
 // Markdown DOM. Theme changes only re-run mermaid (stale-theme nodes).
 
 import type { VNode } from "preact";
-import { useEffect, useMemo, useRef } from "preact/hooks";
+import { useEffect, useLayoutEffect, useMemo, useRef } from "preact/hooks";
 import { renderMarkdown, runMermaid, resetMermaidNode } from "../../lib/markdown.ts";
 import { parseRefs } from "../../lib/refs.ts";
 import { navigateRef } from "../../lib/refs.ts";
@@ -229,9 +229,8 @@ export function MarkdownView(props: MarkdownViewProps): VNode {
       });
   };
 
-  // Build the DOM when the sanitized output or namespace changes — and
-  // ONLY then.
-  useEffect(() => {
+  // Heading geometry must exist before the parent restores its reading position.
+  useLayoutEffect(() => {
     const host = hostRef.current;
     if (!host || rendered.html == null) return;
     const gen = ++genRef.current;

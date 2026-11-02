@@ -1,6 +1,6 @@
 {
   "name": "cortex-desktop",
-  "version": "0.102.0",
+  "version": "0.102.1",
   "private": true,
   "license": "MIT",
   "type": "module",

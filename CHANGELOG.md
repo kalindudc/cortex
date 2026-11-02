@@ -2,6 +2,15 @@
 
 Cortex follows [semantic versioning](https://semver.org). Each release has a section below, newest first.
 
+## 0.102.1 - 2026-11-02
+
+- **Scrolling paper and a quiet title breadcrumb.** The task's dots, grain, title, metadata and body scroll together
+  in Read, Edit, Split and Activity. Once the title leaves view, a small breadcrumb keeps it visible; click it to
+  return. Long titles are no longer clamped, and keyboard editing keeps the caret below the breadcrumb.
+- **Reliable reading position.** The body renders and its reading position restores before paint, so switching tabs
+  or modes cannot reset a scroll you just made. The tests also wait for enough scrollable content before attempting it.
+- 0.102.0 was tagged but not published because its new scrolling tests failed on Linux. These fixes ship in 0.102.1.
+
 ## 0.102.0 - 2026-11-02
 
 - **Paper that scrolls with the task.** The dots and grain now move with the title, metadata and body in Read,

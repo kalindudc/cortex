@@ -208,8 +208,9 @@ export function TaskDocument({ task }: { task: Task }): VNode {
     activeHeading.value = headingId ?? headings.peek()[0]?.id ?? null;
   };
 
-  // Restore before consuming a heading link, so the link wins over an old position.
-  useEffect(() => {
+  // Restore before paint, so a later user scroll cannot be overwritten.
+  // Heading links still run afterwards and win over the saved position.
+  useLayoutEffect(() => {
     const page = pageRef.current;
     const reader = readerRef.current;
     if (!page) return;
