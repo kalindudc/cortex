@@ -2,6 +2,11 @@
 
 Cortex follows [semantic versioning](https://semver.org). Each release has a section below, newest first.
 
+## 0.102.2 - 2026-11-02
+
+- **A seamless title breadcrumb.** The banner now meets the sheet's top and side edges, so scrolled text cannot peek
+  through a pixel gap. Its lower edge and keyboard caret clearance are unchanged.
+
 ## 0.102.1 - 2026-11-02
 
 - **Scrolling paper and a quiet title breadcrumb.** The task's dots, grain, title, metadata and body scroll together

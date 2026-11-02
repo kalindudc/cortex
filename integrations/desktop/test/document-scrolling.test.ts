@@ -70,6 +70,30 @@ describe("scrolling task paper", () => {
     });
   }
 
+  test("the breadcrumb covers the sheet edge without a gap for scrolled content", async () => {
+    const { page } = desktop;
+    await openTask();
+    await page.getByRole("button", { name: "Read", exact: true }).click();
+    await scroll(173);
+    await page.locator(".doc-running-title").waitFor({ state: "visible" });
+    const edges = await page.locator(".doc-running-title").evaluate(el => {
+      const sheet = el.closest(".doc-sheet");
+      if (!sheet) throw new Error("expected document sheet");
+      const outer = sheet.getBoundingClientRect();
+      const banner = el.getBoundingClientRect();
+      return {
+        top: banner.top - outer.top,
+        left: banner.left - outer.left,
+        right: outer.right - banner.right,
+        bottom: banner.bottom - outer.top,
+        covered: [12, outer.width / 2, outer.width - 12].every(x =>
+          document.elementFromPoint(outer.left + x, outer.top + 0.5)?.closest(".doc-running-title") === el,
+        ),
+      };
+    });
+    expect(edges).toEqual({ top: 0, left: 0, right: 0, bottom: 34, covered: true });
+  });
+
   for (const mode of ["Edit", "Split"] as const) {
     test(`${mode} keeps the keyboard caret below the breadcrumb while moving upward`, async () => {
       const { page } = desktop;
