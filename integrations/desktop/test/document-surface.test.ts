@@ -51,7 +51,7 @@ async function typeAtEnd(page: Page, cm: Locator, text: string, delay = 0): Prom
 /** True when the element's top edge is inside the reader's visible area. */
 function inReaderViewport(page: Page, id: string): Promise<boolean> {
   return page.evaluate(headingId => {
-    const reader = document.querySelector(".doc-reader");
+    const reader = document.querySelector(".doc-page");
     const el = document.getElementById(headingId);
     if (!reader || !el) return false;
     const r = reader.getBoundingClientRect();
@@ -128,7 +128,7 @@ describe("document surface", () => {
     await expect.poll(() => inReaderViewport(page, `task-${id}-beta-2`), POLL).toBe(true);
   });
 
-  test("typing in Edit mode autosaves, and the editor's content grows and scrolls inside the pane", async () => {
+  test("typing in Edit mode autosaves, and the editor grows inside the scrolling sheet", async () => {
     const { page } = desktop;
     const id = await addTask("editor autosave", "# Draft\n\nfirst line");
     await openTask(page, `cortex://app/task/${id}`);
@@ -137,15 +137,14 @@ describe("document surface", () => {
     await typeAtEnd(page, cm, "\nsecond line typed in the app");
     await expect.poll(() => bodyOf(id), POLL).toBe("# Draft\n\nfirst line\nsecond line typed in the app");
 
-    // The editor fills the pane and scrolls inside it, so the chrome around it stays put.
+    // The editor grows with its content; the sheet owns vertical scrolling.
     const pane = await page.locator(".md-editor .cm-editor").boundingBox();
     const contentHeight = async (): Promise<number> => (await cm.boundingBox())?.height ?? 0;
     await typeAtEnd(page, cm, "\nmore".repeat(30));
     await expect.poll(contentHeight, POLL).toBeGreaterThan((pane?.height ?? 0) + 100);
-    expect((await page.locator(".md-editor .cm-editor").boundingBox())?.height).toBeLessThanOrEqual((pane?.height ?? 0) + 1);
-    expect(
-      await page.locator(".md-editor .cm-scroller").evaluate(el => el.scrollHeight > el.clientHeight),
-    ).toBe(true);
+    expect((await page.locator(".md-editor .cm-editor").boundingBox())?.height).toBeGreaterThan((pane?.height ?? 0) + 100);
+    expect(await page.locator(".doc-page").evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true);
+    expect(await page.locator(".md-editor .cm-scroller").evaluate(el => el.scrollHeight <= el.clientHeight + 1)).toBe(true);
     await expect.poll(async () => (await bodyOf(id)).split("\n").length, POLL).toBe(34);
   });
 

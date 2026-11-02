@@ -457,11 +457,43 @@ describe("TaskDocument", () => {
     expect(banner.textContent).toContain("Body updated externally");
   });
 
-  test("reading position is remembered per task/panel and restored", async () => {
-    const { container } = render(<TaskDocument task={task()} />);
+  test("the paper tracks page scrolling and the breadcrumb waits for the whole title to exit", async () => {
+    const t = task();
+    const { container } = render(<TaskDocument task={t} />);
     await tick();
-    const reader = container.querySelector<HTMLElement>(".doc-reader");
-    if (!reader) throw new Error("expected reader");
+    const page = container.querySelector<HTMLElement>(".doc-page");
+    const sheet = container.querySelector<HTMLElement>(".doc-sheet");
+    const title = container.querySelector<HTMLElement>(".task-title-row");
+    if (!page || !sheet || !title) throw new Error("expected page, sheet and title");
+    page.getBoundingClientRect = () => ({ top: 10 }) as DOMRect;
+    title.getBoundingClientRect = () => ({ bottom: 11 }) as DOMRect;
+    page.scrollTop = 137;
+    fireEvent.scroll(page);
+    await tick();
+    expect(sheet.style.getPropertyValue("--paper-scroll")).toBe("137px");
+    const breadcrumb = container.querySelector<HTMLElement>(".doc-running-title");
+    expect(breadcrumb).not.toBeNull();
+    expect(breadcrumb?.hidden).toBe(true);
+    title.getBoundingClientRect = () => ({ bottom: 10 }) as DOMRect;
+    fireEvent.scroll(page);
+    await tick();
+    expect(breadcrumb?.hidden).toBe(false);
+    expect(breadcrumb?.textContent).toContain(t.title);
+    const button = breadcrumb?.querySelector("button");
+    if (!button) throw new Error("expected breadcrumb button");
+    fireEvent.click(button);
+    await tick();
+    expect(page.scrollTop).toBe(0);
+    expect(document.activeElement).toBe(container.querySelector(".task-title-trigger"));
+  });
+
+  test("reading position without headings is remembered per task/panel and restored", async () => {
+    const { container } = render(<TaskDocument task={task({ body: "No headings in this document." })} />);
+    await tick();
+    const reader = container.querySelector<HTMLElement>(".doc-page");
+    if (!reader) throw new Error("expected page");
+    Object.defineProperty(reader, "scrollHeight", { configurable: true, value: 600 });
+    Object.defineProperty(reader, "clientHeight", { configurable: true, value: 100 });
     reader.scrollTop = 123;
     fireEvent.scroll(reader);
     // Leave the document panel and come back.
@@ -477,8 +509,8 @@ describe("TaskDocument", () => {
     if (!docTab) throw new Error("expected Document tab");
     fireEvent.click(docTab);
     await tick();
-    const restored = container.querySelector<HTMLElement>(".doc-reader");
-    if (!restored) throw new Error("expected reader after return");
+    const restored = container.querySelector<HTMLElement>(".doc-page");
+    if (!restored) throw new Error("expected page after return");
     expect(restored.scrollTop).toBe(123);
   });
 
@@ -548,10 +580,11 @@ describe("TaskDocument", () => {
     if (!doc || !sheet) throw new Error("expected the document and its sheet");
     expect(Array.from(doc.children).map(el => el.className)).toEqual(["workspace-toolbar", "doc-sheet paper-host"]);
 
-    // The layer is the sheet's first child and holds nothing; the scroll
-    // container is its only sibling, so no content sits under its filter.
+    // The paper layer holds nothing; the page and breadcrumb are siblings,
+    // so neither content nor popover anchors sit under its filter.
     const [layer, page] = Array.from(sheet.children);
-    expect(sheet.children).toHaveLength(2);
+    expect(sheet.children).toHaveLength(3);
+    expect(sheet.lastElementChild?.className).toBe("doc-running-title");
     expect(sheet.querySelectorAll(".paper-layer")).toHaveLength(1);
     expect(layer.className).toBe("paper-layer is-dotted");
     expect(layer.getAttribute("aria-hidden")).toBe("true");

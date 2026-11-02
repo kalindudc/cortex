@@ -52,22 +52,6 @@ dialog.dialog-frame[open]::backdrop { animation: ui-backdrop-in var(--dur-2) var
   transition: background-color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
 }
 .tag-remove { transition: width var(--dur-2) var(--ease), margin-left var(--dur-2) var(--ease), opacity var(--dur-1) var(--ease), transform var(--dur-2) var(--ease), background-color var(--dur-1) var(--ease); }
-/* A clamped title reveals itself IN FLOW: its text's max-height (measured
-   by TaskHeader) eases open and the metadata row, reader and editor move
-   with it, so the reveal reads as the document growing, not a layer over
-   it. Only max-height animates; no transform touches these ancestors. The
-   line clamp is discrete: released at once when expanding, restored only
-   after the collapse finishes so the ellipsis cannot cut the text
-   mid-motion. That is sequencing of one reveal, not a stagger. */
-.is-clamped .task-title-text {
-  transition: max-height var(--dur-2) var(--ease), -webkit-line-clamp 0s linear var(--dur-2);
-  transition-behavior: allow-discrete;
-}
-.task-header.is-title-revealed .is-clamped .task-title-text,
-.is-clamped .task-title-trigger:focus-visible .task-title-text {
-  transition: max-height var(--dur-2) var(--ease), -webkit-line-clamp 0s linear 0s;
-  transition-behavior: allow-discrete;
-}
 .workspace-toolbar .btn, .workspace-toolbar .btn-icon, .compose-submit {
   transition: transform var(--dur-1) var(--ease), background-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
 }

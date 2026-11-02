@@ -2,6 +2,13 @@
 
 Cortex follows [semantic versioning](https://semver.org). Each release has a section below, newest first.
 
+## 0.102.0 - 2026-11-02
+
+- **Paper that scrolls with the task.** The dots and grain now move with the title, metadata and body in Read,
+  Edit, Split and Activity. The editor and preview share the sheet's vertical scroll instead of separate panes.
+- **A quiet title breadcrumb.** The title scrolls away naturally, without a clamp or hover expansion. Once it leaves
+  view, a small breadcrumb keeps the task title visible; click it to return. Keyboard editing keeps the caret below it.
+
 ## 0.101.2 - 2026-10-22
 
 - **Status colours in bb.** In the bb plugin's Cortex tab and task chip, drafts are now grey and open tasks are

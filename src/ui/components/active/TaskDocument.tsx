@@ -25,11 +25,11 @@
 //
 // The toolbar sits on the desk; the header and content lie on one sheet
 // below it. The sheet is a fixed frame whose PaperLayer paints the paper,
-// and `.doc-page` is the layer's sibling, so content scrolls inside the
-// frame and nothing with content or a popover anchor sits under a filter.
+// and `.doc-page` is the layer's sibling. The page scrolls the title and
+// content together; its offset moves the texture without filtering content.
 
 import type { VNode } from "preact";
-import { useEffect, useRef } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
 import { useSignal } from "@preact/signals";
 
 import type { Task } from "../../api/types.ts";
@@ -115,6 +115,9 @@ export function TaskDocument({ task }: { task: Task }): VNode {
   const readerSource = useSignal(draft.body);
   const staleNotice = useSignal(false);
   const readerRef = useRef<HTMLDivElement>(null);
+  const pageRef = useRef<HTMLDivElement>(null);
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const titlePast = useSignal(false);
   const announce = useSignal("");
   useEffect(() => {
     if (!readerVisible || pendingReaderFocus.peek() !== task.id) return;
@@ -179,16 +182,61 @@ export function TaskDocument({ task }: { task: Task }): VNode {
     docOutline.value = { taskId: task.id, headings: readerVisible ? headings.value : [], active: activeHeading.value };
   }, [task.id, readerVisible, headings.value, activeHeading.value]);
 
-  // URL heading fragment: consume only on its owning task, once the
-  // corresponding Markdown source has completed DOM post-processing.
-  // Missing/deleted targets are consumed after that confirmed render — no
-  // crash and no stale target waiting to surprise-scroll a future edit.
+  const syncPaper = (): void => {
+    const page = pageRef.current;
+    if (!page) return;
+    sheetRef.current?.style.setProperty("--paper-scroll", `${page.scrollTop}px`);
+    const title = page.querySelector(".task-title-row");
+    titlePast.value = title != null && title.getBoundingClientRect().bottom <= page.getBoundingClientRect().top;
+  };
+
+  const savePosition = (): void => {
+    const page = pageRef.current;
+    const reader = readerRef.current;
+    if (!page || !reader || !readerVisible) return;
+    const top = page.scrollTop;
+    let headingId: string | null = null;
+    let headingTop = 0;
+    for (const h of Array.from(reader.querySelectorAll<HTMLElement>("h1, h2, h3, h4, h5, h6"))) {
+      const offset = h.getBoundingClientRect().top - page.getBoundingClientRect().top + top;
+      if (offset <= top && offset >= headingTop) {
+        headingId = h.id || null;
+        headingTop = offset;
+      }
+    }
+    readingPositions.set(task.id, { headingId, delta: top - headingTop, top });
+    activeHeading.value = headingId ?? headings.peek()[0]?.id ?? null;
+  };
+
+  // Restore before consuming a heading link, so the link wins over an old position.
+  useEffect(() => {
+    const page = pageRef.current;
+    const reader = readerRef.current;
+    if (!page) return;
+    const pos = readerVisible ? readingPositions.get(task.id) : null;
+    const el = pos?.headingId ? reader?.querySelector<HTMLElement>(`#${CSS.escape(pos.headingId)}`) : null;
+    const offset = el ? el.getBoundingClientRect().top - page.getBoundingClientRect().top + page.scrollTop : 0;
+    const target = pos ? (el ? offset + pos.delta : pos.top) : 0;
+    page.scrollTop = Math.min(target, Math.max(0, page.scrollHeight - page.clientHeight));
+    syncPaper();
+  }, [readerVisible, currentTab, mode, task.id]);
+
+  useLayoutEffect(() => {
+    const page = pageRef.current;
+    const header = page?.querySelector(".task-header");
+    if (!page || !header) return;
+    syncPaper();
+    const observer = new ResizeObserver(syncPaper);
+    observer.observe(page);
+    observer.observe(header);
+    return () => observer.disconnect();
+  }, [draft.title, task.id]);
+
+  // URL heading fragments wait for the owning task's rendered Markdown.
   useEffect(() => {
     const target = pendingHeadingFragment.value;
     if (target == null || target.taskId !== task.id || !readerVisible) return;
     const source = readerSource.value;
-    // Empty descriptions have no MarkdownView callback; they are already a
-    // confirmed missing target. Non-empty content waits for THIS source.
     if (source.trim() !== "" && renderedReaderSource.value !== source) return;
     const host = readerRef.current;
     if (!host) return;
@@ -208,35 +256,6 @@ export function TaskDocument({ task }: { task: Task }): VNode {
     readerSource.value,
     task.id,
   ]);
-
-  const savePosition = (): void => {
-    const host = readerRef.current;
-    if (!host) return;
-    const top = host.scrollTop;
-    let headingId: string | null = null;
-    let headingTop = 0;
-    for (const h of Array.from(host.querySelectorAll<HTMLElement>("h1, h2, h3, h4, h5, h6"))) {
-      if (h.offsetTop <= top && h.offsetTop >= headingTop) {
-        headingId = h.id || null;
-        headingTop = h.offsetTop;
-      }
-    }
-    readingPositions.set(task.id, { headingId, delta: top - headingTop, top });
-    activeHeading.value = headingId ?? headings.peek()[0]?.id ?? null;
-  };
-  // Restore AFTER MarkdownView's child effect has built the DOM (child
-  // effects run before this parent effect).
-  useEffect(() => {
-    if (!readerVisible) return;
-    const host = readerRef.current;
-    if (!host) return;
-    const pos = readingPositions.get(task.id);
-    if (!pos) return;
-    const el = pos.headingId ? host.querySelector<HTMLElement>(`#${CSS.escape(pos.headingId)}`) : null;
-    const target = el ? el.offsetTop + pos.delta : pos.top;
-    const max = Math.max(0, host.scrollHeight - host.clientHeight);
-    host.scrollTop = Number.isFinite(max) && max > 0 ? Math.min(target, max) : target;
-  }, [readerVisible, task.id]);
 
   const emptyBody = draft.body.trim().length === 0;
 
@@ -280,9 +299,16 @@ export function TaskDocument({ task }: { task: Task }): VNode {
           </div>
         }
       />
-      <div class="doc-sheet paper-host">
+      <div class="doc-sheet paper-host" ref={sheetRef}>
         <PaperLayer dots />
-        <div class="doc-page">
+        <div
+          class="doc-page"
+          ref={pageRef}
+          onScroll={() => {
+            syncPaper();
+            savePosition();
+          }}
+        >
           <TaskHeader task={task} draft={draft} />
           {draft.external.body != null ? (
             <div class="doc-conflict">
@@ -317,7 +343,7 @@ export function TaskDocument({ task }: { task: Task }): VNode {
                 />
               ) : null}
               {readerVisible ? (
-                <div class="doc-reader" ref={readerRef} tabIndex={-1} onScroll={savePosition}>
+                <div class="doc-reader" ref={readerRef} tabIndex={-1}>
                   <div class="doc-reading-column">
                     {staleNotice.value ? (
                       <div class="doc-stale-notice" role="status">
@@ -360,6 +386,24 @@ export function TaskDocument({ task }: { task: Task }): VNode {
             {currentTab !== "document" ? <ActivityPane /> : null}
           </div>
         </div>
+        <nav class="doc-running-title" aria-label="Task breadcrumb" hidden={!titlePast.value}>
+          <span class="num">@{task.id}</span>
+          <span aria-hidden="true">›</span>
+          <button
+            type="button"
+            aria-label={`Back to task title: ${draft.title.trim() || "Untitled task"}`}
+            onClick={() => {
+              if (pageRef.current) pageRef.current.scrollTop = 0;
+              syncPaper();
+              pageRef.current
+                ?.querySelector<HTMLElement>(".task-title-trigger, .title-input")
+                ?.focus({ preventScroll: true });
+            }}
+          >
+            {draft.title.trim() || "Untitled task"}
+          </button>
+          <Icon name="chevronUp" size={12} />
+        </nav>
       </div>
     </div>
   );

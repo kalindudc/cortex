@@ -49,7 +49,8 @@ it is built and the rules that keep it safe; see also [architecture](architectur
 - Mod+[ and Mod+] step back and forward through the tasks you opened.
 - The app looks like paper on a desk: the document and the full panels are dotted sheets, the side panel's sections
   are plain cards, prose and titles are set in Literata, the editor in iA Writer Mono, and diagrams look hand-drawn.
-  The fonts ship with the app, and the high-contrast appearance drops the paper's grain and dots.
+  The fonts ship with the app; high contrast drops the grain and dots. Task content scrolls with its paper texture.
+  A small title breadcrumb appears after the heading leaves view; click it to return.
 
 ## Coming from the terminal workspace
 
@@ -149,17 +150,16 @@ together, and rebuild `icon.icns` from an iconset with `iconutil -c icns`.
 
 ### Paper look
 
-`src/ui/styles/tokens.css` holds the palettes: paper for light and night paper for dark, where the desk is the app's
-background and the sheet is the surface you read on. It also defines the paper itself: a faint grain, a dot grid, a
-slightly uneven edge and a soft lift. The document and the full panels are sheets with the dot grid; cards, such as the
-side panel's sections, stay plain, and so do dialogs. High contrast sets the grain and the dots to `none`.
+`src/ui/styles/tokens.css` holds light and night-paper palettes, where the desk is the app background and the sheet is
+the reading surface. It defines grain, dots, uneven edges and a soft lift. Documents and full panels are dotted sheets;
+cards and dialogs stay plain. High contrast sets the grain and dots to `none`.
 
-Paper is painted only by `src/ui/components/PaperLayer.tsx`: an empty, `aria-hidden` element placed first in its
-sheet, which `src/ui/styles/base.css` draws behind the content. The lift is a CSS filter, so its shadow follows the
-uneven edge, and a filter changes how `position: fixed` descendants are placed: they are positioned against the
-filtered element instead of the window, so a popover or tooltip inside a sheet would land in the wrong place, and the
-sheet's text would be redrawn on every scroll. A layer that holds no content has nothing for the filter to move. Why not
-a `box-shadow` on the sheet? It follows the element's straight box, not the cut edge.
+Paper is painted only by `src/ui/components/PaperLayer.tsx`, an empty, `aria-hidden` layer drawn by `src/ui/styles/base.css`.
+Its shadow filter follows the uneven edge. Keeping content outside the filter prevents fixed popovers from being
+positioned against the sheet instead of the window and avoids redrawing its text on every scroll. Why not a `box-shadow`?
+It follows a straight box, not the cut edge. `src/ui/components/active/TaskDocument.tsx#TaskDocument` scrolls the title,
+editor, preview and activity in one page and moves the layer's texture by the same offset; the motion and running-title
+breadcrumb are checked by `integrations/desktop/test/document-scrolling.test.ts`.
 
 `src/ui/styles/fonts.css` sets prose and titles in Literata and the Markdown editor in iA Writer Mono. The files in
 `src/ui/fonts/` ship unmodified beside their licences (both under the SIL Open Font License, which reserves the font

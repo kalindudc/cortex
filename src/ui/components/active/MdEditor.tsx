@@ -83,7 +83,7 @@ const cortexCmTheme = EditorView.theme({
     backgroundColor: "transparent",
     fontSize: WRITE_SIZE,
     fontFamily: "var(--font-write)",
-    height: "100%",
+    height: "auto",
   },
   ".cm-content": {
     fontFamily: "var(--font-write)",
@@ -252,6 +252,11 @@ export function MdEditor({
       markdown({ base: markdownLanguage }),
       syntaxHighlighting(cortexHighlight),
       cortexCmTheme,
+      // CodeMirror's imperative caret scrolling does not read CSS scroll padding.
+      EditorView.scrollMargins.of(view => {
+        const page = view.dom.closest(".doc-page");
+        return page ? { top: Number.parseFloat(getComputedStyle(page).scrollPaddingTop) } : null;
+      }),
       EditorView.lineWrapping,
       highlightActiveLine(),
       highlightActiveLineGutter(),

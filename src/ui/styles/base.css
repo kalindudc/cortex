@@ -62,5 +62,5 @@ button:focus-visible, a:focus-visible, summary:focus-visible, select:focus-visib
 }
 .paper-layer.is-dotted::before {
   background-image: var(--dot-grid), var(--paper-grain);
-  background-size: 22px 22px, auto; background-position: 11px 11px, 0 0;
+  background-size: 22px 22px, auto; background-position: 11px calc(11px - var(--paper-scroll, 0px)), 0 calc(0px - var(--paper-scroll, 0px));
 }

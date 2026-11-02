@@ -37,7 +37,7 @@ async function addDocument(title: string): Promise<number> {
 /** True when the heading's top edge is inside the reader's visible area. */
 function inReaderViewport(page: Page, id: string): Promise<boolean> {
   return page.evaluate(headingId => {
-    const reader = document.querySelector(".doc-reader");
+    const reader = document.querySelector(".doc-page");
     const el = document.getElementById(headingId);
     if (!reader || !el) return false;
     const r = reader.getBoundingClientRect();

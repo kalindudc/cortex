@@ -99,15 +99,16 @@
 .doc-tabs [role="tab"]:hover { color: var(--text); }
 .doc-tabs [role="tab"].active { color: var(--text); border-bottom-color: var(--accent); }
 .tab-count { min-width: 18px; padding: 1px 5px; border-radius: var(--r-1); background: var(--panel); color: var(--text-2); font: 10px/1.4 var(--font-mono); }
-/* The sheet: a fixed frame on the desk, inset so its whole uneven edge
-   stays in view. Its first child, the PaperLayer, paints the paper; its
-   second, .doc-page, is the scroll container, so content scrolls inside a
-   still sheet and nothing that holds content or a popover anchor sits
-   under the layer's filter. Read and Edit cap it and centre it on the
-   desk; Split uses the full width. */
+/* The paper edge stays on the desk; the page scrolls all its content and
+   moves only the paper layer's texture, leaving the filter off content. */
 .doc-sheet { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; min-width: 0; margin: 2px 14px 12px; }
 .task-document.mode-read > .doc-sheet, .task-document.mode-edit > .doc-sheet { width: calc(100% - 28px); max-width: 960px; margin-inline: auto; }
-.doc-page { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; min-width: 0; overflow: auto; }
+.doc-page { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; min-width: 0; overflow: auto; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; scroll-padding-top: 44px; }
+.doc-running-title { position: absolute; z-index: 3; top: 2px; left: 2px; right: 2px; height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 var(--document-gutter); border-bottom: 1px solid var(--rule); background: var(--sheet); color: var(--text-3); font: 11px/1.4 var(--font-sans); }
+.doc-running-title[hidden] { display: none; }
+.doc-running-title > .num, .doc-running-title > .icon { flex-shrink: 0; }
+.doc-running-title > button { min-width: 0; flex: 1; text-align: left; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text-2); }
+.doc-running-title > button:hover { color: var(--text); }
 .task-header, .doc-conflict {
   flex-shrink: 0;
   width: min(var(--document-measure), calc(100% - 2 * var(--document-gutter)));
@@ -196,27 +197,7 @@ button.prop-trigger.priority-chip-unset:focus-visible { border-color: var(--text
 .task-title-trigger { display: block; width: 100%; min-height: 1lh; padding: 0; border: 0; border-radius: var(--r-1); background: transparent; color: inherit; font: inherit; letter-spacing: inherit; text-align: left; overflow-wrap: anywhere; cursor: text; }
 .task-title-trigger:hover { background: color-mix(in srgb, var(--panel) 65%, transparent); }
 .task-title-trigger.is-empty { color: var(--text-2); }
-/* The header is pinned above the scrolling reader/editor, so the display
-   title clamps to --title-clamp-lines (TaskHeader publishes the count and
-   measures overflow). `lh` keeps the clamp height tied to the real
-   line-height at every font size. Once a title really overflows, the
-   heading is `.is-clamped`; a reveal (TaskHeader's `.is-title-revealed` on
-   the header, or keyboard focus-visible on the trigger) lifts the clamp and
-   lets the text grow IN FLOW to its measured full height, so the metadata
-   row, reader and editor move down with it exactly as they do for the
-   title textarea, which is exempt: editing always shows every line. */
-.task-title-text {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: var(--title-clamp-lines, 2);
-  max-height: calc(var(--title-clamp-lines, 2) * 1lh);
-  overflow: hidden;
-}
-.task-header.is-title-revealed .is-clamped .task-title-text,
-.is-clamped .task-title-trigger:focus-visible .task-title-text {
-  -webkit-line-clamp: none;
-  max-height: var(--title-full-height, none);
-}
+.task-title-text { display: block; }
 .task-header .tag-pill-removable { height: 28px; max-width: 28ch; }
 .tags-add { width: auto; padding: 0 9px; border-style: dashed; }
 .tags-add:disabled, .tags-overflow:disabled { opacity: .5; cursor: progress; }
@@ -232,17 +213,17 @@ button.prop-trigger.priority-chip-unset:focus-visible { border-color: var(--text
 .editor-baseline.is-error { color: var(--err); }
 .task-actions-menu { top: calc(100% + 6px); right: 0; min-width: 180px; }
 .task-actions-menu .task-action-delete { color: var(--err); display: flex; align-items: center; gap: 8px; }
-.doc-content { display: grid; grid-template-columns: minmax(0, 1fr); flex: 1 1 auto; min-height: 180px; min-width: 0; }
+.doc-content { display: grid; grid-template-columns: minmax(0, 1fr); flex: 0 0 auto; min-height: 180px; min-width: 0; }
 .doc-content[hidden], .doc-context[hidden] { display: none; }
 .doc-split { display: flex; min-width: 0; min-height: 0; }
-.doc-reader { flex: 1 1 auto; min-height: 0; min-width: 0; overflow: auto; position: relative; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; scroll-padding-top: 20px; }
+.doc-reader { flex: 1 1 auto; min-height: 0; min-width: 0; position: relative; }
 .doc-reading-column, .doc-context > .task-context {
   width: min(var(--document-measure), calc(100% - 2 * var(--document-gutter)));
   margin: 0 auto;
   padding-bottom: 28px;
   font-size: 16px;
 }
-.doc-context { flex: 1 1 auto; min-height: 180px; min-width: 0; overflow: auto; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+.doc-context { flex: 0 0 auto; min-height: 180px; min-width: 0; }
 /* The sheet is the editor's frame: no box of its own. Edit keeps the
    editor in the title's column (the same measure and gutter as
    .task-header, resolved here so the editor's own font cannot change it);
@@ -348,8 +329,8 @@ button.prop-trigger.priority-chip-unset:focus-visible { border-color: var(--text
   .doc-split { flex: 1 1 auto; }
   .mode-split .doc-content { min-height: 460px; }
   .mode-split .doc-split { flex-direction: column; gap: 12px; }
-  .mode-split .doc-split > .editable-task-body { flex: 1 0 200px; }
-  .mode-split .doc-split > .doc-reader { flex: 1 0 220px; --document-gutter: 4px; padding-top: 12px; border-left: 0; border-top: 1px solid var(--rule); }
+  .mode-split .doc-split > .editable-task-body { flex: 0 0 auto; min-height: 200px; }
+  .mode-split .doc-split > .doc-reader { flex: 0 0 auto; min-height: 220px; --document-gutter: 4px; padding-top: 12px; border-left: 0; border-top: 1px solid var(--rule); }
   .markdown-view .md-copy, .markdown-view .md-mermaid-retry { min-height: 44px; }
 }
 /* Unsaved text of deleted tasks: kept until the user exports or discards it. */
