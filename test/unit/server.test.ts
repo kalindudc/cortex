@@ -10,6 +10,7 @@ import {
   type DaemonRuntime,
 } from "../../src/server.ts";
 import { CONTROL_PATHS, INSTANCE_HEADER } from "../../src/api.ts";
+import { MEMORY_LIMITS } from "../../src/memory.ts";
 import { Store, type Notification, type Task, type Update } from "../../src/store.ts";
 import { parseCursor, type PublishedEvent } from "../../src/events.ts";
 import { createSseParser, type SseFrame } from "../../src/subscription.ts";
@@ -425,6 +426,69 @@ describe("server: memory", () => {
     expect(recent.json).toMatchObject({ terms: ["routing", "events"], recent: true });
   });
 
+  test("GET /api/memory/search lists streams linked by identifiers first, inside the limit, then keyword hits", async () => {
+    const named = store.addTask({ title: "Plan: gizmo rollout", lane: "cortex" });
+    const ticket = store.addTask({ title: "Loom project", lane: "infra" });
+    store.addUpdate({ task_id: ticket.id, author: "bb-thr_worker01", summary: "GIZ-4 is waiting for review" });
+    const parent = store.addTask({ title: "parent work", lane: "cortex" });
+    store.addUpdate({ task_id: parent.id, author: "bb-thr_parent01", summary: "progress" });
+    const keyword = store.addTask({ title: "gizmo handler", lane: "cortex" });
+    const q = encodeURIComponent(`implement cortex task ${named.id} and GIZ-4: the gizmo handler`);
+    const { json } = await fetchJson(req("GET", `/api/memory/search?q=${q}`));
+    const hits = (json as { hits: { id: number; via?: { kind: string } }[] }).hits;
+    expect(hits.map(hit => hit.id)).toEqual([named.id, ticket.id, keyword.id]);
+    expect(hits.map(hit => hit.via?.kind ?? null)).toEqual(["named", "ticket", null]);
+    // Linked streams share the budget; a shown id is never linked again.
+    const capped = await fetchJson(req("GET", `/api/memory/search?q=${q}&limit=1`));
+    expect((capped.json as { hits: { id: number }[] }).hits.map(hit => hit.id)).toEqual([named.id]);
+    const skipped = await fetchJson(req("GET", `/api/memory/search?q=${q}&exclude=${named.id}`));
+    expect((skipped.json as { hits: { id: number }[] }).hits.map(hit => hit.id)).toEqual([ticket.id, keyword.id]);
+    // `related` links the starting thread's streams; `linkedOnly` leaves keyword hits out.
+    const child = await fetchJson(req("GET", `/api/memory/search?q=${q}&related=bb-thr_parent01&linkedOnly=1`));
+    expect((child.json as { hits: { id: number }[] }).hits.map(hit => hit.id)).toEqual([
+      named.id,
+      parent.id,
+      ticket.id,
+    ]);
+    expect((await fetchJson(req("GET", "/api/memory/search?q=gizmo&related=a%0Ab"))).status).toBe(400);
+    expect((await fetchJson(req("GET", "/api/memory/search?q=gizmo&self=a%0Ab"))).status).toBe(400);
+  });
+
+  test("GET /api/memory/search: a linked stream is never a keyword hit too; `self` streams come back only when named", async () => {
+    const both = store.addTask({ title: "widget dial handler", lane: "cortex" });
+    const mine = store.addTask({ title: "widget dial notes", lane: "cortex" });
+    store.addUpdate({ task_id: mine.id, author: "bb-thr_mine0001", summary: "my work" });
+    const other = store.addTask({ title: "widget dial spec", lane: "cortex" });
+    const hitIds = async (q: string, extra = "") =>
+      (
+        (await fetchJson(req("GET", `/api/memory/search?q=${encodeURIComponent(q)}${extra}`))).json as {
+          hits: { id: number; via?: unknown }[];
+        }
+      ).hits.map(hit => [hit.id, hit.via !== undefined]);
+    // Named and matching both words: listed once, as linked.
+    expect(await hitIds(`widget dial @${both.id}`)).toEqual([
+      [both.id, true],
+      [other.id, false],
+      [mine.id, false],
+    ]);
+    expect(await hitIds("widget dial", "&self=bb-thr_mine0001")).toEqual([
+      [other.id, false],
+      [both.id, false],
+    ]);
+    expect(await hitIds(`widget dial, continue @${mine.id}`, "&self=bb-thr_mine0001")).toEqual([
+      [mine.id, true],
+      [other.id, false],
+      [both.id, false],
+    ]);
+    // A limit above the maximum is capped, linked streams included.
+    const capped = Array.from({ length: MEMORY_LIMITS.maxHits + 4 }, (_, i) =>
+      store.addTask({ title: `capper knob ${i}` }),
+    );
+    const q = encodeURIComponent(`capper knob @${capped[0]?.id}`);
+    const many = await fetchJson(req("GET", `/api/memory/search?q=${q}&limit=100`));
+    expect((many.json as { hits: unknown[] }).hits).toHaveLength(MEMORY_LIMITS.maxHits);
+  });
+
   test("GET /api/memory/streams filters by active and author and validates the author tag", async () => {
     const open = store.addTask({ title: "open", lane: "l" });
     const done = store.addTask({ title: "done", lane: "l" });
@@ -487,6 +551,9 @@ describe("server: memory exclusion", () => {
       "/api/memory/search": async () => {
         const { json } = await fetchJson(req("GET", "/api/memory/search?q=gizmo"));
         expect(rowIds((json as { hits: unknown }).hits)).toEqual([visible.id]);
+        // Naming the task, or the author that posted to it, links nothing: linking is a search, not a load by id.
+        const linked = await fetchJson(req("GET", `/api/memory/search?q=%40${hidden.id}&related=pi-x&linkedOnly=1`));
+        expect(rowIds((linked.json as { hits: unknown }).hits)).toEqual([visible.id]);
       },
       "/api/memory/streams": async () => {
         expect(rowIds((await fetchJson(req("GET", "/api/memory/streams?lane=cortex"))).json)).toEqual([visible.id]);

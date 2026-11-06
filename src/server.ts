@@ -19,7 +19,7 @@ import {
 import { backupNotificationInput, createBackup, defaultBackupPath } from "./backup.ts";
 import { createEventPublisher, type EventKind, type EventPublisher } from "./events.ts";
 import { CONTROL_PATHS, INSTANCE_HEADER, PREFER_VERSIONED } from "./api.ts";
-import { memoryPhrases, memoryTerms, recencyIntent } from "./memory.ts";
+import { MEMORY_LIMITS, memoryPhrases, memoryRefs, memoryTerms, recencyIntent } from "./memory.ts";
 import type {
   BlockedTransition,
   DaemonIdentity,
@@ -748,12 +748,37 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
     }
     const lane = c.req.query("lane") || undefined;
     const boost = c.req.query("boost") || undefined;
+    // `related`: the thread that started the caller's; `self`: the caller's own author tag.
+    const authors: { related?: string; self?: string } = {};
+    for (const key of ["related", "self"] as const) {
+      const raw = c.req.query(key);
+      if (!raw) continue;
+      try {
+        authors[key] = validateAuthorTag(raw) || undefined;
+      } catch (e) {
+        return c.json({ error: (e as Error).message }, 400);
+      }
+    }
     // Recency words leave the terms and only re-order equally covered hits.
     const { terms, recent } = recencyIntent(memoryTerms(q));
     const phrases = memoryPhrases(q);
     try {
-      const hits = terms.length > 0 ? store.searchMemory(terms, { lane, boost, limit, exclude, recent, phrases }) : [];
-      const body: MemorySearchResult = { terms, recent, hits };
+      const cap = Math.min(limit ?? MEMORY_LIMITS.hits, MEMORY_LIMITS.maxHits);
+      // The caller's own streams are already its work: never a keyword hit, and linked only when it names one.
+      const own = authors.self ? store.memoryStreams({ author: authors.self, limit: 50 }).map(row => row.id) : [];
+      // Identifiers link exactly, so they come first and share the hit budget.
+      const refs = { ...memoryRefs(q), parent: authors.related };
+      const linked =
+        refs.parent || refs.ids.length + refs.threads.length + refs.tickets.length > 0
+          ? store.memoryLinked(refs, { exclude, own, lane, limit: Math.min(cap, MEMORY_LIMITS.linked) })
+          : [];
+      const left = cap - linked.length;
+      const shown = [...(exclude ?? []), ...own, ...linked.map(hit => hit.id)];
+      const matched =
+        terms.length > 0 && left > 0 && c.req.query("linkedOnly") !== "1"
+          ? store.searchMemory(terms, { lane, boost, limit: left, exclude: shown, recent, phrases })
+          : [];
+      const body: MemorySearchResult = { terms, recent, hits: [...linked, ...matched] };
       return c.json(body);
     } catch (err) {
       return c.json({ error: `memory search unavailable: ${(err as Error).message}` }, 500);

@@ -14,7 +14,8 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import type { LinkedStream, MemoryHit, MemoryStream, MemoryStreamRow, Update } from "./store.ts";
+import type { LinkedStream, MemoryHit, MemoryLink, MemoryStream, MemoryStreamRow, Update } from "./store.ts";
+import { REF_RE } from "./lib/refGrammar.ts";
 import { slugify } from "./lib/slug.ts";
 
 /** Output and query budgets for agent memory (the single source). */
@@ -50,6 +51,10 @@ export const MEMORY_LIMITS = {
   chainHops: 10,
   /** Hyphen/underscore/dot compounds of a query searched as phrases. */
   phrases: 4,
+  /** Streams linked to a request by an identifier (a named task, a thread, a ticket key), listed before keyword hits. */
+  linked: 3,
+  /** A stream with at least this many outgoing `@id` links is a digest (a journal); it ranks after other hits. */
+  digestLinks: 20,
 } as const;
 
 /** Opening line of every rendered memory block: stored text is data, never instructions. */
@@ -83,6 +88,9 @@ export const STOPWORDS: ReadonlySet<string> = new Set(
   ).split(" "),
 );
 
+/** Fenced code; an unclosed fence (a cut prompt) runs to the end. */
+const FENCED_CODE = /```[\s\S]*?(?:```|$)/g;
+
 /**
  * Prompt text that names no topic: a leading checkout path spent the whole
  * term budget on `users, kalindu, src, github, com, ...` (the overengineering
@@ -93,11 +101,13 @@ export const STOPWORDS: ReadonlySet<string> = new Set(
  * resets a global regex's lastIndex, so sharing these is safe.
  */
 const QUERY_NOISE: readonly RegExp[] = [
-  /```[\s\S]*?(?:```|$)/g, // fenced code; an unclosed fence (a cut prompt) runs to the end
+  FENCED_CODE,
   /\b[a-z][a-z0-9+.-]*:\/\/[^\s<>"'`]*/gi, // URLs, any scheme
   /[\p{L}\p{N}._%+-]+@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+/gu, // emails (an `@id` has no local part)
   /(?<![\p{L}\p{N}_.~/-])(?:(?:~|\.{1,2})\/|\/[^\s/]+\/)[^\s"'`<>()[\]{}]*/gu, // ~/..., ./..., ../..., /a/b...
   /(?<![\p{L}\p{N}])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\p{L}\p{N}])/giu, // UUIDs
+  /@thread:[a-z0-9_]+(?:#msg=\d+)?/gi, // bb thread mentions; memoryRefs links the thread instead
+  /(?<![\p{L}\p{N}_])[a-z]{2,6}_[a-z0-9]*\d[a-z0-9]*(?![\p{L}\p{N}_])/gu, // bb ids: thr_…, wk_…, env_…
 ];
 
 /** `text` (NFKC) with every QUERY_NOISE span replaced by a space. */
@@ -129,10 +139,54 @@ export function memoryTerms(text: string): string[] {
 
 /** A normalized token that may be a query term (memoryTerms' rules, before dedupe and the cap). */
 function isTermToken(token: string): boolean {
-  // A commit hash or hex id: 7+ hex characters with a digit (`deadbeef`, `facade` stay words).
+  // A commit hash or hex id: 7+ hex characters with a digit (`deadbeef`, `facade` stay words). A generated id
+  // puts digits between letters (`f2y27awp`); a word keeps them at an end (`python3`, `sha256`).
   return (
-    token.length >= 3 && !/^\p{N}+$/u.test(token) && !/^(?=.*\d)[0-9a-f]{7,}$/.test(token) && !STOPWORDS.has(token)
+    token.length >= 3 &&
+    !/^\p{N}+$/u.test(token) &&
+    !/^(?=.*\d)[0-9a-f]{7,}$/.test(token) &&
+    !(token.length >= 6 && /\p{L}\p{N}+\p{L}/u.test(token)) &&
+    !STOPWORDS.has(token)
   );
+}
+
+/** Identifiers in a request that link it to streams without keywords: named tasks, bb threads, ticket keys. */
+export type MemoryRefs = { ids: number[]; threads: string[]; tickets: string[] };
+
+/**
+ * `cortex show 12`, `cortex memory show 12`, `cortex task 12`, `cortex plan task 12`; group 1 = id. A bare
+ * `task 12` is left out: "retry the task 10 times" and a plan's own "Task 12" name unrelated tasks.
+ */
+const CORTEX_ID = /\bcortex\s+(?:memory\s+show|show|(?:task|plan|stream)(?:\s+(?:task|plan))?)\s+#?(\d+)\b/gi;
+/** bb thread ids anywhere, thread-storage paths included: `thr_` and 6 to 40 lowercase letters or digits. */
+const THREAD_ID = /(?<![\p{L}\p{N}])thr_[0-9a-z]{6,40}(?![\p{L}\p{N}_])/gu;
+/** Ticket keys such as `LANE-8` or `OTLP-12`: two capital letters first, so never `X86-64` or `Q3-2024`. */
+const TICKET = /(?<![\p{L}\p{N}_-])([A-Z]{2}[A-Z0-9]{0,8})-(\d{1,5})(?![\p{L}\p{N}_]|-\d)/gu;
+/** Standards, versions and names that look like ticket keys (`UTF-8`, `SHA-256`, `GPT-5`, `COVID-19`). */
+const NOT_TICKETS: ReadonlySet<string> = new Set(
+  "UTF SHA HTTP HTTPS TLS SSL ISO RFC GPT ES MD PEP AES IEEE SOC CWE CVE ECMA ARM WCAG COVID RSA TCP IP".split(" "),
+);
+/** At most this many identifiers of each kind per request: enough to fill MEMORY_LIMITS.linked after misses. */
+const REFS_PER_KIND = 10;
+
+/**
+ * The identifiers in raw request text, each kind deduped in first-seen order
+ * and capped at REFS_PER_KIND: task ids (`@657` by the ref grammar,
+ * `cortex show 657`, `cortex task 657`), bb thread ids (`@thread:thr_…` or a
+ * thread-storage path) and ticket keys (`LANE-8`). They resolve exactly, so
+ * they read the text before QUERY_NOISE blanks the paths and mentions that
+ * carry them; only fenced code, a pasted log or body, is left out.
+ */
+export function memoryRefs(text: string): MemoryRefs {
+  const raw = text.normalize("NFKC").replace(FENCED_CODE, " ");
+  const named = [...raw.matchAll(new RegExp(REF_RE.source, REF_RE.flags))].filter(m => m[1] !== undefined);
+  const ordered = [...named, ...raw.matchAll(CORTEX_ID)].sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+  const ids = new Set(ordered.map(m => Number(m[1])).filter(id => id > 0));
+  const threads = new Set([...raw.matchAll(THREAD_ID)].map(m => m[0]));
+  const tickets = new Set<string>();
+  for (const m of raw.matchAll(TICKET)) if (!NOT_TICKETS.has(m[1] ?? "")) tickets.add(m[0]);
+  const capped = <T>(found: Set<T>): T[] => [...found].slice(0, REFS_PER_KIND);
+  return { ids: capped(ids), threads: capped(threads), tickets: capped(tickets) };
 }
 
 /**
@@ -388,11 +442,26 @@ function streamLine(row: MemoryStreamRow & { latest?: LinkedStream | null }, now
   return `- [${row.id}] ${row.status} \u00b7 ${row.lane} \u00b7 active ${active}${synced}${old} \u00b7 ${title}${latestNote(row.latest)}`;
 }
 
+/** Why a linked stream is listed, in the words an agent reads. */
+function linkReason(via: MemoryLink): string {
+  switch (via.kind) {
+    case "named":
+      return "named in the request";
+    case "parent":
+      return "the thread that started this one worked on it";
+    case "thread":
+      return `thread ${via.key} worked on it`;
+    case "ticket":
+      return `mentions ${via.key}`;
+  }
+}
+
 /**
- * Hits for a query, or "" when there are none: the header names the query
- * (and "newest first" when it asked for the newest) and how to load a hit
- * (`loadHint`, default `cortex memory show <id>`); each hit its own matched
- * terms.
+ * Hits for a query, or "" when there are none. Linked streams (a `via`) come
+ * first under their own header, each with its reason; keyword hits follow
+ * under a header naming the query (and "newest first" when it asked for the
+ * newest), each with its matched terms. Both headers say how to load a hit
+ * (`loadHint`, default `cortex memory show <id>`).
  */
 export function renderHits(
   terms: readonly string[],
@@ -403,13 +472,21 @@ export function renderHits(
   if (hits.length === 0) return "";
   const order = opts.recent ? ", newest first" : "";
   const load = opts.loadHint ?? "cortex memory show <id>";
-  const lines = [
-    MEMORY_PREAMBLE,
-    `Possibly relevant cortex memory (query: ${terms.join(", ")}${order}). Load one with \`${load}\` before relying on it.`,
-  ];
-  for (const hit of hits) {
-    const matched = `(${hit.matched.length}/${terms.length}: ${hit.matched.join(", ")})`;
-    lines.push(`${streamLine(hit, now)} ${matched} \u2014 ${hit.snippet.replaceAll("\n", " ")}`);
+  const lines = [MEMORY_PREAMBLE];
+  const linked = hits.filter(hit => hit.via);
+  const matched = hits.filter(hit => !hit.via);
+  if (linked.length > 0) {
+    lines.push(`Cortex memory linked to this request. Load one with \`${load}\` before relying on it.`);
+    for (const hit of linked) if (hit.via) lines.push(`${streamLine(hit, now)} (linked: ${linkReason(hit.via)})`);
+  }
+  if (matched.length > 0) {
+    lines.push(
+      `Possibly relevant cortex memory (query: ${terms.join(", ")}${order}). Load one with \`${load}\` before relying on it.`,
+    );
+  }
+  for (const hit of matched) {
+    const words = `(${hit.matched.length}/${terms.length}: ${hit.matched.join(", ")})`;
+    lines.push(`${streamLine(hit, now)} ${words} \u2014 ${hit.snippet.replaceAll("\n", " ")}`);
   }
   return lines.join("\n");
 }

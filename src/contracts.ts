@@ -256,7 +256,11 @@ export interface TaskListQuery {
 /**
  * GET /api/memory/search: `q` is tokenized server-side; every lane is
  * searched unless `lane` filters, `boost` ranks the caller's lane higher, and
- * `exclude` drops task ids the caller already showed.
+ * `exclude` drops task ids the caller already showed. Streams linked by the
+ * identifiers in `q` come first; `related` is the author tag of the thread
+ * that started the caller's, whose streams are linked too, and `linkedOnly`
+ * leaves the keyword hits out. `self` is the caller's own author tag: its
+ * streams come back only when `q` names them.
  */
 export interface MemorySearchQuery {
   q: string;
@@ -264,6 +268,9 @@ export interface MemorySearchQuery {
   boost?: string;
   limit?: number;
   exclude?: number[];
+  related?: string;
+  self?: string;
+  linkedOnly?: boolean;
 }
 
 export interface MemorySearchResult {

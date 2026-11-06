@@ -20,11 +20,10 @@ with bb. Run it again after upgrading; it changes only what differs, which `cort
 
 The plugin has four settings. The Cortex executable (`cortexPath`), left empty, finds `cortex` on your `PATH`, then in
 `~/bin` and `~/.local/bin`; run `bb plugin reload cortex` after changing it. Agent memory is Automatic by default:
-threads you start look up and save, and threads started by another thread, such as minions, only look up. The other
-choices are Look up and save in every thread, Look up only, and Off; its description says what look up only leaves
-out. Two switches hide the memory icon and the header task chip; these three settings apply without a reload. When
-cortex is missing or too old, the plugin reports that it needs configuration, says how to fix it, and offers no tools;
-the tabs and the chips show the same reason.
+threads you start look up and save; minions, which have a parent thread, only look up. The other choices are Look up
+and save in every thread, Look up only, and Off; its description says what look up only leaves out. Two switches hide
+the memory icon and the header task chip; these three settings apply without a reload. When cortex is missing or too
+old, the plugin says what to fix and offers no tools; the tabs and chips say the same.
 
 ## What each provider gets
 
@@ -36,7 +35,8 @@ the tabs and the chips show the same reason.
   providers read the copies `cortex agents install` writes to `~/.agents/skills`. The pi extension steps aside in a bb
   pi thread, so the plugin brings the tasks matching a message to pi, Claude Code and Codex threads, and the save
   turn to every thread that looks up and saves; there are no compaction snapshots. A `pi -p` from that thread's shell
-  keeps the extension.
+  keeps the extension. A plugin's message (one that opens with a `[tag]` header, like a wake-up) brings none; a
+  minion or workflow agent gets only tasks its brief names and its starting thread's, as the brief has the context.
 
 bb asks for a thread's tools and instructions when the thread starts and cannot wait for cortex at that moment, so
 the plugin keeps one primer per project in a cache, filled when a thread in that project is created or starts a
@@ -65,8 +65,8 @@ menu copies the body and excludes the task from memory or includes it again; the
 An agent can write `::cortex{id="529"}` on its own line in a reply; bb shows it as a card that opens task 529.
 Stale means the files the task cites changed after its body was last brought up to date
 ([docs/memory.md](memory.md#when-is-memory-stale)). The plugin checks this only when the thread's checkout is on the
-bb server's machine; otherwise the tab says it was not checked. Changes from any agent, shell or the desktop
-app appear within moments, and after a reconnect every open tab and chip refetches.
+bb server's machine; otherwise the tab says it was not checked. Changes from any agent, shell or the desktop app
+appear within moments, and after a reconnect every open tab and chip refetches.
 
 Trying it live changes your bb: `bb plugin dev integrations/bb` rebuilds and reloads on every save. Check behavior
 from a new, separate thread, because bb applies tools and instructions only when it starts a provider session.
@@ -78,11 +78,9 @@ that row is off screen (the task chip then steps aside), shows memory in pi's fo
 context, yellow for a stale stream, red after a failed memory call, pulsing while the automatic save turn runs.
 Hovering it summarises the thread's memory and Cortex task, with a bar of where the streams in context came from;
 clicking it opens the Memory tab. The tab shows what pi's `/memory` shows: health, the streams the thread works on,
-every stream in context and why, and the session's totals (what the plugin gave and the agent recalled).
-
-The tab's menu sets this thread's memory: follow the setting, Look up and save, Look up only, or Off. A change
-applies when bb next starts the thread's agent session. After a plugin reload the tab waits for the thread's next
-memory event.
+every stream in context and why, and the session's totals (what the plugin gave and the agent recalled). The tab's
+menu sets this thread's memory: follow the setting, Look up and save, Look up only, or Off. A change applies when bb
+next starts the thread's agent session. After a plugin reload the tab waits for the thread's next memory event.
 
 ## Under the hood
 
@@ -120,7 +118,9 @@ the SDK, portaling Radix components) are type-only development dependencies; zod
   writes (`PI_BB_TOOLS_FILE`), as the quests and minions packages do, and the extension registers nothing.
 - `./integrations/bb/turns.ts#registerMemoryTurns` reads each request from bb's events, steers matching tasks in as an
   agent-only message only where the bridge injects a steer (an ACP steer cancels the prompt), and starts pi's checkpoint
-  with mode "start"; it copies `src/extensions/pi.ts#injectMemory` and `src/extensions/pi.ts#checkpointPrompt`.
+  with mode "start"; it copies `src/extensions/pi.ts#injectMemory` and `src/extensions/pi.ts#checkpointPrompt`. A
+  started thread's lookup gets its starter (`./integrations/bb/turns.ts#startedBy`) as `--parent`. Save-turn focus is
+  the streams the thread wrote to, in this process or else read once from `cortex memory streams --author`.
 - The binary embeds `src/skills/` as the plugin's `skills/` (`src/bbPluginSource.ts#embeddedBbPlugin`), and
   `./integrations/bb/server.ts#skillsFor` selects only the skills `./integrations/bb/server.ts#pluginSkillNames`
   found in the install directory, since bb fails a configure that names an unknown skill.
@@ -142,9 +142,9 @@ the SDK, portaling Radix components) are type-only development dependencies; zod
   `./integrations/bb/server.test.ts` (public SDK scan).
 - Every provider gets both tools (only `cortex_update` with memory off) and the instructions, which stay within the
   limit without running the CLI; only Claude Code gets the skills, and nobody while Cortex is unavailable:
-  `./integrations/bb/server.test.ts`. Threads started by another thread look up only by default:
-  `./integrations/bb/memory.test.ts`. Matching tasks come only for a user's cued or first request, and at most one
-  agent-only save turn per request: `./integrations/bb/turns.test.ts`, `./integrations/bb/server.test.ts`.
+  `./integrations/bb/server.test.ts`. Minions look up only by default: `./integrations/bb/memory.test.ts`. Matching
+  tasks need a user's cued or first request with no `[tag]` header (a started thread's go by `--parent`), and a
+  request gets one save turn at most: `./integrations/bb/turns.test.ts`, `./integrations/bb/server.test.ts`.
 - The extension registers nothing in bb's RPC-mode pi when bb bridges `cortex_update`:
   `test/unit/extensions-pi.test.ts`. The icon and the chip follow their settings, the icon never moves a node already
   in the footer, and every opener reuses the one Cortex tab: `./integrations/bb/app.test.tsx` (one Cortex tab).

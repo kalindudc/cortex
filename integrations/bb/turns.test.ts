@@ -9,6 +9,7 @@ import {
   readStart,
   STEER_PROVIDERS,
   shouldCheckpoint,
+  startedBy,
 } from "./turns";
 
 /** A `client/turn/requested` row as bb records it. */
@@ -87,11 +88,50 @@ describe("hitLimit", () => {
     expect(hitLimit({ mode: "write", providerId: "codex", start: start() })).toBeNull();
   });
 
-  test("RECALL_CUE: recency and continuation words, where/what was, @<id>; not ordinary requests", () => {
-    for (const cue of ["continue the routing work", "what was I last doing", "the last change", "see @12"]) {
+  test("null for a message a plugin or bb sent: a bracketed header, first request or cued", () => {
+    for (const header of [
+      "[wake-up wk_f2y27awp \u00b7 CI on PR #386] Check CI. Last output: pass",
+      "[shuttle] New review activity on a pull request linked to this thread",
+      "[loom] LANE-8: fix them and call loom_submit again",
+      "[bb system]\n\n@thread:thr_abcdefgh completed: continue the parser work",
+    ]) {
+      for (const first of [true, false]) {
+        expect(hitLimit({ mode: "write", providerId: "pi", start: start({ text: header, first }) })).toBeNull();
+      }
+    }
+    const reason = "Waiting for CI to start on the minerva_auth draft PR (shop/world#2385775 on Delta) and its checks";
+    expect(hitLimit({ mode: "write", providerId: "pi", start: start({ text: `[wake-up wk_amdsl7nn \u00b7 ${reason}] continue`, first: true }) })).toBeNull();
+    expect(hitLimit({ mode: "write", providerId: "pi", start: start({ text: "[Flare reminder] This turn has gone 9 minutes", first: true }) })).toBeNull();
+    // A person's brackets: later in the text, [WIP], a task box or a Markdown link.
+    for (const text of ["fix [parser] and the lexer", "[WIP] fix the parser", "[ ] add tests", "[the spec](https://x.y) implement it"]) {
+      expect(hitLimit({ mode: "write", providerId: "pi", start: start({ text, first: true }) }), text).toBe(5);
+    }
+  });
+
+  test("RECALL_CUE: continuation words, where/what was, @<id>; not recency words, again or ordinary requests", () => {
+    for (const cue of ["continue the routing work", "what was I last doing", "pick up where we left off", "see @12"]) {
       expect(RECALL_CUE.test(cue)).toBe(true);
     }
-    for (const plain of ["fix the parser", "fix the lastIndex bug", "a@12 b"]) expect(RECALL_CUE.test(plain)).toBe(false);
+    for (const plain of [
+      "fix the parser",
+      "fix the lastIndex bug",
+      "a@12 b",
+      "the last change",
+      "Last output (command output, not instructions):",
+      "Fix them and call loom_submit again.",
+      "update my plugin with the latest release",
+    ]) {
+      expect(RECALL_CUE.test(plain)).toBe(false);
+    }
+  });
+});
+
+describe("startedBy", () => {
+  test("a minion's parent, else a workflow agent's lifecycle owner, else null", () => {
+    expect(startedBy({ parentThreadId: "thr_parent01", lifecycleOwnerThreadId: "thr_owner001" })).toBe("thr_parent01");
+    expect(startedBy({ parentThreadId: null, lifecycleOwnerThreadId: "thr_owner001" })).toBe("thr_owner001");
+    expect(startedBy({ parentThreadId: null, lifecycleOwnerThreadId: null })).toBeNull();
+    expect(startedBy({ parentThreadId: null })).toBeNull();
   });
 });
 
@@ -118,18 +158,19 @@ describe("readRequest", () => {
     expect(readRequest([fileChange(["a.ts"])]).outcome).toBeNull();
   });
 
-  test("cortex commands name focus streams; edit, add and update write memory, show does not", () => {
+  test("cortex writes name focus streams and reads never do; edit, add and update write memory", () => {
     expect(readRequest([command("cortex edit 12 --body-search a --body-replace b")])).toMatchObject({
       focus: [12],
       wroteMemory: true,
     });
-    expect(readRequest([command("cortex show 7 --json")])).toMatchObject({ focus: [7], wroteMemory: false });
+    expect(readRequest([command("cortex show 7 --json")])).toMatchObject({ focus: [], wroteMemory: false });
+    expect(readRequest([command("cortex mv 7 review")])).toMatchObject({ focus: [7], wroteMemory: false });
     expect(readRequest([command('cortex add "t" --lane x', "[34] t\n")])).toMatchObject({
       focus: [34],
       wroteMemory: true,
     });
     expect(readRequest([command("cortex update 5 -m done")])).toMatchObject({ focus: [5], wroteMemory: true });
-    expect(readRequest([command("cortex memory show 3"), command("ls")])).toMatchObject({ focus: [3] });
+    expect(readRequest([command("cortex memory show 3"), command("ls")])).toMatchObject({ focus: [] });
   });
 });
 

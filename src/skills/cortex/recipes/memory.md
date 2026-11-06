@@ -62,12 +62,14 @@ Verified: 2026-09-30
 
 Memory is a hint; the code and the user are the truth.
 
-Known limit: automatic hits are lexical, so a conversational prompt can
-surface weak matches. Each hit shows the words it matched (`k/n: ...`);
+Hits marked `linked:` come from an identifier in the ask: a task it
+names, a thread it mentions, its ticket key, or (in bb) the thread that
+started yours. Keyword hits are lexical, so a conversational prompt can
+surface weak matches. Each shows the words it matched (`k/n: ...`);
 skip a hit whose matched words are incidental to the ask. After a
 session's first prompt, pi (and the Cortex bb plugin) searches only when
-the prompt asks for earlier work (a recall cue: "continue", "last",
-"what was", an `@<id>`, ...). Recency words ("last", "latest",
+the prompt asks for earlier work (a recall cue: "continue", "what was",
+"left off", an `@<id>`, ...). Recency words ("last", "latest",
 "current", ...) sort equally matching streams newest activity first;
 status changes are not activity.
 

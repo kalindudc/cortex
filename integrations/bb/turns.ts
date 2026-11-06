@@ -21,22 +21,35 @@ export const TURN_LIMITS = {
 export const STEER_PROVIDERS: ReadonlySet<string> = new Set(["pi", "claude-code", "codex"]);
 
 /**
- * A later request that asks for earlier or current work: recency words,
- * continue/resume/pick up/left off/remember/previous/earlier/again,
- * "where/what was|were|did|is", or an `@<id>` reference.
+ * A later request that asks for earlier work: continue/resume/pick up/left
+ * off/remember/previous/earlier, "where/what was|were|did|is", or an `@<id>`
+ * reference. Recency words and "again" are left out: boilerplate carries them
+ * ("Last output" in a wake-up, "call loom_submit again"), and they started
+ * most later lookups that no agent used.
  */
 export const RECALL_CUE =
-  /\b(last|latest|recent(ly)?|current(ly)?|lately|newest|yesterday|today|continu(e|ing)|resum(e|ing)|pick(ed)? up|left off|remember|previous(ly)?|earlier|again)\b|\b(where|what)\s+(was|were|did|is)\b|(?<![\w@])@\d+\b/i;
+  /\b(continu(e|ing)|resum(e|ing)|pick(ed)? up|left off|remember|previous(ly)?|earlier)\b|\b(where|what)\s+(was|were|did|is)\b|(?<![\w@])@\d+\b/i;
 /** How matching tasks tell the agent to load one. */
 const LOAD_HINT = 'cortex_recall "@<id>"';
-/** Commands that name a stream the thread works on (`cortex add` ids come from its output). */
-const FOCUS_COMMAND = /\bcortex\s+(?:edit|update|mv|show|memory\s+show)\s+(\d+)\b/g;
+/**
+ * A message a plugin sent rather than a person typed (bb records both with initiator "user"): it opens with a
+ * bracketed tag word, then optional detail, such as `[loom]`, `[shuttle]`, `[Flare reminder]` or `[wake-up wk_\u2026 \u00b7
+ * <reason>]`, whose reason can run to 200 characters. Never a person's `[WIP]` (one capitals word), a task box
+ * `[ ]` or `[x]`, or a Markdown link `[the spec](\u2026)`.
+ */
+const PLUGIN_HEADER = /^\[(?![A-Z0-9]+\])[A-Za-z][A-Za-z0-9-]+(?:[ :\u00b7][^\]\n]{0,300})?\](?!\()/;
+/** Commands that write to a stream the thread works on (`cortex add` ids come from its output); reads never count. */
+const FOCUS_COMMAND = /\bcortex\s+(?:edit|update|mv)\s+(\d+)\b/g;
 /** Commands that count as writing memory (the cortex_update tool counts too). */
 const MEMORY_WRITE = /\bcortex\s+(?:edit|add|update)\b/;
 
 export type EventRow = { seq: number; type: string; createdAt: number; data: unknown };
 /** A request as bb recorded it: its row, the user's text and who sent it. */
 export type RequestStart = { seq: number; createdAt: number; text: string; initiator: string; first: boolean };
+/** The thread that started this one: a minion's parent, or the owner of a workflow agent; null for a thread a person started. */
+export function startedBy(thread: { parentThreadId: string | null; lifecycleOwnerThreadId?: string | null }) {
+  return thread.parentThreadId ?? thread.lifecycleOwnerThreadId ?? null;
+}
 export type RequestFacts = {
   outcome: "completed" | "failed" | "interrupted" | null;
   edited: string[];
@@ -92,12 +105,13 @@ export function readStart(row: EventRow): RequestStart | null {
 }
 
 /**
- * How many matching tasks a request brings: a person's first request, or one with a recall cue, with at least two
- * content words, in a thread that looks up and whose provider takes a steer mid-turn. Null brings none.
+ * How many matching tasks a request brings: a first request, or one with a recall cue, with at least two content
+ * words and no plugin header, in a thread that looks up and whose provider takes a steer mid-turn. Null brings none.
  */
 export function hitLimit(s: { mode: MemoryMode; providerId: string; start: RequestStart }): number | null {
   const { mode, providerId, start } = s;
   if (mode === "off" || !STEER_PROVIDERS.has(providerId) || start.initiator !== "user") return null;
+  if (PLUGIN_HEADER.test(start.text)) return null;
   if (contentWords(start.text) < 2 || !(start.first || RECALL_CUE.test(start.text))) return null;
   return mode === "write" && start.first ? TURN_LIMITS.firstHits : TURN_LIMITS.laterHits;
 }
@@ -214,9 +228,14 @@ type ThreadTurn = {
   marked: boolean;
   /** An idle evaluation is running. */
   busy: boolean;
+  /** Cortex was asked which streams the thread posted to; later writes reach the tracker directly. */
+  consulted: boolean;
 };
 
 const contextSchema = z.object({ hits: z.array(z.object({ id: z.number().int().positive() })), hitsText: z.string() });
+const streamsSchema = z.array(z.object({ id: z.number().int().positive() }));
+
+type TurnThread = { id: string; parentThreadId: string | null; lifecycleOwnerThreadId?: string | null };
 
 const message = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
@@ -235,7 +254,7 @@ export function registerMemoryTurns(
     state: CortexState;
     tracker: MemoryTracker;
     publish: (channel: CortexRealtimeChannel, payload: unknown) => void;
-    modeOf(thread: { id: string; parentThreadId: string | null }): Promise<MemoryMode>;
+    modeOf(thread: TurnThread): Promise<MemoryMode>;
   },
 ): MemoryTurns {
   const { runner, state, tracker } = deps;
@@ -243,7 +262,7 @@ export function registerMemoryTurns(
   const turnOf = (threadId: string): ThreadTurn => {
     let entry = threads.get(threadId);
     if (!entry) {
-      entry = { start: null, wroteAt: 0, marked: false, busy: false };
+      entry = { start: null, wroteAt: 0, marked: false, busy: false, consulted: false };
       threads.set(threadId, entry);
     }
     return entry;
@@ -258,8 +277,12 @@ export function registerMemoryTurns(
     changed(threadId);
   }
 
-  /** Looks up the tasks matching a request and steers them into its turn, unless the request is over by then. */
-  async function matchTasks(threadId: string, start: RequestStart, limit: number): Promise<void> {
+  /**
+   * Looks up the tasks matching a request and steers them into its turn, unless the request is over by then. A
+   * thread started by another gets only the tasks its request links to and the starting thread's own, never keyword
+   * hits: its brief already carries the context.
+   */
+  async function matchTasks(threadId: string, start: RequestStart, limit: number, parent: string | null): Promise<void> {
     const { cwd } = await state.locate(threadId);
     // As in pi, a stream the memory summary lists can still match: the hit says it fits this request.
     const seen =
@@ -277,6 +300,7 @@ export function registerMemoryTurns(
       `--load-hint=${LOAD_HINT}`,
       `--query=${start.text}`,
     ];
+    if (parent !== null) args.push(`--parent=bb-${parent}`);
     if (seen.length > 0) args.push(`--exclude=${seen.join(",")}`);
     const started = Date.now();
     let out: z.infer<typeof contextSchema>;
@@ -326,12 +350,34 @@ export function registerMemoryTurns(
     return rows;
   }
 
+  /**
+   * The thread's focus streams, most recent first: the ones it wrote to in this process, or else, asked once per
+   * process, the ones cortex records it posting to, which survive a restart of bb or the plugin. Null when cortex
+   * could not say: a save turn then would invite a duplicate stream.
+   */
+  async function focusOf(threadId: string, entry: ThreadTurn): Promise<number[] | null> {
+    const known = tracker.get(threadId)?.view.focus ?? [];
+    if (known.length > 0 || entry.consulted) return known;
+    let written: number[];
+    try {
+      const args = ["memory", "streams", `--author=bb-${threadId}`, `--limit=${TURN_LIMITS.candidates}`, "--json"];
+      written = (await runner.run(args, streamsSchema)).map(row => row.id);
+    } catch (err) {
+      tracker.failed(threadId, message(err));
+      changed(threadId);
+      return null;
+    }
+    entry.consulted = true;
+    if (written.length > 0) {
+      // Oldest first, so the newest leads, as `focused` expects.
+      tracker.focused(threadId, [...written].reverse());
+      changed(threadId);
+    }
+    return written;
+  }
+
   /** Decides whether the request that just ended earns the save turn, and starts it. */
-  async function checkpoint(
-    thread: { id: string; parentThreadId: string | null },
-    entry: ThreadTurn,
-    start: RequestStart,
-  ): Promise<void> {
+  async function checkpoint(thread: TurnThread, entry: ThreadTurn, start: RequestStart): Promise<void> {
     const threadId = thread.id;
     const mode = await deps.modeOf(thread);
     if (mode !== "write" || (await bb.sdk.threads.queuedMessages.list({ threadId })).length > 0) return;
@@ -340,11 +386,17 @@ export function registerMemoryTurns(
       tracker.focused(threadId, facts.focus);
       changed(threadId);
     }
-    const focus = tracker.get(threadId)?.view.focus ?? [];
+    const wroteMemory = facts.wroteMemory || entry.wroteAt >= start.createdAt;
+    // Only a request that changed files and saved nothing can earn the turn, so only it reads focus from cortex.
+    const focus =
+      facts.edited.length > 0 && !wroteMemory && facts.outcome === "completed"
+        ? await focusOf(threadId, entry)
+        : (tracker.get(threadId)?.view.focus ?? []);
+    if (focus === null) return;
     const kind = shouldCheckpoint({
       mode,
       outcome: facts.outcome,
-      wroteMemory: facts.wroteMemory || entry.wroteAt >= start.createdAt,
+      wroteMemory,
       edited: facts.edited.length,
       focus: focus.length,
     });
@@ -358,15 +410,20 @@ export function registerMemoryTurns(
           "context",
           "--json",
           "--no-primer",
+          `--author=bb-${threadId}`,
           `--query=${start.text}`,
           `--limit=${TURN_LIMITS.candidates}`,
         ];
+        const parent = startedBy(thread);
+        if (parent !== null) args.push(`--parent=bb-${parent}`);
         candidates = (await runner.run(args, contextSchema, { cwd: cwd ?? undefined })).hitsText;
       } catch (err) {
         // No candidates: the checkpoint still offers CREATE and NOTHING.
         tracker.failed(threadId, message(err));
       }
     }
+    // A newer request began while this one was evaluated: its own idle decides, and this save turn is stale.
+    if (entry.start !== null) return;
     const prompt = checkpointPrompt({ kind, edited: facts.edited, focus, candidates, author: `bb-${threadId}` });
     tracker.checkpointing(threadId);
     changed(threadId);
@@ -396,7 +453,7 @@ export function registerMemoryTurns(
       if (start === null || entry.marked) return;
       entry.start = start;
       const limit = hitLimit({ mode: await deps.modeOf(thread), providerId: thread.providerId, start });
-      if (limit !== null) await matchTasks(thread.id, start, limit);
+      if (limit !== null) await matchTasks(thread.id, start, limit, startedBy(thread));
     } catch (err) {
       bb.log.warn(`reading the request of ${thread.id} failed: ${message(err)}`);
     }
@@ -417,7 +474,19 @@ export function registerMemoryTurns(
       if (start === null) return;
       entry.busy = true;
       try {
-        await checkpoint(thread, entry, start);
+        let next: RequestStart | null = start;
+        while (next !== null) {
+          await checkpoint(thread, entry, next);
+          // A request that began and ended during that evaluation had its own idle skipped: evaluate it now.
+          next = null;
+          if (entry.start !== null && !entry.marked) {
+            const live = await bb.sdk.threads.get({ threadId: thread.id });
+            if (live.status === "idle" && entry.start !== null && !entry.marked) {
+              next = entry.start;
+              entry.start = null;
+            }
+          }
+        }
       } finally {
         entry.busy = false;
       }

@@ -6,8 +6,7 @@ sources: [src/memory.ts, src/store.ts, src/commands/memory.ts, src/server.ts, sr
 # Agent memory
 
 Coding agents forget everything when a session ends. Cortex lets them pick up where they left off by reading and
-writing ordinary cortex tasks. This page explains what that looks like for you and your agents, then how it is
-built and which rules keep it cheap and trustworthy.
+writing ordinary cortex tasks. This page covers what you and your agents see, then how it is built and why.
 
 ## The idea: tasks double as memory
 
@@ -53,13 +52,15 @@ With pi (the coding agent cortex ships an extension for), memory arrives on its 
 In bb the Cortex plugin gives every provider the primer and `cortex_recall`; pi, Claude Code and Codex get hits too.
 Elsewhere without pi, an agent runs `cortex memory context --query="<the ask>"` once, then `cortex memory show <id>`.
 
-Search matches words and their forms, and each hit shows which words matched. Full paths, links, commit hashes, UUIDs,
-pasted code blocks and small talk in the ask are ignored, so they never pull in unrelated streams; a repo-relative
-file like `src/server.ts` still counts. It covers every project, the current one first, because work spans repos. A
-long body opens with its priority sections (Next, open questions, Decisions, State) and lists the rest. An older
-stream names the newer one continuing it as its "latest linked". `cortex memory exclude <id>`, the desktop app's "Keep
-out of agent memory" command or bb's More menu keep a task out of all of this; reading it by id still works, and a
-running pi session keeps its primer until compaction or `/memory refresh`.
+Streams the ask points at come first, marked linked: a task it names (`@42`, `cortex show 42`, "task 42"), what a bb
+thread it mentions worked on, or a stream naming its ticket key (`LANE-8`). Keyword hits follow, each showing which
+words (or their forms) matched. Paths, links, commit hashes, other ids, pasted code (even its `@id`s) and small talk
+never pull in streams; a repo-relative file like `src/server.ts` still counts. Search covers every project, this one
+first. The session's own streams come back only when the ask names them, and finished digests (a past journal) or
+streams long out of sync rank last. A long body opens with Next, open questions, Decisions and State, and lists the
+rest; an older stream names the newer one continuing it as its "latest linked". `cortex memory exclude <id>`, the
+desktop app's "Keep out of agent memory" command or bb's More menu keep a task out of all of this; reading it by id
+still works, and a running pi session keeps its primer until compaction or `/memory refresh`.
 
 ## When is memory stale?
 
@@ -80,7 +81,6 @@ running (a spinner). `/memory` opens a panel: health, the streams this session i
 context and why (session summary, matched your prompt, recalled by the agent) and the session's totals. It ends
 with a legend of the symbols; `r` re-reads memory on the next prompt. In bb the extension steps aside and the Cortex
 plugin's icon and Memory tab show the same states ([docs/bb.md](bb.md#memory-in-the-prompt-box-and-the-memory-tab)).
-
 Only the session you type into writes memory; headless ones (delegated agents, `pi -p` scripts) only read.
 `CORTEX_MEMORY=write|read|off` overrides that for the whole process.
 
@@ -91,8 +91,7 @@ Only the session you type into writes memory; headless ones (delegated agents, `
 - `cortex_recall` has a small per-request budget and answers a repeated query without searching again.
 - At most one extra "memory checkpoint" turn per request, only when the agent changed files and saved nothing.
 - Lookups grow with the number of streams, not with their updates: each task's updates are read through an index.
-- Nothing leaves your machine through cortex: search runs on the local database, and results go only into your
-  agent's context, next to your prompt.
+- Nothing leaves your machine through cortex: search runs on the local database, and hits go only to your agent.
 
 ## Under the hood
 
@@ -118,40 +117,40 @@ FTS5 is SQLite's full-text search engine. Its tables (`_memory_sections`, `_memo
 ### Lanes and ranking
 
 `src/memory.ts#memoryLane` names the repo from git's common dir in one spawn (`src/memory.ts#repoInfo`), else the
-directory. The search route in `src/server.ts` tokenizes with `src/memory.ts#memoryTerms`. It first blanks text
-that names no topic (`src/memory.ts#queryText` applying `src/memory.ts#QUERY_NOISE`): fenced code, URLs, emails,
-UUIDs, and `~/`, `./`, `../` or absolute paths of two or more segments. A pasted checkout path would otherwise spend
-the term budget on `users`, `src`, `github`. It then drops short tokens, digits, hex ids
-(`src/memory.ts#isTermToken`) and `src/memory.ts#STOPWORDS`: function words, agent and conversational filler,
-which would surface every stream, but never a word naming a cortex topic or command, nor a
-`src/memory.ts#RECENCY_WORDS` member. `src/memory.ts#recencyIntent` makes recency words a newest-activity
-tie-break only (a global blend was measured to cut precision); `src/memory.ts#memoryPhrases` searches compounds
-like `routing-events` as phrases, from the same blanked text. Every surface (`cortex memory search`,
-`cortex memory context`, pi's automatic hits, `cortex_recall`) gets these terms. Why not drop every path and
-inline code? Streams cite repo-relative files (`src/server.ts`) and identifiers, and recall by them works. Why
-not stopword `update` or `repo`? They name cortex topics. Why not clean the query in the pi extension or the
-route? A copy in the extension drifts, and a future caller of the helpers would get raw text.
+directory. The search route in `src/server.ts` first links: `src/memory.ts#memoryRefs` reads named task ids, bb thread
+ids and ticket keys from the raw text outside fenced code, and `src/store.ts#memoryLinked` resolves them exactly (a
+thread as its `bb-<thread>` author, a ticket as a phrase) plus the `related` author (the bb plugin's starting thread).
+They lead the hits, at most `MEMORY_LIMITS.linked`, inside the same budget. Why not as terms? An id matches no word.
+Terms come from `src/memory.ts#memoryTerms`, which blanks text naming no topic (`src/memory.ts#QUERY_NOISE`: fenced
+code, URLs, emails, UUIDs, bb mentions and ids, and `~/`, `./`, `../` or absolute paths of two or more segments), then
+drops short tokens, digits, hex and generated ids (`src/memory.ts#isTermToken`) and `src/memory.ts#STOPWORDS`:
+function words and filler, never a cortex topic or command, nor a `src/memory.ts#RECENCY_WORDS` member, which
+`src/memory.ts#recencyIntent` turns into a newest-activity tie-break (a global blend cut precision).
+`src/memory.ts#memoryPhrases` searches compounds like `routing-events` as phrases. Every surface gets these terms. Why
+not drop every path and inline code? Streams cite repo-relative files and identifiers, and recall by them works. Why
+not stopword `update`? It names a cortex topic. Why not clean the query in the pi extension? A copy there drifts.
 `src/store.ts#searchMemory` searches every lane and keeps a section only when it covers `MEMORY_LIMITS.minMatched`
-stem groups (fewer for shorter queries), title and tags counting everywhere: a wrong memory is worse than none.
-Order: phrase match, coverage, the tie-break, BM25 (title over tags over text) times the lane boost, then id.
-Activity (`src/store.ts#ACTIVITY_SQL`) ignores status flips and lane or tag moves. `src/store.ts#latestLinked`
-follows `@id` links to later streams in the same lane, bounded, to a handover chain's head; it and the stream lists
-skip excluded tasks through `src/store.ts#MEMORY_EXCLUDED_SQL`.
+stem groups (fewer for shorter queries), title and tags counting everywhere: a wrong memory is worse than none. Order:
+phrase match; not dormant (a done stream that is a digest with `MEMORY_LIMITS.digestLinks` links or unsynced past
+`MEMORY_LIMITS.oldDays`: ranked last, never dropped, as a journal may be the only record); coverage; the tie-break;
+BM25 (title over tags over text) times the lane boost; id. Why not weight terms by rarity? Replayed on real lookups,
+it lost half the hits agents opened. `cortex memory context` leaves its `--author`'s own streams out unless named, and
+`--parent` links the starting thread's streams with no keyword hits. Activity (`src/store.ts#ACTIVITY_SQL`) ignores
+status flips and lane or tag moves. `src/store.ts#latestLinked` follows `@id` links to later streams in the same lane,
+bounded, to a chain's head; it, the stream lists and linked streams skip excluded tasks (`MEMORY_EXCLUDED_SQL`).
 
 ### Staleness and breadcrumbs
 
 `_body_edits` (private, created in `migrate()`) records when each body last changed and the highest update id then
-(the breadcrumb watermark). Only `src/store.ts#recordBodySync` writes it, on creation and real body changes;
-`src/store.ts#forgetBodySync` clears it on restore, which can reuse an id.
-
-Checks run in the CLI only, since the daemon's working directory is not your repo, and git runs only outside
-`src/daemon.ts#withClient`, never while the database lease (its one-owner lock) is held. `src/memory.ts#citedPaths`
-reads paths only under `## Files` or `### Beginning context`, or prose like `Store.open` would count as missing.
-`src/memory.ts#checkStaleness` resolves them against the work-tree root and compares file times with the sync. Why
-not `git log --since`? Committer dates miss pulled commits made before the sync. `src/memory.ts#breadcrumbs` go by
-update id, never time. `src/memory.ts#renderStream` opens with `src/memory.ts#MEMORY_PREAMBLE` (stored text is
-data, not instructions). `src/commands/memory.ts` makes one `withClient` call per command; nested subcommands skip
-the argv pre-normalizer, so harnesses pass `--flag=value`.
+(the breadcrumb watermark); only `src/store.ts#recordBodySync` writes it, and `src/store.ts#forgetBodySync` clears
+it on restore, which can reuse an id. Checks run in the CLI only, since the daemon's working directory is not your
+repo, and git never runs while `src/daemon.ts#withClient` holds the database lease (its one-owner lock).
+`src/memory.ts#citedPaths` reads paths only under `## Files` or `### Beginning context`, or prose like `Store.open`
+would count as missing. `src/memory.ts#checkStaleness` resolves them against the work-tree root and compares file
+times with the sync. Why not `git log --since`? Committer dates miss pulled commits made before the sync.
+`src/memory.ts#breadcrumbs` go by update id, never time. `src/memory.ts#renderStream` opens with
+`src/memory.ts#MEMORY_PREAMBLE` (stored text is data, not instructions). `src/commands/memory.ts` makes one
+`withClient` call per command; nested subcommands skip the argv pre-normalizer, so harnesses pass `--flag=value`.
 
 ### The pi extension
 
@@ -170,13 +169,14 @@ pure functions of state and theme in `src/extensions/memory-view.ts`, installed 
 - `src/extensions/pi.ts#shouldCheckpoint` (writer only) grants one hidden turn to a completed request that edited
   files and wrote no memory. Compaction posts pi's own summary, with no extra model call, as an update on the newest
   `src/extensions/pi.ts#BREADCRUMB_STREAMS` focus streams. Neither edits a body: that stays the agent's to curate.
+  Focus streams are those the session wrote to (`src/extensions/pi.ts#focusFromBash`, `cortex_update`), never read.
 
 ## Rules to keep
 
-- Memory reads hide a task in `memory_exclusions` unless the caller passes `withExcluded` (the user's own views); a
-  load by id never filters: `test/unit/server.test.ts` (every memory route), `test/unit/store-memory.test.ts`.
-- Only `src/memory.ts#memoryTerms` output reaches an FTS5 MATCH, each term quoted by `src/store.ts#quoteTerm`;
-  never raw text: `test/unit/server.test.ts`, `test/integration/cli/memory.test.ts` (punctuation queries).
+- Memory reads, linked streams included, hide a task in `memory_exclusions` unless the caller passes `withExcluded`
+  (the user's own views); a load by id never filters: `test/unit/server.test.ts`, `test/unit/store-memory.test.ts`.
+- Only `src/memory.ts#memoryTerms` output and `src/memory.ts#memoryRefs` ticket keys reach an FTS5 MATCH, quoted by
+  `src/store.ts#quoteTerm`; never raw text: `test/unit/server.test.ts`, `test/integration/cli/memory.test.ts`.
 - Query noise (absolute and home paths, URLs, emails, ids, fenced code) and filler never become terms;
   repo-relative paths, inline code, `@id` and `#tag` still do; no cortex topic or recency word is a stopword:
   `test/unit/memory.test.ts` (query noise), `test/unit/memory-eval.test.ts` (the prompt-noise cases).
@@ -187,8 +187,9 @@ pure functions of state and theme in `src/extensions/memory-view.ts`, installed 
 - Staleness runs in the CLI, never the daemon, and git never inside `withClient`: `src/commands/memory.ts`,
   exercised on a real checkout by `test/integration/cli/memory.test.ts`.
 - The lane boosts, never filters by default: `test/unit/store-memory.test.ts`, `test/unit/memory-eval.test.ts`.
-- Automation never edits a stream body, and a `review` stream's body changes only with the user's say-so:
-  `test/unit/extensions-pi.test.ts` (breadcrumbs, checkpoint prompt), `src/skills/cortex/recipes/memory.md`.
+- Automation never edits a stream body, reading a stream never makes it focus, and a `review` stream's body changes
+  only with the user's say-so: `test/unit/extensions-pi.test.ts` (focus, breadcrumbs, checkpoint prompt),
+  `integrations/bb/turns.test.ts`, `src/skills/cortex/recipes/memory.md`.
 - Bounded spawns (one lookup per prompt, one checkpoint turn per request, one `cortex ls --json` per `/memory`), a
   byte-identical primer, and tool failures that throw: `test/unit/extensions-pi.test.ts`.
 - The footer and `/memory` render only through `src/extensions/memory-view.ts`, stored text passing

@@ -218,8 +218,8 @@ export function createMemoryTracker(recallBudget: number, now: () => number = Da
         const byId = BY_ID.exec(query.trim());
         if (byId) {
           const id = Number(byId[1]);
+          // Reading a stream is not working on it: focus comes only from writes.
           enter(view, id, "recall");
-          addFocus(view, id);
           const staleness = STALENESS_LINE.exec(text);
           if (staleness?.[1] === "stale") view.stale = { id, detail: staleDetail(staleness[0]).slice(0, LIMITS.text) };
           else if (staleness && view.stale?.id === id) view.stale = null;

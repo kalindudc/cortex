@@ -41,7 +41,7 @@
  *     timeout; a failure never blocks or throws). After the session's first
  *     prompt (which fetches the primer) it costs ZERO when the prompt has
  *     fewer than 2 content words or no recall cue (RECALL_CUE: "continue",
- *     "last", "what was", an `@<id>`, ...), and later spawns pass
+ *     "what was", "left off", an `@<id>`, ...), and later spawns pass
  *     `--no-primer`. Keyword recall cannot tell an action request from a
  *     lookup; the cue bounds the noise and `cortex_recall` covers the rest.
  *   - The system-prompt memory block is byte-identical for the whole session
@@ -121,8 +121,8 @@ const BODY_EDIT = /\bcortex\s+edit\s+(\d+)\b/g;
 const STALENESS_LINE = /^staleness: (\w+).*$/m;
 /** A `memory search` result row (src/memory.ts streamLine). */
 const SEARCH_ROW = /^- \[(\d+)\]/gm;
-/** Commands that name a stream the session works on (`cortex add` ids come from its output). */
-const FOCUS_COMMAND = /\bcortex\s+(?:edit|update|mv|show|memory\s+show)\s+(\d+)\b/g;
+/** Commands that write to a stream the session works on (`cortex add` ids come from its output); reads never count. */
+const FOCUS_COMMAND = /\bcortex\s+(?:edit|update|mv)\s+(\d+)\b/g;
 /** Bash commands that count as writing memory (the cortex_update tool counts too). */
 const MEMORY_WRITE = /\bcortex\s+(?:edit|add)\b/;
 const CHECKPOINT_MIN_FILES = 3;
@@ -131,12 +131,14 @@ const CHECKPOINT_FILES_SHOWN = 10;
 const BREADCRUMB_STREAMS = 2;
 const BREADCRUMB_CHARS = 4000;
 /**
- * A later prompt that asks for earlier or current work: recency words,
- * continue/resume/pick up/left off/remember/previous/earlier/again,
- * "where/what was|were|did|is", or an `@<id>` reference.
+ * A later prompt that asks for earlier work: continue/resume/pick up/left
+ * off/remember/previous/earlier, "where/what was|were|did|is", or an `@<id>`
+ * reference. Recency words and "again" are left out: boilerplate carries them
+ * ("Last output" in a wake-up, "call loom_submit again"), and they started
+ * most later lookups that no agent used.
  */
 export const RECALL_CUE =
-  /\b(last|latest|recent(ly)?|current(ly)?|lately|newest|yesterday|today|continu(e|ing)|resum(e|ing)|pick(ed)? up|left off|remember|previous(ly)?|earlier|again)\b|\b(where|what)\s+(was|were|did|is)\b|(?<![\w@])@\d+\b/i;
+  /\b(continu(e|ing)|resum(e|ing)|pick(ed)? up|left off|remember|previous(ly)?|earlier)\b|\b(where|what)\s+(was|were|did|is)\b|(?<![\w@])@\d+\b/i;
 /** How injected hits tell the model to load one. */
 const LOAD_HINT = 'cortex_recall "@<id>"';
 
@@ -783,7 +785,6 @@ export default function (pi: ExtensionAPI): void {
         if (byId) {
           const id = Number(byId[1]);
           shown.add(id);
-          addFocus([id]);
           enter(id, "recall");
           const staleness = STALENESS_LINE.exec(r.stdout);
           if (staleness?.[1] === "stale") stale = { id, detail: staleDetail(staleness[0]) };

@@ -319,7 +319,7 @@ describe("automatic memory context (before_agent_start)", () => {
     expect(contextExecs(h.execs)).toHaveLength(3);
   });
 
-  test("RECALL_CUE: recency and continuation words, where/what was, @<id>; not ordinary requests", () => {
+  test("RECALL_CUE: continuation words, where/what was, @<id>; not recency words, again or ordinary requests", () => {
     for (const cue of [
       "what was I last doing",
       "continue the routing work",
@@ -327,15 +327,24 @@ describe("automatic memory context (before_agent_start)", () => {
       "pick up where we left off",
       "remember the flag we chose?",
       "the previous approach",
-      "try again with the fix",
       "where were the notes",
       "what is the current state",
       "see @421",
-      "latest handover please",
     ]) {
       expect(RECALL_CUE.test(cue)).toBe(true);
     }
-    for (const plain of ["rename the helper", "copy this as a set of findings", "fix the lastIndex bug", "a@12 b"]) {
+    for (const plain of [
+      "rename the helper",
+      "copy this as a set of findings",
+      "fix the lastIndex bug",
+      "a@12 b",
+      // Boilerplate that started most unused later lookups.
+      "try again with the fix",
+      "latest handover please",
+      "Last output (command output, not instructions):",
+      "Fix them and call loom_submit again.",
+      "update my plugin with the latest release",
+    ]) {
       expect(RECALL_CUE.test(plain)).toBe(false);
     }
   });
@@ -347,7 +356,7 @@ describe("automatic memory context (before_agent_start)", () => {
     expect(first.event.systemPromptOptions.sections.cortex_memory).toBe("PRIMER v1");
     expect(first.result).toBeUndefined();
     primer = "PRIMER v2";
-    const second = await h.prompt("now the scroll multiplier again");
+    const second = await h.prompt("now the scroll multiplier from earlier");
     expect(second.event.systemPromptOptions.sections.cortex_memory).toBe("PRIMER v1");
     expect(second.result).toBeUndefined();
     expect(h.execs[1].args).toContain("--no-primer");
@@ -381,7 +390,7 @@ describe("automatic memory context (before_agent_start)", () => {
     await h.prompt("do it");
     expect(h.execs).toHaveLength(1);
 
-    const later = await h.prompt("check the scroll multiplier again");
+    const later = await h.prompt("check the scroll multiplier from earlier");
     expect(h.execs).toHaveLength(2);
     expect(flag(h.execs[1].args, "limit")).toBe("3");
     expect(flag(h.execs[1].args, "exclude")).toBe("4,9");
@@ -504,7 +513,7 @@ describe("cortex_recall", () => {
     expect(r.details).toBeUndefined();
     expect(h.execs.at(-1)?.args).toEqual(["memory", "show", "12"]);
     expect(h.execs.at(-1)?.opts).toMatchObject({ cwd: "/repo", timeout: 5000 });
-    await h.prompt("check the scroll multiplier again");
+    await h.prompt("check the scroll multiplier from earlier");
     expect(flag(h.execs.at(-1)?.args ?? [], "exclude")).toBe("12");
   });
 
@@ -609,7 +618,7 @@ describe("bb thread authors", () => {
     );
     await h.prompt("continue the mouse wheel work");
     const primer = flag(h.execs[0].args, "author");
-    await h.recall("@5");
+    await h.tool("bash", { command: "cortex mv 5 open" });
     await h.tool("edit", { path: "src/tui/mouse.ts" });
     const checkpoint = (await h.settle()).entries[0].content.match(/--as (\S+)/)?.[1];
     await h.compact("progress summary");
@@ -728,11 +737,11 @@ describe("memory roles", () => {
 });
 
 describe("writer tracking (tool_result)", () => {
-  test("focusFromBash: named stream ids, and a `cortex add` id from its text or JSON output", () => {
+  test("focusFromBash: ids a command writes to (never reads), and a `cortex add` id from its text or JSON output", () => {
     expect(focusFromBash("cortex edit 12 --body-search 'a' --body-replace 'b' && cortex update 13 -m hi", "")).toEqual([
       12, 13,
     ]);
-    expect(focusFromBash("cortex mv 4 later; cortex memory show 8; cortex show 9", "")).toEqual([4, 8, 9]);
+    expect(focusFromBash("cortex mv 4 later; cortex memory show 8; cortex show 9", "")).toEqual([4]);
     expect(focusFromBash("cortex ls; cortex search 12", "")).toEqual([]);
     expect(focusFromBash('cortex add "t" --lane x', "[34] t\n")).toEqual([34]);
     expect(focusFromBash('cortex add "t" --json', '{"id":35,"lane":"x"}')).toEqual([35]);
@@ -742,7 +751,7 @@ describe("writer tracking (tool_result)", () => {
   test("edit/write add their paths once; an error result is ignored; a new request resets them", async () => {
     const h = harness();
     await h.prompt("fix the mouse wheel");
-    await h.tool("bash", { command: "cortex show 5" });
+    await h.tool("bash", { command: "cortex mv 5 open" });
     await h.tool("edit", { path: "a.ts" });
     await h.tool("write", { path: "b.ts" });
     await h.tool("write", { path: "a.ts" });
@@ -771,11 +780,15 @@ describe("writer tracking (tool_result)", () => {
     expect(await h.settle()).toBeUndefined();
   });
 
-  test("a read-only cortex command gives focus but writes nothing (the checkpoint fires)", async () => {
-    const h = harness();
+  test("reading a stream gives no focus; a status move gives focus and writes nothing (the checkpoint fires)", async () => {
+    const h = harness(args => (args[1] === "show" ? ok("STREAM 9") : context()));
     await h.prompt("fix the mouse wheel");
     await h.tool("bash", { command: "cortex show 8" });
+    await h.recall("@9");
     await h.tool("edit", { path: "a.ts" });
+    expect(await h.memory()).toContain("Working on\n    none yet\n");
+    expect(await h.settle()).toBeUndefined();
+    await h.tool("bash", { command: "cortex mv 8 open" });
     expect((await h.settle()).continue).toBe(true);
   });
 
@@ -793,9 +806,9 @@ describe("writer tracking (tool_result)", () => {
   test("focus keeps the 5 most recent streams, deduped, across requests; session_start clears it", async () => {
     const h = harness();
     await h.prompt("fix the mouse wheel");
-    for (const id of [1, 2, 3, 4, 5, 6]) await h.tool("bash", { command: `cortex show ${id}` });
+    for (const id of [1, 2, 3, 4, 5, 6]) await h.tool("bash", { command: `cortex mv ${id} open` });
     await h.prompt("now the scroll multiplier");
-    await h.tool("bash", { command: "cortex show 3" });
+    await h.tool("bash", { command: "cortex mv 3 open" });
     expect(await h.memory()).toContain("Working on\n    @3\n    @6\n    @5\n    @4\n    @2\n\n");
     await h.emit("session_start", { type: "session_start", reason: "new" });
     expect(await h.memory()).toContain("Working on\n    none yet\n");
@@ -840,6 +853,7 @@ describe("memory checkpoint (agent_before_settle)", () => {
     const h = harness(args => (args[1] === "show" ? ok("STREAM 5") : context()));
     await h.prompt("continue the mouse wheel work");
     await h.recall("@5");
+    await h.tool("bash", { command: "cortex mv 5 open" });
     await h.tool("edit", { path: "src/tui/mouse.ts" });
     const r = await h.settle();
     expect(r.continue).toBe(true);
@@ -874,7 +888,7 @@ describe("memory checkpoint (agent_before_settle)", () => {
   test("aborted or errored requests never checkpoint", async () => {
     const h = harness(args => (args[1] === "show" ? ok("STREAM 5") : context()));
     await h.prompt("continue the mouse wheel work");
-    await h.recall("@5");
+    await h.tool("bash", { command: "cortex mv 5 open" });
     await h.tool("edit", { path: "a.ts" });
     expect(await h.settle("aborted")).toBeUndefined();
     expect(await h.settle("error")).toBeUndefined();
@@ -929,7 +943,7 @@ describe("compaction breadcrumbs (session_compact)", () => {
   test("the summary goes on the 2 newest focus streams, newest first, truncated to 4000 chars", async () => {
     const h = harness(args => (args[0] === "update" ? ok("\u2713 update posted") : context()));
     await h.prompt("fix the mouse wheel");
-    for (const id of [5, 7, 9]) await h.tool("bash", { command: `cortex show ${id}` });
+    for (const id of [5, 7, 9]) await h.tool("bash", { command: `cortex mv ${id} open` });
     const before = h.execs.length;
     await h.compact(`-${"x".repeat(5000)}`);
     const updates = h.execs.slice(before);
@@ -952,7 +966,7 @@ describe("compaction breadcrumbs (session_compact)", () => {
     const before = h.execs.length;
     await h.compact("progress summary");
     expect(h.execs).toHaveLength(before);
-    await h.tool("bash", { command: "cortex show 5" });
+    await h.tool("bash", { command: "cortex mv 5 open" });
     await h.compact("   ");
     expect(h.execs).toHaveLength(before);
     await h.compact("progress summary");
@@ -998,12 +1012,12 @@ describe("the memory status and /memory (plan @423)", () => {
     await h.recall("wheel notches");
     await h.recall("@4");
     const text = await h.memory();
-    // Rows below "In context" (the recalled @ids are also focus streams under "Working on").
+    // Rows below "In context"; recalls are reads, so nothing is under "Working on".
     const lines = text.slice(text.indexOf("  In context (5)\n")).split("\n");
     const row = (id: number) => lines.find(line => line.startsWith(`    @${id} `)) ?? "";
     const order = lines.filter(line => /^ {4}@\d/.test(line)).map(line => line.trim().split(" ")[0]);
     expect(order).toEqual(["@12", "@11", "@9", "@4", "@3"]);
-    expect(text).toContain("  Working on\n    @4\n    @9\n");
+    expect(text).toContain("  Working on\n    none yet\n");
     expect(row(3)).toContain("session summary");
     expect(row(4)).toContain("matched \u201cfix the mouse wheel\u201d");
     for (const id of [9, 11, 12]) expect(row(id)).toContain("recalled by the agent");
@@ -1066,6 +1080,7 @@ describe("the memory status and /memory (plan @423)", () => {
     const checkpoint = async () => {
       await h.prompt("continue the mouse wheel work");
       await h.recall("@5");
+      await h.tool("bash", { command: "cortex mv 5 open" });
       await h.tool("edit", { path: "a.ts" });
       expect((await h.settle()).continue).toBe(true);
     };
@@ -1097,7 +1112,7 @@ describe("the memory status and /memory (plan @423)", () => {
     await withMemoryEnv("write", async () => {
       const h = harness(args => (args[1] === "show" ? ok("STREAM 5") : context()), { hasUI: false });
       await h.prompt("continue the mouse wheel work");
-      await h.recall("@5");
+      await h.tool("bash", { command: "cortex mv 5 open" });
       await h.tool("edit", { path: "a.ts" });
       expect((await h.settle()).continue).toBe(true);
       expect(intervals).toHaveLength(0);

@@ -30,6 +30,13 @@ const OTHER = "thr_cccccccc";
 const GONE = "thr_ffffffff";
 /** A thread started by THREAD. */
 const CHILD = "thr_qqqqqqqq";
+/** A workflow agent THREAD owns: no parent thread, only a lifecycle owner. */
+const WORKFLOW = "thr_wwwwwwww";
+/** The starter fields bb reports for a test thread. */
+const starter = (threadId: string) => ({
+  parentThreadId: threadId === CHILD ? THREAD : null,
+  lifecycleOwnerThreadId: threadId === CHILD || threadId === WORKFLOW ? THREAD : null,
+});
 const PROJECT = "proj_1";
 /** The skills the plugin's install directory holds in these tests. */
 const SKILLS = ["cortex", "cortex-planner"];
@@ -115,7 +122,7 @@ async function setup(
           projectId: PROJECT,
           title: `Thread ${threadId}`,
           environmentId: threadId === REMOTE ? "env_remote" : "env_local",
-          ...(threadId === CHILD ? { parentThreadId: THREAD } : {}),
+          ...starter(threadId),
           ...live.get(threadId),
         });
       },
@@ -214,7 +221,7 @@ async function setup(
         projectId: PROJECT,
         providerId,
         status: "active",
-        parentThreadId: threadId === CHILD ? THREAD : null,
+        ...starter(threadId),
       }),
     });
   };
@@ -228,7 +235,7 @@ async function setup(
   };
   const idle = (threadId: string) =>
     harness.behavior.emitThreadEvent("thread.idle", {
-      thread: makeThreadResponse({ id: threadId, projectId: PROJECT, parentThreadId: threadId === CHILD ? THREAD : null }),
+      thread: makeThreadResponse({ id: threadId, projectId: PROJECT, ...starter(threadId) }),
       lastAssistantText: null,
     });
   /** Holds every environment lookup until the returned release is called. */
@@ -1040,7 +1047,8 @@ describe("memory", () => {
     let view = (await memory(s, THREAD)).view;
     expect(view.stale).toEqual({ id: 4, detail: "changed: src/a.ts" });
     expect(view.inContext[0]).toEqual({ id: 4, via: "recall" });
-    expect(view.focus).toEqual([4]);
+    // Reading a stream is not working on it.
+    expect(view.focus).toEqual([]);
     expect(view.stats.lookups).toBe(1);
     await expect(call("@77")).rejects.toThrow(/not found/);
     view = (await memory(s, THREAD)).view;
@@ -1049,7 +1057,7 @@ describe("memory", () => {
 
     await s.harness.behavior.callAgentTool("cortex_update", { task_id: 2, message: "x" }, { threadId: THREAD });
     view = (await memory(s, THREAD)).view;
-    expect(view.focus).toEqual([2, 4]);
+    expect(view.focus).toEqual([2]);
     expect(view.error).toBe("");
     await expect(
       s.harness.behavior.callAgentTool("cortex_update", { task_id: 77, message: "x" }, { threadId: THREAD }),
@@ -1077,7 +1085,7 @@ describe("memory", () => {
     expect(memorySignals(s)).toHaveLength(signals + 1);
     const after = await memory(s, THREAD);
     expect(after).toMatchObject({ override: "read", mode: "read" });
-    expect(after.view).toMatchObject({ role: "reader", inContext: [{ id: 1, via: "recall" }], focus: [1] });
+    expect(after.view).toMatchObject({ role: "reader", inContext: [{ id: 1, via: "recall" }], focus: [] });
     await s.resolve("codex", { thread: { id: THREAD }, pluginMetadata: { memoryMode: "read" } });
     expect(memorySignals(s)).toHaveLength(signals + 1);
   });
@@ -1127,10 +1135,16 @@ describe("memory", () => {
 const memoryOf = async (s: Setup, threadId: string) =>
   ((await s.harness.behavior.callRpc("memory", { threadId })) as { view: MemoryView | null }).view;
 const THREE_FILES = [fileChange("src/a.ts", "src/b.ts"), fileChange("src/c.ts"), fileChange("src/a.ts")];
+/** A thread that never posted to a stream, so it has no focus streams to read back. */
+function noStreams(): FakeFixture {
+  const fixture = baseFixture();
+  fixture.streams = {};
+  return fixture;
+}
 
 describe("save turn", () => {
   test("a writer request that changed three files and saved nothing gets ONE agent-only checkpoint turn", async () => {
-    const s = await setup();
+    const s = await setup({ fixture: noStreams() });
     await s.request(THREAD, "rename the helpers");
     await s.finish(THREAD, THREE_FILES);
     expect(s.sent).toEqual([
@@ -1140,7 +1154,17 @@ describe("save turn", () => {
     expect(prompt).toContain("- src/a.ts\n- src/b.ts\n- src/c.ts\n");
     expect(prompt).toContain(`--as bb-${THREAD}`);
     expect(prompt).toContain("Candidate streams (one memory search):\n(none found)");
-    expect(s.argvs()).toContainEqual(["memory", "context", "--json", "--no-primer", "--query=rename the helpers", "--limit=3"]);
+    // No focus in this process, so cortex is asked which streams the thread wrote to before (none here).
+    expect(s.argvs()).toContainEqual(["memory", "streams", `--author=bb-${THREAD}`, "--limit=3", "--json"]);
+    expect(s.argvs()).toContainEqual([
+      "memory",
+      "context",
+      "--json",
+      "--no-primer",
+      `--author=bb-${THREAD}`,
+      "--query=rename the helpers",
+      "--limit=3",
+    ]);
     expect(await memoryOf(s, THREAD)).toMatchObject({ saving: true, stats: { checkpoints: 1 } });
 
     // bb runs the checkpoint turn: its own request brings nothing, and its idle only ends the saving state.
@@ -1219,15 +1243,90 @@ describe("save turn", () => {
     }
   });
 
-  test("focus from an earlier cortex_recall makes one changed file an update naming that stream", async () => {
-    const s = await setup();
+  test("focus from an earlier write makes one changed file an update naming that stream; a recall alone does not", async () => {
+    const s = await setup({ fixture: noStreams() });
     await s.request(THREAD, "rename the helpers");
     await s.harness.behavior.callAgentTool("cortex_recall", { query: "@4" }, { threadId: THREAD });
     await s.finish(THREAD, [fileChange("src/a.ts")]);
+    expect(s.sent).toEqual([]);
+    await s.request(THREAD, "rename the helpers");
+    await s.harness.behavior.callAgentTool("cortex_update", { task_id: 2, message: "x" }, { threadId: THREAD });
+    await s.finish(THREAD, [fileChange("src/a.ts")]);
+    expect(s.sent).toEqual([]);
+    // The write's time must fall before the next request's, as it does outside a test.
+    await new Promise(resolve => setTimeout(resolve, 5));
+    await s.request(THREAD, "now the lexer");
+    await s.finish(THREAD, [fileChange("src/b.ts")]);
     expect(s.sent).toHaveLength(1);
     expect(s.sent[0]?.mode).toBe("start");
-    expect(String(s.sent[0]?.input[0]?.text)).toContain("Focus streams (most recent first): @4");
-    expect(s.argvs().some(argv => argv.includes("--limit=3"))).toBe(false);
+    expect(String(s.sent[0]?.input[0]?.text)).toContain("Focus streams (most recent first): @2");
+    expect(s.argvs().some(argv => argv[1] === "context" && argv.includes("--limit=3"))).toBe(false);
+  });
+
+  test("focus survives a restart: the streams cortex records the thread posting to make an update", async () => {
+    const fixture = baseFixture();
+    const row = (id: number) => ({ id, title: `Task ${id}`, lane: "cortex", status: "open", activity: 1 });
+    fixture.streams = { [`bb-${THREAD}`]: [row(9), row(4)] };
+    const s = await setup({ fixture });
+    await s.request(THREAD, "rename the helpers");
+    await s.finish(THREAD, [fileChange("src/a.ts")]);
+    expect(s.sent).toHaveLength(1);
+    expect(String(s.sent[0]?.input[0]?.text)).toContain("Focus streams (most recent first): @9, @4");
+    expect((await memoryOf(s, THREAD))?.focus).toEqual([9, 4]);
+  });
+
+  test("a workflow agent's attach candidates link its owner's streams with --parent, never keyword hits", async () => {
+    const s = await setup({ fixture: noStreams() });
+    await s.request(WORKFLOW, "rename the helpers");
+    await s.finish(WORKFLOW, THREE_FILES);
+    expect(s.sent).toHaveLength(1);
+    expect(s.argvs()).toContainEqual([
+      "memory",
+      "context",
+      "--json",
+      "--no-primer",
+      `--author=bb-${WORKFLOW}`,
+      "--query=rename the helpers",
+      "--limit=3",
+      `--parent=bb-${THREAD}`,
+    ]);
+  });
+
+  test("when cortex cannot say which streams the thread wrote to, no save turn starts and the error shows", async () => {
+    const fixture = noStreams();
+    fixture.streamsFails = true;
+    const s = await setup({ fixture });
+    await s.request(THREAD, "rename the helpers");
+    await s.finish(THREAD, THREE_FILES);
+    expect(s.sent).toEqual([]);
+    expect((await memoryOf(s, THREAD))?.error).toMatch(/daemon down/);
+  });
+
+  test("cortex is asked once per process which streams a thread wrote to", async () => {
+    const s = await setup({ fixture: noStreams() });
+    for (const text of ["rename the helpers", "now the lexer"]) {
+      await s.request(THREAD, text);
+      await s.finish(THREAD, [fileChange("src/a.ts")]);
+    }
+    const asked = s.argvs().filter(argv => argv[1] === "streams" && argv.includes("--limit=3"));
+    expect(asked).toHaveLength(1);
+  });
+
+  test("a request that starts and ends while the last one is evaluated gets its own save turn, never the stale one", async () => {
+    const s = await setup({ fixture: noStreams() });
+    await s.request(THREAD, "rename the helpers");
+    const release = s.hold();
+    const first = s.finish(THREAD, THREE_FILES);
+    // The first evaluation now waits at the candidates' checkout lookup.
+    await new Promise(resolve => setTimeout(resolve, 20));
+    await s.request(THREAD, "now the lexer");
+    await s.finish(THREAD, [fileChange("src/x.ts", "src/y.ts", "src/z.ts")]);
+    release();
+    await first;
+    expect(s.sent).toHaveLength(1);
+    const prompt = String(s.sent[0]?.input[0]?.text);
+    expect(prompt).toContain("- src/x.ts\n- src/y.ts\n- src/z.ts\n");
+    expect(prompt).not.toContain("src/a.ts");
   });
 
   test("a send that throws crashes nothing, clears saving and logs a warning; the next request can save again", async () => {
@@ -1302,6 +1401,39 @@ describe("matching tasks", () => {
       "--exclude=7",
     ]);
     expect(s.sent.map(send => send.mode)).toEqual(["steer", "steer"]);
+  });
+
+  test("a thread started by another links only what its brief names and the starting thread's streams", async () => {
+    const s = await setup({ fixture: hitsFixture() });
+    await s.request(CHILD, "Implement cortex task 657: the parser fix", { first: true });
+    expect(lookups(s)[0]?.argv).toEqual([
+      "memory",
+      "context",
+      "--json",
+      "--no-primer",
+      `--author=bb-${CHILD}`,
+      "--limit=3",
+      LOAD_HINT,
+      "--query=Implement cortex task 657: the parser fix",
+      `--parent=bb-${THREAD}`,
+    ]);
+    expect(s.sent).toEqual([{ threadId: CHILD, mode: "steer", input: [agentOnlyText("HITS")] }]);
+  });
+
+  test("a workflow agent, which has only a lifecycle owner, links its owner's streams too", async () => {
+    const s = await setup({ fixture: hitsFixture() });
+    await s.request(WORKFLOW, "Run the journal scout for the routing work", { first: true });
+    expect(lookups(s)[0]?.argv.at(-1)).toBe(`--parent=bb-${THREAD}`);
+  });
+
+  test("a message a plugin sent looks nothing up, even with a recall cue or as the first request", async () => {
+    const s = await setup({ fixture: hitsFixture() });
+    await s.request(THREAD, "[loom] You own LANE-8: continue the parser work", { first: true });
+    await s.finish(THREAD);
+    await s.request(THREAD, "[wake-up wk_f2y27awp \u00b7 CI] Check CI, then continue the parser work");
+    await s.finish(THREAD);
+    expect(lookups(s)).toEqual([]);
+    expect(s.sent).toEqual([]);
   });
 
   test("streams the memory summary lists can still match; only matched and recalled ones are excluded", async () => {

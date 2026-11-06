@@ -162,7 +162,18 @@ const context = defineCommand({
       valueHint: "name",
       description: "the primer's lane and the boosted lane for hits (default: this checkout's lane)",
     },
-    author: { type: "string", valueHint: "tag", description: "author tag whose touched streams lead the primer" },
+    author: {
+      type: "string",
+      valueHint: "tag",
+      description:
+        "author tag whose touched streams lead the primer and come back as hits only when the query names them",
+    },
+    parent: {
+      type: "string",
+      valueHint: "tag",
+      description:
+        "with --query, the author tag of the thread that started this one: its streams are linked and keyword hits are left out (its brief carries the context)",
+    },
     query: { type: "string", alias: "q", valueHint: "text", description: "free text to recall hits for" },
     exclude: { type: "string", valueHint: "1,2", description: "task ids already shown to the caller" },
     limit: { type: "string", alias: "n", valueHint: "int", description: `max hits (default ${MEMORY_LIMITS.hits})` },
@@ -185,6 +196,7 @@ const context = defineCommand({
     // git runs before withClient takes the lease.
     const lane = args.lane || memoryLane(process.cwd());
     const author = args.author || undefined;
+    const parent = args.parent?.trim() || undefined;
     const query = (args.query ?? "").trim();
     const loadHint = args["load-hint"]?.trim() || undefined;
     let active: MemoryStreamRow[] = [];
@@ -203,9 +215,17 @@ const context = defineCommand({
             limit: MEMORY_LIMITS.elsewhereStreams + MEMORY_LIMITS.primerStreams,
           });
         }
-        // Every lane, this one boosted: work spans repos.
+        // Every lane, this one boosted: work spans repos. The author's own streams come back only when named.
         if (query) {
-          found = await client.memorySearch({ q: query, boost: lane, limit: limit ?? MEMORY_LIMITS.hits, exclude });
+          found = await client.memorySearch({
+            q: query,
+            boost: lane,
+            limit: limit ?? MEMORY_LIMITS.hits,
+            exclude,
+            self: author,
+            related: parent,
+            linkedOnly: parent !== undefined,
+          });
         }
       });
     } catch (err) {

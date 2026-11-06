@@ -109,10 +109,12 @@ describe("cortex memory (compiled binary)", () => {
     // primerIds: exactly the streams the primer lists, in its order.
     expect(ctx.primerIds).toContain(streamId);
     expect(ctx.primerIds).toEqual([...ctx.primer.matchAll(/^- \[(\d+)\]/gm)].map(m => Number(m[1])));
-    expect(ctx.hitsText).toContain(`[${streamId}]`);
+    // The author's own streams are already its work: never a hit.
+    expect(ctx.hits.map(hit => hit.id)).not.toContain(streamId);
+    expect(ctx.hitsText).toContain("Archived mouse wheel notes");
     expect(ctx.hitsText).toContain("(query: mouse, wheel)");
     expect(ctx.hitsText).toContain("(2/2: mouse, wheel)");
-    const hitsOnly = await json<{ primer: string; primerIds: number[]; hits: unknown[] }>([
+    const hitsOnly = await json<{ primer: string; primerIds: number[]; hits: { id: number }[] }>([
       "memory",
       "context",
       "--json",
@@ -121,7 +123,22 @@ describe("cortex memory (compiled binary)", () => {
     ]);
     expect(hitsOnly.primer).toBe("");
     expect(hitsOnly.primerIds).toEqual([]);
-    expect(hitsOnly.hits.length).toBeGreaterThan(0);
+    expect(hitsOnly.hits.map(hit => hit.id)).toContain(streamId);
+  });
+
+  test("memory context --parent links the starting thread's streams and leaves keyword hits out", async () => {
+    expect((await cli(["update", String(streamId), "-m", "parent work", "--as", "bb-thr_parent01"])).code).toBe(0);
+    const ctx = await json<{ hits: { id: number; via?: { kind: string } }[]; hitsText: string }>([
+      "memory",
+      "context",
+      "--json",
+      "--no-primer",
+      "--parent=bb-thr_parent01",
+      "--query=check the archived mouse wheel notes",
+    ]);
+    expect(ctx.hits.map(hit => [hit.id, hit.via?.kind])).toEqual([[streamId, "parent"]]);
+    expect(ctx.hitsText).toContain("(linked: the thread that started this one worked on it)");
+    expect(ctx.hitsText).not.toContain("Possibly relevant");
   });
 
   test("memory show: status flips are breadcrumbs, file edits make it stale, a body edit re-syncs", async () => {
@@ -212,12 +229,13 @@ describe("cortex memory (compiled binary)", () => {
     expect(r.code).toBe(0);
     expect(r.stdout).toContain(`@${hidden} excluded from memory`);
     expect(await hits()).toEqual([kept]);
+    // Another author's session: x-1's own streams would never come back as its hits.
     const context = await json<{ hits: Row[]; primerIds: number[] }>([
       "memory",
       "context",
       "--json",
       "--query=gizmo notes",
-      "--author=x-1",
+      "--author=y-1",
     ]);
     expect(context.hits.map(h => h.id)).toEqual([kept]);
     expect(context.primerIds).not.toContain(hidden);

@@ -155,7 +155,7 @@ describe("memory tracker", () => {
     expect(view(t, T2)).toMatchObject({ lane: "cortex", inContext: [], stats: { chars: 0 } });
   });
 
-  test("recalling @id enters it once (the first reason wins) as the newest focus, at most five", () => {
+  test("recalling @id enters it once (the first reason wins) but is no focus; writes keep the five newest", () => {
     const t = tracker();
     t.configured(T1, start);
     t.recalled(T1, "@3", "STREAM 3", 12);
@@ -165,8 +165,8 @@ describe("memory tracker", () => {
       { id: 5, via: "summary" },
       { id: 3, via: "summary" },
     ]);
-    expect(view(t)?.focus).toEqual([9, 3]);
-    for (const id of [1, 2, 4, 6, 3]) t.recalled(T1, `${id}`, "S", 1);
+    expect(view(t)?.focus).toEqual([]);
+    for (const id of [9, 3, 1, 2, 4, 6, 3]) t.updated(T1, id);
     expect(view(t)?.focus).toEqual([3, 6, 4, 2, 1]);
   });
 

@@ -133,12 +133,22 @@ export type MemoryStreamRow = Pick<
 };
 /** The newest stream a stream's same-lane `@id` link chain reaches (derived `_memory_links`). */
 export type LinkedStream = { id: number; status: TaskStatus; activity: number };
-/** One ranked memory-search hit (GET /api/memory/search); `latest` is null when the hit is its own chain head. */
+/**
+ * Why a stream is linked to a request without keywords: the request names it (`named`, key = the id), the
+ * thread that started the caller's thread worked on it (`parent`, key = its author tag), a thread the request
+ * mentions worked on it (`thread`, key = the thread id), or it mentions the request's ticket key (`ticket`).
+ */
+export type MemoryLink = { kind: "named" | "parent" | "thread" | "ticket"; key: string };
+/**
+ * One memory-search hit (GET /api/memory/search); `latest` is null when the hit is its own chain head. A linked
+ * hit carries `via` (no score, matched terms or snippet) and is listed before the ranked keyword hits.
+ */
 export type MemoryHit = MemoryStreamRow & {
   score: number;
   matched: string[];
   snippet: string;
   latest: LinkedStream | null;
+  via?: MemoryLink;
 };
 /** One stream with its full update history (GET /api/memory/streams/:id). */
 export type MemoryStream = {
@@ -2479,7 +2489,9 @@ export class Store {
    * A task is represented by its best qualifying section (more groups, then
    * BM25 with title > tags > text), and tasks sort by: (1) a section matching
    * one of `phrases` (a hyphen/underscore/dot compound as adjacent tokens:
-   * `routing-events`), (2) more groups, (3) the boosted BM25 score, or, when
+   * `routing-events`), (2) not dormant (a done stream that is a digest with
+   * MEMORY_LIMITS.digestLinks outgoing links or unsynced past oldDays ranks
+   * after the rest), (3) more groups, (4) the boosted BM25 score, or, when
    * the query asked for the newest (`recent`), the newest activity: recency
    * only re-orders equally covered streams. `matched` and the snippet come
    * from the kept section (the snippet from its text, or from the title when
@@ -2541,7 +2553,7 @@ export class Store {
             ORDER BY rank;`,
         )
         .all(...params);
-      type Kept = { rowid: number; taskId: number; groups: number; score: number; activity: number };
+      type Kept = { rowid: number; taskId: number; groups: number; score: number; activity: number; dormant: boolean };
       const kept = new Map<number, Kept>();
       const phraseTasks = new Set<number>();
       for (const row of ranked) {
@@ -2552,7 +2564,28 @@ export class Store {
         const current = kept.get(row.task_id);
         if (current && current.groups >= groups) continue; // ranked order: the first of equal groups has the best BM25
         const boost = opts.boost !== undefined && row.lane === opts.boost ? MEMORY_LIMITS.laneBoost : 1;
-        kept.set(row.task_id, { rowid: row.rowid, taskId: row.task_id, groups, score: -row.rank * boost, activity: 0 });
+        kept.set(row.task_id, {
+          rowid: row.rowid,
+          taskId: row.task_id,
+          groups,
+          score: -row.rank * boost,
+          activity: 0,
+          dormant: false,
+        });
+      }
+      // A done digest (many outgoing links, as a journal has) or a done stream whose body went unsynced past oldDays
+      // was rarely what an agent opened: it ranks after the rest, and still fills a slot when nothing else qualifies.
+      // An open umbrella stream that cites many tasks is still live work, so status gates both.
+      const dormantOf = this.db.query<{ links: number; status: string; synced: number }, [number]>(
+        `SELECT (SELECT COUNT(*) FROM _memory_links WHERE task_id = t.id) AS links, t.status,
+                COALESCE(e.edited, t.created) AS synced
+           FROM tasks t LEFT JOIN _body_edits e ON e.task_id = t.id WHERE t.id = ?;`,
+      );
+      const oldBefore = Date.now() - MEMORY_LIMITS.oldDays * 86_400_000;
+      for (const hit of kept.values()) {
+        const row = dormantOf.get(hit.taskId);
+        hit.dormant =
+          row !== null && row.status === "done" && (row.links >= MEMORY_LIMITS.digestLinks || row.synced < oldBefore);
       }
       if (opts.recent) {
         const activityOf = this.db.query<{ activity: number }, [number]>(
@@ -2564,6 +2597,7 @@ export class Store {
         .sort(
           (a, b) =>
             Number(phraseTasks.has(b.taskId)) - Number(phraseTasks.has(a.taskId)) ||
+            Number(a.dormant) - Number(b.dormant) ||
             b.groups - a.groups ||
             (opts.recent ? b.activity - a.activity : 0) ||
             b.score - a.score ||
@@ -2589,6 +2623,55 @@ export class Store {
         const latest = this.latestLinked(hit.taskId);
         return [{ ...stream, score: Number(hit.score.toPrecision(4)), matched, snippet, latest }];
       });
+    })();
+  }
+
+  /**
+   * Streams linked to a request by identifiers, never by keywords (src/memory.ts memoryRefs): the `ids` it
+   * names, then the streams the `parent` author tag posted to, then those of each thread in `threads` (as
+   * author `bb-<thread>`), then streams whose sections mention a ticket key as a phrase (`LANE-8` as
+   * `lane 8`). Each group is newest activity first, and a task is listed once, under its first reason.
+   * Left out: tasks excluded from memory (a named id too: this is a search, not a load by id), `exclude`,
+   * other lanes when `lane` filters, and `own` (the caller's own streams) for every reason but a name: a
+   * request that names its own stream still gets it. At most `limit`, default MEMORY_LIMITS.linked.
+   * Ensures and reconciles the index in the same transaction, like searchMemory.
+   */
+  memoryLinked(
+    refs: { ids?: readonly number[]; parent?: string; threads?: readonly string[]; tickets?: readonly string[] },
+    opts: { exclude?: readonly number[]; own?: readonly number[]; lane?: string; limit?: number } = {},
+  ): MemoryHit[] {
+    const limit = clampInt(opts.limit ?? MEMORY_LIMITS.linked, 1, MEMORY_LIMITS.maxHits);
+    const skip = new Set(opts.exclude ?? []);
+    const own = new Set(opts.own ?? []);
+    return this.db.transaction((): MemoryHit[] => {
+      this.ensureMemoryIndex();
+      this.reconcileMemoryIndex();
+      const out: MemoryHit[] = [];
+      const full = (): boolean => out.length >= limit;
+      const add = (row: MemoryStreamRow | null, via: MemoryLink): void => {
+        if (!row || full() || skip.has(row.id) || row.memory_excluded) return;
+        if ((opts.lane && row.lane !== opts.lane) || (via.kind !== "named" && own.has(row.id))) return;
+        skip.add(row.id);
+        out.push({ ...row, score: 0, matched: [], snippet: "", latest: this.latestLinked(row.id), via });
+      };
+      for (const id of refs.ids ?? []) if (!full()) add(this.streamRow(id), { kind: "named", key: String(id) });
+      // The widest page, so streams left out above (shown, own, another lane) never hide older ones.
+      const byAuthor = (author: string, via: MemoryLink): void => {
+        for (const row of full() ? [] : this.memoryStreams({ author, limit: 50 })) add(row, via);
+      };
+      if (refs.parent) byAuthor(refs.parent, { kind: "parent", key: refs.parent });
+      for (const thread of refs.threads ?? []) byAuthor(`bb-${thread}`, { kind: "thread", key: thread });
+      const mentioning = this.db.query<{ id: number }, [string]>(
+        `SELECT t.id FROM tasks t LEFT JOIN _body_edits e ON e.task_id = t.id
+          WHERE t.id IN (SELECT task_id FROM _memory_sections WHERE _memory_sections MATCH ?)
+          ORDER BY ${ACTIVITY_SQL} DESC, t.id DESC LIMIT 50;`,
+      );
+      for (const ticket of refs.tickets ?? []) {
+        if (full()) break;
+        const phrase = quoteTerm(ticket.toLowerCase().split("-").join(" "));
+        for (const { id } of mentioning.all(phrase)) add(this.streamRow(id), { kind: "ticket", key: ticket });
+      }
+      return out;
     })();
   }
 

@@ -14,6 +14,7 @@ import {
   matchingSections,
   memoryLane,
   memoryPhrases,
+  memoryRefs,
   memorySections,
   memoryTerms,
   primerRows,
@@ -183,6 +184,29 @@ describe("query noise", () => {
     ]);
   });
 
+  test("bb thread mentions, bb ids and generated ids yield no terms; words with digits at an end stay", () => {
+    expect(memoryTerms("see @thread:thr_pt5jsb9s92#msg=42 about the composer widget")).toEqual(["composer", "widget"]);
+    expect(memoryTerms("[wake-up wk_f2y27awp \u00b7 CI on env_pe7mp8e77v] flare screenshots")).toEqual([
+      "wake",
+      "flare",
+      "screenshots",
+    ]);
+    expect(memoryTerms("automation djuu8pztkfq iwcjxqj6s9 7o2q5wr2 daily brain")).toEqual([
+      "automation",
+      "daily",
+      "brain",
+    ]);
+    expect(memoryTerms("python3 sha256 base64 es2022 fts5 wheel_notch")).toEqual([
+      "python3",
+      "sha256",
+      "base64",
+      "es2022",
+      "fts5",
+      "wheel",
+      "notch",
+    ]);
+  });
+
   test("phrases and recency see the same clean text", () => {
     expect(memoryPhrases("/tmp/cortex-plans.AzPZ6wlwbr/x https://ex.com/routing-events wheel-notch")).toEqual([
       ["wheel", "notch"],
@@ -202,6 +226,36 @@ describe("query noise", () => {
     const topics = "memory plan docs daemon update repo lane tag draft open review blocked search show stop";
     expect(topics.split(" ").filter(word => STOPWORDS.has(word))).toEqual([]);
     expect([...RECENCY_WORDS].filter(word => STOPWORDS.has(word))).toEqual([]);
+  });
+});
+
+describe("memoryRefs", () => {
+  test("named tasks: @id and cortex show/task/plan N, in the order written; never a bare task N or fenced code", () => {
+    const text =
+      "Implement the plan stored in cortex task 657, read `cortex show 680` and `cortex memory show 7`, " +
+      "see @421 and `cortex plan task 702`; not Low-Level Task 3, retry the task 10 times, plan 30 minutes ago, " +
+      "stream 404 errors, me@12, @12abc or #12\n```\ntask 12 failed (see @40, LANE-8)\n```";
+    expect(memoryRefs(text)).toEqual({ ids: [657, 680, 7, 421, 702], threads: [], tickets: [] });
+  });
+
+  test("each kind is capped, so a pasted digest cannot run hundreds of lookups", () => {
+    const many = Array.from({ length: 40 }, (_, i) => `@${i + 1}`).join(" ");
+    expect(memoryRefs(many).ids).toEqual(Array.from({ length: 10 }, (_, i) => i + 1));
+  });
+
+  test("bb threads come from mentions and thread-storage paths, deduped", () => {
+    const text =
+      "see @thread:thr_iwcjxqj6s9 and read /Users/k/.bb/thread-storage/thr_c9tqg59c58/brief.md; " +
+      "also thr_iwcjxqj6s9 again, not xthr_abcdefg1 or thr_BAD";
+    expect(memoryRefs(text).threads).toEqual(["thr_iwcjxqj6s9", "thr_c9tqg59c58"]);
+  });
+
+  test("ticket keys are uppercase KEY-N, never standards, versions or a CVE's year", () => {
+    const text =
+      "LANE-8 and OTLP-12 (LANE-8 again); not lane-8, UTF-8, SHA-256, GPT-5, CVE-2024-1234, X-1, X86-64, Q3-2024, " +
+      "PEP-8, COVID-19, AES-256, IEEE-754, SOC-2, CWE-79, ECMA-262 or ARM-64";
+    expect(memoryRefs(text).tickets).toEqual(["LANE-8", "OTLP-12"]);
+    expect(memoryRefs("fix the mouse wheel")).toEqual({ ids: [], threads: [], tickets: [] });
   });
 });
 
@@ -519,6 +573,30 @@ describe("rendering", () => {
     const text = renderHits(["routing", "events"], [hit], now, { recent: true, loadHint: 'cortex_recall "@<id>"' });
     expect(text).toContain('(query: routing, events, newest first). Load one with `cortex_recall "@<id>"` before');
     expect(text).toContain("a stream \u00b7 latest linked @9 (review, active 2026-09-30) (2/2: routing, events)");
+  });
+
+  test("renderHits lists linked streams first with their reason, then the keyword hits under the query header", () => {
+    const base = { score: 0, matched: [], snippet: "", latest: null };
+    const linked: MemoryHit[] = [
+      { ...row({ id: 5, activity: now, synced: now }), ...base, via: { kind: "named", key: "5" } },
+      { ...row({ id: 6, activity: now, synced: now }), ...base, via: { kind: "parent", key: "bb-thr_parent01" } },
+      { ...row({ id: 7, activity: now, synced: now }), ...base, via: { kind: "thread", key: "thr_other001" } },
+      { ...row({ id: 8, activity: now, synced: now }), ...base, via: { kind: "ticket", key: "LANE-8" } },
+    ];
+    const hit: MemoryHit = { ...row({ id: 4, activity: now, synced: now }), ...base, matched: ["wheel"], snippet: "w" };
+    const lines = renderHits(["wheel"], [...linked, hit], now, { loadHint: 'cortex_recall "@<id>"' }).split("\n");
+    expect(lines).toEqual([
+      MEMORY_PREAMBLE,
+      'Cortex memory linked to this request. Load one with `cortex_recall "@<id>"` before relying on it.',
+      "- [5] open \u00b7 l \u00b7 active 2026-09-29 \u00b7 a stream (linked: named in the request)",
+      "- [6] open \u00b7 l \u00b7 active 2026-09-29 \u00b7 a stream (linked: the thread that started this one worked on it)",
+      "- [7] open \u00b7 l \u00b7 active 2026-09-29 \u00b7 a stream (linked: thread thr_other001 worked on it)",
+      "- [8] open \u00b7 l \u00b7 active 2026-09-29 \u00b7 a stream (linked: mentions LANE-8)",
+      'Possibly relevant cortex memory (query: wheel). Load one with `cortex_recall "@<id>"` before relying on it.',
+      "- [4] open \u00b7 l \u00b7 active 2026-09-29 \u00b7 a stream (1/1: wheel) \u2014 w",
+    ]);
+    // Linked streams alone need no query header, even without terms.
+    expect(renderHits([], linked.slice(0, 1), now)).not.toContain("Possibly relevant");
   });
 
   test("renderStream prints a short body unchanged and names the latest linked stream", () => {

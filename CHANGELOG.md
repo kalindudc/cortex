@@ -2,6 +2,19 @@
 
 Cortex follows [semantic versioning](https://semver.org). Each release has a section below, newest first.
 
+## 0.103.0 - 2026-11-05
+
+- **Memory linked to the request comes first.** A task the request names (`@42`, `cortex show 42`), what a bb thread
+  it mentions worked on, and streams naming its ticket key (`LANE-8`) now lead the hits, marked as linked, before
+  keyword matches. Ids such as `thr_…` or `wk_…`, and identifiers inside pasted code, no longer pull in streams.
+- **Fewer memory hits nobody reads.** In bb, wake-ups, Shuttle notices, Loom messages and other plugin messages no
+  longer look up memory, and a minion or workflow agent gets only the tasks its brief names and its starting
+  thread's streams. Later requests look up only when they ask for earlier work: "last", "latest" and "again" no
+  longer count. A session's own streams come back only when it names them, and finished digests or streams long out
+  of sync rank after the rest.
+- **The save turn names the right stream.** Only streams an agent wrote to count as the ones it works on, not ones
+  it just read, and in bb they survive a restart of bb or the plugin.
+
 ## 0.102.2 - 2026-11-02
 
 - **A seamless title breadcrumb.** The banner now meets the sheet's top and side edges, so scrolled text cannot peek

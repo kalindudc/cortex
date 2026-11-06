@@ -33,6 +33,8 @@ export type FakeTask = {
 export type FakeFixture = {
   commands?: string[];
   streamsProbeFails?: boolean;
+  /** Fails `memory streams` for agents (neither the feature probe nor the user's `--with-excluded` view). */
+  streamsFails?: boolean;
   /** `cortex doctor --json`'s `author`; absent for a cortex without `update --as-me`. */
   author?: string;
   doctorFails?: boolean;
@@ -80,6 +82,7 @@ if (a === "schema") {
   out({ version: "0.0.0", ...(fixture.author === undefined ? {} : { author: fixture.author }) });
 } else if (a === "memory" && b === "streams") {
   if (flag("limit") === "1" && fixture.streamsProbeFails) fail("Unknown command streams");
+  if (fixture.streamsFails && flag("limit") !== "1" && !argv.includes("--with-excluded")) fail("daemon down");
   out((fixture.streams || {})[flag("author")] || []);
 } else if (a === "show") {
   const t = taskOf(b);

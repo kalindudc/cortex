@@ -590,3 +590,100 @@ describe("memory exclusion (memory_exclusions)", () => {
     expect(() => s.setMemoryExcluded(999, true)).toThrow("task 999 not found");
   });
 });
+
+describe("linked streams by identifier (Store.memoryLinked)", () => {
+  test("named ids come first in request order; excluded, unknown and already-shown ids are left out", () => {
+    const s = open();
+    const a = s.addTask({ title: "alpha", lane: "l" });
+    const b = s.addTask({ title: "beta", lane: "l" });
+    const c = s.addTask({ title: "gamma", lane: "l" });
+    s.setMemoryExcluded(c.id, true);
+    const hits = s.memoryLinked({ ids: [b.id, 999, c.id, a.id] });
+    expect(ids(hits)).toEqual([b.id, a.id]);
+    expect(hits[0]).toMatchObject({ via: { kind: "named", key: String(b.id) }, matched: [], snippet: "", score: 0 });
+    expect(ids(s.memoryLinked({ ids: [b.id, a.id] }, { exclude: [b.id] }))).toEqual([a.id]);
+    expect(ids(s.memoryLinked({ ids: [a.id] }, { lane: "other" }))).toEqual([]);
+  });
+
+  test("the parent author's and a mentioned thread's streams, newest activity first, each task once", () => {
+    const s = open();
+    at(1_000);
+    const older = s.addTask({ title: "older", lane: "l" });
+    const newer = s.addTask({ title: "newer", lane: "l" });
+    const mine = s.addTask({ title: "mine", lane: "l" });
+    at(2_000);
+    s.addUpdate({ task_id: older.id, author: "bb-thr_parent01", summary: "started" });
+    at(3_000);
+    s.addUpdate({ task_id: newer.id, author: "bb-thr_parent01", summary: "progress" });
+    s.addUpdate({ task_id: newer.id, author: "bb-thr_other001", summary: "also here" });
+    s.addUpdate({ task_id: mine.id, author: "bb-thr_other001", summary: "other work" });
+    const hits = s.memoryLinked({ parent: "bb-thr_parent01", threads: ["thr_other001"] }, { limit: 5 });
+    expect(ids(hits)).toEqual([newer.id, older.id, mine.id]);
+    expect(hits.map(hit => hit.via?.kind)).toEqual(["parent", "parent", "thread"]);
+    expect(hits[2]?.via).toEqual({ kind: "thread", key: "thr_other001" });
+  });
+
+  test("shown and own streams never hide the parent's older ones; a request that names its own stream gets it", () => {
+    const s = open();
+    const rows = Array.from({ length: 4 }, (_, i) => {
+      at(1_000 + i * 1_000);
+      const t = s.addTask({ title: `p${i}`, lane: "l" });
+      s.addUpdate({ task_id: t.id, author: "bb-thr_parent01", summary: "work" });
+      return t.id;
+    });
+    const [oldest, a, b, newest] = rows as [number, number, number, number];
+    const parent = { parent: "bb-thr_parent01" };
+    expect(ids(s.memoryLinked(parent, { exclude: [newest, b], own: [a], limit: 3 }))).toEqual([oldest]);
+    expect(ids(s.memoryLinked({ ids: [a], ...parent }, { own: [a], limit: 2 }))).toEqual([a, newest]);
+  });
+
+  test("a ticket key matches the stream that mentions it as written, not a longer number", () => {
+    const s = open();
+    const project = s.addTask({ title: "Loom project force-env-lane", lane: "infra" });
+    s.addUpdate({ task_id: project.id, author: "bb-thr_worker01", summary: "LANE-8 passed its checks" });
+    const other = s.addTask({ title: "lane 80 notes", lane: "infra" });
+    const hits = s.memoryLinked({ tickets: ["LANE-8"] });
+    expect(ids(hits)).toEqual([project.id]);
+    expect(hits[0]?.via).toEqual({ kind: "ticket", key: "LANE-8" });
+    expect(ids(s.memoryLinked({ tickets: ["LANE-80"] }))).toEqual([other.id]);
+  });
+
+  test("the limit caps every reason together, MEMORY_LIMITS.linked by default", () => {
+    const s = open();
+    const many = Array.from({ length: 6 }, (_, i) => s.addTask({ title: `t${i}`, lane: "l" }).id);
+    expect(s.memoryLinked({ ids: many })).toHaveLength(MEMORY_LIMITS.linked);
+    expect(ids(s.memoryLinked({ ids: many }, { limit: 2 }))).toEqual(many.slice(0, 2));
+  });
+});
+
+describe("dormant streams rank after the rest (Store.searchMemory)", () => {
+  const DAY = 86_400_000;
+
+  test("a done digest with MEMORY_LIMITS.digestLinks outgoing links ranks after a fresh stream; an open one does not", () => {
+    const s = open();
+    const targets = Array.from({ length: MEMORY_LIMITS.digestLinks }, (_, i) => s.addTask({ title: `x${i}` }).id);
+    const digest = s.addTask({
+      title: "Journal: gizmo wheel notch",
+      body: targets.map(id => `- @${id}`).join("\n"),
+    });
+    const fresh = s.addTask({ title: "gizmo wheel" });
+    // Its own match set keeps `wheel` a separate term group from `gizmo`.
+    s.addTask({ title: "wheel spokes" });
+    const query = ["gizmo", "wheel", "notch"];
+    expect(ids(s.searchMemory(query))).toEqual([digest.id, fresh.id]);
+    s.setStatus(digest.id, "done");
+    expect(ids(s.searchMemory(query))).toEqual([fresh.id, digest.id]);
+  });
+
+  test("a done stream unsynced past oldDays ranks after the rest; an open one does not", () => {
+    const s = open();
+    at(0);
+    const dormant = s.addTask({ title: "gizmo wheel notch" });
+    const openOld = s.addTask({ title: "gizmo wheel notch handler" });
+    s.setStatus(dormant.id, "done");
+    at((MEMORY_LIMITS.oldDays + 1) * DAY);
+    const fresh = s.addTask({ title: "gizmo wheel" });
+    s.addTask({ title: "wheel spokes" });
+    expect(ids(s.searchMemory(["gizmo", "wheel", "notch"]))).toEqual([openOld.id, fresh.id, dormant.id]);
+  });
+});
