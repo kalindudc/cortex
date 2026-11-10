@@ -450,6 +450,18 @@ describe("server: memory", () => {
       parent.id,
       ticket.id,
     ]);
+    // A request naming a pull request links the streams that cite it; its link and key are no search words.
+    const review = store.addTask({ title: "PR Review #79275: widget rule", lane: "terraform-the-cloud" });
+    const prQuery = encodeURIComponent(
+      "Look at https://github.com/Shopify/terraform-the-cloud/pull/79275 " +
+        "(github:Shopify/terraform-the-cloud#79275): Add the gizmo rule",
+    );
+    const pr = (await fetchJson(req("GET", `/api/memory/search?q=${prQuery}`))).json as {
+      terms: string[];
+      hits: { id: number; via?: { kind: string } }[];
+    };
+    expect(pr.terms).toEqual(["add", "gizmo", "rule"]);
+    expect(pr.hits[0]).toMatchObject({ id: review.id, via: { kind: "pr", key: "Shopify/terraform-the-cloud#79275" } });
     expect((await fetchJson(req("GET", "/api/memory/search?q=gizmo&related=a%0Ab"))).status).toBe(400);
     expect((await fetchJson(req("GET", "/api/memory/search?q=gizmo&self=a%0Ab"))).status).toBe(400);
   });

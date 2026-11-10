@@ -769,7 +769,7 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
       // Identifiers link exactly, so they come first and share the hit budget.
       const refs = { ...memoryRefs(q), parent: authors.related };
       const linked =
-        refs.parent || refs.ids.length + refs.threads.length + refs.tickets.length > 0
+        refs.parent || refs.ids.length + refs.threads.length + refs.tickets.length + refs.prs.length > 0
           ? store.memoryLinked(refs, { exclude, own, lane, limit: Math.min(cap, MEMORY_LIMITS.linked) })
           : [];
       const left = cap - linked.length;

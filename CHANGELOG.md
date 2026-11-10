@@ -2,6 +2,16 @@
 
 Cortex follows [semantic versioning](https://semver.org). Each release has a section below, newest first.
 
+## 0.103.1 - 2026-11-10
+
+- **Pull requests link their memory.** A request that names a pull request, as a link, `owner/repo#12` or a forge
+  key such as `github:owner/repo#12`, now lists the streams that cite it first, such as an earlier review of the same
+  pull request. The link, the key and the phrase "review the pull request" no longer become search words.
+- **`cortex 908` names a task.** "read cortex 908" links task 908 like `cortex show 908` does. Versions and counts
+  such as `cortex 0.103.1` or "Cortex 3" do not.
+- **Journals rank last among linked streams.** A daily journal mentions every ticket and pull request of its day, so
+  it now comes after the other streams that mention the same key.
+
 ## 0.103.0 - 2026-11-05
 
 - **Memory linked to the request comes first.** A task the request names (`@42`, `cortex show 42`), what a bb thread

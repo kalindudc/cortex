@@ -52,12 +52,12 @@ With pi (the coding agent cortex ships an extension for), memory arrives on its 
 In bb the Cortex plugin gives every provider the primer and `cortex_recall`; pi, Claude Code and Codex get hits too.
 Elsewhere without pi, an agent runs `cortex memory context --query="<the ask>"` once, then `cortex memory show <id>`.
 
-Streams the ask points at come first, marked linked: a task it names (`@42`, `cortex show 42`, "task 42"), what a bb
-thread it mentions worked on, or a stream naming its ticket key (`LANE-8`). Keyword hits follow, each showing which
-words (or their forms) matched. Paths, links, commit hashes, other ids, pasted code (even its `@id`s) and small talk
-never pull in streams; a repo-relative file like `src/server.ts` still counts. Search covers every project, this one
-first. The session's own streams come back only when the ask names them, and finished digests (a past journal) or
-streams long out of sync rank last. A long body opens with Next, open questions, Decisions and State, and lists the
+Streams the ask points at come first, marked linked: a task it names (`@42`, `cortex 42`, `cortex show 42`), a mentioned
+bb thread's streams, or one naming its ticket (`LANE-8`) or pull request (`owner/repo#12`, a PR link). Keyword hits
+follow, each showing which words matched. Paths, links, commit hashes, other ids, pasted code (even its `@id`s) and
+small talk never pull in streams; a repo-relative file like `src/server.ts` still counts. Search covers every project,
+this one first. The session's own streams come back only when the ask names them, and finished digests (a past journal)
+or streams long out of sync rank last. A long body opens with Next, open questions, Decisions and State, and lists the
 rest; an older stream names the newer one continuing it as its "latest linked". `cortex memory exclude <id>`, the
 desktop app's "Keep out of agent memory" command or bb's More menu keep a task out of all of this; reading it by id
 still works, and a running pi session keeps its primer until compaction or `/memory refresh`.
@@ -118,26 +118,26 @@ FTS5 is SQLite's full-text search engine. Its tables (`_memory_sections`, `_memo
 
 `src/memory.ts#memoryLane` names the repo from git's common dir in one spawn (`src/memory.ts#repoInfo`), else the
 directory. The search route in `src/server.ts` first links: `src/memory.ts#memoryRefs` reads named task ids, bb thread
-ids and ticket keys from the raw text outside fenced code, and `src/store.ts#memoryLinked` resolves them exactly (a
-thread as its `bb-<thread>` author, a ticket as a phrase) plus the `related` author (the bb plugin's starting thread).
-They lead the hits, at most `MEMORY_LIMITS.linked`, inside the same budget. Why not as terms? An id matches no word.
-Terms come from `src/memory.ts#memoryTerms`, which blanks text naming no topic (`src/memory.ts#QUERY_NOISE`: fenced
-code, URLs, emails, UUIDs, bb mentions and ids, and `~/`, `./`, `../` or absolute paths of two or more segments), then
-drops short tokens, digits, hex and generated ids (`src/memory.ts#isTermToken`) and `src/memory.ts#STOPWORDS`:
-function words and filler, never a cortex topic or command, nor a `src/memory.ts#RECENCY_WORDS` member, which
-`src/memory.ts#recencyIntent` turns into a newest-activity tie-break (a global blend cut precision).
-`src/memory.ts#memoryPhrases` searches compounds like `routing-events` as phrases. Every surface gets these terms. Why
-not drop every path and inline code? Streams cite repo-relative files and identifiers, and recall by them works. Why
-not stopword `update`? It names a cortex topic. Why not clean the query in the pi extension? A copy there drifts.
-`src/store.ts#searchMemory` searches every lane and keeps a section only when it covers `MEMORY_LIMITS.minMatched`
-stem groups (fewer for shorter queries), title and tags counting everywhere: a wrong memory is worse than none. Order:
-phrase match; not dormant (a done stream that is a digest with `MEMORY_LIMITS.digestLinks` links or unsynced past
-`MEMORY_LIMITS.oldDays`: ranked last, never dropped, as a journal may be the only record); coverage; the tie-break;
-BM25 (title over tags over text) times the lane boost; id. Why not weight terms by rarity? Replayed on real lookups,
-it lost half the hits agents opened. `cortex memory context` leaves its `--author`'s own streams out unless named, and
+ids, ticket keys and PRs from the raw text outside fenced code, and `src/store.ts#memoryLinked` resolves them (a thread
+as its `bb-<thread>` author, a ticket as a phrase, a PR as `#N`, `!N` or its link where its repo is named; digests last)
+plus the `related` author (the bb plugin's starting thread). They lead the hits, at most `MEMORY_LIMITS.linked`, inside
+the same budget. Why not as terms? An id matches no word. Terms come from `src/memory.ts#memoryTerms`, which blanks text
+naming no topic (`src/memory.ts#QUERY_NOISE`: fenced code, URLs, PR keys, "review the pull request", emails, UUIDs, bb
+mentions and ids, and paths), then drops short tokens, digits, hex and generated ids (`src/memory.ts#isTermToken`) and
+`src/memory.ts#STOPWORDS`: function words and filler, never a cortex topic or command, nor a
+`src/memory.ts#RECENCY_WORDS` member, which `src/memory.ts#recencyIntent` turns into a newest-activity tie-break (a
+blend cut precision). `src/memory.ts#memoryPhrases` searches compounds like `routing-events` as phrases. Why not drop
+every path and inline code? Streams cite repo-relative files and identifiers, and recall by them works. Why not stopword
+`update`? It names a cortex topic. Why not clean the query in the pi extension? A copy there drifts.
+`src/store.ts#searchMemory` searches every lane and keeps a section only when it covers `MEMORY_LIMITS.minMatched` stem
+groups (fewer for shorter queries), title and tags counting everywhere: a wrong memory is worse than none. Order: phrase
+match; not dormant (a done stream that is a digest with `MEMORY_LIMITS.digestLinks` links or unsynced past
+`MEMORY_LIMITS.oldDays`: ranked last, never dropped, as a journal may be the only record); coverage; the tie-break; BM25
+(title over tags over text) times the lane boost; id. Why not weight terms by rarity? Replayed on real lookups, it lost
+half the hits agents opened. `cortex memory context` leaves its `--author`'s own streams out unless named, and
 `--parent` links the starting thread's streams with no keyword hits. Activity (`src/store.ts#ACTIVITY_SQL`) ignores
-status flips and lane or tag moves. `src/store.ts#latestLinked` follows `@id` links to later streams in the same lane,
-bounded, to a chain's head; it, the stream lists and linked streams skip excluded tasks (`MEMORY_EXCLUDED_SQL`).
+status, lane and tag moves. `src/store.ts#latestLinked` follows `@id` links to later streams in the same lane, bounded,
+to a chain's head; it, the stream lists and linked streams skip excluded tasks (`MEMORY_EXCLUDED_SQL`).
 
 ### Staleness and breadcrumbs
 
@@ -175,8 +175,8 @@ pure functions of state and theme in `src/extensions/memory-view.ts`, installed 
 
 - Memory reads, linked streams included, hide a task in `memory_exclusions` unless the caller passes `withExcluded`
   (the user's own views); a load by id never filters: `test/unit/server.test.ts`, `test/unit/store-memory.test.ts`.
-- Only `src/memory.ts#memoryTerms` output and `src/memory.ts#memoryRefs` ticket keys reach an FTS5 MATCH, quoted by
-  `src/store.ts#quoteTerm`; never raw text: `test/unit/server.test.ts`, `test/integration/cli/memory.test.ts`.
+- Only `src/memory.ts#memoryTerms` output and `src/memory.ts#memoryRefs` keys and PR numbers reach an FTS5 MATCH, quoted
+  by `src/store.ts#quoteTerm`; never raw text: `test/unit/server.test.ts`, `test/integration/cli/memory.test.ts`.
 - Query noise (absolute and home paths, URLs, emails, ids, fenced code) and filler never become terms;
   repo-relative paths, inline code, `@id` and `#tag` still do; no cortex topic or recency word is a stopword:
   `test/unit/memory.test.ts` (query noise), `test/unit/memory-eval.test.ts` (the prompt-noise cases).

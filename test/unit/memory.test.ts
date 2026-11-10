@@ -184,6 +184,23 @@ describe("query noise", () => {
     ]);
   });
 
+  test("pull request links and keys, and 'review the pull request', yield no terms", () => {
+    const text =
+      "Review the pull request https://github.com/Shopify/terraform-the-cloud/pull/79275 " +
+      "(github:Shopify/terraform-the-cloud#79275): Add the escalation referrer rule";
+    expect(memoryTerms(text)).toEqual(["add", "escalation", "referrer", "rule"]);
+    expect(memoryTerms("rebase Shopify/infrastructure#88580 and gitlab:group/sub/proj!42")).toEqual(["rebase"]);
+    // Only the phrase goes: pull requests as a topic, or a review on its own, still count.
+    expect(memoryTerms("fix the pull request template")).toEqual(["pull", "request", "template"]);
+    expect(memoryTerms("review the flare plugin, pull the branch")).toEqual([
+      "review",
+      "flare",
+      "plugin",
+      "pull",
+      "branch",
+    ]);
+  });
+
   test("bb thread mentions, bb ids and generated ids yield no terms; words with digits at an end stay", () => {
     expect(memoryTerms("see @thread:thr_pt5jsb9s92#msg=42 about the composer widget")).toEqual(["composer", "widget"]);
     expect(memoryTerms("[wake-up wk_f2y27awp \u00b7 CI on env_pe7mp8e77v] flare screenshots")).toEqual([
@@ -235,7 +252,32 @@ describe("memoryRefs", () => {
       "Implement the plan stored in cortex task 657, read `cortex show 680` and `cortex memory show 7`, " +
       "see @421 and `cortex plan task 702`; not Low-Level Task 3, retry the task 10 times, plan 30 minutes ago, " +
       "stream 404 errors, me@12, @12abc or #12\n```\ntask 12 failed (see @40, LANE-8)\n```";
-    expect(memoryRefs(text)).toEqual({ ids: [657, 680, 7, 421, 702], threads: [], tickets: [] });
+    expect(memoryRefs(text)).toEqual({ ids: [657, 680, 7, 421, 702], threads: [], tickets: [], prs: [] });
+  });
+
+  test("cortex N names a task from two digits; never a version, a count or a number with a comma", () => {
+    expect(memoryRefs("read cortex 908, I am continuing; also Cortex #929.").ids).toEqual([908, 929]);
+    expect(
+      memoryRefs("cortex 0.103.1 is live, cortex 1,280 tests pass, Quests 18, Cortex 3, cortex 0 times").ids,
+    ).toEqual([]);
+    expect(
+      memoryRefs("cortex 12 tasks, cortex 20 minutes, cortex 100%, cortex 123456 and cortex\n\n42 things").ids,
+    ).toEqual([]);
+    expect(memoryRefs("**Cortex 549: 15/15 implementation tasks completed**").ids).toEqual([549]);
+  });
+
+  test("pull requests from forge keys, owner/repo#N and PR URLs, as <repo path>#<number>, deduped", () => {
+    const text =
+      "Review https://github.com/Shopify/terraform-the-cloud/pull/79275 (github:Shopify/terraform-the-cloud#79275), " +
+      "then Shopify/infrastructure#88580, delta:shop/world#2385775 and https://gitlab.com/g/sub/proj/-/merge_requests/42; " +
+      "not src/memory.ts#L12, src/memory.ts#12, I/O#3, 24/7#1, issue #12 or https://github.com/Shopify/edgey/issues/7; " +
+      "again GITHUB:SHOPIFY/TERRAFORM-THE-CLOUD#79275";
+    expect(memoryRefs(text).prs).toEqual([
+      "Shopify/terraform-the-cloud#79275",
+      "Shopify/infrastructure#88580",
+      "shop/world#2385775",
+      "g/sub/proj#42",
+    ]);
   });
 
   test("each kind is capped, so a pasted digest cannot run hundreds of lookups", () => {
@@ -255,7 +297,7 @@ describe("memoryRefs", () => {
       "LANE-8 and OTLP-12 (LANE-8 again); not lane-8, UTF-8, SHA-256, GPT-5, CVE-2024-1234, X-1, X86-64, Q3-2024, " +
       "PEP-8, COVID-19, AES-256, IEEE-754, SOC-2, CWE-79, ECMA-262 or ARM-64";
     expect(memoryRefs(text).tickets).toEqual(["LANE-8", "OTLP-12"]);
-    expect(memoryRefs("fix the mouse wheel")).toEqual({ ids: [], threads: [], tickets: [] });
+    expect(memoryRefs("fix the mouse wheel")).toEqual({ ids: [], threads: [], tickets: [], prs: [] });
   });
 });
 
@@ -582,6 +624,7 @@ describe("rendering", () => {
       { ...row({ id: 6, activity: now, synced: now }), ...base, via: { kind: "parent", key: "bb-thr_parent01" } },
       { ...row({ id: 7, activity: now, synced: now }), ...base, via: { kind: "thread", key: "thr_other001" } },
       { ...row({ id: 8, activity: now, synced: now }), ...base, via: { kind: "ticket", key: "LANE-8" } },
+      { ...row({ id: 9, activity: now, synced: now }), ...base, via: { kind: "pr", key: "Shopify/edgey#1588" } },
     ];
     const hit: MemoryHit = { ...row({ id: 4, activity: now, synced: now }), ...base, matched: ["wheel"], snippet: "w" };
     const lines = renderHits(["wheel"], [...linked, hit], now, { loadHint: 'cortex_recall "@<id>"' }).split("\n");
@@ -592,6 +635,7 @@ describe("rendering", () => {
       "- [6] open \u00b7 l \u00b7 active 2026-09-29 \u00b7 a stream (linked: the thread that started this one worked on it)",
       "- [7] open \u00b7 l \u00b7 active 2026-09-29 \u00b7 a stream (linked: thread thr_other001 worked on it)",
       "- [8] open \u00b7 l \u00b7 active 2026-09-29 \u00b7 a stream (linked: mentions LANE-8)",
+      "- [9] open \u00b7 l \u00b7 active 2026-09-29 \u00b7 a stream (linked: mentions Shopify/edgey#1588)",
       'Possibly relevant cortex memory (query: wheel). Load one with `cortex_recall "@<id>"` before relying on it.',
       "- [4] open \u00b7 l \u00b7 active 2026-09-29 \u00b7 a stream (1/1: wheel) \u2014 w",
     ]);

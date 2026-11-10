@@ -648,6 +648,48 @@ describe("linked streams by identifier (Store.memoryLinked)", () => {
     expect(ids(s.memoryLinked({ tickets: ["LANE-80"] }))).toEqual([other.id]);
   });
 
+  test("a ticket key lists a digest that mentions it after the other streams", () => {
+    const s = open();
+    const project = s.addTask({ title: "Loom project", lane: "infra", body: "LANE-8 is in review" });
+    at(Date.now() + 60_000);
+    const refs = Array.from({ length: MEMORY_LIMITS.digestLinks }, (_, i) => `@${i + 1000}`).join(" ");
+    const journal = s.addTask({ title: "Journal", lane: "journal", body: `LANE-8 merged. ${refs}` });
+    expect(ids(s.memoryLinked({ tickets: ["LANE-8"] }))).toEqual([project.id, journal.id]);
+  });
+
+  test("a pull request links streams that cite its number with #, ! or /pull/ and name its repo or lane", () => {
+    const s = open();
+    const ledger = s.addTask({
+      title: "PR Review #79275: Add a rule",
+      lane: "terraform-the-cloud",
+      body: "Verdict: PASS",
+    });
+    const own = s.addTask({
+      title: "My rule work",
+      lane: "edge",
+      body: "Opened https://github.com/Shopify/terraform-the-cloud/pull/79275",
+    });
+    s.addTask({ title: "PR Review #79275: another repo", lane: "infrastructure", body: "Verdict: PASS" });
+    s.addTask({ title: "Port notes", lane: "terraform-the-cloud", body: "listens on 79275" });
+    s.addTask({ title: "Burn", lane: "burn", body: "see #792750 and #7927" });
+    const hits = s.memoryLinked({ prs: ["Shopify/terraform-the-cloud#79275"] }, { limit: 5 });
+    expect(ids(hits).sort()).toEqual([ledger.id, own.id].sort());
+    expect(hits[0]?.via).toEqual({ kind: "pr", key: "Shopify/terraform-the-cloud#79275" });
+    s.setMemoryExcluded(ledger.id, true);
+    expect(ids(s.memoryLinked({ prs: ["Shopify/terraform-the-cloud#79275"] }, { limit: 5 }))).toEqual([own.id]);
+  });
+
+  test("a merge request cited as !N or by its link path links too; a short number is found past common tokens", () => {
+    const s = open();
+    const mr = s.addTask({ title: "Review of !42", lane: "proj", body: "Approved" });
+    const path = s.addTask({ title: "Rollout", lane: "ops", body: "see gitlab.com/g/proj/-/merge_requests/42" });
+    expect(ids(s.memoryLinked({ prs: ["g/proj#42"] }, { limit: 5 })).sort()).toEqual([mr.id, path.id].sort());
+    const target = s.addTask({ title: "PR Review #5", lane: "myrepo", body: "Verdict: PASS" });
+    for (let i = 0; i < 60; i++)
+      s.addTask({ title: `step 5 of plan ${i}`, lane: "other", body: "GPT-5 notes, #5 in the list" });
+    expect(ids(s.memoryLinked({ prs: ["o/myrepo#5"] }))).toEqual([target.id]);
+  });
+
   test("the limit caps every reason together, MEMORY_LIMITS.linked by default", () => {
     const s = open();
     const many = Array.from({ length: 6 }, (_, i) => s.addTask({ title: `t${i}`, lane: "l" }).id);

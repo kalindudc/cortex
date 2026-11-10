@@ -91,6 +91,17 @@ export const STOPWORDS: ReadonlySet<string> = new Set(
 /** Fenced code; an unclosed fence (a cut prompt) runs to the end. */
 const FENCED_CODE = /```[\s\S]*?(?:```|$)/g;
 
+/** A forge key such as `github:owner/repo#12` or `gitlab:group/project!42`; group 1 = repo path, 2 = number. */
+const FORGE_KEY = /(?<![\p{L}\p{N}_./-])[a-z][a-z0-9-]*:([\w.-]+(?:\/[\w.-]+)+)[#!](\d+)(?![\p{L}\p{N}_])/giu;
+/**
+ * A bare `owner/repo#12`; group 1 = repo path, 2 = number. Never a file anchor (`src/memory.ts#12`) or a pair like
+ * `I/O#3` or `24/7#1`: the owner has two characters or more and the repo a letter, not a file extension at its end.
+ */
+const REPO_KEY =
+  /(?<![\p{L}\p{N}_./:-])([\w.-]{2,}\/[\w.-]*[A-Za-z][\w.-]*)(?<!\.[A-Za-z]{1,5})#(\d+)(?![\p{L}\p{N}_])/gu;
+/** A pull or merge request URL; group 1 = repo path, 2 = number. */
+const PR_URL = /\bhttps?:\/\/[^\s/]+\/((?:[\w.-]+\/)+?[\w.-]+)\/(?:-\/)?(?:pull|pulls|merge_requests)\/(\d+)/giu;
+
 /**
  * Prompt text that names no topic: a leading checkout path spent the whole
  * term budget on `users, kalindu, src, github, com, ...` (the overengineering
@@ -103,6 +114,9 @@ const FENCED_CODE = /```[\s\S]*?(?:```|$)/g;
 const QUERY_NOISE: readonly RegExp[] = [
   FENCED_CODE,
   /\b[a-z][a-z0-9+.-]*:\/\/[^\s<>"'`]*/gi, // URLs, any scheme
+  FORGE_KEY, // memoryRefs links the pull request instead
+  REPO_KEY,
+  /\breview\s+(?:the|this)\s+(?:pull|merge)[\s-]+requests?\b/gi, // names no topic: every PR review says it
   /[\p{L}\p{N}._%+-]+@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+/gu, // emails (an `@id` has no local part)
   /(?<![\p{L}\p{N}_.~/-])(?:(?:~|\.{1,2})\/|\/[^\s/]+\/)[^\s"'`<>()[\]{}]*/gu, // ~/..., ./..., ../..., /a/b...
   /(?<![\p{L}\p{N}])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\p{L}\p{N}])/giu, // UUIDs
@@ -150,14 +164,24 @@ function isTermToken(token: string): boolean {
   );
 }
 
-/** Identifiers in a request that link it to streams without keywords: named tasks, bb threads, ticket keys. */
-export type MemoryRefs = { ids: number[]; threads: string[]; tickets: string[] };
+/**
+ * Identifiers in a request that link it to streams without keywords: named tasks, bb threads, ticket keys and
+ * pull requests (`owner/repo#12`).
+ */
+export type MemoryRefs = { ids: number[]; threads: string[]; tickets: string[]; prs: string[] };
 
 /**
- * `cortex show 12`, `cortex memory show 12`, `cortex task 12`, `cortex plan task 12`; group 1 = id. A bare
- * `task 12` is left out: "retry the task 10 times" and a plan's own "Task 12" name unrelated tasks.
+ * `cortex show 12`, `cortex memory show 12`, `cortex task 12`, `cortex plan task 12` (group 1), or `cortex 12`
+ * on one line with two to five digits (group 2), never a count or an amount ("Cortex 3", `cortex 12 tasks`,
+ * `cortex 100%`); neither form takes a version or a number (`cortex 0.103.1`, `cortex 1,280`). A bare `task 12` is
+ * left out: "retry the task 10 times" and a plan's own "Task 12" name unrelated tasks.
  */
-const CORTEX_ID = /\bcortex\s+(?:memory\s+show|show|(?:task|plan|stream)(?:\s+(?:task|plan))?)\s+#?(\d+)\b/gi;
+const CORTEX_ID = new RegExp(
+  String.raw`\bcortex(?:\s+(?:memory\s+show|show|(?:task|plan|stream)(?:\s+(?:task|plan))?)\s+#?(\d+)|` +
+    String.raw`[ \t]+#?(\d{2,5})(?![%\d]|[ \t]+(?:tasks?|times?|minutes?|mins?|hours?|seconds?|secs?|ms|days?|` +
+    String.raw`weeks?|months?|years?|tests?|files?|lines?|items?|threads?|streams?|of)\b))\b(?![.,]\d)`,
+  "gi",
+);
 /** bb thread ids anywhere, thread-storage paths included: `thr_` and 6 to 40 lowercase letters or digits. */
 const THREAD_ID = /(?<![\p{L}\p{N}])thr_[0-9a-z]{6,40}(?![\p{L}\p{N}_])/gu;
 /** Ticket keys such as `LANE-8` or `OTLP-12`: two capital letters first, so never `X86-64` or `Q3-2024`. */
@@ -172,21 +196,29 @@ const REFS_PER_KIND = 10;
 /**
  * The identifiers in raw request text, each kind deduped in first-seen order
  * and capped at REFS_PER_KIND: task ids (`@657` by the ref grammar,
- * `cortex show 657`, `cortex task 657`), bb thread ids (`@thread:thr_…` or a
- * thread-storage path) and ticket keys (`LANE-8`). They resolve exactly, so
- * they read the text before QUERY_NOISE blanks the paths and mentions that
- * carry them; only fenced code, a pasted log or body, is left out.
+ * `cortex 657`, `cortex show 657`, `cortex task 657`), bb thread ids
+ * (`@thread:thr_…` or a thread-storage path), ticket keys (`LANE-8`) and pull
+ * requests as `<repo path>#<number>` (from a forge key, `owner/repo#12` or a
+ * pull or merge request URL). They resolve exactly, so they read the text
+ * before QUERY_NOISE blanks the paths, URLs and mentions that carry them;
+ * only fenced code, a pasted log or body, is left out.
  */
 export function memoryRefs(text: string): MemoryRefs {
   const raw = text.normalize("NFKC").replace(FENCED_CODE, " ");
   const named = [...raw.matchAll(new RegExp(REF_RE.source, REF_RE.flags))].filter(m => m[1] !== undefined);
   const ordered = [...named, ...raw.matchAll(CORTEX_ID)].sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
-  const ids = new Set(ordered.map(m => Number(m[1])).filter(id => id > 0));
+  const ids = new Set(ordered.map(m => Number(m[1] ?? m[2])).filter(id => id > 0));
   const threads = new Set([...raw.matchAll(THREAD_ID)].map(m => m[0]));
   const tickets = new Set<string>();
   for (const m of raw.matchAll(TICKET)) if (!NOT_TICKETS.has(m[1] ?? "")) tickets.add(m[0]);
-  const capped = <T>(found: Set<T>): T[] => [...found].slice(0, REFS_PER_KIND);
-  return { ids: capped(ids), threads: capped(threads), tickets: capped(tickets) };
+  const prs = new Map<string, string>();
+  const keys = [...raw.matchAll(FORGE_KEY), ...raw.matchAll(REPO_KEY), ...raw.matchAll(PR_URL)];
+  for (const m of keys.sort((a, b) => (a.index ?? 0) - (b.index ?? 0))) {
+    const key = `${m[1]}#${Number(m[2])}`;
+    if (!prs.has(key.toLowerCase())) prs.set(key.toLowerCase(), key);
+  }
+  const capped = <T>(found: Iterable<T>): T[] => [...found].slice(0, REFS_PER_KIND);
+  return { ids: capped(ids), threads: capped(threads), tickets: capped(tickets), prs: capped(prs.values()) };
 }
 
 /**
@@ -452,6 +484,7 @@ function linkReason(via: MemoryLink): string {
     case "thread":
       return `thread ${via.key} worked on it`;
     case "ticket":
+    case "pr":
       return `mentions ${via.key}`;
   }
 }

@@ -222,12 +222,14 @@ describe("memory evaluation (plan @422, real-prompt replay)", () => {
     expect(result.hits.map(hit => hit.id).sort()).toEqual([id.a, id.b, id.c].sort());
   });
 
-  test("a URL and an @id in the prompt add no terms", async () => {
+  test("a URL and an @id in the prompt add no terms; a stream citing the same pull request is linked", async () => {
     const result = await search(
-      `see https://github.com/kalindudc/cortex/pull/12 and @${id.b} for the gateway migration`,
+      `see https://github.com/kalindudc/cortex/pull/34 and @${id.b} for the gateway migration`,
       "&boost=cortex",
     );
     noNoise(result);
     expect(result.hits.map(hit => hit.id)).toContain(id.b);
+    const same = await search("see https://github.com/kalindudc/cortex/pull/12 for the gateway migration");
+    expect(same.hits[0]).toMatchObject({ id: id.notes, via: { kind: "pr", key: "kalindudc/cortex#12" } });
   });
 });

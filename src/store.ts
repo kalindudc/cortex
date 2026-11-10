@@ -136,9 +136,10 @@ export type LinkedStream = { id: number; status: TaskStatus; activity: number };
 /**
  * Why a stream is linked to a request without keywords: the request names it (`named`, key = the id), the
  * thread that started the caller's thread worked on it (`parent`, key = its author tag), a thread the request
- * mentions worked on it (`thread`, key = the thread id), or it mentions the request's ticket key (`ticket`).
+ * mentions worked on it (`thread`, key = the thread id), or it mentions the request's ticket key (`ticket`) or
+ * pull request (`pr`, key = `<repo path>#<number>`).
  */
-export type MemoryLink = { kind: "named" | "parent" | "thread" | "ticket"; key: string };
+export type MemoryLink = { kind: "named" | "parent" | "thread" | "ticket" | "pr"; key: string };
 /**
  * One memory-search hit (GET /api/memory/search); `latest` is null when the hit is its own chain head. A linked
  * hit carries `via` (no score, matched terms or snippet) and is listed before the ranked keyword hits.
@@ -2630,14 +2631,24 @@ export class Store {
    * Streams linked to a request by identifiers, never by keywords (src/memory.ts memoryRefs): the `ids` it
    * names, then the streams the `parent` author tag posted to, then those of each thread in `threads` (as
    * author `bb-<thread>`), then streams whose sections mention a ticket key as a phrase (`LANE-8` as
-   * `lane 8`). Each group is newest activity first, and a task is listed once, under its first reason.
+   * `lane 8`), then streams that mention a pull request in `prs` (`owner/repo#12`): a section cites its number
+   * as `#12`, `!12` or `/pull/12`, and the stream's lane is the repo's last path segment or its title or body
+   * names it. Each group is newest activity first, digests (MEMORY_LIMITS.digestLinks outgoing links, any
+   * status) after the rest in the two key groups, since a journal mentions every key of its day; a task is listed
+   * once, under its first reason.
    * Left out: tasks excluded from memory (a named id too: this is a search, not a load by id), `exclude`,
    * other lanes when `lane` filters, and `own` (the caller's own streams) for every reason but a name: a
    * request that names its own stream still gets it. At most `limit`, default MEMORY_LIMITS.linked.
    * Ensures and reconciles the index in the same transaction, like searchMemory.
    */
   memoryLinked(
-    refs: { ids?: readonly number[]; parent?: string; threads?: readonly string[]; tickets?: readonly string[] },
+    refs: {
+      ids?: readonly number[];
+      parent?: string;
+      threads?: readonly string[];
+      tickets?: readonly string[];
+      prs?: readonly string[];
+    },
     opts: { exclude?: readonly number[]; own?: readonly number[]; lane?: string; limit?: number } = {},
   ): MemoryHit[] {
     const limit = clampInt(opts.limit ?? MEMORY_LIMITS.linked, 1, MEMORY_LIMITS.maxHits);
@@ -2664,12 +2675,43 @@ export class Store {
       const mentioning = this.db.query<{ id: number }, [string]>(
         `SELECT t.id FROM tasks t LEFT JOIN _body_edits e ON e.task_id = t.id
           WHERE t.id IN (SELECT task_id FROM _memory_sections WHERE _memory_sections MATCH ?)
-          ORDER BY ${ACTIVITY_SQL} DESC, t.id DESC LIMIT 50;`,
+          ORDER BY (SELECT COUNT(*) FROM _memory_links WHERE task_id = t.id) >= ${MEMORY_LIMITS.digestLinks},
+                   ${ACTIVITY_SQL} DESC, t.id DESC LIMIT 50;`,
       );
       for (const ticket of refs.tickets ?? []) {
         if (full()) break;
         const phrase = quoteTerm(ticket.toLowerCase().split("-").join(" "));
         for (const { id } of mentioning.all(phrase)) add(this.streamRow(id), { kind: "ticket", key: ticket });
+      }
+      const sectionsOf = this.db.query<{ title: string; text: string }, [number]>(
+        `SELECT title, text FROM _memory_sections WHERE rowid BETWEEN
+           (SELECT first_rowid FROM _memory_section_map WHERE task_id = ?1)
+           AND (SELECT last_rowid FROM _memory_section_map WHERE task_id = ?1);`,
+      );
+      // No row cap here: a short number such as `#5` is a common token, and the repo filter is what narrows it.
+      const naming = this.db.query<{ id: number; lane: string; title: string; body: string | null }, [string, string]>(
+        `SELECT t.id, t.lane, t.title, t.body FROM tasks t LEFT JOIN _body_edits e ON e.task_id = t.id
+          WHERE t.id IN (SELECT task_id FROM _memory_sections WHERE _memory_sections MATCH ?1)
+            AND (lower(t.lane) = ?2 OR instr(lower(t.title || char(10) || COALESCE(t.body, '')), ?2) > 0)
+          ORDER BY (SELECT COUNT(*) FROM _memory_links WHERE task_id = t.id) >= ${MEMORY_LIMITS.digestLinks},
+                   ${ACTIVITY_SQL} DESC, t.id DESC;`,
+      );
+      for (const key of refs.prs ?? []) {
+        const pr = /^(.+)#(\d+)$/.exec(key);
+        if (full() || !pr?.[1] || !pr[2]) continue;
+        const repo = (pr[1].split("/").pop() ?? "").toLowerCase();
+        if (!repo) continue;
+        const escaped = repo.replace(/[\\^$.*+?()[\]{}|/]/g, "\\$&");
+        const word = new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, "u");
+        // The number alone is a plain token; only a `#12`, `!12` or `/pull/12` beside it cites the pull request.
+        const cites = new RegExp(`(?:#|!|/pulls?/|/merge_requests/)${pr[2]}(?![\\p{L}\\p{N}])`, "u");
+        for (const row of naming.all(quoteTerm(pr[2]), repo)) {
+          if (full()) break;
+          const names = row.lane.toLowerCase() === repo || word.test(`${row.title}\n${row.body ?? ""}`.toLowerCase());
+          if (names && sectionsOf.all(row.id).some(s => cites.test(s.title) || cites.test(s.text))) {
+            add(this.streamRow(row.id), { kind: "pr", key });
+          }
+        }
       }
       return out;
     })();
