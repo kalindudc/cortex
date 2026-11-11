@@ -66,7 +66,7 @@ function When({ at }: { at: number }) {
     <time
       dateTime={new Date(at).toISOString()}
       title={absoluteTime(at)}
-      className="ml-auto shrink-0 text-[11px] whitespace-nowrap text-subtle-foreground"
+      className="ml-auto shrink-0 text-[11px] whitespace-nowrap text-muted-foreground"
     >
       {relativeTime(at)}
     </time>
@@ -148,7 +148,7 @@ export function ActivityTimeline({ detail }: { detail: CortexTaskDetail }) {
         <li
           key="sync"
           role="separator"
-          className="my-0.5 mb-3.5 ml-8 flex items-center gap-2 text-[11px] text-subtle-foreground before:flex-1 before:border-t before:border-dashed before:border-border after:flex-1 after:border-t after:border-dashed after:border-border"
+          className="my-0.5 mb-3.5 ml-8 flex items-center gap-2 text-[11px] text-muted-foreground before:flex-1 before:border-t before:border-dashed before:border-border after:flex-1 after:border-t after:border-dashed after:border-border"
         >
           Body last synced here · {relativeTime(entry.at)}
         </li>
@@ -162,7 +162,7 @@ export function ActivityTimeline({ detail }: { detail: CortexTaskDetail }) {
     <div>
       {groups.map(group => (
         <section key={group.label} aria-label={group.label}>
-          <h3 className="mb-2 text-[11px] font-semibold tracking-wide text-subtle-foreground uppercase">{group.label}</h3>
+          <h3 className="mb-2 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">{group.label}</h3>
           <ol>{rows(group.items)}</ol>
         </section>
       ))}
@@ -246,7 +246,7 @@ export function Composer({
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
-        <span className="text-[11px] text-subtle-foreground">Posts as you · ⌘↵</span>
+        <span className="text-[11px] text-muted-foreground">Posts as you · ⌘↵</span>
         <span className="flex-1" />
         <Button type="submit" size="sm" className="h-[26px] px-3" disabled={pending || empty}>
           {pending ? "Posting…" : "Post"}

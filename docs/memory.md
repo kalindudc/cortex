@@ -80,7 +80,7 @@ a memory call failed (red), the agent is using a stale stream (yellow, with its 
 running (a spinner). `/memory` opens a panel: health, the streams this session is working on, every stream in
 context and why (session summary, matched your prompt, recalled by the agent) and the session's totals. It ends
 with a legend of the symbols; `r` re-reads memory on the next prompt. In bb the extension steps aside and the Cortex
-plugin's icon and Memory tab show the same states ([docs/bb.md](bb.md#memory-in-the-prompt-box-and-the-memory-tab)).
+plugin's context row and Memory tab show memory activity ([docs/bb.md](bb.md#inspect-or-change-a-threads-context)).
 Only the session you type into writes memory; headless ones (delegated agents, `pi -p` scripts) only read.
 `CORTEX_MEMORY=write|read|off` overrides that for the whole process.
 

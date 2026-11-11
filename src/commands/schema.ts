@@ -33,6 +33,11 @@ const COMMANDS: { name: string; summary: string }[] = [
     name: "update",
     summary: "post an update / change status (--as or bb thread, --json; --as-me only for tools acting for the user)",
   },
+  {
+    name: "workstream",
+    summary:
+      "canonical saved knowledge: list|show|entry|read|history|knowledge; mutate --input JSON (--json); attributed, revision-guarded mutations, candidates require human approval",
+  },
   { name: "watch", summary: "follow changes and reconnect markers (--json)" },
   { name: "edit", summary: "edit title/body/priority/tags (--json; anchor body edits)" },
   { name: "mv", summary: "move a task to a lane (--json)" },
@@ -84,6 +89,9 @@ export default defineCommand({
           columns: ["id", "task_id", "author", "status", "title", "message", "read", "created"],
         },
         memory_exclusions: { columns: ["task_id"] },
+        workstreams: { columns: ["id", "revision", "data"] },
+        knowledge: { columns: ["id", "workstream_id", "revision", "data"] },
+        workstream_revisions: { columns: ["id", "revision", "data"] },
       },
       grammar: {
         taskId: "positive integer, e.g. 42",
@@ -93,6 +101,64 @@ export default defineCommand({
         statuses: STATUSES,
         severities: SEVERITIES,
         priority: "non-negative integer; 0 = highest; unset sorts last",
+      },
+      workstream: {
+        types: "src/workstreams.ts: WorkstreamMutation, Workstream, Knowledge, WorkstreamsApi",
+        actor: { id: "nonempty attribution string", type: ["human", "agent", "system"] },
+        applicability: {
+          environment: "{mode:'value',value:string}|{mode:'not-applicable'}|{mode:'unknown'}",
+          host: "same tagged dimension; unknown is not a wildcard",
+        },
+        source: {
+          ref: "string",
+          excerpt: "optional captured text",
+          authorType: ["human", "agent", "system", "unknown"],
+          observedAt: "ISO UTC timestamp",
+          status: "optional: available|archived|unreachable; caller-reported, not a live check",
+        },
+        common:
+          "Every mutation requires op and actor. Existing IDs require expectedRevision and reason. Unknown fields refuse.",
+        mutations: {
+          create: { required: ["name"], optional: ["description"] },
+          "edit-workstream": {
+            required: ["id", "expectedRevision", "reason"],
+            optional: ["name", "description", "archived"],
+            permission: "human",
+          },
+          propose: {
+            required: ["workstreamId", "subject", "title", "text", "kind", "facet", "applicability", "sources"],
+            optional: ["expiresAt"],
+            result:
+              "candidate only; no-save requires identical normalized text and matching subject, facet, kind, applicability and expiry with no new evidence. Other collisions remain reviewable candidates.",
+          },
+          edit: {
+            required: ["id", "expectedRevision", "reason"],
+            optional: ["title", "text", "facet", "sources", "expiresAt"],
+            result: "new candidate revision; clear approval, protected directive edits require human",
+          },
+          evidence: {
+            required: ["id", "expectedRevision", "reason", "sources"],
+            result: "append distinct evidence without approving or renewing expiry",
+          },
+          transition: {
+            required: ["id", "expectedRevision", "reason", "state"],
+            states: ["approved", "recheck", "archived", "rejected", "forgotten"],
+            permission: "human; forget scrubs stored content, not prior deliveries or archives",
+          },
+          conflict: {
+            required: ["id", "expectedRevision", "reason", "otherId", "otherExpectedRevision"],
+            result: "reciprocal dispute; an agent cannot remove an approved human directive",
+          },
+          supersede: {
+            required: ["id", "expectedRevision", "reason", "otherId", "otherExpectedRevision"],
+            permission: "human; id replaces otherId, same workstream/applicability, no competing subject owner",
+          },
+        },
+        read: "Explicit ID, orientation plus exact topic, approved/applicable/unexpired only; claim-free review notices. No legacy fallback. Consumer grants/budgets/receipts belong to the integration.",
+        trust:
+          "Actor attribution is not authentication. Local single-user API; integrations must derive human approval from trusted user actions.",
+        semanticDeduplication:
+          "Not implemented. Normalized text/subject and shared evidence provide comparison hints only. No scores, automatic merges or promotion.",
       },
       output: {
         json: "every mutating command accepts --json: success prints the resulting object to stdout; errors print { error: { code, message, matches? } } to stdout; exit 0 on success, 1 on error",

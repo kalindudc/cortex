@@ -1,15 +1,16 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
-import { createPortal } from "react-dom";
-import { loadPluginApp, type PluginRpcTestHandlers, renderSlot } from "@get-bb/plugin-sdk/testing/app";
+import { experimental_useAppPanel, useBbNavigate, useSdk, type PluginThreadAction } from "@get-bb/plugin-sdk/app";
+import { loadPluginApp, type PluginRpcTestHandlers, type RenderSlotOptions, renderSlot } from "@get-bb/plugin-sdk/testing/app";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import type { MemoryState, MemoryView } from "./memory";
-import { FOOTER_SELECTOR, placeInFooter, useFooterMount } from "./panel/footer";
 import { MemorySummary } from "./panel/memory";
 import { selectTask } from "./panel/selection";
 import type { rpcContract } from "./server";
 import type { CortexTaskDetail, CortexThreadState } from "./state";
+import type { ThreadContext, Workstream } from "./ui/types";
+import { threadContextSchema } from "./workstream-contract";
 
 const toast = vi.hoisted(() => Object.assign(vi.fn(), { error: vi.fn(), success: vi.fn() }));
 vi.mock("sonner", () => ({ toast }));
@@ -120,12 +121,63 @@ function memoryState(overrides: Partial<MemoryState> = {}): MemoryState {
   };
 }
 
+function threadContext(overrides: Partial<ThreadContext> = {}): ThreadContext {
+  return threadContextSchema.parse({
+    threadId: THREAD,
+    revision: 0,
+    binding: null,
+    bindingRevision: 0,
+    bindingSource: "none",
+    inheritedFrom: null,
+    workstream: null,
+    applicability: { environment: { mode: "not-applicable" }, host: { mode: "not-applicable" } },
+    entries: [],
+    notices: [],
+    exclusions: [],
+    overrides: [],
+    grants: [],
+    exactText: "",
+    estimatedTokens: 0,
+    budgetTokens: 400,
+    status: "unbound",
+    error: null,
+    dismissed: false,
+    dismissedPreference: null,
+    bindingChanged: false,
+    lastReceipt: null,
+    ...overrides,
+  });
+}
+
+function boundContext(overrides: Partial<ThreadContext> = {}): ThreadContext {
+  const workstream: Workstream = {
+    id: "ws_cortex",
+    name: "Cortex",
+    description: "Shared context for Cortex integration tests",
+    revision: 1,
+    archived: false,
+    createdAt: new Date(Date.now() - DAY).toISOString(),
+    updatedAt: new Date(Date.now()).toISOString(),
+    actor: { id: "kal", type: "human" },
+  };
+  return threadContext({
+    revision: 1,
+    binding: { workstreamId: workstream.id, topic: "memory", budgetTokens: 400, requiredKnowledgeIds: [] },
+    bindingRevision: 1,
+    bindingSource: "section",
+    workstream,
+    status: "ready",
+    ...overrides,
+  });
+}
+
 type Handlers = PluginRpcTestHandlers<typeof rpcContract>;
 
 function handlers(state: CortexThreadState = threadState(), overrides: Partial<Handlers> = {}): Handlers {
   const details = new Map<number, CortexTaskDetail>();
   const get = (id: number) => details.get(id) ?? detail(id);
-  return {
+  let dismissed: boolean | null = null;
+  const base: Partial<Handlers> = {
     threadState: () => state,
     task: ({ taskId }) => get(taskId),
     pin: ({ taskId }) => ({ ...state, pinnedTaskId: taskId, focusTaskId: taskId ?? state.focusTaskId }),
@@ -155,29 +207,101 @@ function handlers(state: CortexThreadState = threadState(), overrides: Partial<H
     memory: () => memoryState(),
     taskRows: ({ ids }) => ({ tasks: ids.map(id => ({ id, title: `Stream ${id}`, lane: "cortex", status: "open" })) }),
     setMemoryMode: ({ mode }) => memoryState({ override: mode }),
-    ...overrides,
+    threadContext: ({ threadId }) => threadContext({ threadId, dismissed: dismissed === true, dismissedPreference: dismissed }),
+    contextVisibility: ({ threadIds }) => ({
+      threads: threadIds.map(threadId => ({ threadId, dismissed: dismissed === true, dismissedPreference: dismissed })),
+    }),
+    setContextDismissed: ({ threadId, dismissed: next }) => {
+      dismissed = next;
+      return threadContext({ threadId, dismissed: next === true, dismissedPreference: next });
+    },
+    deliveryReceipts: () => ({ receipts: [], total: 0, limit: 20, offset: 0 }),
   };
+  return { ...base, ...overrides } as Handlers;
 }
-
-/** bb's composer footer: a left group, then the right-hand group ending with the context circle. */
-const COMPOSER_FOOTER =
-  '<div data-follow-up-composer-footer><div>branch</div><div><button aria-label="Context window 49% used">49%</button></div></div>';
-/** Makes the body a thread pane, so a slot rendered into it finds bb's composer footer once it is added. */
-const asPane = () => document.body.setAttribute("data-split-pane-id", "pane-1");
-const addFooter = () => {
-  document.body.insertAdjacentHTML("beforeend", COMPOSER_FOOTER);
-  return document.querySelector(`${FOOTER_SELECTOR} > :last-child`) as HTMLElement;
-};
-const leavePane = () => {
-  document.body.removeAttribute("data-split-pane-id");
-  document.querySelector(FOOTER_SELECTOR)?.remove();
-};
 
 const calls = (slot: { inspection: { rpcCalls: Array<{ method: string; input: unknown }> } }, method: string) =>
   slot.inspection.rpcCalls.filter(call => call.method === method).map(call => call.input);
 
+type ActionTab = Extract<App["tabs"][number], { context: { kind: "thread" }; availability: "action" }>;
+const taskTab = () => app.tabs.find(tab => tab.id === "cortex")! as ActionTab;
+const memoryTab = () => app.tabs.find(tab => tab.id === "cortex-memory")! as ActionTab;
+const contextSegment = () => app.threadContextSegments.find(segment => segment.id === "cortex-context")!;
+const contextCard = () => app.threadContextCardSections.find(section => section.id === "cortex-context")!;
+const tabProps = { threadId: THREAD, environment: null, params: null };
 const panel = (rpc: Handlers = handlers(), params: unknown = null) =>
-  renderSlot(app.threadPanelActions[0]!, { threadId: THREAD, params: params as never }, { rpc });
+  renderSlot(taskTab(), { ...tabProps, params: params as never }, { rpc });
+
+const openCall = (id = "cortex") => ({
+  method: "openTab",
+  options: { tab: { id, context: { kind: "thread" }, availability: "action" } },
+});
+
+const targetThread = {
+  id: THREAD,
+  projectId: "proj_1",
+  parentThreadId: null,
+  parentNotifications: "auto" as const,
+  archivedAt: null,
+  pinnedAt: null,
+  sectionId: null,
+  isUnread: false,
+  status: "idle" as const,
+  environment: null,
+};
+
+function headerAction(rpc: Handlers = handlers(), options: RenderSlotOptions<typeof rpcContract> = {}) {
+  const registration = app.threadActions.find(action => action.id === "cortex-task")!;
+  let item: PluginThreadAction | null = null;
+  function Probe({ threadIds }: { threadIds: readonly string[] }) {
+    const data = registration.useData!({ threadIds });
+    const sdk = useSdk();
+    const navigate = useBbNavigate();
+    const experimental_panel = experimental_useAppPanel();
+    item = registration.item({ thread: targetThread, data, sdk, navigate, experimental_panel });
+    return null;
+  }
+  const slot = renderSlot({ component: Probe }, { threadIds: [THREAD] }, {
+    rpc,
+    experimental_panel: { openTab: () => true },
+    ...options,
+  });
+  return { ...slot, item: () => item, Probe };
+}
+
+const cardProps = { threadId: THREAD, projectId: "proj_1", environment: null };
+const segmentProps = {
+  threadId: THREAD,
+  projectId: "proj_1",
+  environment: null,
+  segments: [],
+  isExpanded: false,
+  onToggle: vi.fn(),
+};
+const memoryIcon = (rpc: Handlers = handlers(), options: RenderSlotOptions<typeof rpcContract> = {}) =>
+  renderSlot({ component: contextSegment().summary }, segmentProps, { rpc, ...options });
+
+function contextSurface(rpc: Handlers = handlers(), options: RenderSlotOptions<typeof rpcContract> = {}) {
+  const registration = contextSegment();
+  function Surface() {
+    const [isExpanded, setExpanded] = useState(false);
+    const props = { ...segmentProps, isExpanded, onToggle: () => setExpanded(value => !value) };
+    const visible = registration.useVisible!(props);
+    const Summary = registration.summary;
+    const Details = registration.details!;
+    return (
+      <section data-testid="context-surface" data-visible={String(visible)}>
+        {visible ? <Summary {...props} /> : null}
+        {visible ? <Details {...props} /> : null}
+      </section>
+    );
+  }
+  return renderSlot({ component: Surface }, {}, {
+    rpc,
+    experimental_panel: { openTab: () => true },
+    ...options,
+  });
+}
 
 /** Radix menus open from the keyboard in jsdom (no pointer events). */
 async function openMenu(trigger: HTMLElement) {
@@ -186,12 +310,22 @@ async function openMenu(trigger: HTMLElement) {
   });
 }
 
-test("registers the Cortex and Memory tabs, the header chip, the memory icon and the message directive", () => {
-  expect(app.threadPanelActions.map(action => [action.id, action.layout])).toEqual([
+test("registers the Cortex and Memory tabs, header action, context segment and card, and message directive", () => {
+  expect(app.tabs.map(tab => [tab.id, tab.layout])).toEqual([
     ["cortex", "flush"],
     ["cortex-memory", "flush"],
   ]);
-  expect(app.threadHeaderActions.map(action => action.id)).toEqual(["cortex-chip", "cortex-memory"]);
+  expect(app.tabs.map(tab => [tab.context, tab.availability])).toEqual([
+    [{ kind: "thread" }, "action"],
+    [{ kind: "thread" }, "action"],
+  ]);
+  expect(app.threadActions.map(action => [action.id, action.placement])).toEqual([
+    ["cortex-task", "header"],
+    ["cortex-context", undefined],
+  ]);
+  expect(app.threadContextSegments.map(segment => segment.id)).toEqual(["cortex-context"]);
+  expect(app.threadContextCardSections.map(section => section.id)).toEqual(["cortex-context"]);
+  expect(app.threadHeaderActions).toEqual([]);
   // Not a prompt-box action: bb mounts only the three most-used plugins' actions there.
   expect(app.composerCustomizations).toEqual([]);
   expect(app.messageDirectives.map(directive => directive.id)).toEqual(["cortex"]);
@@ -204,7 +338,7 @@ describe("header", () => {
     expect(slot.getByText("#plan")).toBeTruthy();
     expect(slot.getByRole("button", { name: /Status: Open/ })).toBeTruthy();
     expect(slot.getByRole("button", { name: /Ready for review/ })).toBeTruthy();
-    expect(slot.getByRole("button", { name: "Fresh" })).toBeTruthy();
+    expect(slot.getByRole("button", { name: "Files unchanged" })).toBeTruthy();
     expect(slot.getByRole("progressbar", { name: "Plan progress" }).getAttribute("aria-valuenow")).toBe("3");
     expect(slot.getByText("3/13 tasks")).toBeTruthy();
     expect(slot.getByText("Updated 4m ago · 4 updates · 2 not yet in the body")).toBeTruthy();
@@ -316,7 +450,7 @@ describe("freshness", () => {
 
   test("fresh has no callout", async () => {
     const slot = panel();
-    await slot.findByRole("button", { name: "Fresh" });
+    await slot.findByRole("button", { name: "Files unchanged" });
     expect(slot.queryByTestId("freshness-callout")).toBeNull();
   });
 });
@@ -493,15 +627,16 @@ describe("switcher and more menu", () => {
     expect(await slot.findByRole("heading", { name: "Title 1" })).toBeTruthy();
     expect(slot.queryByText("excluded from memory")).toBeNull();
     await openMenu(slot.getByRole("button", { name: "More" }));
-    fireEvent.click(await slot.findByRole("menuitem", { name: "Exclude from memory" }));
+    fireEvent.click(await slot.findByRole("menuitem", { name: "Exclude task from automatic memory (all threads)" }));
     await waitFor(() => expect(calls(slot, "setMemoryExcluded")).toEqual([{ threadId: THREAD, taskId: 1, excluded: true }]));
     expect(await slot.findByText("excluded from memory")).toBeTruthy();
-    expect(toast).toHaveBeenCalledWith("#1 is out of agent memory; reading it by id still works");
+    expect(toast).toHaveBeenCalledWith("#1 is out of automatic memory in every thread; reading it by id still works");
     await openMenu(slot.getByRole("button", { name: "More" }));
-    fireEvent.click(await slot.findByRole("menuitem", { name: "Include in memory" }));
+    fireEvent.click(await slot.findByRole("menuitem", { name: "Include task in automatic memory (all threads)" }));
     await waitFor(() => expect(calls(slot, "setMemoryExcluded")).toHaveLength(2));
     expect(calls(slot, "setMemoryExcluded")[1]).toEqual({ threadId: THREAD, taskId: 1, excluded: false });
     await waitFor(() => expect(slot.queryByText("excluded from memory")).toBeNull());
+    expect(toast).toHaveBeenCalledWith("#1 is back in automatic memory in every thread");
   });
 
   test("more: a cortex without memory exclusion offers no memory item", async () => {
@@ -514,8 +649,8 @@ describe("switcher and more menu", () => {
 
   test("more: a refused clipboard write says so", async () => {
     const slot = renderSlot(
-      app.threadPanelActions[0]!,
-      { threadId: THREAD, params: null as never },
+      taskTab(),
+      tabProps,
       { rpc: handlers(), experimental_copyToClipboard: () => Promise.resolve(false) },
     );
     await openMenu(await slot.findByRole("button", { name: "More" }));
@@ -573,7 +708,7 @@ describe("other states", () => {
     }
   });
 
-  test("opens the task named in valid params, offers to link it, and ignores invalid params", async () => {
+  test("restores a legacy task param, offers to link it, and ignores invalid stored params", async () => {
     const slot = panel(handlers(), { taskId: 7 });
     expect(await slot.findByRole("heading", { name: "Title 7" })).toBeTruthy();
     await openMenu(slot.getByRole("button", { name: "More" }));
@@ -600,98 +735,130 @@ describe("other states", () => {
   });
 });
 
-describe("header chip", () => {
-  type Options = { settings?: Record<string, boolean>; compact?: boolean };
-  const header = (index: number, state: CortexThreadState, options: Options) =>
-    renderSlot(
-      app.threadHeaderActions[index]!,
-      { threadId: THREAD, projectId: "proj_1", isCompactViewport: options.compact ?? false },
-      { rpc: handlers(state), ...(options.settings ? { settings: options.settings } : {}) },
-    );
-  const chip = (state: CortexThreadState = threadState(), options: Options = {}) => header(0, state, options);
-  /** The buttons left in the thread header, by accessible name; the memory icon's footer portal is not among them. */
-  const headerButtons = (...slots: Array<ReturnType<typeof chip>>) =>
-    slots.flatMap(slot => within(slot.container).queryAllByRole("button").map(node => node.getAttribute("aria-label")));
-  beforeEach(asPane);
-  afterEach(leavePane);
-
-  test("names the focus task with its status dot and opens the Cortex tab", async () => {
-    addFooter();
-    const slot = chip(threadState());
-    const button = await slot.findByRole("button", { name: /#1 · open/ });
-    expect(button.textContent).toBe("#1 \u00b7 open");
-    expect(button.getAttribute("data-tone")).toBe("ok");
-    expect(button.querySelector("[data-status=open]")).toBeTruthy();
-    fireEvent.click(button);
-    expect(slot.inspection.navigateCalls).toContainEqual({ method: "openThreadPanel", options: { actionId: "cortex" } });
+describe("header task action", () => {
+  test("names the focus task with its status icon and opens the Cortex tab", async () => {
+    const slot = headerAction();
+    await waitFor(() => expect(slot.item()?.label).toBe("#1 · Open"));
+    expect(slot.item()?.detail).toBe("First task");
+    expect(slot.item()?.icon).toBe("Circle");
+    await act(async () => { await slot.item()!.run({ requestRename: vi.fn() }); });
+    expect(slot.inspection.experimental_panelCalls).toEqual([openCall()]);
   });
 
-  test("is muted without a task and warns for blocked or stale focus", async () => {
-    addFooter();
-    const empty = chip(threadState({ links: [], focusTaskId: null }));
-    expect((await empty.findByRole("button", { name: /Cortex: cortex\./ })).getAttribute("data-tone")).toBe("muted");
-    const blocked = chip(threadState({ focusTaskId: 2, health: { kind: "blocked", message: "#2 is blocked" } }));
-    const blockedButton = await blocked.findByRole("button", { name: /#2 · blocked/ });
-    expect(blockedButton.getAttribute("data-tone")).toBe("blocked");
-    expect(blockedButton.querySelector("[data-status=blocked]")).toBeTruthy();
-    const stale = chip(threadState({ health: { kind: "stale", message: "changed: x" } }));
-    expect((await stale.findByRole("button", { name: /changed: x/ })).getAttribute("data-tone")).toBe("stale");
-  });
-
-  test("steps aside for the memory icon while the footer is missing, and comes back with the footer", async () => {
-    const task = chip();
-    const memory = header(1, threadState(), {});
-    await memory.findByRole("button", { name: /^Cortex memory:/ });
-    expect(headerButtons(task, memory)).toEqual([expect.stringMatching(/^Cortex memory:/)]);
-    expect(task.container.querySelector("span")).toBeTruthy();
-    expect(calls(task, "threadState")).toEqual([]);
-    addFooter();
-    await waitFor(() => expect(headerButtons(task, memory)).toEqual([expect.stringMatching(/^Cortex: #1 · open/)]));
-    document.querySelector(FOOTER_SELECTOR)!.remove();
-    await waitFor(() => expect(headerButtons(task, memory)).toEqual([expect.stringMatching(/^Cortex memory:/)]));
-  });
-
-  test("stays without the footer when the memoryChip setting hides the memory icon", async () => {
-    const settings = { memoryChip: false };
-    const task = chip(threadState(), { settings });
-    const memory = header(1, threadState(), { settings });
-    await task.findByRole("button", { name: /#1 · open/ });
-    expect(headerButtons(task, memory)).toEqual([expect.stringMatching(/^Cortex: #1 · open/)]);
-  });
-
-  test("is absent on compact viewports, where the Cortex tab stays in the right panel", async () => {
-    for (const footer of [false, true]) {
-      if (footer) addFooter();
-      const slot = chip(threadState(), { compact: true });
-      await act(async () => {});
-      expect(headerButtons(slot)).toEqual([]);
-      expect(slot.inspection.rpcCalls).toEqual([]);
+  test("is absent without a focus task and represents every status with a label and icon", async () => {
+    const empty = headerAction(handlers(threadState({ links: [], focusTaskId: null })));
+    await waitFor(() => expect(calls(empty, "threadState")).toHaveLength(1));
+    await act(async () => {});
+    expect(empty.item()).toBeNull();
+    empty.lifecycle.unmount();
+    const cases = [
+      ["draft", "Draft", "CircleDot"],
+      ["open", "Open", "Circle"],
+      ["review", "In review", "Eye"],
+      ["blocked", "Blocked", "OctagonPause"],
+      ["done", "Done", "CircleCheck"],
+    ] as const;
+    for (const [status, label, icon] of cases) {
+      const state = threadState({
+        links: [{ ...threadState().links[0]!, status }],
+        health: { kind: "stale", message: "changed: x" },
+      });
+      const slot = headerAction(handlers(state));
+      await waitFor(() => expect(slot.item()?.label).toBe(`#1 · ${label}`));
+      expect(slot.item()?.detail).toBe("First task");
+      expect(slot.item()?.icon).toBe(icon);
       slot.lifecycle.unmount();
     }
   });
 
-  test("is absent when the taskChip setting is off", async () => {
-    addFooter();
-    const slot = chip(threadState(), { settings: { taskChip: false } });
+  test("the context segment never displaces the header's task action", async () => {
+    const task = headerAction();
+    const memory = contextSurface();
+    await waitFor(() => expect(task.item()?.label).toBe("#1 · Open"));
+    expect(await memory.findByText("Memory: nothing loaded yet")).toBeTruthy();
+    memory.lifecycle.unmount();
+    expect(task.item()?.label).toBe("#1 · Open");
+    expect(calls(task, "threadState")).toEqual([{ threadId: THREAD }]);
+  });
+
+  test("the task action remains when the memoryChip setting hides the marker", async () => {
+    const settings = { memoryChip: false };
+    const task = headerAction(handlers(), { settings });
+    const memory = contextSurface(handlers(), { settings });
+    await waitFor(() => expect(task.item()?.label).toBe("#1 · Open"));
+    expect(await memory.findByRole("button", { name: /Cortex memory/ })).toBeTruthy();
+    expect(memory.queryByText(/^Memory:/)).toBeNull();
+    expect(calls(memory, "memory")).toEqual([]);
+  });
+
+  test("the host owns header placement while both pane kinds retain the task action and tab", async () => {
+    expect(app.threadActions.find(action => action.id === "cortex-task")?.placement).toBe("header");
+    for (const threadContextKind of ["banner", "card"] as const) {
+      const slot = headerAction(handlers(), { threadContextKind });
+      await waitFor(() => expect(slot.item()?.label).toBe("#1 · Open"));
+      await act(async () => { await slot.item()!.run({ requestRename: vi.fn() }); });
+      expect(slot.inspection.experimental_panelCalls).toEqual([openCall()]);
+      slot.lifecycle.unmount();
+    }
+    expect(taskTab().availability).toBe("action");
+  });
+
+  test("is absent and skips task reads when the taskChip setting is off", async () => {
+    const slot = headerAction(handlers(), { settings: { taskChip: false } });
     await act(async () => {});
-    expect(headerButtons(slot)).toEqual([]);
+    expect(slot.item()).toBeNull();
     expect(slot.inspection.rpcCalls).toEqual([]);
+  });
+
+  test("refetches listed tasks on matching thread, task, workstream and reconnect signals; releases hidden headers", async () => {
+    const slot = headerAction();
+    await waitFor(() => expect(slot.item()?.label).toBe("#1 · Open"));
+    const count = () => calls(slot, "threadState").length;
+    const before = count();
+    await slot.behavior.emitRealtime("thread", { threadId: "thr_zzzzzzzz" });
+    await slot.behavior.emitRealtime("task", { taskId: 99 });
+    await slot.behavior.emitRealtime("memory", { threadId: THREAD });
+    await slot.behavior.emitRealtime("workstreams", { threadId: "thr_zzzzzzzz" });
+    expect(count()).toBe(before);
+    await slot.behavior.emitRealtime("thread", { threadId: THREAD });
+    await waitFor(() => expect(count()).toBe(before + 1));
+    await slot.behavior.emitRealtime("task", { taskId: 2 });
+    await waitFor(() => expect(count()).toBe(before + 2));
+    await slot.behavior.emitRealtime("workstreams", { threadId: THREAD });
+    await waitFor(() => expect(count()).toBe(before + 3));
+    await slot.behavior.emitRealtime("all", null);
+    await waitFor(() => expect(count()).toBe(before + 4));
+    await slot.behavior.setRealtimeConnectionState("reconnecting");
+    expect(count()).toBe(before + 4);
+    await slot.behavior.setRealtimeConnectionState("connected");
+    await waitFor(() => expect(count()).toBe(before + 5));
+    slot.lifecycle.rerender(<slot.Probe threadIds={[]} />);
+    expect(slot.item()).toBeNull();
+    await slot.behavior.emitRealtime("thread", { threadId: THREAD });
+    await slot.behavior.emitRealtime("all", null);
+    expect(count()).toBe(before + 5);
+  });
+
+  test("a declined header open leaves selection alone and reports why", async () => {
+    const tab = panel();
+    await tab.findByRole("heading", { name: "Title 1" });
+    await act(async () => { selectTask(THREAD, 2); });
+    await tab.findByRole("heading", { name: "Title 2" });
+    const slot = headerAction(handlers(), { experimental_panel: { openTab: () => false } });
+    await waitFor(() => expect(slot.item()?.label).toBe("#1 · Open"));
+    await act(async () => { await slot.item()!.run({ requestRename: vi.fn() }); });
+    expect(slot.inspection.experimental_panelCalls).toEqual([openCall()]);
+    expect(toast.error).toHaveBeenCalledWith("bb could not open the Cortex tab here.");
+    expect(tab.getByRole("heading", { name: "Title 2" })).toBeTruthy();
   });
 });
 
-describe("memory icon", () => {
-  const icon = (rpc: Handlers = handlers(), options: { settings?: Record<string, boolean>; compact?: boolean } = {}) =>
-    renderSlot(
-      app.threadHeaderActions[1]!,
-      { threadId: THREAD, projectId: "proj_1", isCompactViewport: options.compact ?? false },
-      { rpc, ...(options.settings ? { settings: options.settings } : {}) },
-    );
-  afterEach(leavePane);
+describe("memory context marker", () => {
   const withMemory = (memory: MemoryState) => handlers(threadState(), { memory: () => memory });
   const stale = { id: 421, detail: "changed: a.ts" };
-  const button = (slot: ReturnType<typeof icon>) => slot.getByRole("button", { name: /^Cortex memory:/ });
+  const mark = (slot: ReturnType<typeof memoryIcon>) => slot.getByText(/^Memory:/).parentElement!;
 
-  test("its tone follows pi's footer states in the footer's priority, with no text", async () => {
+  test("its tone and accessible text follow the memory-state priority; off hides the marker", async () => {
     const cases: Array<[MemoryState, string, RegExp]> = [
       [memoryState({ view: memoryView({ inContext: [{ id: 1, via: "summary" }] }) }), "info", /1 stream in context/],
       [memoryState(), "info", /nothing loaded yet/],
@@ -699,89 +866,125 @@ describe("memory icon", () => {
       [memoryState({ view: memoryView({ saving: true }) }), "info", /automatic save turn/],
       [memoryState({ view: memoryView({ error: "boom", stale, saving: true }) }), "error", /error: boom/],
       [memoryState({ view: memoryView({ stale, saving: true }) }), "warning", /@421 is stale/],
-      [memoryState({ view: memoryView({ role: "off" }) }), "muted", /off for this thread/],
-      [memoryState({ mode: "off", view: null }), "muted", /off for this thread/],
       [memoryState({ view: null }), "muted", /no agent session since the Cortex plugin loaded/],
     ];
-    for (const [memory, tone, name] of cases) {
-      const slot = icon(withMemory(memory));
-      await waitFor(() => expect(button(slot).getAttribute("aria-label")).toMatch(name));
-      expect(button(slot).getAttribute("data-tone")).toBe(tone);
-      expect(button(slot).textContent).toBe("");
+    for (const [memory, tone, title] of cases) {
+      const slot = memoryIcon(withMemory(memory));
+      await waitFor(() => expect(mark(slot).getAttribute("title")).toMatch(title));
+      expect(mark(slot).getAttribute("data-tone")).toBe(tone);
+      expect(slot.getByText(/^Memory:/).className).toContain("sr-only");
+      expect(mark(slot).querySelector("[aria-hidden]")).toBeTruthy();
+      slot.lifecycle.unmount();
+    }
+    for (const memory of [
+      memoryState({ view: memoryView({ role: "off" }) }),
+      memoryState({ mode: "off", view: null }),
+    ]) {
+      const slot = memoryIcon(withMemory(memory));
+      await waitFor(() => expect(calls(slot, "memory")).toHaveLength(1));
+      await waitFor(() => expect(slot.queryByText(/^Memory:/)).toBeNull());
       slot.lifecycle.unmount();
     }
   });
 
-  test("opens the Memory tab; without the composer footer it stays in the header", async () => {
-    const slot = icon(withMemory(memoryState({ view: null })));
-    const trigger = await slot.findByRole("button", {
-      name: "Cortex memory: no agent session since the Cortex plugin loaded. Open the Memory tab.",
-    });
-    expect(trigger.getAttribute("data-placement")).toBe("header");
-    expect(slot.container.contains(trigger)).toBe(true);
+  test("expands in the public context row and opens the Memory tab from its details", async () => {
+    const slot = contextSurface(withMemory(memoryState({ view: null })));
+    const trigger = await slot.findByRole("button", { name: "Cortex memory. Show details" });
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(slot.queryByRole("button", { name: "Open Memory tab" })).toBeNull();
     fireEvent.click(trigger);
-    expect(slot.inspection.navigateCalls).toContainEqual({
-      method: "openThreadPanel",
-      options: { actionId: "cortex-memory" },
-    });
+    const open = await slot.findByRole("button", { name: "Open Memory tab" });
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(open);
+    expect(slot.inspection.experimental_panelCalls).toEqual([openCall("cortex-memory")]);
   });
 
-  test("a failed read is an error, and loading is muted", async () => {
-    const failing = icon(
-      handlers(threadState(), {
-        memory: () => {
-          throw new Error("cortex is down");
-        },
-      }),
-    );
-    expect(await failing.findByRole("button", { name: /Cortex memory: error: cortex is down/ })).toBeTruthy();
-    expect(button(failing).getAttribute("data-tone")).toBe("error");
+  test("a failed read is an error and loading is muted", async () => {
+    const failing = memoryIcon(handlers(threadState(), {
+      memory: () => { throw new Error("cortex is down"); },
+    }));
+    expect(await failing.findByText("Memory: error: cortex is down")).toBeTruthy();
+    expect(mark(failing).getAttribute("data-tone")).toBe("error");
     failing.lifecycle.unmount();
-    const loading = icon(handlers(threadState(), { memory: () => new Promise(() => {}) }));
-    expect((await loading.findByRole("button", { name: /loading/ })).getAttribute("data-tone")).toBe("muted");
+    const loading = memoryIcon(handlers(threadState(), { memory: () => new Promise(() => {}) }));
+    expect((await loading.findByText("Memory: loading")).parentElement!.getAttribute("data-tone")).toBe("muted");
   });
 
-  test("with the composer footer it sits beside the context circle, on any viewport", async () => {
-    for (const compact of [false, true]) {
-      asPane();
-      const group = addFooter();
-      const slot = icon(handlers(), { compact });
-      await waitFor(() => expect(group.querySelector("[data-cortex-memory-icon] button")).toBeTruthy());
-      expect(button(slot).getAttribute("data-placement")).toBe("footer");
-      expect(within(slot.container).queryByRole("button")).toBeNull();
-      slot.lifecycle.unmount();
-      group.parentElement!.remove();
+  test("uses the banner segment or the card section without a duplicate banner in card panes", async () => {
+    const banner = contextSurface();
+    expect(await banner.findByText("Memory: nothing loaded yet")).toBeTruthy();
+    expect(banner.getByTestId("context-surface").getAttribute("data-visible")).toBe("true");
+    banner.lifecycle.unmount();
+    const segment = contextSurface(handlers(), { threadContextKind: "card" });
+    const card = renderSlot(contextCard(), cardProps, {
+      rpc: handlers(),
+      threadContextKind: "card",
+      experimental_panel: { openTab: () => true },
+    });
+    const row = await card.findByRole("button", { name: /^Nothing loaded yet/ });
+    expect(row.getAttribute("data-icon")).toBe("Brain");
+    expect(row.textContent).toBe("Nothing loaded yet○");
+    expect(segment.getByTestId("context-surface").getAttribute("data-visible")).toBe("false");
+    expect(within(segment.container).queryByRole("button")).toBeNull();
+    fireEvent.click(row);
+    expect(card.inspection.experimental_panelCalls).toEqual([openCall("cortex-memory")]);
+  });
+
+  test("waits for context before showing and unmounts without orphaning a marker", async () => {
+    let release!: (context: ThreadContext) => void;
+    const slot = contextSurface(handlers(threadState(), {
+      threadContext: () => new Promise(resolve => { release = resolve; }),
+    }));
+    await waitFor(() => expect(calls(slot, "threadContext")).toHaveLength(1));
+    expect(slot.getByTestId("context-surface").getAttribute("data-visible")).toBe("false");
+    expect(slot.queryByText(/^Memory:/)).toBeNull();
+    await act(async () => { release(threadContext()); });
+    await slot.findByText("Memory: nothing loaded yet");
+    slot.lifecycle.unmount();
+    expect(document.querySelector("[title='Memory: nothing loaded yet']")).toBeNull();
+  });
+
+  test("hides only the disabled reads and content, including both settings off", async () => {
+    for (const threadContextKind of ["banner", "card"] as const) {
+      const choices: Array<Record<string, boolean>> = [{ memoryChip: false }, { memoryChip: false, taskChip: false }];
+      for (const settings of choices) {
+        const slot = contextSurface(handlers(), { settings, threadContextKind });
+        await waitFor(() => expect(calls(slot, "threadContext")).toHaveLength(1));
+        await act(async () => {});
+        expect(slot.queryByText(/^Memory:/)).toBeNull();
+        expect(calls(slot, "memory")).toEqual([]);
+        if ("taskChip" in settings) {
+          expect(calls(slot, "threadState")).toEqual([]);
+          expect(slot.getByTestId("context-surface").getAttribute("data-visible")).toBe("false");
+        }
+        slot.lifecycle.unmount();
+        const card = renderSlot(contextCard(), cardProps, { rpc: handlers(), settings, threadContextKind });
+        await waitFor(() => expect(calls(card, "threadContext")).toHaveLength(1));
+        await act(async () => {});
+        expect(card.queryByRole("button", { name: /^Nothing loaded yet/ })).toBeNull();
+        expect(calls(card, "memory")).toEqual([]);
+        if ("taskChip" in settings) {
+          expect(calls(card, "threadState")).toEqual([]);
+          expect(card.container.textContent).toBe("");
+        } else {
+          const task = await card.findByRole("button", { name: /^#1 First task/ });
+          expect(task.textContent).toBe("#1 First taskOpen");
+          expect(task.getAttribute("data-icon")).toBe("Circle");
+        }
+        card.lifecycle.unmount();
+      }
     }
   });
 
-  test("on a compact viewport it leaves the header empty and moves into the footer once it appears", async () => {
-    asPane();
-    const slot = icon(handlers(), { compact: true });
-    await act(async () => {});
-    expect(slot.queryByRole("button", { name: /^Cortex memory:/ })).toBeNull();
-    expect(slot.container.querySelector("span")).toBeTruthy();
-    const group = addFooter();
-    await waitFor(() => expect(group.querySelector("[data-cortex-memory-icon] button")).toBeTruthy());
-    expect(button(slot).getAttribute("data-placement")).toBe("footer");
-    group.parentElement!.remove();
-    await waitFor(() => expect(slot.queryByRole("button", { name: /^Cortex memory:/ })).toBeNull());
-    expect(within(slot.container).queryByRole("button")).toBeNull();
-  });
-
-  test("is absent with the memoryChip setting off", async () => {
-    const slot = icon(handlers(), { settings: { memoryChip: false } });
-    await act(async () => {});
-    expect(slot.queryByRole("button")).toBeNull();
-    expect(slot.inspection.rpcCalls).toEqual([]);
-  });
-
-  test("refetches on its own thread's memory signal, a signal for every thread, and reconnects", async () => {
-    const slot = icon();
-    await slot.findByRole("button", { name: /Cortex memory/ });
+  test("refetches only matching memory, all-thread memory, all, and reconnect signals", async () => {
+    const slot = memoryIcon();
+    await slot.findByText("Memory: nothing loaded yet");
     const count = () => calls(slot, "memory").length;
     const before = count();
     await slot.behavior.emitRealtime("memory", { threadId: "thr_zzzzzzzz" });
     await slot.behavior.emitRealtime("thread", { threadId: THREAD });
+    await slot.behavior.emitRealtime("task", { taskId: 1 });
+    await slot.behavior.emitRealtime("workstreams", { threadId: "thr_zzzzzzzz" });
     expect(count()).toBe(before);
     await slot.behavior.emitRealtime("memory", { threadId: THREAD });
     await waitFor(() => expect(count()).toBe(before + 1));
@@ -789,6 +992,10 @@ describe("memory icon", () => {
     await waitFor(() => expect(count()).toBe(before + 2));
     await slot.behavior.emitRealtime("all", null);
     await waitFor(() => expect(count()).toBe(before + 3));
+    await slot.behavior.setRealtimeConnectionState("reconnecting");
+    expect(count()).toBe(before + 3);
+    await slot.behavior.setRealtimeConnectionState("connected");
+    await waitFor(() => expect(count()).toBe(before + 4));
   });
 });
 
@@ -817,7 +1024,7 @@ describe("memory summary", () => {
     expect(card.getByText("Working on #7, #3")).toBeTruthy();
     expect(card.getByText("2 prompts \u00b7 3 lookups, last 120 ms")).toBeTruthy();
     expect(card.getByText("Task #550 \u00b7 In review: Cortex in bb")).toBeTruthy();
-    expect(card.getByText("Click to open the Memory tab")).toBeTruthy();
+    expect(card.queryByRole("button")).toBeNull();
   });
 
   test("a reader lists no work, and off, a missing view or a failed read show only the headline", () => {
@@ -842,82 +1049,63 @@ describe("memory summary", () => {
   });
 });
 
-describe("footer placement", () => {
-  /** A thread pane with bb's composer footer, its context circle, and a header slot to render into. */
-  function pane(withFooter = true) {
-    const root = document.createElement("div");
-    root.setAttribute("data-split-pane-id", "pane-1");
-    root.innerHTML = withFooter ? `<header></header>${COMPOSER_FOOTER}` : "<header></header>";
-    document.body.appendChild(root);
-    const header = root.querySelector("header") as HTMLElement;
-    const group = root.querySelector(`${FOOTER_SELECTOR} > :last-child`) as HTMLElement | null;
-    return { root, header, group };
-  }
-  function Probe() {
-    const [anchor, setAnchor] = useState<HTMLSpanElement | null>(null);
-    const mount = useFooterMount(anchor);
-    const icon = <b data-testid="icon">icon</b>;
-    return <span ref={setAnchor}>{mount === null ? icon : createPortal(icon, mount)}</span>;
-  }
-  /** The group's children by test id (the icon sits inside its mount node), else tag. */
-  const order = (group: HTMLElement) =>
-    Array.from(group.children, child => {
-      const id = child.getAttribute("data-testid") ?? child.firstElementChild?.getAttribute("data-testid");
-      return id ?? child.tagName.toLowerCase();
-    });
-  afterEach(() => {
-    document.body.innerHTML = "";
+describe("public context placement and lifecycle", () => {
+  test("the host's banner and card slots keep context in their own container and clean up on unmount", async () => {
+    const slot = contextSurface();
+    const marker = await slot.findByText("Memory: nothing loaded yet");
+    expect(slot.container.contains(marker)).toBe(true);
+    expect(slot.container.querySelectorAll("[data-tone]")).toHaveLength(1);
+    slot.lifecycle.unmount();
+    expect(document.querySelector("[title='Memory: nothing loaded yet']")).toBeNull();
+    const card = renderSlot(contextCard(), cardProps, { rpc: handlers(), threadContextKind: "card" });
+    const row = await card.findByRole("button", { name: /^Nothing loaded yet/ });
+    expect(card.container.contains(row)).toBe(true);
+    card.lifecycle.unmount();
+    expect(document.body.textContent).not.toContain("Nothing loaded yet");
   });
 
-  test("the icon moves next to the context circle and stays in the header without a footer", async () => {
-    const withFooter = pane();
-    render(<Probe />, { container: withFooter.header });
-    await waitFor(() => expect(order(withFooter.group!)).toEqual(["icon", "button"]));
-    expect(withFooter.header.querySelector("[data-testid=icon]")).toBeNull();
-    cleanup();
-    expect(withFooter.group!.querySelector("[data-cortex-memory-icon]")).toBeNull();
-    const without = pane(false);
-    render(<Probe />, { container: without.header });
-    expect(without.header.querySelector("[data-testid=icon]")).toBeTruthy();
+  test("a remounted context row restores one marker and leaves neighboring controls untouched", async () => {
+    const neighbor = document.createElement("button");
+    neighbor.textContent = "Context window 49% used";
+    document.body.appendChild(neighbor);
+    try {
+      const slot = contextSurface();
+      await slot.findByText("Memory: nothing loaded yet");
+      expect(document.querySelectorAll("[title='Memory: nothing loaded yet']")).toHaveLength(1);
+      fireEvent.click(slot.getByRole("button", { name: "Cortex memory. Show details" }));
+      await slot.findByRole("button", { name: "Open Memory tab" });
+      expect(document.querySelectorAll("[title='Memory: nothing loaded yet']")).toHaveLength(1);
+      expect(neighbor.parentElement).toBe(document.body);
+      slot.lifecycle.unmount();
+      const next = contextSurface();
+      await next.findByText("Memory: nothing loaded yet");
+      expect(document.querySelectorAll("[title='Memory: nothing loaded yet']")).toHaveLength(1);
+      expect(neighbor.parentElement).toBe(document.body);
+      expect(neighbor.textContent).toBe("Context window 49% used");
+    } finally {
+      neighbor.remove();
+    }
   });
 
-  test("a re-rendered footer gets the icon back; a neighbour beside the circle never starts a loop", async () => {
-    const { root, header, group } = pane();
-    render(<Probe />, { container: header });
-    await waitFor(() => expect(order(group!)).toEqual(["icon", "button"]));
-    // Thread Spend keeps its pill right before the circle; the icon stays put, so both settle.
-    const spend = document.createElement("span");
-    spend.setAttribute("data-testid", "spend");
-    group!.insertBefore(spend, group!.lastElementChild);
-    await new Promise(resolve => setTimeout(resolve, 50));
-    expect(order(group!)).toEqual(["icon", "spend", "button"]);
-    // bb replaces the footer: the icon follows into the new one.
-    root.querySelector(FOOTER_SELECTOR)!.remove();
-    root.insertAdjacentHTML(
-      "beforeend",
-      '<div data-follow-up-composer-footer><div></div><div><button aria-label="Context window 50% used">50%</button></div></div>',
-    );
-    const next = root.querySelector(`${FOOTER_SELECTOR} > :last-child`) as HTMLElement;
-    await waitFor(() => expect(order(next)).toEqual(["icon", "button"]));
-  });
-
-  test("placeInFooter only moves a node that is not already in the footer", () => {
-    const { root, group } = pane();
-    const node = document.createElement("span");
-    expect(placeInFooter(node, root)).toBe(true);
-    expect(group!.firstElementChild).toBe(node);
-    group!.appendChild(node);
-    expect(placeInFooter(node, root)).toBe(true);
-    expect(group!.lastElementChild).toBe(node);
-    root.querySelector(FOOTER_SELECTOR)!.remove();
-    expect(placeInFooter(node, root)).toBe(false);
-    expect(node.isConnected).toBe(false);
+  test("collapse and re-expansion keep one summary, without dismissing or moving it", async () => {
+    const slot = contextSurface();
+    const summary = await slot.findByRole("button", { name: "Cortex memory. Show details" });
+    const parent = summary.parentElement;
+    for (let i = 0; i < 2; i++) {
+      fireEvent.click(summary);
+      expect(await slot.findByRole("button", { name: "Open Memory tab" })).toBeTruthy();
+      fireEvent.click(summary);
+      expect(slot.queryByRole("button", { name: "Open Memory tab" })).toBeNull();
+      expect(summary.parentElement).toBe(parent);
+      expect(slot.container.querySelectorAll("[data-tone]")).toHaveLength(1);
+    }
+    expect(calls(slot, "setContextDismissed")).toEqual([]);
   });
 });
 
 describe("Memory tab", () => {
   const tab = (rpc: Handlers = handlers()) =>
-    renderSlot(app.threadPanelActions[1]!, { threadId: THREAD, params: null as never }, { rpc });
+    renderSlot(memoryTab(), tabProps, { rpc, experimental_panel: { openTab: () => true } });
   const busy = memoryState({
     view: memoryView({
       focus: [7],
@@ -931,6 +1119,24 @@ describe("Memory tab", () => {
   });
   const rows = (ids: number[]) => ({
     tasks: ids.map(id => ({ id, title: `Stream ${id}`, lane: id === 9 ? "infra" : "cortex", status: "open" as const })),
+  });
+
+  test("an unbound thread defaults to Task memory; a bound thread defaults to Next context and can switch to tasks and history", async () => {
+    const unbound = tab();
+    await waitFor(() => expect(calls(unbound, "threadContext")).toHaveLength(1));
+    await waitFor(() => expect(unbound.getByRole("tab", { name: "Task memory" }).getAttribute("aria-selected")).toBe("true"));
+    unbound.lifecycle.unmount();
+    const bound = tab(handlers(threadState(), {
+      threadContext: () => boundContext(),
+      memory: () => busy,
+    }));
+    await waitFor(() => expect(bound.getByRole("tab", { name: "Next context" }).getAttribute("aria-selected")).toBe("true"));
+    expect(bound.queryByRole("region", { name: "In context" })).toBeNull();
+    fireEvent.mouseDown(bound.getByRole("tab", { name: "Task memory" }));
+    expect(await within(bound.getByRole("region", { name: "Working on" })).findByRole("button", { name: "Open #7 Stream 7 in the Cortex tab" })).toBeTruthy();
+    fireEvent.mouseDown(bound.getByRole("tab", { name: "Context history" }));
+    await waitFor(() => expect(calls(bound, "deliveryReceipts")).toEqual([{ threadId: THREAD, limit: 20, offset: 0 }]));
+    expect(bound.getByRole("tab", { name: "Context history" }).getAttribute("aria-selected")).toBe("true");
   });
 
   test("shows the health line, Working on, In context with titles and reasons, the totals and the legend", async () => {
@@ -958,7 +1164,20 @@ describe("Memory tab", () => {
     const row = await slot.findByRole("button", { name: "Open #9 in the Cortex tab" });
     expect(row.textContent).toBe("#9recalled by the agent");
     fireEvent.click(row);
-    expect(slot.inspection.navigateCalls).toContainEqual({ method: "openThreadPanel", options: { actionId: "cortex" } });
+    expect(slot.inspection.experimental_panelCalls).toEqual([openCall()]);
+  });
+
+  test("failed task title reads retain ids and reasons rather than inventing rows", async () => {
+    const slot = tab(handlers(threadState(), {
+      memory: () => busy,
+      taskRows: () => { throw new Error("task titles unavailable"); },
+    }));
+    const row = await slot.findByRole("button", { name: "Open #9 in the Cortex tab" });
+    await waitFor(() => expect(calls(slot, "taskRows")).toEqual([{ ids: [7, 9, 8] }]));
+    await act(async () => {});
+    expect(row.textContent).toBe("#9recalled by the agent");
+    expect(slot.queryByText("Stream 9")).toBeNull();
+    expect(within(slot.getByRole("region", { name: "In context" })).getAllByRole("listitem")).toHaveLength(3);
   });
 
   test("look up only has its own health line and no Working on", async () => {
@@ -1025,7 +1244,7 @@ describe("Memory tab", () => {
 });
 
 describe("::cortex card", () => {
-  const card = (attributes: Record<string, string>, openThreadPanel?: () => boolean) =>
+  const card = (attributes: Record<string, string>, openTab?: () => boolean) =>
     renderSlot(
       app.messageDirectives[0]!,
       {
@@ -1034,7 +1253,7 @@ describe("::cortex card", () => {
         message: { id: "msg_1", threadId: THREAD, turnId: null, projectId: "proj_1" },
         openWorkspaceFile: null,
       },
-      { rpc: handlers(), ...(openThreadPanel ? { openThreadPanel } : {}) },
+      { rpc: handlers(), ...(openTab ? { experimental_panel: { openTab } } : {}) },
     );
 
   test("shows the task with its status dot and opens it in the Cortex tab", async () => {
@@ -1043,15 +1262,19 @@ describe("::cortex card", () => {
     expect(slot.getByText("Open · cortex")).toBeTruthy();
     expect(slot.container.querySelector("[data-status=open]")).toBeTruthy();
     fireEvent.click(slot.getByRole("button", { name: "Open" }));
-    expect(slot.inspection.navigateCalls).toContainEqual({ method: "openThreadPanel", options: { actionId: "cortex" } });
+    expect(slot.inspection.experimental_panelCalls).toEqual([openCall()]);
     expect(slot.queryByText(/could not open/)).toBeNull();
   });
 
   test("reports a declined open", async () => {
-    const slot = card({ id: "4" }, () => false);
-    await slot.findByText("Title 4");
-    fireEvent.click(slot.getByRole("button", { name: "Open" }));
-    expect(await slot.findByText(/could not open the Cortex tab/)).toBeTruthy();
+    for (const openTab of [undefined, () => false]) {
+      const slot = card({ id: "4" }, openTab);
+      await slot.findByText("Title 4");
+      fireEvent.click(slot.getByRole("button", { name: "Open" }));
+      expect(await slot.findByText(/could not open the Cortex tab/)).toBeTruthy();
+      expect(slot.inspection.experimental_panelCalls).toEqual([openCall()]);
+      slot.lifecycle.unmount();
+    }
   });
 
   test("rejects an invalid id without calling the server", async () => {
@@ -1065,7 +1288,7 @@ describe("::cortex card", () => {
 });
 
 describe("one Cortex tab", () => {
-  const card = (taskId: number, openThreadPanel: () => boolean = () => true) =>
+  const card = (taskId: number, openTab: () => boolean = () => true) =>
     renderSlot(
       app.messageDirectives[0]!,
       {
@@ -1074,32 +1297,21 @@ describe("one Cortex tab", () => {
         message: { id: `msg_${taskId}`, threadId: THREAD, turnId: null, projectId: "proj_1" },
         openWorkspaceFile: null,
       },
-      { rpc: handlers(), openThreadPanel },
+      { rpc: handlers(), experimental_panel: { openTab } },
     );
-  const memoryTab = () =>
+  const memory = () =>
     renderSlot(
-      app.threadPanelActions[1]!,
-      { threadId: THREAD, params: null as never },
+      memoryTab(),
+      tabProps,
       {
         rpc: handlers(threadState(), {
           memory: () => memoryState({ view: memoryView({ inContext: [{ id: 9, via: "recall" }] }) }),
         }),
-        openThreadPanel: () => true,
+        experimental_panel: { openTab: () => true },
       },
     );
-  /** In a pane with the composer footer, the chip's usual place. */
-  const chip = () => {
-    asPane();
-    addFooter();
-    return renderSlot(
-      app.threadHeaderActions[0]!,
-      { threadId: THREAD, projectId: "proj_1", isCompactViewport: false },
-      { rpc: handlers(), openThreadPanel: () => true },
-    );
-  };
-  afterEach(leavePane);
-  const opens = (...slots: Array<{ inspection: { navigateCalls: Array<{ method: string }> } }>) =>
-    slots.flatMap(slot => slot.inspection.navigateCalls.filter(call => call.method === "openThreadPanel"));
+  const opens = (...slots: Array<{ inspection: { experimental_panelCalls: Array<{ method: string }> } }>) =>
+    slots.flatMap(slot => slot.inspection.experimental_panelCalls.filter(call => call.method === "openTab"));
 
   test("a card, a Memory stream and the chip switch the open tab instead of opening another", async () => {
     const tab = panel();
@@ -1109,19 +1321,20 @@ describe("one Cortex tab", () => {
     fireEvent.click(await fromCard.findByRole("button", { name: "Open" }));
     expect(await tab.findByRole("heading", { name: "Title 4" })).toBeTruthy();
 
-    const fromMemory = memoryTab();
+    const fromMemory = memory();
     fireEvent.click(await fromMemory.findByRole("button", { name: "Open #9 in the Cortex tab" }));
     expect(await tab.findByRole("heading", { name: "Title 9" })).toBeTruthy();
 
-    // The chip names the focus task, so it brings the tab back to following it.
-    const fromChip = chip();
-    fireEvent.click(await fromChip.findByRole("button", { name: /#1 · open/ }));
+    // The header action names the focus task, so it brings the tab back to following it.
+    const fromChip = headerAction();
+    await waitFor(() => expect(fromChip.item()?.label).toBe("#1 · Open"));
+    await act(async () => { await fromChip.item()!.run({ requestRename: vi.fn() }); });
     expect(await tab.findByRole("heading", { name: "Title 1" })).toBeTruthy();
 
     // bb keys a tab by its params and title, so every open must be the same paramless request.
     const all = opens(fromCard, fromMemory, fromChip);
     expect(all).toHaveLength(3);
-    for (const call of all) expect(call).toEqual({ method: "openThreadPanel", options: { actionId: "cortex" } });
+    for (const call of all) expect(call).toEqual(openCall());
   });
 
   test("a tab bb opens for the click shows the chosen task", async () => {

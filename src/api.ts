@@ -260,6 +260,16 @@ export function createApi(send: RequestSender, options: ApiOptions = {}): Cortex
     guard === undefined ? {} : { body: { guard } };
 
   return {
+    workstreams: {
+      entry: id => request("GET", `/api/workstream-entries/${enc(id)}`),
+      knowledge: query =>
+        request("GET", `/api/workstream-knowledge${queryString({ ...query, states: query?.states?.join(",") })}`),
+      list: query => request("GET", `/api/workstreams${queryString({ ...query })}`),
+      show: (id, query) => request("GET", `/api/workstreams/${enc(id)}${queryString({ ...query })}`),
+      read: (id, query) => request("GET", `/api/workstreams/${enc(id)}/context${queryString({ ...query })}`),
+      history: (id, query) => request("GET", `/api/workstream-history/${enc(id)}${queryString({ ...query })}`),
+      mutate: body => request("POST", "/api/workstreams/mutate", { body }),
+    },
     // ---- reads ----
     health: () => request("GET", "/api/health"),
     me: () => request("GET", "/api/me"),

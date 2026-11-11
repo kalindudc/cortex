@@ -55,7 +55,7 @@ function listedFiles(dir: string): string[] {
   return new TextDecoder()
     .decode(listed.stdout)
     .split("\n")
-    .filter(Boolean)
+    .filter(file => file !== "" && fs.existsSync(path.join(ROOT, file)))
     .map(file => file.slice(`${dir}/`.length));
 }
 

@@ -1,15 +1,15 @@
 import { useState } from "react";
-import { type PluginMessageDirectiveProps, useBbNavigate } from "@get-bb/plugin-sdk/app";
+import { experimental_useAppPanel, type PluginMessageDirectiveProps } from "@get-bb/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Icon } from "@/components/ui/icon";
 import { parseTaskId, useTaskDetail } from "./hooks";
-import { openCortexTab } from "./selection";
+import { openTaskTab } from "../ui/panel-tabs";
 import { STATUS_LABEL, StatusDot } from "./status";
 
 /** `::cortex{id="<id>"}` in an assistant reply: a card that opens the task in the Cortex tab. */
 export function CortexCard({ attributes, message }: PluginMessageDirectiveProps) {
-  const navigate = useBbNavigate();
+  const panel = experimental_useAppPanel();
   const taskId = parseTaskId(attributes.id);
   const { detail, error } = useTaskDetail(message.threadId, taskId);
   const [declined, setDeclined] = useState(false);
@@ -21,7 +21,7 @@ export function CortexCard({ attributes, message }: PluginMessageDirectiveProps)
     );
   }
   const open = () => {
-    setDeclined(!openCortexTab(navigate, message.threadId, taskId));
+    setDeclined(!openTaskTab(panel, message.threadId, taskId));
   };
   return (
     <Card className="my-2 flex items-center gap-3 px-3 py-2 text-sm">

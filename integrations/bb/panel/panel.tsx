@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import type { PluginThreadPanelProps } from "@get-bb/plugin-sdk/app";
+import type { ExperimentalThreadActionTabProps } from "@get-bb/plugin-sdk/app";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -70,9 +70,14 @@ function FreshnessPill({ detail, onClick }: { detail: CortexTaskDetail; onClick:
   }
   if (verdict === "fresh") {
     return (
-      <button type="button" onClick={onClick} className={cn(base, "border-success/35 text-success")}>
+      <button
+        type="button"
+        onClick={onClick}
+        title="The task's source files have not changed since its last sync. This does not check that the task is still right."
+        className={cn(base, "border-success/35 text-success")}
+      >
         <Icon name="CircleCheck" className="size-3" aria-hidden />
-        Fresh
+        Files unchanged
       </button>
     );
   }
@@ -189,8 +194,8 @@ function TaskView({
       onDetail(await rpc.call("setMemoryExcluded", { threadId, taskId: task.id, excluded }));
       toast(
         excluded
-          ? `#${task.id} is out of agent memory; reading it by id still works`
-          : `#${task.id} is back in agent memory`,
+          ? `#${task.id} is out of automatic memory in every thread; reading it by id still works`
+          : `#${task.id} is back in automatic memory in every thread`,
       );
     } catch (cause) {
       toast.error(`Could not change memory for #${task.id}: ${errorText(cause)}`);
@@ -361,7 +366,7 @@ function EmptyPanel({ threadId, onLink }: { threadId: string; onLink: (taskId: n
         <TaskSearchField value={query} onChange={setQuery} />
       </div>
       {error !== null ? <p className="mt-2 text-xs text-destructive-text">{error}</p> : null}
-      <p className="mt-4 mb-1.5 text-[11px] font-semibold tracking-wide text-subtle-foreground uppercase">
+      <p className="mt-4 mb-1.5 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
         {query.trim() !== "" ? "Matching tasks" : recent?.lane ? `Recent in ${recent.lane}` : "Recent tasks"}
       </p>
       {query.trim() !== "" && results !== null && results.length === 0 ? (
@@ -377,7 +382,7 @@ function EmptyPanel({ threadId, onLink }: { threadId: string; onLink: (taskId: n
 }
 
 /** The Cortex tab: the thread's tasks, one task's status, body and activity. Never edits a body or title. */
-export function CortexPanel({ threadId, params }: PluginThreadPanelProps) {
+export function CortexPanel({ threadId, params }: ExperimentalThreadActionTabProps) {
   const thread = useThreadState(threadId);
   const requested = panelTaskId(params);
   const chosen = useSelectedTask(threadId);

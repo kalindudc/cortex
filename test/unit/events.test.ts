@@ -14,8 +14,13 @@ const LEGACY_KINDS = [
 ];
 
 describe("event kinds", () => {
-  test("keep every legacy name and add the notification-change and blocked-transition events", () => {
-    expect([...EVENT_KINDS] as string[]).toEqual([...LEGACY_KINDS, "notification.changed", "task.blocked"]);
+  test("keep every legacy name and add notification, blocked-transition and workstream events", () => {
+    expect([...EVENT_KINDS] as string[]).toEqual([
+      ...LEGACY_KINDS,
+      "notification.changed",
+      "task.blocked",
+      "workstream.changed",
+    ]);
   });
 });
 

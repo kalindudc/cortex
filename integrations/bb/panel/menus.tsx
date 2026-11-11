@@ -169,13 +169,13 @@ export function SwitcherMenu({
               {link.id === selected ? (
                 <Icon name="Check" className="size-3.5 text-primary" aria-label="current" />
               ) : (
-                <span className="text-[10.5px] text-subtle-foreground">{link.authored ? "posted here" : "linked"}</span>
+                <span className="text-[10.5px] text-muted-foreground">{link.authored ? "posted here" : "linked"}</span>
               )}
             </DropdownMenuItem>
           ))
         )}
         <DropdownMenuSeparator />
-        <p className="px-2 pt-1 pb-1.5 text-[11px] text-subtle-foreground">Tasks this thread posted to appear on their own.</p>
+        <p className="px-2 pt-1 pb-1.5 text-[11px] text-muted-foreground">Tasks this thread posted to appear on their own.</p>
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -242,7 +242,7 @@ export function MoreMenu({
         {memoryExcluded === null ? null : (
           <DropdownMenuItem onSelect={onToggleMemory}>
             <Icon name="Brain" aria-hidden />
-            {memoryExcluded ? "Include in memory" : "Exclude from memory"}
+            {memoryExcluded ? "Include task in automatic memory (all threads)" : "Exclude task from automatic memory (all threads)"}
           </DropdownMenuItem>
         )}
         {listed === null ? (
@@ -254,7 +254,7 @@ export function MoreMenu({
           <DropdownMenuItem onSelect={onUnlink} disabled={listed.authored}>
             <Icon name="X" aria-hidden />
             Unlink
-            {listed.authored ? <span className="ml-auto text-[11px] text-subtle-foreground">posted here</span> : null}
+            {listed.authored ? <span className="ml-auto text-[11px] text-muted-foreground">posted here</span> : null}
           </DropdownMenuItem>
         )}
       </DropdownMenuContent>

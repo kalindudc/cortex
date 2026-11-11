@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { CortexRunner } from "./cli";
 import type { MemoryMode, MemoryTracker } from "./memory";
 import type { CortexRealtimeChannel, CortexState } from "./state";
+import type { Workstreams } from "./workstreams";
 
 // The cue, limits, patterns and checkpoint text copy src/extensions/pi.ts (injectMemory, shouldCheckpoint,
 // focusFromBash, checkpointPrompt), since the plugin imports no cortex source: change them together.
@@ -253,6 +254,7 @@ export function registerMemoryTurns(
     runner: CortexRunner;
     state: CortexState;
     tracker: MemoryTracker;
+    workstreams?: Workstreams;
     publish: (channel: CortexRealtimeChannel, payload: unknown) => void;
     modeOf(thread: TurnThread): Promise<MemoryMode>;
   },
@@ -283,6 +285,21 @@ export function registerMemoryTurns(
    * hits: its brief already carries the context.
    */
   async function matchTasks(threadId: string, start: RequestStart, limit: number, parent: string | null): Promise<void> {
+    if (deps.workstreams && (deps.workstreams.store.hasBindings() || deps.workstreams.store.tracked(threadId))) {
+      const context = await deps.workstreams.context(threadId);
+      if (context.binding || context.bindingChanged) {
+        if (context.status !== "ready") {
+          tracker.failed(threadId, context.error ?? "Workstream changed; no context was substituted.");
+          changed(threadId);
+          return;
+        }
+        const current = () => threads.get(threadId)?.start?.seq === start.seq && !threads.get(threadId)?.marked;
+        if (!current() || (await bb.sdk.threads.get({ threadId })).status !== "active" || !current()) return;
+        await bb.sdk.threads.send({ threadId, mode: "steer", input: agentOnly(context.exactText) });
+        deps.workstreams.record(context, "match", context.exactText);
+        return;
+      }
+    }
     const { cwd } = await state.locate(threadId);
     // As in pi, a stream the memory summary lists can still match: the hit says it fits this request.
     const seen =
@@ -380,6 +397,10 @@ export function registerMemoryTurns(
   async function checkpoint(thread: TurnThread, entry: ThreadTurn, start: RequestStart): Promise<void> {
     const threadId = thread.id;
     const mode = await deps.modeOf(thread);
+    if (deps.workstreams && (deps.workstreams.store.hasBindings() || deps.workstreams.store.tracked(threadId))) {
+      const context = await deps.workstreams.context(threadId);
+      if (context.binding || context.bindingChanged) return;
+    }
     if (mode !== "write" || (await bb.sdk.threads.queuedMessages.list({ threadId })).length > 0) return;
     const facts = readRequest(await requestRows(threadId, start.seq));
     if (facts.focus.length > 0) {

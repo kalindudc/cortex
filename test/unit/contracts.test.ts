@@ -42,12 +42,12 @@ describe("contracts: zero runtime footprint", () => {
     expect(Object.keys(contracts)).toEqual([]);
   });
 
-  test("every import is type-only and comes from store.ts or events.ts", () => {
+  test("every import is type-only and comes from generic domain or event modules", () => {
     const imports = [...SOURCE.matchAll(/^\s*import\s+(type\s+)?[^;]*?from\s+["']([^"']+)["'];?/gm)];
     expect(imports.length).toBeGreaterThan(0);
     for (const [statement, typeKeyword, specifier] of imports) {
       expect(typeKeyword, `runtime import: ${statement.trim()}`).toBe("type ");
-      expect(["./store.ts", "./events.ts"]).toContain(specifier);
+      expect(["./store.ts", "./events.ts", "./workstreams.ts"]).toContain(specifier);
     }
     // No side-effect imports (`import "x"`) and no dynamic imports either.
     expect(SOURCE).not.toMatch(/^\s*import\s+["']/m);

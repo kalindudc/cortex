@@ -327,7 +327,7 @@ function tokenValues(versions: Versions | null): string[] {
 }
 
 describe("backup excludes private metadata", () => {
-  test("TABLES and the v1 payload are unchanged: no identity, revision or receipt data is exported", async () => {
+  test("source tables include canonical revisions but never private identity, task revision or receipt metadata", async () => {
     const { dbPath, dir, store } = openTmpStore("export-private");
     try {
       const task = store.addTask({ title: "t", tags: ["x"], author: "agent-1" });
@@ -349,12 +349,17 @@ describe("backup excludes private metadata", () => {
         ["task_tags", ["task_id", "tag_name"], null],
         ["notifications", ["id", "task_id", "author", "status", "title", "message", "read", "created"], "id"],
         ["memory_exclusions", ["task_id"], null],
+        ["workstreams", ["id", "revision", "data"], null],
+        ["knowledge", ["id", "workstream_id", "revision", "data"], null],
+        ["workstream_revisions", ["id", "revision", "data"], null],
       ]);
 
       const outPath = path.join(dir, "private.zip");
       await createBackup({ liveDbPath: dbPath, outPath });
       for (const doc of [await exportData(dbPath), unzipJson(outPath)]) {
-        expect(Object.keys(doc).sort()).toEqual(V1_KEYS);
+        expect(Object.keys(doc).sort()).toEqual(
+          [...V1_KEYS, "workstreams", "knowledge", "workstream_revisions"].sort(),
+        );
         expect(Object.keys(doc.tables).sort()).toEqual(TABLES.map(t => t.name).sort());
         const text = JSON.stringify(doc);
         expect(text).not.toContain(store.databaseId());

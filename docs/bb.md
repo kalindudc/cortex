@@ -2,159 +2,149 @@
 budget: 160
 sources: [integrations/bb/server.ts, integrations/bb/state.ts, integrations/bb/watch.ts, integrations/bb/app.tsx,
   integrations/bb/cli.ts, integrations/bb/detail.ts, integrations/bb/memory.ts, integrations/bb/panel/,
-  src/commands/agents.ts, src/commands/update.ts, src/bbPlugin.ts, src/bbPluginSource.ts, src/extensions/pi.ts,
-  src/extensions/memory-view.ts, integrations/bb/turns.ts]
+  integrations/bb/ui/, integrations/bb/workstream-contract.ts, integrations/bb/workstream-cli.ts,
+  integrations/bb/workstream-store.ts, integrations/bb/workstream-rpc.ts, integrations/bb/workstream-agents.ts,
+  integrations/bb/workstreams.ts, src/commands/agents.ts, src/commands/workstream.ts, src/bbPlugin.ts,
+  src/bbPluginSource.ts, src/extensions/pi.ts, integrations/bb/turns.ts]
 ---
 # Cortex in bb
 
-bb is an IDE that runs coding agents in threads. The Cortex bb plugin shows each thread's current task beside the
-conversation, and gives every thread Cortex memory and updates credited to that thread, whatever agent provider it
-runs on. This page covers installing it and what it does, then how it is built and the rules that keep it safe.
+Cortex keeps tasks and shared knowledge available while you work in bb threads. Its page brings together changes
+that need your review, workstreams and saved knowledge. The thread's Cortex and Memory tabs keep task actions and
+context close without requiring one long-lived coordinator conversation.
 
-## Install
+## Install and upgrade
 
-`cortex agents install` installs the plugin when bb is installed and running: it writes the plugin's source, which ships
-inside the cortex binary, to `~/.config/cortex/bb-plugin`, installs its dependencies there with npm, and registers it
-with bb. Run it again after upgrading; it changes only what differs, which `cortex agents status` lists.
-`cortex agents reset` first removes it from bb, which also replaces one installed another way and resets its settings.
+`cortex agents install` writes the plugin embedded in the Cortex binary to `~/.config/cortex/bb-plugin`, installs
+its npm dependencies and registers it with bb. Repeating it changes only what differs; `cortex agents status`
+shows those differences. `cortex agents reset` removes and replaces the plugin, resetting its settings.
 
-The plugin has four settings. The Cortex executable (`cortexPath`), left empty, finds `cortex` on your `PATH`, then in
-`~/bin` and `~/.local/bin`; run `bb plugin reload cortex` after changing it. Agent memory is Automatic by default:
-threads you start look up and save; minions, which have a parent thread, only look up. The other choices are Look up
-and save in every thread, Look up only, and Off; its description says what look up only leaves out. Two switches hide
-the memory icon and the header task chip; these three settings apply without a reload. When cortex is missing or too
-old, the plugin says what to fix and offers no tools; the tabs and chips say the same.
+Workstreams require a Cortex build with `cortex workstream` support and a daemon running that build. An older
+running daemon cannot serve the new commands; stop it with `cortex stop` when you intend to upgrade. Do not point a
+new plugin at a different production database merely to make an unavailable command appear to work.
 
-## What each provider gets
+Settings stay in bb's plugin settings. `cortexPath` selects an executable; an empty value searches PATH, `~/bin`
+and `~/.local/bin`. Reload the plugin after changing it. `memory` controls automatic lookup and saving;
+`taskChip` controls the task shortcut and `memoryChip` the memory status. `contextWidget` chooses whether context
+is shown beside conversations by default. Appearance settings do not grant sharing or erase existing context.
 
-- Every provider, pi, Codex, Claude Code and the rest, gets `cortex_update` and `cortex_recall`, credited to
-  `bb-<thread id>` (the author the CLI uses inside a bb thread), plus short usage notes and the project's memory
-  primer, the summary of recent tasks (see [docs/memory.md](memory.md#how-do-agents-find-memory)). Look up only leaves
-  the primer out; Off also drops `cortex_recall` and its notes, keeping `cortex_update`.
-- Claude Code also gets the four cortex skills from the plugin, because it reads only `~/.claude/skills`; the other
-  providers read the copies `cortex agents install` writes to `~/.agents/skills`. The pi extension steps aside in a bb
-  pi thread, so the plugin brings the tasks matching a message to pi, Claude Code and Codex threads, and the save
-  turn to every thread that looks up and saves; there are no compaction snapshots. A `pi -p` from that thread's shell
-  keeps the extension. A plugin's message (one that opens with a `[tag]` header, like a wake-up) brings none; a
-  minion or workflow agent gets only tasks its brief names and its starting thread's, as the brief has the context.
+## Connect a section to a workstream
 
-bb asks for a thread's tools and instructions when the thread starts and cannot wait for cortex at that moment, so
-the plugin keeps one primer per project in a cache, filled when a thread in that project is created or starts a
-turn, and on startup for running threads. A thread that starts before its project is cached gets only the usage
-notes. Changes reach a provider the next time bb starts its session, never mid-session.
+Create a workstream, then use Bindings to connect a bb section to it. The workstream can span repositories.
+An unsectioned child inherits its starting thread's connection; a deliberate thread-specific connection takes
+precedence. Changing sections changes future context, not the ownership of saved knowledge or text in a running
+agent's conversation. A section is a convenient association, not a security boundary or the memory database.
 
-## The Cortex tab and the header chip
+A blank topic includes the workstream's shared basics. Choosing a topic adds approved knowledge saved under that
+exact topic. Choose a target environment and, where relevant, a target host or cluster explicitly: your development
+checkout and the machine running the agent are not deployment targets. An unknown target is not a wildcard.
 
-Open the tab from the thread's right panel (Cortex) or, except on a phone, by clicking the chip in the thread header;
-the chip, a card in a reply and a Memory stream each switch the thread's one Cortex tab to their task. Its switcher
-lists the tasks this thread posted updates to, whether through `cortex_update` or `cortex update` in its shell, plus
-any task you linked by search or id. The focus task is the one you pinned, or else the most active one. The chip names
-it as `#<id> · <status>` with its status colour, reads plain `cortex` when the thread has no task, and warns when the
-focus task is blocked or stale. Unlinking removes only a link you added: a task the thread posted to stays listed.
+## Review saved knowledge
 
-The header shows the task's status, its freshness and, for a plan, how many Low-Level Tasks were reported done.
-Overview splits the body at its `##` headings and folds a long one to a line per section. Activity is the update
-history, newest first, with a line where the body was last synced; an update from another bb thread links to it.
+New shared knowledge starts as a suggestion, not an approved instruction. Review its wording, applicability and
+sources before approving it. A human-message quote is evidence, not approval. Source authorship and reachability
+are reported metadata; neither a source pointer nor unchanged files proves that a claim is true now.
 
-Click the status pill to pick any status, or take the next step in one click, with Undo in the toast that follows.
-On Activity you can post a note, optionally changing the status in the same step. Both are recorded as you with
-`cortex update --as-me`: credited to you, notifying nobody. A cortex whose `cortex doctor` names no `author`
-predates `--as-me`, so the tab stays read-only and says to update it. The tab never edits a body or title. The More
-menu copies the body and excludes the task from memory or includes it again; the header marks an excluded task.
+Agents can attempt up to ten new suggestions during an active thread run. No-save results and failures count;
+the limit resets when the thread becomes idle. It does not limit your review actions or explicit task updates.
 
-An agent can write `::cortex{id="529"}` on its own line in a reply; bb shows it as a card that opens task 529.
-Stale means the files the task cites changed after its body was last brought up to date
-([docs/memory.md](memory.md#when-is-memory-stale)). The plugin checks this only when the thread's checkout is on the
-bb server's machine; otherwise the tab says it was not checked. Changes from any agent, shell or the desktop app
-appear within moments, and after a reconnect every open tab and chip refetches.
+Keep one accepted source of knowledge rather than saving another summary for each thread. Repeated evidence can
+be attached to existing knowledge. Exact duplicates can produce a no-save result; related suggestions help compare
+and consolidate. They are bounded hints, not a semantic duplicate detector or a confidence score. Different subject
+keys and superficially different sources still need human judgment.
 
-Trying it live changes your bb: `bb plugin dev integrations/bb` rebuilds and reloads on every save. Check behavior
-from a new, separate thread, because bb applies tools and instructions only when it starts a provider session.
+Report competing factual claims as a conflict. Automatic context withholds their actionable wording until review;
+it carries a notice and source references instead. Superseding knowledge is an explicit, revision-checked decision.
+Agent evidence cannot silently cancel a human prohibition. Expired observations also need review: a new observation
+becomes a suggestion and does not put a new timestamp on the old claim.
 
-## Memory in the prompt box and the Memory tab
+Archive keeps knowledge available as history but out of future context. Forget removes its content from the current
+entry and stored revisions while preserving a tombstone. Neither action erases prior exports, backups or text already
+sent to an agent. Forget is not an undoable archive; read the confirmation before using it.
 
-A brain icon beside the context circle under each thread's prompt box, or, except on a phone, in the thread header when
-that row is off screen (the task chip then steps aside), shows memory in pi's footer colours: accent once memory is in
-context, yellow for a stale stream, red after a failed memory call, pulsing while the automatic save turn runs.
-Hovering it summarises the thread's memory and Cortex task, with a bar of where the streams in context came from;
-clicking it opens the Memory tab. The tab shows what pi's `/memory` shows: health, the streams the thread works on,
-every stream in context and why, and the session's totals (what the plugin gave and the agent recalled). The tab's
-menu sets this thread's memory: follow the setting, Look up and save, Look up only, or Off. A change applies when bb
-next starts the thread's agent session. After a plugin reload the tab waits for the thread's next memory event.
+## Inspect or change a thread's context
+
+The Memory tab shows the workstream, topic and targets, what is selected, what stays out and why, and the exact
+text prepared for the thread. The estimate is approximate; if required knowledge is missing or context exceeds its
+budget or the SDK's startup character limit, the preview explains the refusal before sending. Constraints are never
+silently truncated.
+
+Change wording or leave something out for this thread only without modifying the shared knowledge. A shared edit
+is a separate action with a revision check; if someone changed it first, your input stays available for review.
+The existing task action Exclude from automatic memory is task-wide, not a thread-only choice. Direct task reads
+by ID remain possible, and exclusion does not remove text already in a session.
+
+Prepare context inserts a visible draft for you to inspect and send. Preparing a draft is not delivery. A reference
+adds information; it cannot replace a running session's earlier text. Start a fresh thread when a clean context is
+needed. Context history preserves returned recall text and accepted reference sends; it never recomputes old text
+from today's budget or knowledge and never claims that an agent used something merely because it was offered.
+Returning instructions from a configuration callback does not prove the provider received them.
+
+Bound lookup uses the workstream and explicit human grants, without an implicit fallback to legacy or other
+workstream content. Reading an older, unscoped task requires an explicit grant and is labeled historical context.
+Direct shell and Cortex CLI access remain outside this accidental-selection control.
+
+## Keep conversations clear
+
+Collapse context when you want a short summary. Close it when you want it completely out of the conversation;
+the per-thread preference survives reloads. Bring it back from the Cortex thread action or the Memory tab. The
+global default can keep it hidden in new threads without disabling memory. A restored thread can override that
+default, or return to following it. Closing the widget changes presentation only, not the knowledge-sharing policy.
+
+## Work with tasks
+
+Open the Cortex tab from the thread panel, task shortcut or a `::cortex{id="529"}` card in a reply. Its switcher lists
+tasks the thread updated and any manually linked by search or ID. Pin a focus task or follow the most active one.
+A task the thread posted to cannot be unlinked; removing a manual link does not delete the task.
+
+Overview folds the body at headings; Activity shows updates and their source threads. Change status or take the
+next step with Undo, and post a note with an optional status change. These writes use your Cortex author. The More
+menu copies the body or a command to open the desktop task, and includes task-wide automatic-memory exclusion.
+The plan progress and source-file checks remain available; Files unchanged is not a factual verification badge.
+
+## What agents receive
+
+Unbound threads retain Cortex's ordinary memory behavior. Under Automatic, threads you start look up and save;
+children look up without a general primer or automatic save turn. Look up only omits those writes; Off omits
+automatic lookup and recall. Existing explicit `cortex_update` access remains available in all modes.
+
+Startup context contains short claims, approval, scope and source references, not captured evidence excerpts.
+An explicit scoped recall can return the selected knowledge's full captured evidence within the output budget.
+
+Bound threads receive scoped context and can propose sourced findings or report corrections; they cannot approve
+or grant sharing through these agent tools. Their scope comes from the executing thread, not caller-supplied
+workstream or actor fields. Claude Code receives the Cortex skills from the plugin; other providers read their
+installed skills. The pi extension steps aside in a bb thread so memory is not injected twice.
 
 ## Under the hood
 
-The plugin is its own npm package in `integrations/bb/`, with its own lockfile and Vitest tests, so the Git
-subdirectory installs on its own. It runs inside the bb server's Node process and reads cortex only by running the
-`cortex` CLI, so the rules for tasks, memory and staleness stay in cortex. Packages bb provides at runtime (React,
-the SDK, portaling Radix components) are type-only development dependencies; zod and the other UI pieces are bundled.
+The independent npm package is `integrations/bb/`; it uses only the public SDK, Node and declared dependencies.
+It reads canonical tasks and workstream knowledge through the Cortex CLI, never through Cortex's database.
+`src/bbPluginSource.ts` embeds the source at build time; its tests compare the embedded files with that source.
+Run the final root build and tests only after plugin writers stop, so that comparison is meaningful.
 
-- The binary embeds the plugin through a Bun macro (`src/bbPluginSource.ts#embeddedBbPlugin`), which reads the files
-  as text at bundle time, so the root typecheck never compiles them. Why not install from git, or the checkout? Git
-  needs the plugin pushed and installs what the remote holds; a checkout path breaks when its branch changes.
-- `./integrations/bb/cli.ts#createCortexRunner` runs each command with `execFile` and an argument array, never a shell,
-  with a short timeout (`./integrations/bb/cli.ts#DEFAULT_TIMEOUT_MS`), the caller's abort signal and typed
-  `./integrations/bb/cli.ts#CortexCliError` failures. JSON output is validated before use, and an `{ error }` envelope
-  fails even on exit 0. `./integrations/bb/cli.ts#verifyCortexFeatures` gates loading on `watch` and author streams.
-- `./integrations/bb/state.ts#createCortexState` merges `memory streams --author=bb-<thread> --with-excluded` with
-  the manual links kept in this plugin's thread metadata, validated field by field on every read. Pin, link and
-  unlink run one at a time per thread. A task's `show` and `memory show` are cached briefly
-  (`./integrations/bb/state.ts#CACHE_MS`) and shared by every chip and tab, so a change costs one CLI round per task.
-- A checkout is local when its environment's host is bb's primary host. Otherwise `memory show` runs in the OS temp
-  directory, which is never a checkout, and staleness is reported as unverifiable.
-- `cortex memory context --json` returns the lane and the primer in one call. A watch event refreshes, after a short
-  debounce, the primers of the task's lane and any that list the task; a removed task refreshes all of them.
-- `./integrations/bb/server.ts#instructionsFor` caps usage plus primer at bb's 4,096-character instruction limit.
-  The configure callback is synchronous, so a cache miss never runs the CLI.
-- `cortex_recall` returns the text `cortex memory show` or `cortex memory search` prints, as the pi extension does
-  (`./integrations/bb/server.ts#recall`). Why not render it from JSON? That copies cortex's renderer, which drifts.
-- `./integrations/bb/watch.ts#registerCortexWatch` follows `cortex watch --json` with `spawn`, because `execFile`
-  buffers a stream that never ends. `./integrations/bb/watch.ts#routeCortexEvent` drops cached reads before it
-  publishes, so a refetch never reads a stale copy.
-- The frontend reads data only over the plugin's RPC methods and refetches on the `thread`, `task`, `memory` and `all`
-  realtime signals (`./integrations/bb/state.ts#CortexRealtimeChannel`). A write drops the task's cached reads and
-  publishes both signals; the tab applies a status change at once and reverts it if the write fails.
-- In bb's own pi, `src/extensions/pi.ts#shouldStepAside` finds the plugin's `cortex_update` in the tools file bb
-  writes (`PI_BB_TOOLS_FILE`), as the quests and minions packages do, and the extension registers nothing.
-- `./integrations/bb/turns.ts#registerMemoryTurns` reads each request from bb's events, steers matching tasks in as an
-  agent-only message only where the bridge injects a steer (an ACP steer cancels the prompt), and starts pi's checkpoint
-  with mode "start"; it copies `src/extensions/pi.ts#injectMemory` and `src/extensions/pi.ts#checkpointPrompt`. A
-  started thread's lookup gets its starter (`./integrations/bb/turns.ts#startedBy`) as `--parent`. Save-turn focus is
-  the streams the thread wrote to, in this process or else read once from `cortex memory streams --author`.
-- The binary embeds `src/skills/` as the plugin's `skills/` (`src/bbPluginSource.ts#embeddedBbPlugin`), and
-  `./integrations/bb/server.ts#skillsFor` selects only the skills `./integrations/bb/server.ts#pluginSkillNames`
-  found in the install directory, since bb fails a configure that names an unknown skill.
-- `./integrations/bb/memory.ts#effectiveMode` picks the mode: the thread's choice, else the setting.
-- `./integrations/bb/memory.ts#createMemoryTracker` builds each thread's view
-  (`./integrations/bb/memory.ts#memoryViewSchema`) from configure and the tools; the `memory` RPC runs no CLI.
-- The icon is a header action, since bb mounts only its three most-used plugins' prompt-box actions;
-  `./integrations/bb/panel/footer.ts#useFooterMount` moves it beside the context circle, as Thread Spend does. It
-  never moves a node already there, so two plugins beside the circle never loop.
-- bb names a panel tab by its params, so every opener calls `./integrations/bb/panel/selection.ts#openCortexTab`: it
-  opens the one tab without params, then sets its task in memory shared by every slot, so a reload shows the focus
-  task. Why not a tab per task, as bb's Tasks plugin does? The tab's switcher already lists the thread's tasks.
-- Plan progress copies the Herdr label's rule (`./integrations/bb/detail.ts#planProgress`); the body splitter
-  (`./integrations/bb/panel/sections.ts#splitSections`) ignores `##` lines inside fenced code, as in plan bodies.
+- `workstream-contract.ts` validates RPC and CLI boundaries. `workstream-cli.ts` uses the current-entry command for
+  canonical knowledge, not the oldest history revision. JSON mutations use stdin and `--input=-`.
+- `workstream-store.ts` stores bb-specific bindings, preferences, grants and frozen context history. It does not
+  duplicate the canonical knowledge database. `workstreams.ts` composes eligible context and thread-only changes.
+- `workstream-agents.ts` prepares scope at dispatch, uses a synchronous configuration cache and registers read/propose
+  tools. Session construction and provider delivery are distinct; the plugin does not claim hot system-prompt updates.
+- `cli.ts` runs argument arrays with timeouts and cancellation, validates JSON and throws on every tool failure.
+  `state.ts` retains task links, source checks and the ordinary project primer cache; `watch.ts` invalidates reads.
+- `turns.ts` retains cued/first-user lookup, the narrower starting-thread path for children, and at most one save turn
+  per eligible request. Workstream routing does not rewrite generic Cortex memory ranking.
+- `app.tsx`, `ui/` and `panel/` use host tabs, navigation and context surfaces. Their RPC invalidations distinguish
+  task, memory and workstream changes. All user-facing styling follows the host theme.
 
 ## Rules to keep
 
-- The plugin imports only the public bb SDK, zod, Node and its own files, never cortex's source:
-  `./integrations/bb/server.test.ts` (public SDK scan).
-- Every provider gets both tools (only `cortex_update` with memory off) and the instructions, which stay within the
-  limit without running the CLI; only Claude Code gets the skills, and nobody while Cortex is unavailable:
-  `./integrations/bb/server.test.ts`. Minions look up only by default: `./integrations/bb/memory.test.ts`. Matching
-  tasks need a user's cued or first request with no `[tag]` header (a started thread's go by `--parent`), and a
-  request gets one save turn at most: `./integrations/bb/turns.test.ts`, `./integrations/bb/server.test.ts`.
-- The extension registers nothing in bb's RPC-mode pi when bb bridges `cortex_update`:
-  `test/unit/extensions-pi.test.ts`. The icon and the chip follow their settings, the icon never moves a node already
-  in the footer, and every opener reuses the one Cortex tab: `./integrations/bb/app.test.tsx` (one Cortex tab).
-- Tool failures throw, `cortex_recall` keeps the pi extension's per-request budget, and every tool argument, RPC
-  input, metadata value and CLI output is validated: `./integrations/bb/server.test.ts`, `./integrations/bb/cli.test.ts`.
-- Staleness is checked only for a checkout on the bb server's own machine: `./integrations/bb/server.test.ts`.
-- The tab never edits a task's body or title; its only task writes are memory exclusion and, only when doctor
-  reports `author`, status changes and notes through `cortex update --as-me`, which never notify:
-  `./integrations/bb/server.test.ts` (writes as the user), `test/integration/cli/as-me.test.ts`.
-- `cortex agents install` never changes the plugin's settings or touches a plugin bb installed from git or npm, and
-  no test runs the real bb or npm (`CORTEX_BB_CLI=""` in every test env): `test/integration/cli/agents-bb.test.ts`,
-  `test/integration/isolation.test.ts`.
-- `pnpm run test:bb` runs the plugin's tests and typecheck after `npm ci --prefix integrations/bb`; CI does not run it.
+- No production database, real bb mutation or real npm invocation in tests; use temporary data and fakes:
+  `test/integration/isolation.test.ts`, `test/integration/cli/agents-bb.test.ts`.
+- Keep generic discovery and child behavior, bounded recall and explicit updates:
+  `integrations/bb/server.test.ts`, `integrations/bb/turns.test.ts`, `integrations/bb/memory.test.ts`.
+- Preserve current-state reads, source-role distinctions, approval/CAS and applicability guards:
+  `test/unit/workstreams.test.ts`, `test/unit/workstreams-api.test.ts`, `test/integration/cli/workstreams.test.ts`.
+- Test the CLI boundary, scope, context refusal, historical receipts and persistent visibility:
+  `integrations/bb/workstreams.test.ts`, `integrations/bb/cli.test.ts`, `integrations/bb/app.test.tsx`.
+- `pnpm run test:bb` runs the plugin tests and typecheck after its npm dependencies are installed. The root suite
+  does not substitute for the independent plugin tests, and neither proves live provider lifecycle behavior.

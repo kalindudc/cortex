@@ -8,6 +8,7 @@
  */
 
 import type { EventKind } from "./events.ts";
+import type { WorkstreamsApi } from "./workstreams.ts";
 import type {
   Lane,
   MemoryHit,
@@ -438,6 +439,7 @@ export interface VersionedWrites {
 
 /** The full typed client (desktop app and CLI): ApiClient plus snapshots and versioned writes. */
 export interface CortexClient extends ApiClient {
+  readonly workstreams: WorkstreamsApi;
   health(): Promise<HealthResponse>;
   me(): Promise<{ author: string }>;
   workspace(): Promise<WorkspaceSnapshot>;

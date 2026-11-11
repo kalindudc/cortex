@@ -74,6 +74,13 @@ describe("resolveCortexBinary", () => {
 });
 
 describe("runner.run", () => {
+  test("streams JSON mutation input on stdin without placing it in argv", async () => {
+    const runner = await createCortexRunner(executable(tempDir(), `let input = ""; process.stdin.setEncoding("utf8"); process.stdin.on("data", chunk => input += chunk); process.stdin.on("end", () => process.stdout.write(JSON.stringify({ input, argv: process.argv.slice(2) })));`));
+    const input = JSON.stringify({ text: "x".repeat(200000) });
+    const result = await runner.run(["workstream", "mutate", "--input", "-", "--json"], z.object({ input: z.string(), argv: z.array(z.string()) }), { input });
+    expect(result.input).toBe(input);
+    expect(result.argv).toEqual(["workstream", "mutate", "--input", "-", "--json"]);
+  });
   test("passes the exact argv and cwd, and returns the validated JSON", async () => {
     const f = fake({ context: { lane: "cortex", primer: "P" } });
     const runner = await createCortexRunner(f.binary);

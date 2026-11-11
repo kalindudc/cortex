@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
 
-export type CortexRunOptions = { cwd?: string; signal?: AbortSignal; timeoutMs?: number };
+export type CortexRunOptions = { cwd?: string; signal?: AbortSignal; timeoutMs?: number; input?: string };
 
 export type CortexRunner = {
   binary: string;
@@ -84,7 +84,7 @@ export async function createCortexRunner(
   function exec(args: readonly string[], options: CortexRunOptions): Promise<string> {
     const what = `cortex ${args.slice(0, 2).join(" ")}`;
     return new Promise<string>((resolve, reject) => {
-      execFile(
+      const child = execFile(
         binary,
         [...args],
         {
@@ -115,6 +115,10 @@ export async function createCortexRunner(
           }
         },
       );
+      child.stdin?.on("error", error => {
+        if ((error as NodeJS.ErrnoException).code !== "EPIPE") reject(error);
+      });
+      child.stdin?.end(options.input);
     });
   }
 

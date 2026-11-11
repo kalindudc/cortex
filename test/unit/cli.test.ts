@@ -30,6 +30,7 @@ const EXPECTED_SUBCOMMANDS = [
   "backup",
   "restore",
   "memory",
+  "workstream",
   "agents",
   "app",
 ] as const;

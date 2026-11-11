@@ -8,6 +8,9 @@ import { BACKUP_NOTIFICATION_TITLE } from "./lib/constants.ts";
 import pkg from "../package.json" with { type: "json" };
 
 export type BackupStats = {
+  workstreams?: number;
+  knowledge?: number;
+  workstream_revisions?: number;
   lanes: number;
   tags: number;
   tasks: number;
@@ -18,6 +21,9 @@ export type BackupStats = {
 };
 
 export type BackupDoc = {
+  workstreams?: Record<string, unknown>[];
+  knowledge?: Record<string, unknown>[];
+  workstream_revisions?: Record<string, unknown>[];
   format: "cortex-backup";
   format_version: 1;
   cortex_version: string;
@@ -39,6 +45,9 @@ export type BackupDoc = {
 export type CreateBackupOpts = { liveDbPath: string; outPath: string; rotate?: number };
 export type RestoreOpts = { backupPath: string; liveStore: Store };
 export type RestoreCounts = {
+  workstreams?: number;
+  knowledge?: number;
+  workstreamRevisions?: number;
   lanes: { new: number; existing: number };
   tags: { new: number; existing: number };
   tasks: { preserved: number; bumped: number };
@@ -56,7 +65,16 @@ export type DryRunResult = {
 type TableSpec = {
   name: keyof Pick<
     BackupDoc,
-    "lanes" | "tags" | "tasks" | "updates" | "task_tags" | "notifications" | "memory_exclusions"
+    | "lanes"
+    | "tags"
+    | "tasks"
+    | "updates"
+    | "task_tags"
+    | "notifications"
+    | "memory_exclusions"
+    | "workstreams"
+    | "knowledge"
+    | "workstream_revisions"
   >;
   columns: readonly string[];
   idColumn: string | null;
@@ -81,6 +99,9 @@ export const TABLES: ReadonlyArray<TableSpec> = [
   },
   // The user's memory choices travel with the data; an older database or archive has none.
   { name: "memory_exclusions", columns: ["task_id"], idColumn: null, optional: true },
+  { name: "workstreams", columns: ["id", "revision", "data"], idColumn: null, optional: true },
+  { name: "knowledge", columns: ["id", "workstream_id", "revision", "data"], idColumn: null, optional: true },
+  { name: "workstream_revisions", columns: ["id", "revision", "data"], idColumn: null, optional: true },
 ] as const;
 
 const FORMAT_VERSION = 1;
@@ -173,6 +194,9 @@ function normalisedStats(doc: Record<string, unknown>): BackupStats {
     task_tags: Number(stats.task_tags ?? rowArray(doc, "task_tags").length),
     notifications: Number(stats.notifications ?? rowArray(doc, "notifications").length),
     memory_exclusions: Number(stats.memory_exclusions ?? rowArray(doc, "memory_exclusions").length),
+    workstreams: rowArray(doc, "workstreams").length,
+    knowledge: rowArray(doc, "knowledge").length,
+    workstream_revisions: rowArray(doc, "workstream_revisions").length,
   };
 }
 
@@ -202,6 +226,9 @@ function validateDoc(raw: unknown): BackupDoc {
     task_tags: rowArray(doc, "task_tags"),
     notifications: rowArray(doc, "notifications"),
     memory_exclusions: rowArray(doc, "memory_exclusions"),
+    workstreams: rowArray(doc, "workstreams"),
+    knowledge: rowArray(doc, "knowledge"),
+    workstream_revisions: rowArray(doc, "workstream_revisions"),
   };
 }
 
@@ -377,6 +404,9 @@ export async function exportData(liveDbPath: string): Promise<BackupDoc> {
         task_tags: [],
         notifications: [],
         memory_exclusions: [],
+        workstreams: [],
+        knowledge: [],
+        workstream_revisions: [],
       };
       const tables: Record<string, string[]> = {};
       const stats = emptyStats();
@@ -661,6 +691,7 @@ export async function restoreBackup(opts: RestoreOpts): Promise<{ idMap: Map<num
       insertTaskTags(db, extracted.doc, counts, taskTagColumns, idMap, touched);
       insertNotifications(db, extracted.doc, counts, notificationColumns, idMap);
       insertMemoryExclusions(db, extracted.doc, counts, exclusionColumns, idMap);
+      Object.assign(counts, opts.liveStore.restoreWorkstreamRows(extracted.doc));
       stampRestored(opts.liveStore, idMap, touched);
       return { idMap, counts };
     });
@@ -728,6 +759,13 @@ function readDestination(store: Store): RestoreDestination {
 export function projectRestore(doc: BackupDoc, destination: Store | null): DryRunResult {
   const dest = destination === null ? freshDestination() : readDestination(destination);
   const counts = emptyCounts();
+  if (destination) Object.assign(counts, destination.restoreWorkstreamRows(doc, false));
+  else
+    Object.assign(counts, {
+      workstreams: doc.workstreams?.length ?? 0,
+      knowledge: doc.knowledge?.length ?? 0,
+      workstreamRevisions: doc.workstream_revisions?.length ?? 0,
+    });
   for (const row of doc.lanes) {
     const name = asString(row, "name");
     if (!name) continue;

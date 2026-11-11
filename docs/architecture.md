@@ -1,7 +1,7 @@
 ---
 budget: 250
 sources: [src/cli.ts, src/daemon.ts, src/commands/serve.ts, src/server.ts, src/api.ts, src/client.ts, src/contracts.ts,
-  src/subscription.ts, src/events.ts, src/ownership.ts, src/paths.ts, src/store.ts, src/backup.ts]
+  src/subscription.ts, src/events.ts, src/ownership.ts, src/paths.ts, src/store.ts, src/backup.ts, src/workstreams.ts]
 ---
 
 # How cortex works
@@ -149,10 +149,21 @@ the next command or daemon takes over and cleans up after it. For you, this mean
 
 ### Tables and migrations
 
+- Canonical workstreams and saved knowledge use additive source tables, not legacy tasks. `cortex workstream --help`
+  and `cortex schema --json` describe the JSON interface. `src/workstreams.ts#WorkstreamMutation` requires actor
+  attribution and expected revisions; approval and supersession require explicit human intent, not a source quote.
+  Source author labels are reported metadata, not verified human truth. This is provenance, not authentication.
+  `src/store.ts#mutateWorkstream` commits history with each write.
+- `src/store.ts#readWorkstream` selects approved, applicable, unexpired orientation and exact-topic knowledge;
+  disputed or expired findings become claim-free notices. It never searches legacy tasks or another workstream.
+  Human-review hints use an indexed recent-neighbor sample bounded by `src/workstreams.ts#REVIEW_HINT_LIMITS`;
+  No-save requires matching normalized text and subject, facet, kind, applicability and expiry with no new evidence; hints alone never discard proposals.
+- Backups include canonical history. `src/store.ts#restoreWorkstreamRows` refuses changed-ID collisions rather than
+  overwriting approvals. Forget scrubs current and historical claim content, not old exports or delivered context.
 - Source tables are exactly `src/backup.ts#TABLES`. The rest are private `_*` tables: database identity, resource
   revisions, mutation receipts, applied migration names, body-edit records, the derived memory index. Concurrency
   metadata lives there, never in source-table columns, so row selects stay clean, whole-row rebuilds keep working
-  and the data-only backup never sees it. Only `cortex reset`, which deletes the file, wipes them.
+  and the data-only backup never sees task concurrency metadata. Canonical knowledge revisions are source data.
 - Additive schema is `CREATE ... IF NOT EXISTS` in `src/store.ts#migrate`, one transaction on every writable open, with
   no schema version number. Rebuilds are named, detected by DDL inspection in `src/store.ts#pendingMigrations` (fresh
   databases are seeded as applied) and run only by `src/store.ts#applyMigrations`, each behind a VACUUM INTO backup.
@@ -234,5 +245,6 @@ the next command or daemon takes over and cleans up after it. For you, this mean
   runtime globals: `test/unit/api.test.ts`. Output past a pipe buffer: `test/integration/cli/large-output.test.ts`.
 - Unit tests never use the integration helpers or spawn the binary, and no test touches the real config dir:
   `test/unit/_layout.test.ts`, `test/integration/isolation.test.ts`.
+- Canonical knowledge and CLI: `test/unit/workstreams.test.ts`, `test/unit/workstreams-api.test.ts`, `test/integration/cli/workstreams.test.ts`.
 - Memory: `test/unit/store-memory.test.ts`,
   `test/unit/extensions-pi.test.ts`, `test/unit/memory-eval.test.ts`. Docs: `scripts/check-docs.ts`.

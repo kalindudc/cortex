@@ -1,11 +1,5 @@
 import { type ReactNode, useState } from "react";
-import { createPortal } from "react-dom";
-import {
-  type PluginThreadHeaderActionProps,
-  type PluginThreadPanelProps,
-  useBbNavigate,
-  useSettings,
-} from "@get-bb/plugin-sdk/app";
+import { type ExperimentalThreadActionTabProps, experimental_useAppPanel } from "@get-bb/plugin-sdk/app";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,7 +9,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Icon } from "@/components/ui/icon";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import {
   effectiveMode,
@@ -28,13 +22,13 @@ import {
   ROLE_LABEL,
 } from "../memory";
 import type { CortexTaskRow } from "../state";
-import { useFooterMount } from "./footer";
-import { errorText, useCortexRpc, useMemory, useTaskRows, useThreadState } from "./hooks";
+import { useThreadContext } from "../ui/data";
+import { openTaskTab } from "../ui/panel-tabs";
+import { FailureNotice, LoadingRows } from "../ui/parts";
+import { ContextHistory, ContextOverview, NextContext, VisibilityControl } from "../ui/thread-context";
+import { errorText, useCortexRpc, useMemory, useTaskRows } from "./hooks";
 import { ErrorNotice } from "./panel";
-import { openCortexTab } from "./selection";
 import { STATUS_LABEL, StatusDot } from "./status";
-
-export const MEMORY_ACTION_ID = "cortex-memory";
 
 // Copies of src/extensions/memory-view.ts#MEMORY_SYMBOLS (the plugin imports no cortex source); the saving arc is static.
 export const MEMORY_SYMBOLS = {
@@ -171,74 +165,7 @@ export function MemorySummary({
       {task ? (
         <p className="truncate opacity-80">{`Task #${task.id} \u00b7 ${STATUS_LABEL[task.status]}: ${task.title}`}</p>
       ) : null}
-      <p className="opacity-60">Click to open the Memory tab</p>
     </div>
-  );
-}
-
-const ICON_TONE: Record<MarkerLook["tone"], string> = {
-  muted: "text-muted-foreground hover:text-foreground",
-  info: "text-file-accent",
-  warning: "text-warning-text",
-  error: "text-destructive-text",
-};
-
-/** The memory icon: its colour is the marker's state, hovering shows the summary, a click opens the Memory tab. */
-function MemoryIcon({ threadId, placement }: { threadId: string; placement: "footer" | "header" }) {
-  const { memory, error } = useMemory(threadId);
-  const { state } = useThreadState(threadId);
-  const navigate = useBbNavigate();
-  const look = markerLook(memory, error);
-  const task = state?.links.find(link => link.id === state.focusTaskId) ?? null;
-  return (
-    <TooltipProvider delayDuration={200}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            data-tone={look.tone}
-            data-placement={placement}
-            aria-label={`Cortex memory: ${look.title}. Open the Memory tab.`}
-            onClick={() => {
-              navigate.openThreadPanel({ actionId: MEMORY_ACTION_ID });
-            }}
-            className={cn(
-              "inline-flex shrink-0 cursor-pointer items-center justify-center rounded-md hover:bg-state-hover",
-              "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-              placement === "footer" ? "size-6" : "size-7",
-              ICON_TONE[look.tone],
-              memory?.view?.saving && "animate-pulse",
-            )}
-          >
-            <Icon name="Brain" className="size-4" aria-hidden />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side={placement === "footer" ? "top" : "bottom"} align="end" className="w-72">
-          <MemorySummary memory={memory} error={error} task={task} />
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  );
-}
-
-/**
- * A thread header action, which bb always mounts, unlike a prompt-box action.
- * It shows the memory icon beside the context circle under the prompt box,
- * or here in the header when that row is not on screen, unless the viewport is
- * compact: a phone's header has no room. The anchor stays to find the row.
- */
-export function MemoryHeaderAction({ threadId, isCompactViewport }: PluginThreadHeaderActionProps): ReactNode {
-  const { values } = useSettings();
-  const hidden = values?.memoryChip === false;
-  const [anchor, setAnchor] = useState<HTMLSpanElement | null>(null);
-  const mount = useFooterMount(hidden ? null : anchor);
-  if (hidden) return null;
-  const inHeader = mount === null && !isCompactViewport;
-  const icon = <MemoryIcon threadId={threadId} placement={mount === null ? "header" : "footer"} />;
-  return (
-    <span ref={setAnchor} className={inHeader ? "inline-flex items-center" : "hidden"}>
-      {mount !== null ? createPortal(icon, mount) : inHeader ? icon : null}
-    </span>
   );
 }
 
@@ -273,7 +200,7 @@ function totals(view: MemoryView): string[] {
 
 function Heading({ children }: { children: ReactNode }) {
   return (
-    <h3 className="mt-4 mb-1 text-[11px] font-semibold tracking-wide text-subtle-foreground uppercase">{children}</h3>
+    <h3 className="mt-4 mb-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">{children}</h3>
   );
 }
 
@@ -302,8 +229,14 @@ function StreamRow({
       >
         {row ? <StatusDot status={row.status} /> : null}
         <span className="shrink-0 font-mono text-muted-foreground">#{id}</span>
-        <span className="min-w-0 flex-1 truncate text-foreground">{row?.title ?? ""}</span>
-        {tail ? <span className="max-w-[55%] shrink-0 truncate text-[11.5px] text-subtle-foreground">{tail}</span> : null}
+        <span className="min-w-0 flex-1 truncate text-foreground" title={row?.title}>
+          {row?.title ?? ""}
+        </span>
+        {tail ? (
+          <span className="max-w-[55%] shrink-0 truncate text-[11.5px] text-muted-foreground" title={tail}>
+            {tail}
+          </span>
+        ) : null}
       </button>
     </li>
   );
@@ -311,8 +244,8 @@ function StreamRow({
 
 const NONE = <p className="px-1.5 text-muted-foreground">none yet</p>;
 
-/** The mode menu and the note on when a change applies. */
-function Controls({ memory, onChange }: { memory: MemoryState; onChange: (next: MemoryState) => void }) {
+/** The thread's memory mode menu; a change applies when bb next starts this thread's agent. */
+function ModeControl({ memory, onChange }: { memory: MemoryState; onChange: (next: MemoryState) => void }) {
   const { threadId } = memory;
   const rpc = useCortexRpc();
   const follow = `Follow the setting (${MODE_LABEL[effectiveMode(memory.setting, null, memory.child)]})`;
@@ -327,40 +260,89 @@ function Controls({ memory, onChange }: { memory: MemoryState; onChange: (next: 
   };
   const options: Array<[MemoryMode | null, string]> = [[null, follow], ...MEMORY_MODES.map(m => [m, MODE_LABEL[m]] as [MemoryMode, string])];
   return (
-    <div className="mt-3 flex flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-2">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm" className="h-[26px] gap-1.5 px-2.5" aria-label={`Memory for this thread: ${current}. Change`}>
-              {current}
-              <Icon name="ChevronDown" className="size-3.5" aria-hidden />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" mobileTitle="Memory for this thread" className="w-80">
-            {options.map(([mode, label]) => (
-              <DropdownMenuItem key={mode ?? "follow"} onSelect={() => void choose(mode)} aria-checked={mode === memory.override}>
-                <span className="flex-1">{label}</span>
-                {mode === memory.override ? <Icon name="Check" className="size-3.5 text-primary" aria-label="current" /> : null}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-      <p className="text-[11.5px] text-muted-foreground">A change applies when bb next starts this thread's agent.</p>
-    </div>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2.5 text-[12px]" aria-label={`Memory for this thread: ${current}. Change`}>
+          {current}
+          <Icon name="ChevronDown" className="size-3.5" aria-hidden />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" mobileTitle="Memory for this thread" className="w-80">
+        {options.map(([mode, label]) => (
+          <DropdownMenuItem key={mode ?? "follow"} onSelect={() => void choose(mode)} aria-checked={mode === memory.override}>
+            <span className="flex-1">{label}</span>
+            {mode === memory.override ? <Icon name="Check" className="size-3.5 text-primary" aria-label="current" /> : null}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
-/** The Memory tab: what pi's `/memory` shows, for pi and every other provider, and the thread's memory mode. */
-export function MemoryPanel({ threadId }: PluginThreadPanelProps): ReactNode {
+/** Working on, In context with each stream's reason, the session totals and the marker legend. */
+function TaskMemory({ view, rows, onOpen }: { view: MemoryView | null; rows: Map<number, CortexTaskRow> | null; onOpen: (taskId: number) => void }) {
+  if (view === null) {
+    return <p className="mt-2 text-muted-foreground">This thread's agent has not started a session since the Cortex plugin loaded.</p>;
+  }
+  if (view.role === "off") return <p className="mt-2 text-muted-foreground">Memory is off for this thread.</p>;
+  const focus = view.role === "writer" ? view.focus : [];
+  const lane = view.lane ?? null;
+  const parts = totals(view);
+  const m = MEMORY_SYMBOLS;
+  return (
+    <>
+      {view.role === "writer" ? (
+        <section aria-label="Working on">
+          <Heading>Working on</Heading>
+          {focus.length === 0 ? NONE : null}
+          <ul>
+            {focus.map(id => (
+              <StreamRow key={id} id={id} row={rows?.get(id)} lane={lane} onOpen={onOpen} />
+            ))}
+          </ul>
+        </section>
+      ) : null}
+      <section aria-label="In context">
+        <Heading>In context ({view.inContext.length})</Heading>
+        {view.inContext.length === 0 ? NONE : null}
+        <ul>
+          {view.inContext.map(entry => (
+            <StreamRow key={entry.id} id={entry.id} row={rows?.get(entry.id)} lane={lane} reason={reasonText(entry)} onOpen={onOpen} />
+          ))}
+        </ul>
+      </section>
+      {parts.length > 0 ? (
+        <section aria-label="This session">
+          <Heading>This session</Heading>
+          <p className="px-1.5 text-muted-foreground">{parts.join(" \u00b7 ")}</p>
+        </section>
+      ) : null}
+      <p className="mt-4 font-mono text-[11px] whitespace-pre-wrap text-muted-foreground">
+        {`${m.loaded} loaded  ${m.empty} nothing loaded  ${m.saving} saving  ${m.stale} stale  ${m.error} error`}
+      </p>
+    </>
+  );
+}
+
+const TAB_TRIGGER =
+  "-mb-px rounded-none border-b-2 border-transparent bg-transparent px-2.5 py-2 text-[12.5px] font-normal text-muted-foreground data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:font-semibold data-[state=active]:text-foreground data-[state=active]:shadow-none";
+
+/**
+ * The Memory tab: the thread's memory mode and health, whether Cortex context
+ * shows above the composer (where a dismissed widget comes back), the thread's
+ * next context, its context history, and the task memory pi's `/memory` shows.
+ */
+export function MemoryPanel({ threadId }: ExperimentalThreadActionTabProps): ReactNode {
   const { memory, error, refetch, accept } = useMemory(threadId);
-  const navigate = useBbNavigate();
+  const context = useThreadContext(threadId);
+  const panel = experimental_useAppPanel();
+  const [chosen, setChosen] = useState<string | null>(null);
   const view = memory?.view ?? null;
   const focus = view?.role === "writer" ? view.focus : [];
   const ids = [...new Set([...focus, ...(view?.inContext ?? []).map(entry => entry.id)])];
   const rows = useTaskRows(ids);
   const open = (taskId: number) => {
-    openCortexTab(navigate, threadId, taskId);
+    openTaskTab(panel, threadId, taskId);
   };
   if (error !== null) {
     return (
@@ -373,8 +355,8 @@ export function MemoryPanel({ threadId }: PluginThreadPanelProps): ReactNode {
   const look = markerLook(memory, null);
   const role = view?.role ?? ROLE[memory.mode];
   const lane = view?.lane ?? null;
-  const m = MEMORY_SYMBOLS;
-  const parts = view ? totals(view) : [];
+  const bound = context.data !== undefined && context.data.status !== "unbound";
+  const tab = chosen ?? (bound || context.error !== null ? "context" : "tasks");
   return (
     <div className="h-full overflow-y-auto px-4 pt-3 pb-4 text-[12.5px]">
       <header className="flex items-center gap-2">
@@ -390,11 +372,7 @@ export function MemoryPanel({ threadId }: PluginThreadPanelProps): ReactNode {
           {lane === null ? "" : ` \u00b7 lane ${lane}`}
         </span>
       </header>
-      {view === null ? (
-        <p className="mt-2 text-muted-foreground">
-          This thread's agent has not started a session since the Cortex plugin loaded.
-        </p>
-      ) : (
+      {view === null ? null : (
         <p
           className={cn(
             "mt-2",
@@ -405,47 +383,42 @@ export function MemoryPanel({ threadId }: PluginThreadPanelProps): ReactNode {
           {healthText(view)}
         </p>
       )}
-      <Controls memory={memory} onChange={accept} />
-      {view === null || view.role === "off" ? null : (
-        <>
-          {view.role === "writer" ? (
-            <section aria-label="Working on">
-              <Heading>Working on</Heading>
-              {focus.length === 0 ? NONE : null}
-              <ul>
-                {focus.map(id => (
-                  <StreamRow key={id} id={id} row={rows?.get(id)} lane={lane} onOpen={open} />
-                ))}
-              </ul>
-            </section>
-          ) : null}
-          <section aria-label="In context">
-            <Heading>In context ({view.inContext.length})</Heading>
-            {view.inContext.length === 0 ? NONE : null}
-            <ul>
-              {view.inContext.map(entry => (
-                <StreamRow
-                  key={entry.id}
-                  id={entry.id}
-                  row={rows?.get(entry.id)}
-                  lane={lane}
-                  reason={reasonText(entry)}
-                  onOpen={open}
-                />
-              ))}
-            </ul>
-          </section>
-          {parts.length > 0 ? (
-            <section aria-label="This session">
-              <Heading>This session</Heading>
-              <p className="px-1.5 text-muted-foreground">{parts.join(" \u00b7 ")}</p>
-            </section>
-          ) : null}
-          <p className="mt-4 font-mono text-[11px] whitespace-pre-wrap text-subtle-foreground">
-            {`${m.loaded} loaded  ${m.empty} nothing loaded  ${m.saving} saving  ${m.stale} stale  ${m.error} error`}
-          </p>
-        </>
-      )}
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <ModeControl memory={memory} onChange={accept} />
+        {context.data ? <VisibilityControl context={context.data} /> : null}
+      </div>
+      <p className="mt-1.5 text-[11.5px] text-muted-foreground">A change applies when bb next starts this thread's agent.</p>
+      <Tabs value={tab} onValueChange={setChosen} className="mt-2">
+        <TabsList className="h-auto w-full justify-start gap-0.5 rounded-none border-b border-border-seam bg-transparent p-0">
+          <TabsTrigger value="context" className={TAB_TRIGGER}>
+            Next context
+          </TabsTrigger>
+          <TabsTrigger value="history" className={TAB_TRIGGER}>
+            Context history
+          </TabsTrigger>
+          <TabsTrigger value="tasks" className={TAB_TRIGGER}>
+            Task memory
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="context" className="mt-3">
+          {context.error ? (
+            <FailureNotice failure={context.error} onRetry={context.refetch} />
+          ) : context.data === undefined ? (
+            <LoadingRows label="Loading thread context" />
+          ) : (
+            <div className="flex flex-col gap-3">
+              <ContextOverview context={context.data} canPrepare />
+              {bound ? <NextContext context={context.data} /> : null}
+            </div>
+          )}
+        </TabsContent>
+        <TabsContent value="history" className="mt-3">
+          <ContextHistory threadId={threadId} />
+        </TabsContent>
+        <TabsContent value="tasks" className="mt-1">
+          <TaskMemory view={view} rows={rows} onOpen={open} />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

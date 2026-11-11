@@ -39,6 +39,7 @@ import type {
 } from "./contracts.ts";
 import pkg from "../package.json" with { type: "json" };
 import { resolveAuthor } from "./lib/userAuthor.ts";
+import { type KnowledgeState, WorkstreamError } from "./workstreams.ts";
 
 const VERSION = pkg.version;
 const isStatus = (v: string): v is TaskStatus =>
@@ -242,6 +243,72 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
   };
   app.use("/api/*", checkInstance);
   app.use("/events", checkInstance);
+
+  const workstreamResponse = (c: Context, read: () => unknown): Response => {
+    try {
+      return c.json(read());
+    } catch (err) {
+      if (err instanceof WorkstreamError) return c.json({ error: err.message }, err.status);
+      throw err;
+    }
+  };
+  const workstreamPage = (c: Context) => ({
+    limit: c.req.query("limit") === undefined ? undefined : Number(c.req.query("limit")),
+    offset: c.req.query("offset") === undefined ? undefined : Number(c.req.query("offset")),
+  });
+  app.get("/api/workstream-entries/:id", c => workstreamResponse(c, () => store.workstreamEntry(c.req.param("id"))));
+  app.get("/api/workstream-knowledge", c =>
+    workstreamResponse(c, () => {
+      const reviewOnly = c.req.query("reviewOnly");
+      if (reviewOnly !== undefined && !["true", "false", "1", "0"].includes(reviewOnly))
+        throw new WorkstreamError("reviewOnly must be true or false");
+      return store.listKnowledge({
+        ...workstreamPage(c),
+        query: c.req.query("query"),
+        workstream: c.req.query("workstream"),
+        states: c.req.query("states")?.split(",") as KnowledgeState[] | undefined,
+        reviewOnly: reviewOnly === "true" || reviewOnly === "1",
+      });
+    }),
+  );
+  app.get("/api/workstreams", c =>
+    workstreamResponse(c, () => {
+      const archived = c.req.query("archived");
+      if (archived !== undefined && !["true", "false", "1", "0"].includes(archived))
+        throw new WorkstreamError("archived must be true or false");
+      return store.listWorkstreams({ ...workstreamPage(c), archived: archived === "true" || archived === "1" });
+    }),
+  );
+  app.get("/api/workstreams/:id", c =>
+    workstreamResponse(c, () => store.showWorkstream(c.req.param("id"), workstreamPage(c))),
+  );
+  app.get("/api/workstreams/:id/context", c =>
+    workstreamResponse(c, () =>
+      store.readWorkstream(c.req.param("id"), {
+        topic: c.req.query("topic"),
+        environment: c.req.query("environment"),
+        host: c.req.query("host"),
+      }),
+    ),
+  );
+  app.get("/api/workstream-history/:id", c =>
+    workstreamResponse(c, () => store.workstreamHistory(c.req.param("id"), workstreamPage(c))),
+  );
+  app.post("/api/workstreams/mutate", async c => {
+    const text = await c.req.text();
+    if (text.length > 2 * 1024 * 1024) return c.json({ error: "Mutation JSON exceeds the input limit" }, 400);
+    let input: unknown;
+    try {
+      input = JSON.parse(text);
+    } catch {
+      return c.json({ error: "Mutation body must be valid JSON" }, 400);
+    }
+    return workstreamResponse(c, () => {
+      const result = store.mutateWorkstream(input);
+      if (result.outcome !== "no-save") publish("workstream.changed", result);
+      return result;
+    });
+  });
 
   // A published daemon names itself, which is how clients verify the
   // instance behind a socket.

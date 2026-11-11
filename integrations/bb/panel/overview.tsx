@@ -108,7 +108,7 @@ export function BodySections({ body }: { body: string | null }) {
     <div className="mt-1">
       {headed.length > 0 ? (
         <div className="mt-4 mb-0.5 flex items-center">
-          <span className="text-[11px] font-semibold tracking-wide text-subtle-foreground uppercase">
+          <span className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
             {plural(headed.length, "section")}
           </span>
           <span className="flex-1" />
@@ -142,7 +142,7 @@ export function BodySections({ body }: { body: string | null }) {
               />
               <span className="text-[13px] font-semibold text-foreground">{section.heading}</span>
               {section.items > 0 ? (
-                <span className="ml-auto text-[11.5px] text-subtle-foreground">{plural(section.items, "item")}</span>
+                <span className="ml-auto text-[11.5px] text-muted-foreground">{plural(section.items, "item")}</span>
               ) : null}
             </CollapsibleTrigger>
             {open[i] || section.preview === "" ? null : (

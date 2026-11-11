@@ -588,6 +588,30 @@ function claimOwnership(path: string, opts: StoreOpenOptions): OwnerLease | null
   return lease;
 }
 
+import {
+  type KnowledgeListQuery,
+  type KnowledgeList,
+  validateKnowledgeQuery,
+  type Knowledge,
+  type MutationResult,
+  type PageQuery,
+  type ContextQuery,
+  type Workstream,
+  type WorkstreamListQuery,
+  type WorkstreamRevision,
+  type AdmissionHint,
+  WorkstreamError,
+  pageQuery,
+  parseContextQuery,
+  parseWorkstreamMutation,
+  normalizeKnowledgeText,
+  sameApplicability,
+  sourceKey,
+  scrubKnowledge,
+  selectWorkstreamContext,
+  REVIEW_HINT_LIMITS,
+} from "./workstreams.ts";
+
 export class Store {
   /** The database UUID, read once (it never changes for a database file). */
   private cachedDatabaseId: string | null = null;
@@ -663,6 +687,21 @@ export class Store {
 
   migrate(): void {
     this.db.transaction(() => {
+      this.db.run(
+        `CREATE TABLE IF NOT EXISTS workstreams (id TEXT PRIMARY KEY, revision INTEGER NOT NULL, data TEXT NOT NULL);`,
+      );
+      this.db.run(
+        `CREATE TABLE IF NOT EXISTS knowledge (id TEXT PRIMARY KEY, workstream_id TEXT NOT NULL REFERENCES workstreams(id), revision INTEGER NOT NULL, data TEXT NOT NULL);`,
+      );
+      this.db.run(`CREATE INDEX IF NOT EXISTS idx_knowledge_workstream ON knowledge(workstream_id);`);
+      this.db.run(`CREATE INDEX IF NOT EXISTS idx_knowledge_review_app ON knowledge(
+        workstream_id,
+        json_extract(data, '$.applicability.environment.mode'), json_extract(data, '$.applicability.environment.value'),
+        json_extract(data, '$.applicability.host.mode'), json_extract(data, '$.applicability.host.value')
+      ) WHERE json_extract(data, '$.state') <> 'forgotten';`);
+      this.db.run(
+        `CREATE TABLE IF NOT EXISTS workstream_revisions (id TEXT NOT NULL, revision INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY(id, revision));`,
+      );
       this.db.run(`
         CREATE TABLE IF NOT EXISTS lanes (
           name  TEXT PRIMARY KEY,
@@ -825,6 +864,537 @@ export class Store {
     // Seed _migrations for DBs created with the current schema so they don't
     // show as pending on the next open.
     this._seedMigrations();
+  }
+
+  restoreWorkstreamRows(
+    rows: {
+      workstreams?: Record<string, unknown>[];
+      knowledge?: Record<string, unknown>[];
+      workstream_revisions?: Record<string, unknown>[];
+    },
+    apply = true,
+  ) {
+    const counts = { workstreams: 0, knowledge: 0, workstreamRevisions: 0 };
+    return this.atomically(() => {
+      for (const table of ["workstreams", "knowledge", "workstream_revisions"] as const) {
+        for (const row of rows[table] ?? []) {
+          if (
+            typeof row.id !== "string" ||
+            typeof row.data !== "string" ||
+            !Number.isSafeInteger(row.revision) ||
+            Number(row.revision) < 1
+          )
+            throw new Error("invalid canonical backup row");
+          const parsed = JSON.parse(row.data) as Workstream | Knowledge | WorkstreamRevision;
+          if (parsed.id !== row.id || parsed.revision !== row.revision)
+            throw new Error("invalid canonical backup identity");
+          if (table === "workstreams") {
+            const w = parsed as Workstream;
+            parseWorkstreamMutation({ op: "create", actor: w.actor, name: w.name, description: w.description });
+            if (!w.id.startsWith("ws_") || typeof w.archived !== "boolean")
+              throw new Error("invalid canonical workstream");
+          } else if (table === "knowledge") {
+            const e = parsed as Knowledge;
+            if (
+              e.workstreamId !== row.workstream_id ||
+              !e.id.startsWith("kn_") ||
+              ![
+                "candidate",
+                "approved",
+                "disputed",
+                "superseded",
+                "recheck",
+                "archived",
+                "rejected",
+                "forgotten",
+              ].includes(e.state)
+            )
+              throw new Error("invalid canonical knowledge");
+            if (e.state !== "forgotten")
+              parseWorkstreamMutation({
+                op: "propose",
+                actor: e.actor,
+                workstreamId: e.workstreamId,
+                subject: e.subject,
+                title: e.title,
+                text: e.text,
+                kind: e.kind,
+                facet: e.facet,
+                applicability: e.applicability,
+                sources: e.sources,
+                expiresAt: e.expiresAt,
+              });
+            if (e.state === "approved" && e.approval?.actor.type !== "human")
+              throw new Error("invalid canonical approval");
+            if (
+              !this.db.query("SELECT 1 FROM workstreams WHERE id = ?").get(e.workstreamId) &&
+              !(rows.workstreams ?? []).some(w => w.id === e.workstreamId)
+            )
+              throw new Error("canonical knowledge has no workstream");
+          } else {
+            const r = parsed as WorkstreamRevision;
+            if (!r.snapshot || r.snapshot.id !== r.id || r.snapshot.revision !== r.revision)
+              throw new Error("invalid canonical revision snapshot");
+          }
+          const existing =
+            table === "workstream_revisions"
+              ? this.db
+                  .query<{ data: string }, [string, number]>(
+                    "SELECT data FROM workstream_revisions WHERE id = ? AND revision = ?",
+                  )
+                  .get(row.id, Number(row.revision))
+              : this.db.query<{ data: string }, [string]>(`SELECT data FROM ${table} WHERE id = ?`).get(row.id);
+          if (existing) {
+            if (canonicalJson(JSON.parse(existing.data)) !== canonicalJson(parsed))
+              throw new Error(`canonical restore collision for ${row.id}; destination differs; nothing overwritten`);
+            continue;
+          }
+          if (apply) {
+            if (table === "knowledge")
+              this.db.run("INSERT INTO knowledge(id, workstream_id, revision, data) VALUES (?, ?, ?, ?)", [
+                row.id,
+                String(row.workstream_id),
+                Number(row.revision),
+                row.data,
+              ]);
+            else
+              this.db.run(`INSERT INTO ${table}(id, revision, data) VALUES (?, ?, ?)`, [
+                row.id,
+                Number(row.revision),
+                row.data,
+              ]);
+          }
+          if (table === "workstream_revisions") counts.workstreamRevisions++;
+          else counts[table]++;
+        }
+      }
+      return counts;
+    });
+  }
+
+  private workstreamEntity<T extends Workstream | Knowledge>(table: "workstreams" | "knowledge", id: string): T {
+    const row = this.db.query<{ data: string }, [string]>(`SELECT data FROM ${table} WHERE id = ?`).get(id);
+    if (!row) throw new WorkstreamError(`${id} not found`, 404);
+    return JSON.parse(row.data) as T;
+  }
+
+  private canonicalCount(sql: string, values: (string | number)[] = []): number {
+    const row = this.db.query<{ n: number }, (string | number)[]>(sql).get(...values);
+    if (!row) throw new Error("Canonical count query returned no row");
+    return row.n;
+  }
+
+  listKnowledge(query: KnowledgeListQuery = {}): KnowledgeList {
+    validateKnowledgeQuery(query);
+    const { limit, offset } = pageQuery(query);
+    const filters: string[] = [];
+    const values: (string | number)[] = [];
+    if (query.workstream !== undefined) {
+      this.workstreamEntity("workstreams", query.workstream);
+      filters.push("k.workstream_id = ?");
+      values.push(query.workstream);
+    } else filters.push("json_extract(w.data, '$.archived') = 0");
+    if (query.query !== undefined) {
+      filters.push(
+        "instr(lower(json_extract(k.data, '$.title') || ' ' || json_extract(k.data, '$.text') || ' ' || json_extract(k.data, '$.subject') || ' ' || json_extract(k.data, '$.facet') || ' ' || json_extract(w.data, '$.name')), lower(?)) > 0",
+      );
+      values.push(query.query);
+    }
+    if (query.states) {
+      filters.push(`json_extract(k.data, '$.state') IN (${query.states.map(() => "?").join(",")})`);
+      values.push(...query.states);
+    }
+    if (query.reviewOnly) {
+      filters.push(
+        "(json_extract(k.data, '$.state') IN ('candidate', 'disputed', 'recheck') OR (json_extract(k.data, '$.state') = 'approved' AND julianday(json_extract(k.data, '$.expiresAt')) <= julianday(?)))",
+      );
+      values.push(new Date().toISOString());
+    }
+    const from = `FROM knowledge k JOIN workstreams w ON w.id = k.workstream_id WHERE ${filters.length ? filters.join(" AND ") : "1"}`;
+    const total = this.canonicalCount(`SELECT COUNT(*) AS n ${from}`, values);
+    const rows = this.db
+      .query<{ data: string; workstream: string }, (string | number)[]>(
+        `SELECT k.data, w.data AS workstream ${from} ORDER BY json_extract(k.data, '$.createdAt'), k.rowid LIMIT ? OFFSET ?`,
+      )
+      .all(...values, limit, offset);
+    const items = rows.map(row => ({
+      entry: JSON.parse(row.data) as Knowledge,
+      workstream: JSON.parse(row.workstream) as Workstream,
+      hints: [] as AdmissionHint[],
+    }));
+    for (const item of items) {
+      if (item.entry.state !== "candidate") continue;
+      const e = item.entry;
+      const { environment, host } = e.applicability;
+      const neighbors = this.db
+        .query<{ data: string }, (string | number | null)[]>(
+          `SELECT data FROM knowledge WHERE workstream_id = ?
+             AND json_extract(data, '$.applicability.environment.mode') = ?
+             AND json_extract(data, '$.applicability.environment.value') IS ?
+             AND json_extract(data, '$.applicability.host.mode') = ?
+             AND json_extract(data, '$.applicability.host.value') IS ?
+             AND json_extract(data, '$.state') <> 'forgotten' AND id <> ?
+           ORDER BY rowid DESC LIMIT ?`,
+        )
+        .all(
+          e.workstreamId,
+          environment.mode,
+          environment.mode === "value" ? environment.value : null,
+          host.mode,
+          host.mode === "value" ? host.value : null,
+          e.id,
+          REVIEW_HINT_LIMITS.neighbors,
+        );
+      const refs = new Set(e.sources.map(sourceKey));
+      for (const row of neighbors) {
+        const other = JSON.parse(row.data) as Knowledge;
+        const reason =
+          normalizeKnowledgeText(other.subject) === normalizeKnowledgeText(e.subject)
+            ? "same-subject"
+            : normalizeKnowledgeText(other.text) === normalizeKnowledgeText(e.text)
+              ? "same-text"
+              : other.sources.some(s => refs.has(sourceKey(s)))
+                ? "shared-source"
+                : null;
+        if (reason) item.hints.push({ id: other.id, reason });
+        if (item.hints.length === REVIEW_HINT_LIMITS.hints) break;
+      }
+    }
+    return { items, total, limit, offset };
+  }
+
+  listWorkstreams(query: WorkstreamListQuery = {}) {
+    const { limit, offset } = pageQuery(query);
+    if (query.archived !== undefined && typeof query.archived !== "boolean")
+      throw new WorkstreamError("archived must be boolean");
+    const where = query.archived ? "" : "WHERE json_extract(data, '$.archived') = 0";
+    const total = this.canonicalCount(`SELECT COUNT(*) AS n FROM workstreams ${where}`);
+    const rows = this.db
+      .query<{ data: string }, [number, number]>(`SELECT data FROM workstreams ${where} ORDER BY id LIMIT ? OFFSET ?`)
+      .all(limit, offset);
+    return { workstreams: rows.map(row => JSON.parse(row.data) as Workstream), total, limit, offset };
+  }
+
+  showWorkstream(id: string, query: PageQuery = {}) {
+    const { limit, offset } = pageQuery(query);
+    const workstream = this.workstreamEntity<Workstream>("workstreams", id);
+    const total = this.canonicalCount("SELECT COUNT(*) AS n FROM knowledge WHERE workstream_id = ?", [id]);
+    const rows = this.db
+      .query<{ data: string }, [string, number, number]>(
+        "SELECT data FROM knowledge WHERE workstream_id = ? ORDER BY rowid LIMIT ? OFFSET ?",
+      )
+      .all(id, limit, offset);
+    return { workstream, entries: rows.map(row => JSON.parse(row.data) as Knowledge), total, limit, offset };
+  }
+
+  readWorkstream(id: string, query: ContextQuery = {}) {
+    parseContextQuery(query);
+    const workstream = this.workstreamEntity<Workstream>("workstreams", id);
+    const rows = this.db
+      .query<{ data: string }, [string, string]>(
+        `SELECT data FROM knowledge WHERE workstream_id = ? AND json_extract(data, '$.state') IN ('approved', 'disputed', 'recheck') AND (json_extract(data, '$.facet') = 'orientation' OR json_extract(data, '$.facet') = ?) ORDER BY rowid LIMIT 501`,
+      )
+      .all(id, query.topic ?? "orientation");
+    if (rows.length > 500)
+      throw new WorkstreamError(
+        "Context exceeds 500 reviewable entries; narrow the topic or archive entries. Nothing delivered.",
+        409,
+      );
+    return selectWorkstreamContext(
+      workstream,
+      rows.map(row => JSON.parse(row.data) as Knowledge),
+      query,
+    );
+  }
+
+  workstreamEntry(id: string): Knowledge {
+    return this.workstreamEntity<Knowledge>("knowledge", id);
+  }
+
+  workstreamHistory(id: string, query: PageQuery = {}) {
+    const { limit, offset } = pageQuery(query);
+    const total = this.canonicalCount("SELECT COUNT(*) AS n FROM workstream_revisions WHERE id = ?", [id]);
+    if (!total) throw new WorkstreamError(`${id} not found`, 404);
+    const rows = this.db
+      .query<{ data: string }, [string, number, number]>(
+        "SELECT data FROM workstream_revisions WHERE id = ? ORDER BY revision LIMIT ? OFFSET ?",
+      )
+      .all(id, limit, offset);
+    return { revisions: rows.map(row => JSON.parse(row.data) as WorkstreamRevision), total, limit, offset };
+  }
+
+  private saveWorkstreamEntity(entity: Workstream | Knowledge, action: string, reason: string, fresh = false): void {
+    const isKnowledge = "workstreamId" in entity;
+    const table = isKnowledge ? "knowledge" : "workstreams";
+    if (fresh) {
+      if (isKnowledge)
+        this.db.run("INSERT INTO knowledge(id, workstream_id, revision, data) VALUES (?, ?, ?, ?)", [
+          entity.id,
+          entity.workstreamId,
+          entity.revision,
+          JSON.stringify(entity),
+        ]);
+      else
+        this.db.run("INSERT INTO workstreams(id, revision, data) VALUES (?, ?, ?)", [
+          entity.id,
+          entity.revision,
+          JSON.stringify(entity),
+        ]);
+    } else {
+      const changed = this.db.run(`UPDATE ${table} SET revision = ?, data = ? WHERE id = ? AND revision = ?`, [
+        entity.revision,
+        JSON.stringify(entity),
+        entity.id,
+        entity.revision - 1,
+      ]);
+      if (changed.changes !== 1)
+        throw new WorkstreamError("revision conflict; reread before retrying; input was not applied", 409);
+    }
+    const revision: WorkstreamRevision = {
+      id: entity.id,
+      revision: entity.revision,
+      actor: entity.actor,
+      at: entity.updatedAt,
+      action,
+      reason,
+      snapshot: entity,
+    };
+    this.db.run("INSERT INTO workstream_revisions(id, revision, data) VALUES (?, ?, ?)", [
+      entity.id,
+      entity.revision,
+      JSON.stringify(revision),
+    ]);
+  }
+
+  private assertKnowledgeSubjectFree(entry: Knowledge, except: string[] = []): void {
+    const rows = this.db
+      .query<{ data: string }, [string]>(
+        "SELECT data FROM knowledge WHERE workstream_id = ? AND json_extract(data, '$.state') = 'approved'",
+      )
+      .all(entry.workstreamId);
+    if (
+      rows.some(row => {
+        const e = JSON.parse(row.data) as Knowledge;
+        return (
+          e.id !== entry.id &&
+          !except.includes(e.id) &&
+          sameApplicability(e.applicability, entry.applicability) &&
+          normalizeKnowledgeText(e.subject) === normalizeKnowledgeText(entry.subject)
+        );
+      })
+    )
+      throw new WorkstreamError(
+        "An approved entry already owns this subject/applicability; use explicit supersession of that entry",
+        409,
+      );
+  }
+
+  mutateWorkstream(input: unknown): MutationResult {
+    const m = parseWorkstreamMutation(input);
+    return this.atomically((): MutationResult => {
+      const at = new Date().toISOString();
+      const human = () => {
+        if (m.actor.type !== "human") throw new WorkstreamError("This operation requires an explicit human actor");
+      };
+      const guard = (e: Workstream | Knowledge, expected: number) => {
+        if (e.revision !== expected)
+          throw new WorkstreamError(
+            `revision conflict for ${e.id}: expected ${expected}, current ${e.revision}; input was not applied`,
+            409,
+          );
+      };
+      const next = <T extends Workstream | Knowledge>(e: T): T => ({
+        ...e,
+        revision: e.revision + 1,
+        updatedAt: at,
+        actor: m.actor,
+      });
+      if (m.op === "create") {
+        const workstream: Workstream = {
+          id: `ws_${crypto.randomUUID()}`,
+          name: m.name,
+          description: m.description ?? "",
+          revision: 1,
+          archived: false,
+          createdAt: at,
+          updatedAt: at,
+          actor: m.actor,
+        };
+        this.saveWorkstreamEntity(workstream, m.op, "", true);
+        return { outcome: "created", workstream };
+      }
+      if (m.op === "edit-workstream") {
+        human();
+        const old = this.workstreamEntity<Workstream>("workstreams", m.id);
+        guard(old, m.expectedRevision);
+        const workstream = {
+          ...next(old),
+          name: m.name ?? old.name,
+          description: m.description ?? old.description,
+          archived: m.archived ?? old.archived,
+        };
+        this.saveWorkstreamEntity(workstream, m.op, m.reason);
+        return { outcome: "updated", workstream };
+      }
+      if (m.op === "propose") {
+        const w = this.workstreamEntity<Workstream>("workstreams", m.workstreamId);
+        if (w.archived) throw new WorkstreamError("workstream is archived", 409);
+        const rows = this.db
+          .query<{ data: string }, [string]>("SELECT data FROM knowledge WHERE workstream_id = ?")
+          .all(m.workstreamId);
+        const hints: AdmissionHint[] = [];
+        const submittedSources = new Set(m.sources.map(sourceKey));
+        for (const row of rows) {
+          const e = JSON.parse(row.data) as Knowledge;
+          if (e.state === "forgotten" || !sameApplicability(e.applicability, m.applicability)) continue;
+          const sameSubject = normalizeKnowledgeText(e.subject) === normalizeKnowledgeText(m.subject);
+          const sameText = normalizeKnowledgeText(e.text) === normalizeKnowledgeText(m.text);
+          const existing = new Set(e.sources.map(sourceKey));
+          const sharedSource = [...submittedSources].some(key => existing.has(key));
+          if (sameSubject || sameText || sharedSource)
+            hints.push({ id: e.id, reason: sameSubject ? "same-subject" : sameText ? "same-text" : "shared-source" });
+          if (
+            sameSubject &&
+            sameText &&
+            e.facet === m.facet &&
+            e.kind === m.kind &&
+            e.expiresAt === (m.expiresAt ?? null) &&
+            [...submittedSources].every(key => existing.has(key))
+          )
+            return {
+              outcome: "no-save",
+              entry: e,
+              hints,
+              reason:
+                "Identical normalized claim and subject, facet, kind, applicability and expiry with no new evidence; existing entry preserved. Other collisions are review hints, not semantic no-save decisions.",
+            };
+        }
+        const entry: Knowledge = {
+          id: `kn_${crypto.randomUUID()}`,
+          workstreamId: m.workstreamId,
+          subject: m.subject,
+          title: m.title,
+          text: m.text,
+          kind: m.kind,
+          state: "candidate",
+          facet: m.facet,
+          applicability: m.applicability,
+          sources: [...new Map(m.sources.map(s => [sourceKey(s), s])).values()],
+          revision: 1,
+          actor: m.actor,
+          createdAt: at,
+          updatedAt: at,
+          expiresAt: m.expiresAt ?? null,
+          approval: null,
+          supersedes: [],
+          supersededBy: null,
+          conflicts: [],
+        };
+        this.saveWorkstreamEntity(entry, m.op, "", true);
+        return { outcome: "created", entry, hints: hints.slice(0, 100) };
+      }
+      const old = this.workstreamEntity<Knowledge>("knowledge", m.id);
+      guard(old, m.expectedRevision);
+      if (old.state === "forgotten") throw new WorkstreamError("forgotten knowledge cannot be restored or edited", 409);
+      const entry = next(old);
+      const protectedDirective = (e: Knowledge) =>
+        e.kind === "directive" && e.approval !== null && e.state === "approved";
+      if (m.op === "edit") {
+        if (protectedDirective(old)) human();
+        if (["superseded", "archived", "rejected"].includes(old.state)) human();
+        const { op: _op, actor: _actor, id: _id, expectedRevision: _expected, reason: _reason, ...fields } = m;
+        Object.assign(entry, fields);
+        entry.state = "candidate";
+        entry.approval = null;
+      } else if (m.op === "evidence") {
+        const existing = new Set(old.sources.map(sourceKey));
+        const added = m.sources.filter(s => !existing.has(sourceKey(s)));
+        if (!added.length)
+          return {
+            outcome: "no-save",
+            entry: old,
+            reason: "All evidence already saved; repetition is not corroboration.",
+          };
+        entry.sources = [...new Map([...old.sources, ...added].map(s => [sourceKey(s), s])).values()];
+        if (entry.sources.length > 100) throw new WorkstreamError("At most 100 distinct sources per entry");
+      } else if (m.op === "transition") {
+        human();
+        if (m.state === "approved") {
+          if (old.state === "superseded")
+            throw new WorkstreamError("Use explicit supersession to replace a superseded entry", 409);
+          if (old.conflicts.length)
+            throw new WorkstreamError("Resolve conflicts through explicit supersession before approving", 409);
+          const w = this.workstreamEntity<Workstream>("workstreams", old.workstreamId);
+          if (w.archived) throw new WorkstreamError("workstream is archived", 409);
+          this.assertKnowledgeSubjectFree(old);
+          entry.approval = { actor: m.actor, at };
+        }
+        entry.state = m.state;
+        if (m.state === "forgotten") {
+          Object.assign(entry, scrubKnowledge(entry));
+          const rows = this.db
+            .query<{ data: string; revision: number }, [string]>(
+              "SELECT data, revision FROM workstream_revisions WHERE id = ?",
+            )
+            .all(old.id);
+          for (const row of rows) {
+            const r = JSON.parse(row.data) as WorkstreamRevision;
+            r.snapshot = scrubKnowledge(r.snapshot as Knowledge);
+            r.reason = "Content forgotten";
+            this.db.run("UPDATE workstream_revisions SET data = ? WHERE id = ? AND revision = ?", [
+              JSON.stringify(r),
+              old.id,
+              row.revision,
+            ]);
+          }
+        }
+      } else {
+        const other = this.workstreamEntity<Knowledge>("knowledge", m.otherId);
+        guard(other, m.otherExpectedRevision);
+        if (
+          old.id === other.id ||
+          old.workstreamId !== other.workstreamId ||
+          !sameApplicability(old.applicability, other.applicability)
+        )
+          throw new WorkstreamError(
+            "Relation requires different entries in the same workstream and applicability",
+            409,
+          );
+        if (
+          ["forgotten", "archived", "rejected", "superseded"].includes(other.state) ||
+          ["archived", "rejected", "superseded"].includes(old.state)
+        )
+          throw new WorkstreamError("Historical entries cannot acquire active relations", 409);
+        const revisedOther = next(other);
+        if (m.op === "conflict") {
+          entry.conflicts = [...new Set([...entry.conflicts, other.id])];
+          revisedOther.conflicts = [...new Set([...other.conflicts, old.id])];
+          if (!protectedDirective(old) || m.actor.type === "human") entry.state = "disputed";
+          if (!protectedDirective(other) || m.actor.type === "human") revisedOther.state = "disputed";
+        } else {
+          human();
+          if (old.conflicts.some(id => id !== other.id) || other.conflicts.some(id => id !== old.id))
+            throw new WorkstreamError("Additional conflicts require separate resolution; no partial approval", 409);
+          if (protectedDirective(other) && old.kind !== "directive")
+            throw new WorkstreamError("Only a human-approved directive can supersede an approved directive", 409);
+          this.assertKnowledgeSubjectFree(old, [other.id]);
+          entry.state = "approved";
+          entry.approval = { actor: m.actor, at };
+          entry.supersedes = [...new Set([...entry.supersedes, other.id])];
+          entry.conflicts = [];
+          revisedOther.state = "superseded";
+          revisedOther.supersededBy = entry.id;
+          revisedOther.conflicts = [];
+        }
+        this.saveWorkstreamEntity(revisedOther, m.op, m.reason);
+      }
+      this.saveWorkstreamEntity(
+        entry,
+        m.op,
+        m.op === "transition" && m.state === "forgotten" ? "Content forgotten" : m.reason,
+      );
+      return { outcome: "updated", entry };
+    });
   }
 
   /** For DBs created before the _migrations table existed, seed entries

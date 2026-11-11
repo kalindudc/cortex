@@ -1,27 +1,63 @@
-import { definePluginApp } from "@get-bb/plugin-sdk/app";
+import {
+  definePluginApp,
+  experimental_THREAD_INFO_SECTION_GROUPS as INFO_SECTION_GROUPS,
+} from "@get-bb/plugin-sdk/app";
 import { CortexCard } from "./panel/card";
-import { CortexChip } from "./panel/chip";
-import { MEMORY_ACTION_ID, MemoryHeaderAction, MemoryPanel } from "./panel/memory";
+import { MemoryPanel } from "./panel/memory";
 import { CortexPanel } from "./panel/panel";
-import { PANEL_ACTION_ID } from "./panel/selection";
+import { ContextCardSection, ContextSegmentDetails, ContextSegmentSummary, useSegmentVisible } from "./ui/context-widget";
+import { CortexPage, CortexSidebar, useCortexPageTitle, useNeedsYouBadge } from "./ui/page";
+import { MEMORY_TAB_ID, TASK_TAB_ID } from "./ui/panel-tabs";
+import { contextVisibilityAction, taskHeaderAction } from "./ui/thread-actions";
+import { CORTEX_PAGE_PATH } from "./ui/thread-context";
 
 export default definePluginApp(app => {
-  app.slots.threadPanelAction({
-    id: PANEL_ACTION_ID,
+  // Tab ids match the retired threadPanelAction ids, so saved tabs and layouts carry over.
+  app.slots.experimental_tab({
+    context: { kind: "thread" },
+    availability: "action",
+    id: TASK_TAB_ID,
     title: "Cortex",
     icon: "Brain",
     layout: "flush",
     component: CortexPanel,
   });
-  app.slots.threadPanelAction({
-    id: MEMORY_ACTION_ID,
+  app.slots.experimental_tab({
+    context: { kind: "thread" },
+    availability: "action",
+    id: MEMORY_TAB_ID,
     title: "Memory",
     icon: "Layers",
     layout: "flush",
     component: MemoryPanel,
   });
-  app.slots.experimental_threadHeaderAction({ id: "cortex-chip", title: "Cortex task", component: CortexChip });
-  // Not a prompt-box action: bb shows only three plugins' actions there and does not mount the rest.
-  app.slots.experimental_threadHeaderAction({ id: "cortex-memory", title: "Cortex memory", component: MemoryHeaderAction });
+  app.slots.navPanel({
+    id: "cortex",
+    title: "Cortex",
+    icon: "Brain",
+    path: CORTEX_PAGE_PATH,
+    component: CortexPage,
+    experimental_sidebar: CortexSidebar,
+    experimental_useBadge: useNeedsYouBadge,
+    experimental_usePageTitle: useCortexPageTitle,
+  });
+  // One widget in two host places: the context row above the composer, or the context card in wide panes.
+  app.slots.experimental_threadContextSegment({
+    id: "cortex-context",
+    title: "Cortex context",
+    group: "3_cortex",
+    summary: ContextSegmentSummary,
+    details: ContextSegmentDetails,
+    useVisible: useSegmentVisible,
+  });
+  app.slots.experimental_threadContextCardSection({
+    id: "cortex-context",
+    title: "Cortex",
+    group: INFO_SECTION_GROUPS.related,
+    order: 40,
+    component: ContextCardSection,
+  });
+  app.slots.experimental_threadAction(taskHeaderAction);
+  app.slots.experimental_threadAction(contextVisibilityAction);
   app.slots.messageDirective({ id: "cortex", component: CortexCard });
 });

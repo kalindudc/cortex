@@ -28,6 +28,10 @@ import {
 } from "./state";
 import { type MemoryTurns, registerMemoryTurns, STEER_PROVIDERS } from "./turns";
 import { registerCortexWatch } from "./watch";
+import { workstreamRpcMethods } from "./workstream-contract";
+import { createWorkstreams, type Workstreams } from "./workstreams";
+import { workstreamHandlers, unavailableWorkstreamHandlers } from "./workstream-rpc";
+import { registerWorkstreamAgents, workstreamConfiguration } from "./workstream-agents";
 
 const THREAD_ID = /^thr_[0-9a-z]{6,40}$/;
 const threadIdInputSchema = z.object({ threadId: z.string().regex(THREAD_ID) });
@@ -48,6 +52,7 @@ const taskRowsInputSchema = z.object({ ids: z.array(z.number().int().positive())
 const setMemoryModeInputSchema = threadIdInputSchema.extend({ mode: z.enum(MEMORY_MODES).nullable() });
 
 export const rpcContract = defineRpcContract({
+  ...workstreamRpcMethods,
   threadState: { input: threadIdInputSchema, output: threadStateSchema },
   task: { input: threadTaskInputSchema, output: taskDetailSchema },
   pin: { input: pinInputSchema, output: threadStateSchema },
@@ -112,14 +117,15 @@ export const SETTINGS = {
       off: "Off",
     },
   },
+  contextWidget: { type: "select", label: "Thread context widget", options: ["shown", "hidden"], default: "shown", description: "Default appearance of the Cortex thread context widget. Each thread can dismiss or restore it independently. Hiding it does not stop sharing context or erase an agent's existing session.", experimental_optionLabels: { shown: "Shown by default", hidden: "Hidden by default" } },
   memoryChip: {
     type: "boolean",
     label: "Memory icon",
     description:
-      "Shows the thread's memory beside the context circle under the prompt box, or in the thread header when that row is not on screen. Hover it for a summary; click it to open the Memory tab.",
+      "Shows memory status in the Cortex context row and card. Open the Memory tab for details.",
     default: true,
   },
-  taskChip: { type: "boolean", label: "Task chip in the thread header", default: true },
+  taskChip: { type: "boolean", label: "Current task button in the thread header", default: true },
 } satisfies PluginSettingDescriptors;
 
 const USAGE_TOOLS = "Cortex is the user's task tracker and agent memory. Two tools use it:";
@@ -234,6 +240,7 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
       throw new Error(reason);
     };
     bb.rpc.register(rpcContract, {
+      ...unavailableWorkstreamHandlers(reason),
       threadState: unavailable,
       task: unavailable,
       pin: unavailable,
@@ -261,6 +268,8 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
     bb.log.warn(`cortex doctor failed, so the Cortex tab is read-only: ${message(err)}`);
   }
   const state = createCortexState(bb, runner, { userAuthor });
+  const workstreams = createWorkstreams(bb, runner, { userAuthor, widgetDefault: () => current.contextWidget === "shown" });
+  registerWorkstreamAgents(bb, workstreams);
   const tracker = createMemoryTracker(RECALL_BUDGET);
   const publish = (channel: CortexRealtimeChannel, payload: unknown): void => bb.realtime.publish(channel, payload);
   const turns = registerMemoryTurns(bb, {
@@ -268,10 +277,11 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
     state,
     tracker,
     publish,
+    workstreams,
     modeOf: async thread =>
       effectiveMode(memorySetting(current.memory), await state.memoryOverride(thread.id), thread.parentThreadId !== null),
   });
-  registerCortexTools(bb, runner, state, tracker, publish, turns);
+  registerCortexTools(bb, runner, state, tracker, publish, turns, workstreams);
 
   // bb fails a configure that names a skill the plugin lacks, so only the skills its install holds are selected.
   let shippedSkills: string[] = [];
@@ -287,6 +297,11 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
   bb.agents.configure(context => {
     const child = context.thread.parentThreadId !== null;
     const mode = effectiveMode(memorySetting(current.memory), overrideFrom(context.pluginMetadata), child);
+    const scoped = workstreamConfiguration(workstreams, context, mode);
+    if (scoped !== null) {
+      if (tracker.configured(context.thread.id, { mode, lane: null, summary: [], chars: 0 })) publish("memory", { threadId: context.thread.id });
+      return { ...scoped, skills: skillsFor(context.provider.id, shippedSkills) };
+    }
     // As in the pi extension, only writers get the summary; off also drops recall.
     const primer = mode === "write" ? state.primerFor(context.project.id) : null;
     const summary = primer === null ? [] : state.primerIdsFor(context.project.id);
@@ -309,6 +324,7 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
     return result;
   }
   bb.rpc.register(rpcContract, {
+    ...workstreamHandlers(workstreams),
     threadState: ({ threadId }) => state.threadState(threadId),
     task: ({ threadId, taskId }) => state.task(threadId, taskId),
     pin: ({ threadId, taskId }) => written(threadId, state.pin(threadId, taskId)),
@@ -382,6 +398,7 @@ function registerCortexTools(
   tracker: MemoryTracker,
   publish: (channel: CortexRealtimeChannel, payload: unknown) => void,
   turns: MemoryTurns,
+  workstreams: Workstreams,
 ): void {
   // Per thread for the current request: calls made and queries claimed (in flight or answered).
   const recalls = new Map<string, { count: number; claimed: Set<string> }>();
@@ -445,6 +462,12 @@ function registerCortexTools(
       // Claimed before the CLI runs, so a parallel duplicate sees it in flight; a failure releases it.
       entry.claimed.add(key);
       try {
+        const scope = await workstreams.resolveBinding(ctx.threadId);
+        if (scope.binding || workstreams.store.tracked(ctx.threadId)) {
+          const output = await workstreams.recall(ctx.threadId, query, ctx.signal);
+          workstreams.record(output.context, "recall", output.text);
+          return output.text;
+        }
         const { projectId, cwd } = await state.locate(ctx.threadId);
         const started = Date.now();
         const text = await recall(runner, query, { cwd, lane: state.laneFor(projectId), signal: ctx.signal });

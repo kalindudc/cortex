@@ -970,10 +970,11 @@ describe("memory", () => {
   const memory = (s: Setup, threadId: string) => rpc(s, "memory", { threadId });
   const memorySignals = (s: Setup) => s.harness.inspection.realtimeSignals.filter(signal => signal.channel === "memory");
 
-  test("four settings with their defaults; a change applies to the next configure and signals every thread", async () => {
+  test("retains four settings and adds the context default; a change applies to the next configure and signals every thread", async () => {
     const s = await setup();
     const descriptors = s.harness.inspection.registrations.settingsDescriptors;
-    expect(Object.keys(descriptors)).toEqual(["cortexPath", "memory", "memoryChip", "taskChip"]);
+    expect(Object.keys(descriptors)).toEqual(["cortexPath", "memory", "contextWidget", "memoryChip", "taskChip"]);
+    expect(descriptors.contextWidget).toMatchObject({ type: "select", default: "shown", options: ["shown", "hidden"] });
     expect(descriptors.memory).toMatchObject({
       type: "select",
       label: "Agent memory",
@@ -981,7 +982,7 @@ describe("memory", () => {
       default: "auto",
     });
     expect(descriptors.memoryChip).toMatchObject({ type: "boolean", label: "Memory icon", default: true });
-    expect(descriptors.taskChip).toMatchObject({ type: "boolean", label: "Task chip in the thread header", default: true });
+    expect(descriptors.taskChip).toMatchObject({ type: "boolean", label: "Current task button in the thread header", default: true });
     await warm(s);
     await s.harness.behavior.setSettings({ memory: "read" });
     expect(memorySignals(s)).toContainEqual({ channel: "memory", payload: null });

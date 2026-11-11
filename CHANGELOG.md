@@ -2,6 +2,26 @@
 
 Cortex follows [semantic versioning](https://semver.org). Each release has a section below, newest first.
 
+## 0.104.0 - 2026-11-11
+
+- **Shared context for bb sections.** Connect a section to a workstream so related threads, including children,
+  start with approved knowledge for their topic and target environment. Startup context contains short claims and
+  source references; full captured evidence is available on demand. Other workstreams and historical tasks need
+  an explicit sharing grant.
+- **Review knowledge before it becomes guidance.** Suggestions wait for approval. Conflicts, expired observations
+  and unavailable volatile sources are held back with notices instead of actionable claims. Revisions, source
+  evidence, supersession and thread-only changes make the affected scope visible. Exact duplicates can reuse
+  existing knowledge; differently worded suggestions still need review, not an automatic similarity judgment.
+- **A new Cortex interface in bb.** Needs you, Workstreams, Library and Bindings bring review and navigation into
+  one page. The Cortex and Memory tabs retain task actions and add exact context previews and history. Collapse
+  the context row or hide it completely; the thread menu and Memory tab restore it, with a saved per-thread choice.
+- **Prepare context without sending it.** Inspect the exact text, put it in the composer as an unsent draft, and
+  distinguish current shared knowledge from changes for this thread. Context history records returned or sent
+  text without claiming the agent used it. Oversized startup context is refused before dispatch, never clipped.
+- **Workstreams in the CLI and API.** `cortex workstream` manages canonical knowledge, scoped reads and revisioned
+  changes; backup and restore include their history. Ordinary Cortex task memory, ranking and child updates keep
+  their existing behavior.
+
 ## 0.103.1 - 2026-11-10
 
 - **Pull requests link their memory.** A request that names a pull request, as a link, `owner/repo#12` or a forge

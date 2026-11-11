@@ -20,6 +20,7 @@ export const EVENT_KINDS = [
   "notification.changed",
   /** An actual transition into blocked; payload: BlockedTransition. */
   "task.blocked",
+  "workstream.changed",
 ] as const;
 
 export type EventKind = (typeof EVENT_KINDS)[number];

@@ -1,7 +1,4 @@
 import { useSyncExternalStore } from "react";
-import type { BbNavigate } from "@get-bb/plugin-sdk/app";
-
-export const PANEL_ACTION_ID = "cortex";
 
 /**
  * The task each thread's Cortex tab shows, shared by every slot in this app window; null follows the focus task.
@@ -22,11 +19,4 @@ export function selectTask(threadId: string, taskId: number | null): void {
 
 export function useSelectedTask(threadId: string): number | null {
   return useSyncExternalStore(subscribe, () => selections.get(threadId) ?? null);
-}
-
-/** Opens the thread's one Cortex tab, or focuses it, on `taskId`; false when bb declined. */
-export function openCortexTab(navigate: BbNavigate, threadId: string, taskId: number | null): boolean {
-  const accepted = navigate.openThreadPanel({ actionId: PANEL_ACTION_ID });
-  if (accepted) selectTask(threadId, taskId);
-  return accepted;
 }

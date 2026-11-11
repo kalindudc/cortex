@@ -129,7 +129,7 @@ export function StatusPill({
           </DropdownMenuItem>
         ))}
         <DropdownMenuSeparator />
-        <p className="px-2 pt-1 pb-1.5 text-[11px] leading-snug text-subtle-foreground">
+        <p className="px-2 pt-1 pb-1.5 text-[11px] leading-snug text-muted-foreground">
           Recorded as you, like a change in the cortex desktop app. Nobody is notified.
         </p>
       </DropdownMenuContent>
