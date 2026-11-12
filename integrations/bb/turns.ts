@@ -283,7 +283,7 @@ export function registerMemoryTurns(
   /**
    * Looks up the tasks matching a request and steers them into its turn, unless the request is over by then. A
    * thread started by another gets only the tasks its request links to and the starting thread's own, never keyword
-   * hits: its brief already carries the context.
+   * hits: its brief already carries the context. A connected section's brief goes first; ordinary hits still follow.
    */
   async function matchTasks(threadId: string, start: RequestStart, limit: number, parent: string | null): Promise<void> {
     if (deps.workstreams && (deps.workstreams.store.hasBindings() || deps.workstreams.store.tracked(threadId))) {
@@ -292,13 +292,12 @@ export function registerMemoryTurns(
         if (context.status !== "ready") {
           tracker.failed(threadId, context.error ?? "Workstream changed; no context was substituted.");
           changed(threadId);
-          return;
+        } else {
+          const current = () => threads.get(threadId)?.start?.seq === start.seq && !threads.get(threadId)?.marked;
+          if (!current() || (await bb.sdk.threads.get({ threadId })).status !== "active" || !current()) return;
+          await bb.sdk.threads.send({ threadId, mode: "steer", input: agentOnly(context.exactText) });
+          deps.workstreams.record(context, "match", context.exactText);
         }
-        const current = () => threads.get(threadId)?.start?.seq === start.seq && !threads.get(threadId)?.marked;
-        if (!current() || (await bb.sdk.threads.get({ threadId })).status !== "active" || !current()) return;
-        await bb.sdk.threads.send({ threadId, mode: "steer", input: agentOnly(context.exactText) });
-        deps.workstreams.record(context, "match", context.exactText);
-        return;
       }
     }
     const { cwd } = await state.locate(threadId);
@@ -398,10 +397,6 @@ export function registerMemoryTurns(
   async function checkpoint(thread: TurnThread, entry: ThreadTurn, start: RequestStart): Promise<void> {
     const threadId = thread.id;
     const mode = await deps.modeOf(thread);
-    if (deps.workstreams && (deps.workstreams.store.hasBindings() || deps.workstreams.store.tracked(threadId))) {
-      const context = await deps.workstreams.context(threadId);
-      if (context.binding || context.bindingChanged) return;
-    }
     if (mode !== "write" || (await bb.sdk.threads.queuedMessages.list({ threadId })).length > 0) return;
     const facts = readRequest(await requestRows(threadId, start.seq));
     if (facts.focus.length > 0) {

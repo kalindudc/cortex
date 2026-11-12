@@ -12,6 +12,8 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { createFakeCortex, type FakeCortex, type FakeFixture, type FakeTask } from "./fake-cortex";
 import type { MemoryView } from "./memory";
 import plugin, {
+  boundInstructionsFor,
+  combinedRecall,
   instructionsFor,
   PLUGIN_SKILL_PROVIDERS,
   pluginSkillNames,
@@ -384,6 +386,28 @@ describe("agent configuration", () => {
     const long = instructionsFor("x".repeat(10_000));
     expect(long.length).toBeLessThanOrEqual(4096);
     expect(long.endsWith("</cortex_memory>")).toBe(true);
+  });
+
+  test("a connected section's thread keeps ordinary memory beside its exact brief", () => {
+    const brief = "BRIEF: approved section knowledge";
+    const both = boundInstructionsFor(brief, "PRIMER: [908] open", { recall: true, hits: true });
+    expect(both).toContain(USAGE);
+    expect(both).toContain("<cortex_memory>\nPRIMER: [908] open\n</cortex_memory>");
+    expect(both.endsWith(`\n\n${brief}`)).toBe(true);
+
+    const longPrimer = boundInstructionsFor(brief, "x".repeat(10_000), { recall: true, hits: true });
+    expect(longPrimer.length).toBeLessThanOrEqual(4096);
+    expect(longPrimer.endsWith(`</cortex_memory>\n\n${brief}`)).toBe(true);
+
+    const fullBrief = "B".repeat(4096 - USAGE.length);
+    expect(boundInstructionsFor(fullBrief, "PRIMER", { recall: true, hits: true })).toBe(fullBrief);
+  });
+
+  test("a connected section's recall adds its brief matches to ordinary memory results", () => {
+    expect(combinedRecall(null, "TEXT memory search mint\n")).toBe("TEXT memory search mint\n");
+    expect(combinedRecall("BRIEF HIT\n", "TEXT memory search mint\n")).toBe(
+      "BRIEF HIT\n\nOrdinary Cortex memory:\nTEXT memory search mint\n",
+    );
   });
 
   test("a remote checkout never warms a primer", async () => {

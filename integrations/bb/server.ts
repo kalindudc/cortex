@@ -32,7 +32,7 @@ import { workstreamRpcMethods } from "./workstream-contract";
 import { sectionRpcMethods } from "./section-contract";
 import { createSections } from "./sections";
 import { sectionHandlers, unavailableSectionHandlers } from "./section-rpc";
-import { createWorkstreams, type Workstreams } from "./workstreams";
+import { createWorkstreams, NO_SCOPE_MATCH, type Workstreams } from "./workstreams";
 import { workstreamHandlers, unavailableWorkstreamHandlers } from "./workstream-rpc";
 import { registerWorkstreamAgents, workstreamConfiguration } from "./workstream-agents";
 import { createWorkstreamStore } from "./workstream-store";
@@ -85,6 +85,8 @@ export const rpcContract = defineRpcContract({
 
 const doctorSchema = z.object({ author: z.string().min(1).optional() });
 const INSTRUCTIONS_MAX = 4_096;
+const TASK_REF = /^@?\d+(?:#.*)?$/;
+const KNOWLEDGE_REF = /^@?kn_[a-zA-Z0-9_-]+$/;
 export const RECALL_BUDGET = 3;
 
 const updateParameters = z.object({
@@ -197,18 +199,39 @@ export function usageFor(recall: boolean, hits = true): string {
 }
 export const USAGE = usageFor(true);
 
-/** The usage block plus the project's cached primer, within bb's 4,096-character instruction limit. */
+/** The usage block plus the project's cached primer, within bb's 4,096-character instruction limit (or `max`). */
 export function instructionsFor(
   primer: string | null,
   options: { recall: boolean; hits: boolean } = { recall: true, hits: true },
+  max = INSTRUCTIONS_MAX,
 ): string {
   const usage = usageFor(options.recall, options.hits);
   if (!primer) return usage;
   const open = "\n\n<cortex_memory>\n";
   const close = "\n</cortex_memory>";
-  const room = INSTRUCTIONS_MAX - usage.length - open.length - close.length;
+  const room = max - usage.length - open.length - close.length;
+  if (room < 2) return usage;
   const body = primer.length <= room ? primer : `${primer.slice(0, room - 1)}\u2026`;
   return `${usage}${open}${body}${close}`;
+}
+
+/**
+ * A connected section's thread keeps ordinary memory and adds its brief. The brief is never clipped; ordinary
+ * memory takes the room left in bb's instruction limit, and only the tools' own descriptions remain without room.
+ */
+export function boundInstructionsFor(
+  scoped: string,
+  primer: string | null,
+  options: { recall: boolean; hits: boolean },
+): string {
+  const room = INSTRUCTIONS_MAX - scoped.length - 2;
+  if (room < usageFor(options.recall, options.hits).length) return scoped;
+  return `${instructionsFor(primer, options, room)}\n\n${scoped}`;
+}
+
+/** Joins a connected section's scoped recall with ordinary memory recall; scoped text comes first. */
+export function combinedRecall(scoped: string | null, ordinary: string): string {
+  return scoped === null ? ordinary : `${scoped.trimEnd()}\n\nOrdinary Cortex memory:\n${ordinary}`;
 }
 
 /**
@@ -333,24 +356,24 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
     if (restricted !== null) return restricted;
     const child = context.thread.parentThreadId !== null;
     const mode = effectiveMode(memorySetting(current.memory), overrideFrom(context.pluginMetadata), child);
-    const scoped = workstreamConfiguration(workstreams, context, mode);
-    if (scoped !== null) {
-      if (tracker.configured(context.thread.id, { mode, lane: null, summary: [], chars: 0 }))
-        publish("memory", { threadId: context.thread.id });
-      return { ...scoped, skills: skillsFor(context.provider.id, shippedSkills) };
-    }
     // As in the pi extension, only writers get the summary; off also drops recall.
     const primer = mode === "write" ? state.primerFor(context.project.id) : null;
     const summary = primer === null ? [] : state.primerIdsFor(context.project.id);
     const start = { mode, lane: state.laneFor(context.project.id), summary, chars: primer?.length ?? 0 };
     if (tracker.configured(context.thread.id, start)) publish("memory", { threadId: context.thread.id });
+    const usage = { recall: mode !== "off", hits: STEER_PROVIDERS.has(context.provider.id) };
+    const skills = skillsFor(context.provider.id, shippedSkills);
+    const scoped = workstreamConfiguration(workstreams, context, mode);
+    if (scoped !== null)
+      return {
+        ...scoped,
+        skills,
+        instructions: mode === "off" ? scoped.instructions : boundInstructionsFor(scoped.instructions, primer, usage),
+      };
     return {
       tools: mode === "off" ? ["cortex_update"] : ["cortex_update", "cortex_recall"],
-      skills: skillsFor(context.provider.id, shippedSkills),
-      instructions: instructionsFor(primer, {
-        recall: mode !== "off",
-        hits: STEER_PROVIDERS.has(context.provider.id),
-      }),
+      skills,
+      instructions: instructionsFor(primer, usage),
     };
   });
 
@@ -507,17 +530,22 @@ function registerCortexTools(
       // Claimed before the CLI runs, so a parallel duplicate sees it in flight; a failure releases it.
       entry.claimed.add(key);
       try {
+        // A connected section adds its brief to ordinary memory; task ids always read ordinary memory.
+        let scoped: string | null = null;
         const scope = await workstreams.resolveBinding(ctx.threadId);
-        if (scope.binding || workstreams.store.tracked(ctx.threadId)) {
+        if ((scope.binding || workstreams.store.tracked(ctx.threadId)) && !TASK_REF.test(query)) {
           const output = await workstreams.recall(ctx.threadId, query, ctx.signal);
-          workstreams.record(output.context, "recall", output.text);
-          return output.text;
+          if (output.context.binding && output.context.status === "ready" && output.text !== NO_SCOPE_MATCH) {
+            workstreams.record(output.context, "recall", output.text);
+            scoped = output.text;
+          }
+          if (KNOWLEDGE_REF.test(query)) return scoped ?? output.text;
         }
         const { projectId, cwd } = await state.locate(ctx.threadId);
         const started = Date.now();
         const text = await recall(runner, query, { cwd, lane: state.laneFor(projectId), signal: ctx.signal });
         tracker.recalled(ctx.threadId, query, text, Date.now() - started);
-        return text;
+        return combinedRecall(scoped, text);
       } catch (err) {
         tracker.failed(ctx.threadId, message(err));
         entry.claimed.delete(key);

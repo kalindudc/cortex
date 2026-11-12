@@ -2,6 +2,12 @@
 
 Cortex follows [semantic versioning](https://semver.org). Each release has a section below, newest first.
 
+## 0.105.1 - 2026-11-11
+
+- **Connected sections keep ordinary Cortex memory.** Threads in a section with a shared brief again get the memory
+  summary, matching tasks, `cortex_recall` across all Cortex memory and memory save checkpoints. The section brief is
+  added beside them and is never clipped to make room. Another workstream's knowledge still needs an explicit grant.
+
 ## 0.105.0 - 2026-11-11
 
 - **Section-first setup in bb.** Connect a real section to a new or existing shared brief, see its threads and

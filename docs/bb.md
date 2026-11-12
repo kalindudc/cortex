@@ -90,7 +90,7 @@ adds information; it cannot replace a running session's earlier text. Start a fr
 needed. Context history preserves returned recall text and accepted reference sends; it never recomputes old text
 from today's budget or knowledge and never claims that an agent used something merely because it was offered.
 
-Bound lookup has no implicit legacy or cross-workstream fallback; human grants are explicit and legacy reads labeled historical.
+A connected section adds its brief to ordinary Cortex memory; another workstream's knowledge needs an explicit human grant.
 Direct shell and Cortex CLI access remain outside this accidental-selection control.
 
 ## Keep conversations clear
@@ -112,14 +112,14 @@ task-wide memory exclusion. Plan progress and source checks remain; Files unchan
 
 ## What agents receive
 
-Unbound threads retain Cortex's ordinary memory behavior. Under Automatic, threads you start look up and save;
+Every thread keeps Cortex's ordinary memory, including in connected sections. Under Automatic, threads you start look up and save;
 children look up without a general primer or automatic save turn. Look up only omits those writes; Off omits
 automatic lookup and recall. Existing explicit `cortex_update` access remains available in all modes.
 
 Startup context contains short claims, approval, scope and source references, not captured evidence excerpts.
 An explicit scoped recall can return the selected knowledge's full captured evidence within the output budget.
 
-Bound threads receive scoped context and can propose sourced findings or report corrections; they cannot approve
+Bound threads also receive scoped context and can propose sourced findings or report corrections; they cannot approve
 or grant sharing through these agent tools. Their scope comes from the executing thread, not caller-supplied
 workstream or actor fields. Claude Code receives the Cortex skills from the plugin; other providers read their
 installed skills. The pi extension steps aside in a bb thread so memory is not injected twice.
