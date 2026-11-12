@@ -1,13 +1,7 @@
 import { type ReactNode, useState } from "react";
-import { type ExperimentalThreadActionTabProps, experimental_useAppPanel } from "@get-bb/plugin-sdk/app";
+import { type ExperimentalThreadActionTabProps, experimental_useAppPanel, useBbNavigate } from "@get-bb/plugin-sdk/app";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Icon } from "@/components/ui/icon";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
@@ -24,8 +18,8 @@ import {
 import type { CortexTaskRow } from "../state";
 import { useThreadContext } from "../ui/data";
 import { openTaskTab } from "../ui/panel-tabs";
-import { FailureNotice, LoadingRows } from "../ui/parts";
-import { ContextHistory, ContextOverview, NextContext, VisibilityControl } from "../ui/thread-context";
+import { FailureNotice, LoadingRows, Segmented } from "../ui/parts";
+import { CORTEX_PAGE_PATH, CONTEXT_TAB_LIST, CONTEXT_TAB_TRIGGER, ContextActions, ContextHistory, ContextOverview, copyContextText, NextContext, VisibilityControl } from "../ui/thread-context";
 import { errorText, useCortexRpc, useMemory, useTaskRows } from "./hooks";
 import { ErrorNotice } from "./panel";
 import { STATUS_LABEL, StatusDot } from "./status";
@@ -244,12 +238,11 @@ function StreamRow({
 
 const NONE = <p className="px-1.5 text-muted-foreground">none yet</p>;
 
-/** The thread's memory mode menu; a change applies when bb next starts this thread's agent. */
+/** A change applies when bb next starts this thread's agent. */
 function ModeControl({ memory, onChange }: { memory: MemoryState; onChange: (next: MemoryState) => void }) {
   const { threadId } = memory;
   const rpc = useCortexRpc();
-  const follow = `Follow the setting (${MODE_LABEL[effectiveMode(memory.setting, null, memory.child)]})`;
-  const current = memory.override === null ? follow : MODE_LABEL[memory.override];
+  const follow = `Follow setting\n${MODE_LABEL[effectiveMode(memory.setting, null, memory.child)]}`;
   const choose = async (mode: MemoryMode | null) => {
     try {
       onChange(await rpc.call("setMemoryMode", { threadId, mode }));
@@ -258,25 +251,13 @@ function ModeControl({ memory, onChange }: { memory: MemoryState; onChange: (nex
       toast.error(`Could not change memory: ${errorText(cause)}`);
     }
   };
-  const options: Array<[MemoryMode | null, string]> = [[null, follow], ...MEMORY_MODES.map(m => [m, MODE_LABEL[m]] as [MemoryMode, string])];
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2.5 text-[12px]" aria-label={`Memory for this thread: ${current}. Change`}>
-          {current}
-          <Icon name="ChevronDown" className="size-3.5" aria-hidden />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" mobileTitle="Memory for this thread" className="w-80">
-        {options.map(([mode, label]) => (
-          <DropdownMenuItem key={mode ?? "follow"} onSelect={() => void choose(mode)} aria-checked={mode === memory.override}>
-            <span className="flex-1">{label}</span>
-            {mode === memory.override ? <Icon name="Check" className="size-3.5 text-primary" aria-label="current" /> : null}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
+  return <Segmented
+    label="Memory for this thread"
+    value={memory.override ?? "follow"}
+    options={[{ value: "follow", label: follow }, ...MEMORY_MODES.map(value => ({ value, label: MODE_LABEL[value] }))]}
+    onChange={mode => void choose(mode === "follow" ? null : mode as MemoryMode)}
+    className="cortex-memory-modes grid w-full grid-cols-4 gap-px rounded-md border border-border-seam p-0.5"
+  />;
 }
 
 /** Working on, In context with each stream's reason, the session totals and the marker legend. */
@@ -291,6 +272,8 @@ function TaskMemory({ view, rows, onOpen }: { view: MemoryView | null; rows: Map
   const m = MEMORY_SYMBOLS;
   return (
     <>
+      <p data-testid="memory-health" className={cn("mt-2 break-words text-[12px]", view.error ? "text-destructive-text" : view.stale ? "text-warning-text" : "text-muted-foreground")}>{healthText(view)}</p>
+      <p className="mt-1 text-[11.5px] text-muted-foreground">{ROLE_LABEL[view.role]}{lane === null ? "" : ` · lane ${lane}`}</p>
       {view.role === "writer" ? (
         <section aria-label="Working on">
           <Heading>Working on</Heading>
@@ -324,9 +307,6 @@ function TaskMemory({ view, rows, onOpen }: { view: MemoryView | null; rows: Map
   );
 }
 
-const TAB_TRIGGER =
-  "-mb-px rounded-none border-b-2 border-transparent bg-transparent px-2.5 py-2 text-[12.5px] font-normal text-muted-foreground data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:font-semibold data-[state=active]:text-foreground data-[state=active]:shadow-none";
-
 /**
  * The Memory tab: the thread's memory mode and health, whether Cortex context
  * shows above the composer (where a dismissed widget comes back), the thread's
@@ -336,6 +316,7 @@ export function MemoryPanel({ threadId }: ExperimentalThreadActionTabProps): Rea
   const { memory, error, refetch, accept } = useMemory(threadId);
   const context = useThreadContext(threadId);
   const panel = experimental_useAppPanel();
+  const navigate = useBbNavigate();
   const [chosen, setChosen] = useState<string | null>(null);
   const view = memory?.view ?? null;
   const focus = view?.role === "writer" ? view.focus : [];
@@ -346,60 +327,37 @@ export function MemoryPanel({ threadId }: ExperimentalThreadActionTabProps): Rea
   };
   if (error !== null && memory === null) {
     return (
-      <div className="p-4">
+      <div data-cortex data-cortex-context className="p-4">
         <ErrorNotice message={error} onRetry={refetch} />
       </div>
     );
   }
   if (memory === null) return null;
-  const look = markerLook(memory, null);
+  const look = markerLook(memory, error);
   const role = view?.role ?? ROLE[memory.mode];
-  const lane = view?.lane ?? null;
+  const health = role === "off" ? "Off" : look.tone === "error" ? "Error" : view?.stale ? "Stale" : view?.saving ? "Saving" : view === null ? "No session" : view.inContext.length > 0 ? "Loaded" : "Ready";
   const bound = context.data !== undefined && context.data.status !== "unbound";
   const tab = chosen ?? (bound || context.error !== null ? "context" : "tasks");
   return (
-    <div className="h-full overflow-y-auto px-4 pt-3 pb-4 text-[12.5px]">
+    <div data-cortex data-cortex-context className="cortex-memory h-full min-w-0 overflow-y-auto px-4 pt-3 pb-4 text-[12.5px]">
       {error !== null ? <ErrorNotice message={error} onRetry={refetch} /> : null}
-      <header className="flex items-center gap-2">
-        {look.symbol ? (
-          <span aria-hidden className={cn("font-mono", SYMBOL_TONE[look.tone])}>
-            {look.symbol}
-          </span>
-        ) : null}
-        <h2 className="text-[14px] font-semibold text-foreground">Memory</h2>
-        <span className="flex-1" />
-        <span className="truncate text-[11.5px] text-muted-foreground">
-          {ROLE_LABEL[role]}
-          {lane === null ? "" : ` \u00b7 lane ${lane}`}
+      <header className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <span title={look.title} className={cn("inline-flex items-center gap-1 text-[11.5px]", SYMBOL_TONE[look.tone])}>
+          <Icon name={health === "Error" ? "AlertCircle" : health === "Stale" ? "AlertTriangle" : health === "Off" ? "EyeOff" : health === "Saving" ? "Loading" : "BellDot"} className="size-3.5 shrink-0" aria-hidden />{health}
         </span>
+        <h2 className="text-[14px] font-semibold text-foreground">Memory</h2>
+        {view && role !== "off" ? <span className="text-[11.5px] text-muted-foreground tabular-nums">{plural(view.inContext.length, "stream")} · {tokens(view.stats.chars)} tokens</span> : null}
       </header>
-      {view === null ? null : (
-        <p
-          className={cn(
-            "mt-2",
-            look.tone === "error" ? "text-destructive-text" : look.tone === "warning" ? "text-warning-text" : "text-foreground",
-          )}
-          data-testid="memory-health"
-        >
-          {healthText(view)}
-        </p>
-      )}
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <ModeControl memory={memory} onChange={accept} />
+      <div className="mt-3"><ModeControl memory={memory} onChange={accept} /></div>
+      <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+        <p className="min-w-0 flex-1 text-[11.5px] text-muted-foreground">Applies from the agent's next start</p>
         {context.data ? <VisibilityControl context={context.data} /> : null}
       </div>
-      <p className="mt-1.5 text-[11.5px] text-muted-foreground">A change applies when bb next starts this thread's agent.</p>
       <Tabs value={tab} onValueChange={setChosen} className="mt-2">
-        <TabsList className="h-auto w-full justify-start gap-0.5 rounded-none border-b border-border-seam bg-transparent p-0">
-          <TabsTrigger value="context" className={TAB_TRIGGER}>
-            Next context
-          </TabsTrigger>
-          <TabsTrigger value="history" className={TAB_TRIGGER}>
-            Context history
-          </TabsTrigger>
-          <TabsTrigger value="tasks" className={TAB_TRIGGER}>
-            Task memory
-          </TabsTrigger>
+        <TabsList className={CONTEXT_TAB_LIST}>
+          <TabsTrigger value="context" className={CONTEXT_TAB_TRIGGER}>Section brief</TabsTrigger>
+          <TabsTrigger value="tasks" className={CONTEXT_TAB_TRIGGER}>Task memory</TabsTrigger>
+          <TabsTrigger value="history" className={CONTEXT_TAB_TRIGGER}>History</TabsTrigger>
         </TabsList>
         <TabsContent value="context" className="mt-3">
           {context.error ? <FailureNotice failure={context.error} onRetry={context.refetch} /> : null}
@@ -407,8 +365,13 @@ export function MemoryPanel({ threadId }: ExperimentalThreadActionTabProps): Rea
             <LoadingRows label="Loading thread context" />
           ) : (
             <div className="flex flex-col gap-3">
-              <ContextOverview context={context.data} canPrepare />
-              {bound ? <NextContext context={context.data} /> : null}
+              <ContextOverview context={context.data} canPrepare showActions={false} />
+              {bound ? <NextContext context={context.data} compact /> : null}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <ContextActions context={context.data} canPrepare />
+                {bound ? <Button variant="outline" size="sm" onClick={() => void copyContextText(context.data!.exactText)}><Icon name="Copy" className="size-3.5" aria-hidden />Copy exact text</Button> : null}
+                <Button variant="ghost" size="sm" onClick={() => navigate.toPluginPanel(CORTEX_PAGE_PATH, { subPath: `threads/${threadId}` })}>Open full view<Icon name="ArrowUpRight" className="size-3.5" aria-hidden /></Button>
+              </div>
             </div>
           )}
         </TabsContent>

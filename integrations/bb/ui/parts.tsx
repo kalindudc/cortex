@@ -104,7 +104,7 @@ export function ApprovalLine({ entry }: { entry: Knowledge }) {
   if (entry.approval === null) {
     return (
       <span className="inline-flex items-center gap-1 text-[11.5px] text-muted-foreground">
-        <Icon name="CircleDot" className="size-3.5" aria-hidden />
+        <Icon name="BellDot" className="size-3.5" aria-hidden />
         Not approved
       </span>
     );
@@ -298,77 +298,6 @@ export function Segmented<T extends string>({
           {option.label}
         </button>
       ))}
-    </div>
-  );
-}
-
-type Segment = { id: string; tokens: number; label: string; tone: "directive" | "finding" | "notice" | "thread" };
-const SEGMENT_FILL: Record<Segment["tone"], string> = {
-  directive: "bg-primary/70",
-  finding: "bg-success/60",
-  notice: "bg-warning/55",
-  thread: "bg-attention/60",
-};
-
-export function segmentsOf(context: ThreadContext): Segment[] {
-  const entries = context.entries.map((entry: ContextEntry) => ({
-    id: entry.knowledge.id,
-    tokens: entry.estimatedTokens,
-    label: entry.knowledge.title,
-    tone: (entry.origin === "canonical" ? entry.knowledge.kind : "thread") as Segment["tone"],
-  }));
-  const notices = context.notices.map((notice: ContextNotice) => ({
-    id: notice.id,
-    tokens: notice.estimatedTokens,
-    label: "Notice only",
-    tone: "notice" as const,
-  }));
-  return [...entries, ...notices];
-}
-
-/**
- * The cut line: the budget as a bar, each piece of the next context as a
- * segment, the budget edge as a rule. Tokens not tied to an entry (the header
- * and footer) sit before the first entry so the total always matches.
- */
-export function BudgetBar({ context, className }: { context: ThreadContext; className?: string }) {
-  const segments = segmentsOf(context);
-  const assigned = segments.reduce((sum, segment) => sum + segment.tokens, 0);
-  const scale = Math.max(context.budgetTokens, context.estimatedTokens, 1);
-  const header = Math.max(0, context.estimatedTokens - assigned);
-  const over = context.estimatedTokens > context.budgetTokens;
-  const pct = (n: number) => `${(100 * n) / scale}%`;
-  return (
-    <div className={cn("flex flex-col gap-1", className)}>
-      <div
-        role="img"
-        aria-label={`${tokens(context.estimatedTokens)} of ${context.budgetTokens} tokens${over ? ", over budget" : ""}`}
-        className="relative flex h-3 overflow-hidden rounded-sm bg-muted"
-      >
-        {header > 0 ? <span className="h-full bg-muted-foreground/35" style={{ width: pct(header) }} /> : null}
-        {segments.map(segment => (
-          <span
-            key={segment.id}
-            title={`${segment.label} · ${tokens(segment.tokens)} tokens`}
-            className={cn("h-full border-r border-background", SEGMENT_FILL[segment.tone])}
-            style={{ width: pct(segment.tokens) }}
-          />
-        ))}
-        <span aria-hidden className="absolute inset-y-0 w-0.5 bg-foreground" style={{ left: `calc(${pct(context.budgetTokens)} - 1px)` }} />
-      </div>
-      <div className="flex items-center gap-2 text-[11.5px] text-muted-foreground tabular-nums">
-        <span className={over ? "font-semibold text-destructive-text" : "text-foreground"}>
-          {tokens(context.estimatedTokens)} / {context.budgetTokens} tokens
-        </span>
-        <span aria-hidden>·</span>
-        <span>{context.entries.length} with text</span>
-        {context.notices.length > 0 ? (
-          <>
-            <span aria-hidden>·</span>
-            <span>{context.notices.length} notice only</span>
-          </>
-        ) : null}
-      </div>
     </div>
   );
 }

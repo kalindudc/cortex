@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { experimental_copyToClipboard } from "@get-bb/plugin-sdk/app";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -92,7 +91,7 @@ export function TaskSearchField({
         }}
         placeholder="Link a task: search, or #id"
         aria-label="Search tasks to link"
-        className="h-[30px] pl-8 text-[12.5px]"
+        className="h-[30px] pl-8 text-[12.5px] pointer-coarse:min-h-11 pointer-coarse:text-base max-[480px]:min-h-11 max-[480px]:text-base"
       />
     </div>
   );
@@ -128,18 +127,15 @@ export function SwitcherMenu({
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="-ml-2 inline-flex h-[26px] items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground hover:bg-state-hover hover:text-foreground"
+          className="inline-flex min-h-7 min-w-0 items-center gap-1.5 rounded-md border border-border-seam px-2 text-xs text-muted-foreground hover:bg-state-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           aria-label={`Thread tasks (${state.links.length})`}
         >
-          <Icon name="Brain" className="size-4" aria-hidden />
-          Thread tasks
-          <Badge variant="secondary" className="h-[18px] min-w-[18px] justify-center rounded-full px-1.5 text-[11px]">
-            {state.links.length}
-          </Badge>
-          <Icon name="ChevronDown" className="size-3.5" aria-hidden />
+          {selected === null ? <span>Thread tasks</span> : <span className="shrink-0 font-mono text-foreground">#{selected}</span>}
+          <span className="truncate">· {state.links.some(link => link.id === selected) ? `${state.links.findIndex(link => link.id === selected) + 1} of ` : ""}{state.links.length} thread tasks</span>
+          <Icon name="ChevronDown" className="size-3.5 shrink-0" aria-hidden />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" mobileTitle="Thread tasks" className="w-[min(26rem,calc(100vw-2rem))]">
+      <DropdownMenuContent align="start" mobileTitle="Thread tasks" className="w-[min(26rem,calc(100vw-2rem))] pointer-coarse:[&_[role=menuitem]]:min-h-11 max-[480px]:[&_[role=menuitem]]:min-h-11">
         <div className="p-1">
           <TaskSearchField value={query} onChange={setQuery} autoFocus={open} />
         </div>
@@ -218,12 +214,12 @@ export function MoreMenu({
         <button
           type="button"
           aria-label="More"
-          className="grid size-[26px] place-items-center rounded-md text-muted-foreground hover:bg-state-hover hover:text-foreground"
+          className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-state-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         >
           <Icon name="MoreHorizontal" className="size-4" aria-hidden />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" mobileTitle={`Task #${taskId}`} className="w-60">
+      <DropdownMenuContent align="end" mobileTitle={`Task #${taskId}`} className="w-60 pointer-coarse:[&_[role=menuitem]]:min-h-11 max-[480px]:[&_[role=menuitem]]:min-h-11">
         <DropdownMenuItem onSelect={onPin}>
           <Icon name={pinned ? "PinOff" : "Pin"} aria-hidden />
           {pinned ? "Unpin" : "Pin as focus"}
@@ -239,6 +235,7 @@ export function MoreMenu({
           <Icon name="Copy" aria-hidden />
           Copy <span className="font-mono">{command}</span>
         </DropdownMenuItem>
+        <DropdownMenuSeparator />
         {memoryExcluded === null ? null : (
           <DropdownMenuItem onSelect={onToggleMemory}>
             <Icon name="Brain" aria-hidden />

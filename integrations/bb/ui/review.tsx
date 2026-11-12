@@ -1,16 +1,18 @@
-import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type KeyboardEvent, type RefObject, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { useBbNavigate } from "@get-bb/plugin-sdk/app";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
-import { facetWord, plural, STATE_LOOK } from "./copy";
+import { BRIEF_STATE_LOOK, plural, STATE_LOOK } from "./copy";
 import { type RpcFailure, useKnowledgeEntries, useReviewQueue, useWorkstreamWrites, type Writes } from "./data";
-import { ObserveDialog, Side } from "./dialogs";
+import { DiffText, EditKnowledgeDialog, ObserveDialog, Side } from "./dialogs";
 import { KnowledgeDetail } from "./knowledge";
 import { displayState, oldestFirst, waitAge, wordDiff } from "./model";
-import { EmptyNote, FailureNotice, LoadingRows, Segmented, StateMark, TONE_TEXT } from "./parts";
+import { EmptyNote, FailureNotice, Hint, LoadingRows, TONE_TEXT } from "./parts";
+import { CORTEX_PAGE_PATH } from "./thread-context";
 import type { AdmissionHint, Knowledge, ReviewItem } from "./types";
-import { DiffText } from "./dialogs";
+import "./review.css";
 
 const HINT_WORD: Record<AdmissionHint["reason"], string> = {
   "same-subject": "Same subject",
@@ -114,33 +116,32 @@ function optionsFor(item: ReviewItem, others: Knowledge[], writes: Writes, now: 
 
 function itemReason(entry: Knowledge, now: number): string {
   const state = displayState(entry, now);
-  if (state === "candidate") return entry.kind === "directive" ? "New directive" : "New finding";
+  if (state === "candidate") return entry.kind === "directive" ? "New rule" : "New finding";
   if (state === "disputed") return "Disputed";
   if (state === "expired") return "Expired";
   return STATE_LOOK[state].word;
 }
 
 function QueueRow({ item, selected, onSelect, now }: { item: ReviewItem; selected: boolean; onSelect: () => void; now: number }) {
-  const state = displayState(item.entry, now);
-  const look = STATE_LOOK[state];
+  const look = BRIEF_STATE_LOOK[displayState(item.entry, now)];
   return (
-    <li>
+    <li className="border-b border-border-seam">
       <button
         type="button"
         aria-current={selected ? "true" : undefined}
         onClick={onSelect}
         className={cn(
-          "flex w-full items-start gap-2.5 border-l-2 px-3 py-2.5 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset",
-          selected ? "border-primary bg-surface-selected" : "border-attention hover:bg-state-hover",
+          "flex w-full min-w-0 items-start gap-2.5 border-l-2 px-4 py-3 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset",
+          selected ? "border-primary bg-surface-selected" : "border-transparent hover:bg-state-hover",
         )}
       >
         <Icon name={look.icon} className={cn("mt-0.5 size-4 shrink-0", TONE_TEXT[look.tone])} aria-label={look.word} />
         <span className="min-w-0 flex-1">
-          <span className="line-clamp-2 text-[12.5px] font-semibold text-foreground">{item.entry.title}</span>
-          <span className="mt-0.5 line-clamp-2 text-[11.5px] text-muted-foreground">
-            {itemReason(item.entry, now)} · {item.workstream.name} · {facetWord(item.entry.facet)}
-            {item.hints.length > 0 ? ` · ${plural(item.hints.length, "similar entry", "similar entries")}` : ""}
+          <span className="line-clamp-2 text-[13px] font-semibold text-foreground" title={item.entry.title}>{item.entry.title}</span>
+          <span className="mt-1 block text-[12px] text-muted-foreground">
+            {itemReason(item.entry, now)} · {item.workstream.name}
           </span>
+          {item.hints.length > 0 ? <span className="block text-[11.5px] text-muted-foreground">{plural(item.hints.length, "similar entry", "similar entries")}</span> : null}
         </span>
         <span className="shrink-0 text-[11.5px] text-muted-foreground tabular-nums">{waitAge(item.entry.updatedAt, now)}</span>
       </button>
@@ -148,7 +149,23 @@ function QueueRow({ item, selected, onSelect, now }: { item: ReviewItem; selecte
   );
 }
 
-function Decision({ item, onDone, now }: { item: ReviewItem; onDone: () => void; now: number }) {
+type DecisionKeys = { choose: (index: number) => void; confirm: () => void };
+
+function optionIcon(option: Option): string {
+  if (option.id === "approve") return "Check";
+  if (option.id === "reject") return "X";
+  if (option.id === "archive") return "Archive";
+  if (option.opens === "observe") return "Eye";
+  return option.id.startsWith("merge-") ? "Link" : "GitBranch";
+}
+
+function Decision({ item, onDone, onOpen, now, keysRef }: {
+  item: ReviewItem;
+  onDone: () => void;
+  onOpen: (id: string) => void;
+  now: number;
+  keysRef: RefObject<DecisionKeys | null>;
+}) {
   const writes = useWorkstreamWrites();
   const relatedIds = useMemo(
     () => [...new Set([...item.entry.conflicts, ...item.hints.map(hint => hint.id)])].filter(id => id !== item.entry.id),
@@ -163,20 +180,17 @@ function Decision({ item, onDone, now }: { item: ReviewItem; onDone: () => void;
   const options = loadingRelated ? [] : optionsFor(item, relatedEntries, writes, now);
   const [choice, setChoice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const running = useRef(false);
   const [failure, setFailure] = useState<RpcFailure | null>(null);
-  const [observing, setObserving] = useState(false);
+  const [dialog, setDialog] = useState<"observe" | "edit" | null>(null);
   const chosen = options.find(option => option.id === choice) ?? null;
-  useEffect(() => {
-    setChoice(null);
-    setFailure(null);
-    setLoadCount(RELATED_STEP);
-  }, [item.entry.id]);
   const confirm = async () => {
-    if (!chosen) return;
+    if (!chosen || running.current) return;
     if (chosen.opens === "observe") {
-      setObserving(true);
+      setDialog("observe");
       return;
     }
+    running.current = true;
     setBusy(true);
     setFailure(null);
     try {
@@ -186,186 +200,175 @@ function Decision({ item, onDone, now }: { item: ReviewItem; onDone: () => void;
     } catch (cause) {
       setFailure(cause as RpcFailure);
     } finally {
+      running.current = false;
       setBusy(false);
     }
   };
-  const keys = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
-    const index = Number(event.key) - 1;
-    if (Number.isInteger(index) && index >= 0 && index < Math.min(9, options.length)) {
-      event.preventDefault();
-      setChoice(options[index]!.id);
-    }
-  };
+  useImperativeHandle(keysRef, () => ({
+    choose: index => {
+      if (!busy && options[index]) setChoice(options[index]!.id);
+    },
+    confirm: () => { void confirm(); },
+  }));
   return (
-    <div className="flex min-h-0 flex-1 flex-col" onKeyDown={keys}>
-      <div className="min-h-36 flex-1 overflow-y-auto px-4 py-4 md:px-5">
-        <KnowledgeDetail entry={item.entry} workstream={item.workstream}>
-          {relatedEntries.length > 0 ? (
-            <div className="flex flex-col gap-2">
-              <p className="text-[11.5px] font-semibold tracking-wide text-muted-foreground uppercase">Compare</p>
-              {relatedEntries.map(other => {
-                const hint = item.hints.find(h => h.id === other.id);
-                return (
-                  <div key={other.id} className="grid grid-cols-1 gap-2 xl:grid-cols-2">
-                    <Side entry={other} label={hint ? HINT_WORD[hint.reason] : "Disputes this"} />
-                    <div className="flex min-w-0 flex-col gap-1.5 rounded-md border border-border-seam p-3">
-                      <span className="text-[11.5px] font-semibold text-foreground">Wording change</span>
-                      <DiffText ops={wordDiff(other.text, item.entry.text)} label={`Words changed from ${other.title}`} />
-                    </div>
+    <div className="flex min-w-0 flex-col gap-4" data-part="DecisionPane">
+      <KnowledgeDetail
+        entry={item.entry}
+        workstream={item.workstream}
+        onOpen={onOpen}
+        facts={<span className="text-[12px] text-muted-foreground">waiting {waitAge(item.entry.updatedAt, now)}</span>}
+      >
+        {relatedEntries.length > 0 ? (
+          <section aria-label="Compare" className="flex flex-col gap-2">
+            <h3 className="text-[13px] font-semibold">Similar</h3>
+            {relatedEntries.map(other => {
+              const hint = item.hints.find(h => h.id === other.id);
+              return (
+                <div key={other.id} className="cortex-compare" data-part="Compare">
+                  <Side entry={other} label={hint ? HINT_WORD[hint.reason] : "Disputes this"} />
+                  <div className="flex min-w-0 flex-col gap-1.5 rounded-md border border-border-seam p-3">
+                    <span className="text-[12px] font-semibold text-foreground">Wording change</span>
+                    <DiffText ops={wordDiff(other.text, item.entry.text)} label={`Words changed from ${other.title}`} />
                   </div>
-                );
-              })}
-            </div>
-          ) : null}
-          {relatedIds.length > 0 ? (
-            <div className="flex flex-col items-start gap-1">
-              {loadingRelated ? <LoadingRows rows={1} label="Loading the entries to compare" /> : null}
-              {unreadable.map(row => (
-                <p key={row.id} role="alert" className="text-[12px] text-destructive-text">
-                  <span className="font-mono">{row.id}</span> could not be read: {row.failure.message}. Options that need it are hidden.
-                </p>
-              ))}
-              {relatedIds.length > loadedIds.length ? (
-                <Button variant="ghost" size="sm" className="h-7 px-2 text-[12px]" onClick={() => setLoadCount(loadCount + RELATED_STEP)}>
-                  Compare {Math.min(RELATED_STEP, relatedIds.length - loadedIds.length)} more of {relatedIds.length - loadedIds.length} not loaded
-                </Button>
-              ) : null}
-              <p className="text-[11.5px] text-muted-foreground">Similar means same subject, words or source. Cortex never merges by itself.</p>
-            </div>
-          ) : null}
-        </KnowledgeDetail>
-      </div>
-      <div className="flex max-h-[55%] min-h-0 shrink-0 flex-col border-t border-border-seam bg-background px-4 pt-3 pb-3 md:px-5">
-        <div role="radiogroup" aria-label="Your call" className="-mx-1 flex min-h-0 flex-col gap-1.5 overflow-y-auto px-1 py-0.5">
+                </div>
+              );
+            })}
+          </section>
+        ) : null}
+        {relatedIds.length > 0 ? (
+          <div className="flex flex-col items-start gap-2">
+            {loadingRelated ? <LoadingRows rows={1} label="Loading the entries to compare" /> : null}
+            {unreadable.map(row => (
+              <p key={row.id} role="alert" className="text-[12px] text-destructive-text">
+                <span title={row.id}>Related entry</span> could not be read: {row.failure.message}. Options that need it are hidden.
+              </p>
+            ))}
+            {relatedIds.length > loadedIds.length ? (
+              <Button variant="ghost" size="sm" className="cortex-filter h-auto px-2 text-[12px]" onClick={() => setLoadCount(loadCount + RELATED_STEP)}>
+                Compare {Math.min(RELATED_STEP, relatedIds.length - loadedIds.length)} more of {relatedIds.length - loadedIds.length} not loaded
+              </Button>
+            ) : null}
+            <Hint text="Similar means same subject, words or source. Cortex never merges by itself.">
+              <span className="inline-flex items-center gap-1 text-[12px] text-muted-foreground"><Icon name="Info" className="size-3.5" aria-hidden />About similar entries</span>
+            </Hint>
+          </div>
+        ) : null}
+      </KnowledgeDetail>
+      <section aria-label="Decision" className="flex flex-col gap-2">
+        <div className="flex items-center gap-2">
+          <h3 className="flex-1 text-[13px] font-semibold">Your call</h3>
+          {options.length > 0 ? <span className="text-[11.5px] text-muted-foreground">1–{Math.min(9, options.length)} choose</span> : null}
+        </div>
+        <div role="radiogroup" aria-label="Your call" className="flex min-w-0 flex-col gap-1.5">
           {options.map((option, index) => (
             <button
               key={option.id}
-              ref={node => {
-                if (node && option.id === choice) node.scrollIntoView?.({ block: "nearest" });
-              }}
               type="button"
               role="radio"
               aria-checked={option.id === choice}
+              disabled={busy}
               onClick={() => setChoice(option.id)}
+              onKeyDown={event => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  setChoice(option.id);
+                }
+              }}
               className={cn(
-                "flex items-start gap-2.5 rounded-md border px-3 py-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                "cortex-choice flex min-w-0 items-start gap-2.5 rounded-md border px-3 py-2.5 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50",
                 option.id === choice ? "border-primary bg-surface-selected" : "border-border-seam hover:bg-state-hover",
               )}
             >
-              <Icon name={option.id === choice ? "CircleCheck" : "Circle"} className={cn("mt-0.5 size-4 shrink-0", option.id === choice ? "text-primary" : "text-muted-foreground")} aria-hidden />
+              {index < 9 ? <kbd aria-hidden className="shrink-0 rounded-sm border border-border-seam px-1 font-mono text-[11px] text-muted-foreground">{index + 1}</kbd> : null}
+              <Icon name={optionIcon(option)} className={cn("mt-0.5 size-4 shrink-0", option.id === "reject" ? "text-destructive-text" : option.id === choice ? "text-primary" : "text-muted-foreground")} aria-hidden />
               <span className="min-w-0 flex-1">
-                <span className="block text-[12.5px] font-semibold text-foreground">{option.label}</span>
-                <span className="block text-[11.5px] text-muted-foreground">{option.effect}</span>
+                <span className="block text-[13px] font-semibold text-foreground">{option.label}</span>
+                <span className="mt-0.5 block text-[12px] text-muted-foreground">{option.effect}</span>
               </span>
-              {index < 9 ? <kbd className="shrink-0 rounded-sm border border-border-seam px-1 font-mono text-[11px] text-muted-foreground">{index + 1}</kbd> : null}
             </button>
           ))}
         </div>
-        {failure ? (
-          <div className="mt-2 shrink-0">
-            <FailureNotice failure={failure} />
-          </div>
-        ) : null}
-        <div className="mt-2.5 flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1">
-          <Button disabled={chosen === null || busy} onClick={() => void confirm()}>
+        {failure ? <FailureNotice failure={failure} /> : null}
+        <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
+          <Button className="cortex-choice h-auto min-h-8 bg-primary px-3 py-2 text-primary-foreground hover:bg-primary/90" aria-label={chosen ? `Confirm: ${chosen.label}` : loadingRelated ? "Loading options" : "Choose an option"} disabled={chosen === null || busy} onClick={() => void confirm()}>
             {chosen ? `Confirm: ${chosen.label}` : loadingRelated ? "Loading options" : "Choose an option"}
+            <kbd aria-hidden className="rounded-sm border border-current px-1 text-[11px]">↵</kbd>
           </Button>
-          {options.length > 0 ? <span className="text-[11.5px] text-muted-foreground">J and K move · 1 to {Math.min(9, options.length)} choose</span> : null}
+          <Button variant="outline" size="sm" disabled={busy} onClick={() => setDialog("edit")}><Icon name="Edit" aria-hidden />Edit first</Button>
         </div>
-      </div>
-      <ObserveDialog entry={item.entry} mode="observe" open={observing} onOpenChange={open => setObserving(open)} />
+      </section>
+      <EditKnowledgeDialog entry={item.entry} workstream={item.workstream} open={dialog === "edit"} onOpenChange={open => { if (!open) setDialog(null); }} />
+      <ObserveDialog entry={item.entry} mode="observe" open={dialog === "observe"} onOpenChange={open => { if (!open) setDialog(null); }} />
     </div>
   );
 }
 
-/** Needs you: entries waiting for a person's decision, oldest first, each with its evidence and named options. */
 export function NeedsYou() {
   const read = useReviewQueue();
+  const navigate = useBbNavigate();
   const now = Date.now();
   const [filter, setFilter] = useState("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showDetail, setShowDetail] = useState(false);
-  const listRef = useRef<HTMLUListElement>(null);
+  const keysRef = useRef<DecisionKeys | null>(null);
   const items = useMemo(() => oldestFirst(read.data?.items ?? []), [read.data]);
   const workstreams = useMemo(() => [...new Map(items.map(item => [item.workstream.id, item.workstream])).values()], [items]);
   const visible = filter === "all" ? items : items.filter(item => item.workstream.id === filter);
   const selected = visible.find(item => item.entry.id === selectedId) ?? visible[0] ?? null;
-  if (read.error && read.data === undefined) return <div className="p-4 md:p-5"><FailureNotice failure={read.error} onRetry={read.refetch} /></div>;
-  if (read.data === undefined) return <div className="p-4 md:p-5"><LoadingRows label="Loading what needs you" /></div>;
-  const move = (delta: number) => {
-    if (visible.length === 0) return;
-    const index = Math.max(0, visible.findIndex(item => item.entry.id === selected?.entry.id));
-    const next = visible[Math.min(visible.length - 1, Math.max(0, index + delta))]!;
-    setSelectedId(next.entry.id);
+  const open = (id: string) => {
+    if (visible.some(item => item.entry.id === id)) {
+      setSelectedId(id);
+      setShowDetail(true);
+    } else if (selected) {
+      navigate.toPluginPanel(CORTEX_PAGE_PATH, { subPath: `workstreams/${selected.workstream.id}/${id}` });
+    }
   };
   const keys = (event: KeyboardEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement;
-    if (target.closest("input, textarea, [role=dialog], [role=menu]")) return;
-    if (event.key === "j" || event.key === "k") {
+    if (event.ctrlKey || event.metaKey || event.altKey || event.nativeEvent.isComposing ||
+      target.closest("input, textarea, select, [contenteditable]:not([contenteditable=false]), [role=textbox], [role=combobox], [role=dialog], [role=alertdialog], [role=menu]")) return;
+    if ((event.key.toLowerCase() === "j" || event.key.toLowerCase() === "k") && visible.length > 0) {
       event.preventDefault();
-      move(event.key === "j" ? 1 : -1);
+      const index = Math.max(0, visible.findIndex(item => item.entry.id === selected?.entry.id));
+      const delta = event.key.toLowerCase() === "j" ? 1 : -1;
+      setSelectedId(visible[Math.min(visible.length - 1, Math.max(0, index + delta))]!.entry.id);
+    } else if (/^[1-9]$/.test(event.key)) {
+      event.preventDefault();
+      keysRef.current?.choose(Number(event.key) - 1);
+    } else if (event.key === "Enter" && !target.closest("button, a, summary")) {
+      event.preventDefault();
+      keysRef.current?.confirm();
     }
   };
-  const oldest = items[0];
+  if (read.error && read.data === undefined) return <div className="p-4"><FailureNotice failure={read.error} onRetry={read.refetch} /></div>;
+  if (read.data === undefined) return <div className="p-4"><LoadingRows label="Loading what needs you" /></div>;
+  const oldest = visible[0];
   return (
-    <div className="flex h-full min-h-0 flex-col" onKeyDown={keys}>
+    <div data-cortex data-part="ReviewQueue" role="region" aria-label="Review queue" tabIndex={0} className="cortex-review flex h-full min-h-0 flex-col focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" onKeyDown={keys}>
       {read.error ? <FailureNotice failure={read.error} onRetry={read.refetch} /> : null}
-      <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-border-seam px-4 py-3 md:px-5">
-        <span className="text-[28px] leading-none font-semibold text-foreground tabular-nums">{read.data.total}</span>
-        <span className="text-[14px] font-semibold text-foreground">need you</span>
-        {oldest ? <span className="text-[12px] text-muted-foreground">oldest {waitAge(oldest.entry.updatedAt, now)}</span> : null}
-        <span className="flex-1" />
-        {workstreams.length > 1 ? (
-          <Segmented
-            label="Workstream"
-            value={filter}
-            options={[{ value: "all", label: "All" }, ...workstreams.map(ws => ({ value: ws.id, label: ws.name }))]}
-            onChange={setFilter}
-          />
-        ) : null}
+      <div className="cortex-master-detail" data-show-detail={showDetail || undefined}>
+        <div className="cortex-master border-r border-border-seam">
+          <header className="flex items-center gap-3 border-b border-border-seam px-4 py-3">
+            <span className="text-[24px] leading-none font-semibold text-foreground tabular-nums">{filter === "all" ? read.data.total : visible.length}</span>
+            <div className="min-w-0 flex-1"><h2 className="text-[13px] font-semibold">to review</h2>{oldest ? <p className="text-[12px] text-muted-foreground">oldest {waitAge(oldest.entry.updatedAt, now)}</p> : null}</div>
+            <span title="J and K move through the queue" className="flex gap-1 text-[11px] text-muted-foreground"><kbd className="border border-border-seam px-1">J</kbd><kbd className="border border-border-seam px-1">K</kbd></span>
+          </header>
+          {workstreams.length > 1 ? <div role="group" aria-label="Workstream" className="flex flex-wrap gap-1.5 border-b border-border-seam p-3">
+            {[{ id: "all", name: "All" }, ...workstreams].map(ws => <Button key={ws.id} variant="outline" size="sm" aria-pressed={filter === ws.id} className={cn("cortex-filter h-auto min-h-7 px-2 py-1 text-[12px]", filter === ws.id && "border-surface-selected-border bg-surface-selected")} onClick={() => { setFilter(ws.id); setSelectedId(null); setShowDetail(false); }}>{ws.name}</Button>)}
+          </div> : null}
+          {visible.length === 0 ? <div className="p-4"><EmptyNote icon="CircleCheck">Nothing waits for your review.</EmptyNote></div> : <>
+            <p className="border-b border-border-seam px-4 py-2 text-[11.5px] text-muted-foreground">Oldest first</p>
+            <ul aria-label="Waiting for your review">
+              {visible.map(item => <QueueRow key={item.entry.id} item={item} now={now} selected={item.entry.id === selected?.entry.id} onSelect={() => { setSelectedId(item.entry.id); setShowDetail(true); }} />)}
+            </ul>
+          </>}
+          {read.data.total > items.length ? <p className="px-4 py-3 text-[12px] text-muted-foreground">{plural(read.data.total - items.length, "older item")} after these</p> : null}
+        </div>
+        {selected ? <div className="cortex-detail">
+          <Button variant="ghost" size="sm" className="cortex-back mb-3" onClick={() => setShowDetail(false)}><Icon name="ChevronLeft" aria-hidden />Queue</Button>
+          <Decision key={selected.entry.id} item={selected} now={now} keysRef={keysRef} onOpen={open} onDone={() => { setSelectedId(null); }} />
+        </div> : null}
       </div>
-      {visible.length === 0 ? (
-        <div className="p-4 md:p-5">
-          <EmptyNote icon="CircleCheck">Nothing waits for your review.</EmptyNote>
-        </div>
-      ) : (
-        <div className="flex min-h-0 flex-1">
-          <ul
-            ref={listRef}
-            aria-label="Waiting for your review"
-            className={cn("min-h-0 w-full overflow-y-auto border-r border-border-seam lg:w-[22rem] lg:shrink-0", showDetail && "hidden lg:block")}
-          >
-            {visible.map(item => (
-              <QueueRow
-                key={item.entry.id}
-                item={item}
-                now={now}
-                selected={item.entry.id === selected?.entry.id}
-                onSelect={() => {
-                  setSelectedId(item.entry.id);
-                  setShowDetail(true);
-                }}
-              />
-            ))}
-            {read.data.total > items.length ? (
-              <li className="px-3 py-2 text-[11.5px] text-muted-foreground">{plural(read.data.total - items.length, "older item")} after these</li>
-            ) : null}
-          </ul>
-          {selected ? (
-            <div className={cn("min-w-0 flex-1 flex-col", showDetail ? "flex" : "hidden lg:flex")}>
-              <div className="flex items-center gap-2 border-b border-border-seam px-3 py-1.5 lg:hidden">
-                <Button variant="ghost" size="sm" onClick={() => setShowDetail(false)}>
-                  <Icon name="ChevronLeft" className="size-4" aria-hidden />
-                  Queue
-                </Button>
-                <StateMark state={displayState(selected.entry, now)} />
-              </div>
-              <Decision item={selected} now={now} onDone={() => setSelectedId(null)} />
-            </div>
-          ) : null}
-        </div>
-      )}
     </div>
   );
 }

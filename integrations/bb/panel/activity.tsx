@@ -51,14 +51,14 @@ function Who({ who }: { who: CortexAuthor }) {
       <button
         type="button"
         title="Open this bb thread"
-        className="font-semibold text-foreground hover:underline"
+        className="min-w-0 break-words text-left font-semibold text-foreground hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring [overflow-wrap:anywhere]"
         onClick={() => navigate.toThread(threadId)}
       >
         {who.label}
       </button>
     );
   }
-  return <span className="font-semibold text-foreground">{who.label}</span>;
+  return <span className="min-w-0 break-words font-semibold text-foreground [overflow-wrap:anywhere]">{who.label}</span>;
 }
 
 function When({ at }: { at: number }) {
@@ -84,14 +84,14 @@ function NoteRow({ detail, update }: { detail: CortexTaskDetail; update: CortexU
           <Who who={who} />
           <When at={update.created} />
         </div>
-        <p className="mt-0.5 text-[13px] leading-normal text-foreground">{update.summary}</p>
+        <p data-content className="mt-0.5 break-words text-[13px] leading-normal text-foreground [overflow-wrap:anywhere]">{update.summary}</p>
         {update.body ? (
           <div className="mt-1">
-            <button type="button" className="text-[11.5px] text-primary hover:underline" onClick={() => setOpen(!open)}>
+            <button type="button" className="text-[11.5px] text-primary hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" onClick={() => setOpen(!open)}>
               {open ? "Hide details" : "Show details"}
             </button>
             {open ? (
-              <div className="mt-1.5 rounded-md bg-surface-recessed px-2.5 py-2 text-xs leading-normal text-muted-foreground">
+              <div data-content className="mt-1.5 min-w-0 break-words rounded-md bg-surface-recessed px-2.5 py-2 text-xs leading-normal text-muted-foreground [overflow-wrap:anywhere] [&_pre]:max-w-full [&_pre]:overflow-x-auto">
                 <Markdown content={update.body} />
               </div>
             ) : null}
@@ -202,13 +202,16 @@ export function Composer({
   };
   return (
     <form
-      className="shrink-0 border-t border-border bg-card px-3 py-2.5"
+      aria-label="Post a task note"
+      className="shrink-0 border-t border-border-seam bg-card px-3 py-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))]"
       onSubmit={event => {
         event.preventDefault();
         void submit();
       }}
     >
+      <div className="flex min-w-0 flex-wrap items-end gap-2">
       <Textarea
+        rows={1}
         value={text}
         onChange={event => setText(event.target.value)}
         onKeyDown={event => {
@@ -220,14 +223,9 @@ export function Composer({
         disabled={pending}
         placeholder="Add a note…"
         aria-label="Note"
-        className="min-h-[54px] resize-none text-[12.5px]"
+        aria-description="Posts as you. Cmd or Ctrl+Enter to post."
+        className="h-8 max-h-40 min-h-8 min-w-0 flex-1 basis-28 resize-y py-1.5 text-[12.5px] pointer-coarse:min-h-11 pointer-coarse:text-base max-[480px]:text-base @max-[480px]/cortex-task:basis-full"
       />
-      {error === null ? null : (
-        <p role="alert" className="mt-1.5 text-xs text-destructive-text">
-          {error}
-        </p>
-      )}
-      <div className="mt-2 flex items-center gap-2">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button type="button" variant="outline" size="sm" disabled={pending} className="h-[26px] gap-1.5 px-2">
@@ -236,7 +234,7 @@ export function Composer({
               <Icon name="ChevronDown" className="size-3.5" aria-hidden />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" mobileTitle="Status for this note">
+          <DropdownMenuContent align="start" mobileTitle="Status for this note" className="pointer-coarse:[&_[role=menuitem]]:min-h-11 max-[480px]:[&_[role=menuitem]]:min-h-11">
             <DropdownMenuItem onSelect={() => setStatus(null)}>Keep status</DropdownMenuItem>
             {STATUSES.map(option => (
               <DropdownMenuItem key={option} onSelect={() => setStatus(option)}>
@@ -246,12 +244,15 @@ export function Composer({
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
-        <span className="text-[11px] text-muted-foreground">Posts as you · ⌘↵</span>
-        <span className="flex-1" />
-        <Button type="submit" size="sm" className="h-[26px] px-3" disabled={pending || empty}>
+        <Button type="submit" size="sm" className="ml-auto h-8 bg-primary px-3 text-primary-foreground hover:bg-primary/90" disabled={pending || empty}>
           {pending ? "Posting…" : "Post"}
         </Button>
       </div>
+      {error === null ? null : (
+        <p role="alert" className="mt-1.5 break-words text-xs text-destructive-text">
+          {error}
+        </p>
+      )}
     </form>
   );
 }

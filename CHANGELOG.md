@@ -2,6 +2,25 @@
 
 Cortex follows [semantic versioning](https://semver.org). Each release has a section below, newest first.
 
+## 0.106.0 - 2026-11-12
+
+- **The Cortex page in bb is redesigned.** It opens on an Overview of every section and its brief, instead of a
+  "need you" count, and that Overview replaces the Bindings page. Review is its own screen: a queue on one side and
+  the decision on the other, with J and K to move and number keys to choose. A shared workstream's knowledge and its
+  edit history are now tabs on its section, and a small Workstreams list keeps shared and archived ones within reach.
+- **Each section shows its brief as a budget bar.** Every entry that goes to new threads is a segment, and notices
+  are hatched. Suggestions sit inside the brief with Accept, Edit and Reject beside their source quote. Entries that
+  are held back say why in a few words, such as "Environment and host unknown", and offer the fix that applies.
+- **Honest delivery wording.** When a brief is over budget, missing required knowledge or unavailable, every screen
+  says it sends nothing and why, instead of counting entries as going in.
+- **Drafting moves to a side card** with a five-step progress bar, and a Drafts tab holds the history.
+- **Disconnect can be undone** from a toast, against the revision the disconnect returned.
+- **The thread context page reads as text,** not JSON, with an Exact text view, its changes and its history. The
+  thread's Memory tab has a four-way mode control and the same budget bar, and the Cortex task tab has a status track.
+- **A compact sidebar.** Rows are as dense as bb's own lists, the shared section shows its brief under its name, and
+  sections that share nothing fold under "Not shared". Touch-size targets apply only on a touch or narrow screen.
+- **Icons show as intended.** Several icon names were not in bb's icon set and drew a lightning bolt instead.
+
 ## 0.105.5 - 2026-11-12
 
 - **Start drafting works.** bb refused to create the drafting helper ("startedOnBehalfOf requires an originKind"),

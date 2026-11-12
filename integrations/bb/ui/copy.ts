@@ -6,10 +6,21 @@ import type { Actor, DeliveryReceipt, Dimension, Knowledge, KnowledgeSource, Thr
 export type Tone = "success" | "attention" | "warning" | "destructive" | "muted" | "primary";
 export type DisplayState = Knowledge["state"] | "expired";
 
+const DELIVERY_STATUS: Record<Exclude<ThreadContext["status"], "ready">, string> = {
+  "over-budget": "over budget",
+  "missing-required": "required knowledge missing",
+  unavailable: "brief unavailable",
+  unbound: "not connected",
+};
+
+export function deliverySummary(status: ThreadContext["status"], readyText: string): string {
+  return status === "ready" ? readyText : `Sends nothing: ${DELIVERY_STATUS[status]}`;
+}
+
 export const STATE_LOOK: Record<DisplayState, { word: string; icon: string; tone: Tone }> = {
-  candidate: { word: "Waiting for review", icon: "CircleDot", tone: "attention" },
+  candidate: { word: "Waiting for review", icon: "BellDot", tone: "attention" },
   approved: { word: "Approved", icon: "CircleCheck", tone: "success" },
-  disputed: { word: "Disputed", icon: "TriangleAlert", tone: "warning" },
+  disputed: { word: "Disputed", icon: "AlertTriangle", tone: "warning" },
   superseded: { word: "Replaced", icon: "RotateCcw", tone: "muted" },
   recheck: { word: "Needs re-check", icon: "Clock", tone: "warning" },
   expired: { word: "Expired", icon: "Clock", tone: "warning" },
@@ -21,6 +32,16 @@ export const STATE_LOOK: Record<DisplayState, { word: string; icon: string; tone
 export const KIND_LOOK: Record<Knowledge["kind"], { word: string; icon: string }> = {
   directive: { word: "Directive", icon: "ListTodo" },
   finding: { word: "Finding", icon: "Search" },
+};
+
+export const BRIEF_STATE_LOOK = {
+  ...STATE_LOOK,
+  candidate: { ...STATE_LOOK.candidate, word: "Waiting" },
+};
+
+export const BRIEF_KIND_LOOK: typeof KIND_LOOK = {
+  directive: { word: "Rule", icon: "ListTodo" },
+  finding: { ...KIND_LOOK.finding, icon: "Explore" },
 };
 
 export const ORIGIN_WORD: Record<ThreadContext["entries"][number]["origin"], string> = {

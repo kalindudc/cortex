@@ -8,10 +8,13 @@ import { draftRpcContract, type DraftConfig, type DraftJob, type DraftPreview } 
 import { sectionRpcContract, type Section } from "./section-contract";
 import { workstreamRpcContract } from "./workstream-contract";
 import { draftRecoveryScope, pendingDraft, savePendingDraft } from "./ui/draft-intent";
-import { DraftJobs, DraftJobView } from "./ui/drafting";
+import { DraftJobs, DraftJobView, draftPhase } from "./ui/drafting";
+import { DraftRailCard, DraftsTab } from "./ui/draft-rail";
+import { SectionPage } from "./ui/sections";
+import { CompactViewportOverrideProvider } from "./components/ui/hooks/use-compact-viewport";
 import { failureOf, useDraftJob, useDraftWrites } from "./ui/data";
 
-const contract = { ...draftRpcContract, sectionList: sectionRpcContract.sectionList, sectionDetail: sectionRpcContract.sectionDetail, sectionCaptureJobs: sectionRpcContract.sectionCaptureJobs, workstreamList: workstreamRpcContract.workstreamList };
+const contract = { ...draftRpcContract, sectionList: sectionRpcContract.sectionList, sectionDetail: sectionRpcContract.sectionDetail, sectionCaptureJobs: sectionRpcContract.sectionCaptureJobs, workstreamList: workstreamRpcContract.workstreamList, knowledgeShow: workstreamRpcContract.knowledgeShow };
 const actor = { id: "kal", type: "human" } as const;
 const now = new Date().toISOString();
 const threadId = "thr_aaaaaaaa";
@@ -41,6 +44,7 @@ function fixture() {
     sectionDetail: () => ({ section: currentSection, threads: [{ id: threadId, name: "Investigate the staging bootstrap" }], eligibility: { computedAt: now, status: "ready", error: null, entries: [], notices: [], exclusions: [], exactText: "", estimatedTokens: 0, budgetTokens: 400 }, review: { items: [], total: 0, limit: 50, offset: 0 } }),
     sectionCaptureJobs: ({ limit = 20, offset = 0 }) => ({ jobs: [], total: 0, limit, offset }),
     workstreamList: () => ({ workstreams: [ws], total: 1, limit: 100, offset: 0 }),
+    knowledgeShow: ({ id }) => { throw { code: "not_found", message: "Saved knowledge unavailable" }; },
     draftConfigGet: () => config,
     draftConfigSet: input => { if (input.expectedRevision !== config.revision) throw { code: "conflict", message: "Drafting settings changed elsewhere" }; config = { revision: config.revision + 1, selection: input.selection, updatedAt: now, updatedBy: actor }; return config; },
     draftCapabilities: () => ({ available: true, reason: null, maxActivePerSection: 1, maxActiveGlobal: 3, maxFindings: 3, maxMessages: 12, maxSourceChars: 16384, maxQuoteChars: 8192, maxOutputBytes: 32768 }),
@@ -59,6 +63,7 @@ function settings(backend = fixture()) {
   return { backend, slot: renderSlot(registration!, {}, backend.options) };
 }
 function sectionPage(backend = fixture()) { return { backend, slot: renderSlot(app.navPanels[0]!, { subPath: `sections/${section.id}` }, backend.options) }; }
+function sectionDrafts(backend = fixture()) { return { backend, slot: renderSlot({ component: SectionPage }, { id: section.id, tab: "drafts" }, backend.options) }; }
 const calls = (slot: ReturnType<typeof renderSlot>, method: string) => slot.inspection.rpcCalls.filter(call => call.method === method);
 async function choose(slot: ReturnType<typeof renderSlot>, tier = "fast") {
   fireEvent.click(await slot.findByRole("button", { name: "Choose a model" }));
@@ -162,7 +167,7 @@ describe("explicit section drafting", () => {
     expect(within(dialog).queryByText("Foreign conversation")).toBeNull();
     expect(calls(slot, "draftSourcePreview")[0]!.input).toEqual({ sectionId: section.id, expectedBindingRevision: 1, sourceThreadId: threadId });
     expect(within(dialog).getByText(/Requested model/)).toBeTruthy();
-    expect(dialog.textContent).toContain(selection.model); expect(dialog.textContent).toContain("5 messages omitted"); expect(dialog.textContent).toContain("12,000");
+    expect(dialog.textContent).toContain(selection.model); expect(dialog.textContent).toContain("5 omitted"); expect(dialog.textContent).toContain("12,000");
     expect(calls(slot, "draftStart")).toHaveLength(0);
     fireEvent.click(within(dialog).getByRole("button", { name: "Start drafting" }));
     await waitFor(() => expect(calls(slot, "draftStart")).toHaveLength(1));
@@ -215,7 +220,7 @@ describe("explicit section drafting", () => {
   });
   test("unbound section cannot start drafting", async () => {
     const backend = fixture(); backend.section({ ...section, binding: { ...section.binding, revision: 2, binding: null } });
-    const { slot } = sectionPage(backend); await slot.findByRole("button", { name: "Share context in this section" });
+    const { slot } = sectionPage(backend); await slot.findByRole("button", { name: `Share context in ${section.canonicalName}` });
     expect(slot.queryByRole("button", { name: "Draft from a thread" })).toBeNull();
     expect(calls(slot, "draftStart")).toHaveLength(0);
   });
@@ -312,7 +317,8 @@ describe("explicit section drafting", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Preview completed excerpts" }));
     await waitFor(() => expect(calls(slot, "draftSourcePreview")).toHaveLength(2));
     await waitFor(() => expect(within(dialog).getByRole("button", { name: "Preview completed excerpts" }).matches(":disabled")).toBe(false));
-    expect(within(dialog).getByRole("checkbox", { name: "Run this draft with full access" })).toHaveProperty("checked", false);
+    expect(within(dialog).getByRole("checkbox", { name: "Run this draft with full access" }).getAttribute("aria-checked")).toBe("false");
+    expect(within(dialog).getByRole("button", { name: "Start drafting" }).matches(":disabled")).toBe(true);
     fireEvent.click(within(dialog).getByRole("checkbox", { name: "Run this draft with full access" }));
     fireEvent.click(within(dialog).getByRole("button", { name: "Start drafting" }));
     await waitFor(() => expect(calls(slot, "draftStart")).toHaveLength(1));
@@ -354,7 +360,7 @@ describe("explicit section drafting", () => {
   });
   test("durable stop is CAS guarded and requested is not stopped; partial results link original workstream", async () => {
     const backend = fixture(); const partial = job({ workstreamId: "ws_original", revision: 4, candidateResults: [{ intendedId: "kn_suggestion0", canonicalId: "kn_suggestion0", status: "saved", error: null }, { intendedId: "kn_suggestion1", canonicalId: null, status: "pending", error: null }, { intendedId: "kn_suggestion2", canonicalId: null, status: "pending", error: null }] }); backend.jobs([partial]);
-    const { slot } = sectionPage(backend); const region = await slot.findByRole("region", { name: "Drafting jobs" });
+    const { slot } = sectionDrafts(backend); const region = await slot.findByRole("region", { name: "Drafting jobs" });
     fireEvent.click(within(region).getByRole("button", { name: "Stop drafting" }));
     await waitFor(() => expect(calls(slot, "draftCancel")).toHaveLength(1));
     expect(calls(slot, "draftCancel")[0]!.input).toEqual({ sectionId: section.id, requestId, expectedRevision: 4 });
@@ -369,7 +375,7 @@ describe("explicit section drafting", () => {
   });
   test("save recovery uses pinned job/revision with no fresh inference; empty result is valid", async () => {
     const backend = fixture(); backend.jobs([job({ status: "needs-recovery", retry: "lookup-save", revision: 8, error: "Suggestion save needs recovery" })]);
-    const { slot } = sectionPage(backend); const region = await slot.findByRole("region", { name: "Drafting jobs" });
+    const { slot } = sectionDrafts(backend); const region = await slot.findByRole("region", { name: "Drafting jobs" });
     fireEvent.click(within(region).getByRole("button", { name: "Recover suggestion saves" }));
     await waitFor(() => expect(calls(slot, "draftResumeSave")).toHaveLength(1));
     expect(calls(slot, "draftResumeSave")[0]!.input).toEqual({ sectionId: section.id, requestId, expectedRevision: 8 });
@@ -380,7 +386,7 @@ describe("explicit section drafting", () => {
   test("a newest active job remains discoverable beyond the first history page", async () => {
     const backend = fixture();
     const rows = Array.from({ length: 25 }, (_, index) => job({ requestId: `8fafd34a-df8f-4784-9113-${String(index).padStart(12, "0")}`, status: index === 24 ? "running" : "nothing-to-save" }));
-    backend.jobs(rows); const { slot } = sectionPage(backend);
+    backend.jobs(rows); const { slot } = sectionDrafts(backend);
     const region = await slot.findByRole("region", { name: "Drafting jobs" });
     await within(region).findByText("Drafting suggestions");
     expect(calls(slot, "draftJobs").some(call => (call.input as { offset: number }).offset === 20)).toBe(true);
@@ -404,14 +410,15 @@ describe("explicit section drafting", () => {
   });
   test("drafts channel refreshes only its section, not unrelated section/context/task reads", async () => {
     const { slot } = sectionPage(); await slot.findByRole("button", { name: "Draft from a thread" });
-    await waitFor(() => expect(calls(slot, "draftJobs")).toHaveLength(1));
+    await waitFor(() => expect(calls(slot, "draftJobs")).toHaveLength(2));
+    const draftReads = calls(slot, "draftJobs").length;
     const sectionReads = calls(slot, "sectionDetail").length;
     await act(() => slot.behavior.emitRealtime("drafts", { sectionId: "sec_other", requestId, revision: 2 }));
     await act(() => slot.behavior.emitRealtime("thread", { threadId }));
     await act(() => slot.behavior.emitRealtime("all", {}));
-    expect(calls(slot, "draftJobs")).toHaveLength(1); expect(calls(slot, "sectionDetail")).toHaveLength(sectionReads);
+    expect(calls(slot, "draftJobs")).toHaveLength(draftReads); expect(calls(slot, "sectionDetail")).toHaveLength(sectionReads);
     await act(() => slot.behavior.emitRealtime("drafts", { sectionId: section.id, requestId, revision: 2 }));
-    await waitFor(() => expect(calls(slot, "draftJobs")).toHaveLength(2));
+    await waitFor(() => expect(calls(slot, "draftJobs")).toHaveLength(draftReads + 1));
     expect(calls(slot, "sectionDetail")).toHaveLength(sectionReads);
   });
 });
@@ -578,7 +585,7 @@ describe("bounded drafting client corrections", () => {
     expect(within(dialog).getByText("Worker assigned")).toBeTruthy(); expect(dialog.textContent).not.toContain("Old progress");
   });
   test("a foreign list row cannot replace known history or retarget actions", async () => {
-    const backend = fixture(); backend.jobs([job()]); const { slot } = sectionPage(backend);
+    const backend = fixture(); backend.jobs([job()]); const { slot } = sectionDrafts(backend);
     const region = await slot.findByRole("region", { name: "Drafting jobs" }); await within(region).findByText("Drafting suggestions");
     backend.jobs([job({ sectionId: "sec_other", revision: 2, progress: "Foreign list row" })]);
     await act(() => slot.behavior.emitRealtime("drafts", { sectionId: section.id, requestId, revision: 2 }));
@@ -588,7 +595,7 @@ describe("bounded drafting client corrections", () => {
     expect(calls(slot, "draftCancel")[0]!.input).toMatchObject({ sectionId: section.id, requestId });
   });
   test.each(["source", "execution"])("same-ID changed %s list rows keep the known history", async kind => {
-    const backend = fixture(); backend.jobs([job()]); const { slot } = sectionPage(backend);
+    const backend = fixture(); backend.jobs([job()]); const { slot } = sectionDrafts(backend);
     const region = await slot.findByRole("region", { name: "Drafting jobs" }); await within(region).findByText("Drafting suggestions");
     backend.jobs([job({ revision: 2, progress: "Wrong history", ...(kind === "source" ? { sourceSnapshotId: requestId } : { execution: { ...preview.execution, model: "wrong-model" } }) })]);
     await act(() => slot.behavior.emitRealtime("drafts", { sectionId: section.id, requestId, revision: 2 }));
@@ -596,7 +603,7 @@ describe("bounded drafting client corrections", () => {
   });
   test("pending, empty and no-save slots without canonical IDs never invent result links", async () => {
     const backend = fixture(); backend.jobs([job({ status: "completed", candidateResults: [{ intendedId: "kn_unused", canonicalId: null, status: "no-save", error: null }, { intendedId: "kn_pending", canonicalId: null, status: "pending", error: null }] })]);
-    const { slot } = sectionPage(backend); const region = await slot.findByRole("region", { name: "Drafting jobs" });
+    const { slot } = sectionDrafts(backend); const region = await slot.findByRole("region", { name: "Drafting jobs" });
     await within(region).findByText("No new takeaway was saved"); expect(within(region).queryByRole("button", { name: /Open existing takeaway|Review saved suggestion/ })).toBeNull();
     expect(region.textContent).not.toMatch(/kn_unused|kn_pending/);
     backend.jobs([job({ status: "nothing-to-save", revision: 2, candidateResults: [] })]);
@@ -608,7 +615,7 @@ describe("bounded drafting client corrections", () => {
     const key = localStorage.key(0)!; const raw = localStorage.getItem(key);
     slot.unmount();
     backend.jobs([job({ requestId: original.requestId, revision: 2, status: "nothing-to-save", candidateResults: [], progress: "Uncorrelated history after remount", ...(kind === "source" ? { sourceThreadId: "thr_foreignx" } : { execution: { ...preview.execution, model: "foreign-model" } }) })]);
-    const second = sectionPage(backend).slot;
+    const second = sectionDrafts(backend).slot;
     const history = await second.findByRole("region", { name: "Drafting jobs" });
     await within(history).findByText(/The drafting response changed the pinned source or settings/);
     expect(history.textContent).not.toContain("Uncorrelated history after remount");
@@ -737,7 +744,7 @@ describe("bounded drafting client corrections", () => {
   });
   test("canonical no-save result opens existing original-workstream knowledge without new-review claims", async () => {
     const backend = fixture(); backend.jobs([job({ status: "completed", workstreamId: "ws_original", candidateResults: [{ intendedId: "kn_unused", canonicalId: "kn_existing", status: "no-save", error: null }] })]);
-    const { slot } = sectionPage(backend); const region = await slot.findByRole("region", { name: "Drafting jobs" });
+    const { slot } = sectionDrafts(backend); const region = await slot.findByRole("region", { name: "Drafting jobs" });
     await within(region).findByText("No new takeaway was saved");
     fireEvent.click(within(region).getByRole("button", { name: "Open existing takeaway" }));
     expect(slot.inspection.navigateCalls.at(-1)).toEqual({ method: "toPluginPanel", path: "cortex", options: { subPath: "workstreams/ws_original/kn_existing" } });
@@ -844,5 +851,136 @@ describe("known Stop without recovery storage", () => {
     backend.options.servers!.status = "loading";
     await act(async () => { finish(job({ revision: 4, status: "cancel-requested", cancellation: { state: "requested", requestedAt: now, confirmedAt: null } })); });
     await slot.findByRole("alert"); expect(slot.queryByText(/Accepted response/)).toBeNull(); expect(calls(slot, "draftStart")).toHaveLength(0);
+  });
+});
+
+describe("drafting rail and history redesign", () => {
+  test.each([
+    ["prepared", 1], ["setup-requested", 1], ["setup-uncertain", 1],
+    ["queued", 2], ["activating", 2], ["running", 2], ["validating", 3],
+    ["saving", 4], ["needs-recovery", 4], ["failed", 2],
+    ["completed", 5], ["nothing-to-save", 5], ["cancel-requested", 2], ["stopped", 2],
+  ] as const)("%s maps to phase %s without claiming review or stop", (status, step) => {
+    const phase = draftPhase(job({ status, ...(status === "needs-recovery" ? { retry: "lookup-save" } : {}) }));
+    expect(phase.step).toBe(step);
+    expect(phase.done).toBe(status === "completed" || status === "nothing-to-save");
+    if (status === "cancel-requested") expect(phase.label).toMatch(/not yet confirmed/);
+    if (status === "stopped") expect(phase.label).toBe("Stopped");
+  });
+  test("rail is hidden without a job and for a finished job older than 24 hours", async () => {
+    const backend = fixture();
+    const slot = renderSlot({ component: () => <DraftRailCard section={section} /> }, {}, backend.options);
+    await waitFor(() => expect(calls(slot, "draftJobs")).toHaveLength(1));
+    expect(slot.queryByRole("region", { name: "Drafting" })).toBeNull();
+    backend.jobs([job({ status: "completed", updatedAt: new Date(Date.now() - 86_400_001).toISOString() })]);
+    await act(() => slot.behavior.emitRealtime("drafts", { sectionId: section.id }));
+    await waitFor(() => expect(calls(slot, "draftJobs")).toHaveLength(2));
+    expect(slot.queryByRole("region", { name: "Drafting" })).toBeNull();
+  });
+  test("rail renders phase, model and named source; Details opens the section drafts tab", async () => {
+    const backend = fixture(); backend.jobs([job({ status: "validating" })]);
+    const slot = renderSlot({ component: () => <DraftRailCard section={section} /> }, {}, backend.options);
+    await slot.findByText("Checking sources");
+    expect(slot.getByText("step 3 of 5")).toBeTruthy();
+    expect(slot.getByRole("img", { name: /Prepare, Draft, Check, Save, Review.*step 3 of 5/ })).toBeTruthy();
+    expect(slot.getByRole("button", { name: "Open source thread" }).textContent).toContain("Investigate the staging bootstrap");
+    expect(slot.getByText(/Sample agent/)).toBeTruthy();
+    fireEvent.click(slot.getByRole("button", { name: "Details" }));
+    expect(slot.inspection.navigateCalls.at(-1)).toEqual({ method: "toPluginPanel", path: "cortex", options: { subPath: `sections/${section.id}/drafts` } });
+    expect(calls(slot, "draftSourcePreview")).toHaveLength(0); expect(calls(slot, "draftStart")).toHaveLength(0);
+  });
+  test("rail finds the newest active original request and keeps its revision guard", async () => {
+    const backend = fixture();
+    backend.jobs([...Array.from({ length: 20 }, () => job({ requestId: crypto.randomUUID(), status: "completed" })), job({ status: "needs-recovery", retry: "lookup-save" })]);
+    const slot = renderSlot({ component: () => <DraftRailCard section={section} /> }, {}, backend.options);
+    await slot.findByText("Needs recovery");
+    fireEvent.click(slot.getByRole("button", { name: "Recover suggestion saves" }));
+    await waitFor(() => expect(calls(slot, "draftResumeSave")).toHaveLength(1));
+    expect(calls(slot, "draftResumeSave")[0]!.input).toEqual({ sectionId: section.id, requestId, expectedRevision: 1 });
+    expect(calls(slot, "draftStart")).toHaveLength(0);
+  });
+  test("finished draft rail reads only the first and newest page, never older history pages", async () => {
+    const backend = fixture();
+    backend.jobs(Array.from({ length: 101 }, () => job({ requestId: crypto.randomUUID(), status: "completed", updatedAt: new Date().toISOString() })));
+    const slot = renderSlot({ component: () => <DraftRailCard section={section} /> }, {}, backend.options);
+    await slot.findByRole("region", { name: "Drafting" });
+    expect(calls(slot, "draftJobs").map(call => call.input)).toEqual([{ sectionId: section.id, limit: 20, offset: 0 }, { sectionId: section.id, limit: 20, offset: 100 }]);
+  });
+
+  test("rail stop stays requested and refreshes live without starting again", async () => {
+    const backend = fixture(); backend.jobs([job()]);
+    const slot = renderSlot({ component: () => <DraftRailCard section={section} /> }, {}, backend.options);
+    fireEvent.click(await slot.findByRole("button", { name: "Stop drafting" }));
+    await slot.findByText(/Stop requested.*not yet confirmed/);
+    expect(slot.getByRole("button", { name: "Check stop" })).toBeTruthy();
+    expect(calls(slot, "draftCancel")[0]!.input).toEqual({ sectionId: section.id, requestId, expectedRevision: 1 });
+    backend.jobs([job({ revision: 3, status: "stopped", cancellation: { state: "confirmed", requestedAt: now, confirmedAt: now } })]);
+    await act(() => slot.behavior.emitRealtime("drafts", { sectionId: section.id, requestId, revision: 3 }));
+    await slot.findByText("Stopped"); expect(slot.queryByRole("button", { name: "Check stop" })).toBeNull();
+    expect(calls(slot, "draftStart")).toHaveLength(0);
+  });
+  test("drafts tab has an empty state and opens the guarded three-step dialog", async () => {
+    const backend = fixture();
+    const slot = renderSlot({ component: () => <DraftsTab section={section} /> }, {}, backend.options);
+    await slot.findByText("No drafts yet.");
+    fireEvent.click(slot.getByRole("button", { name: "Draft from a thread" }));
+    const dialog = await slot.findByRole("dialog", { name: "Draft from a thread" });
+    const steps = within(dialog).getByRole("list", { name: "Draft steps" });
+    expect(steps.querySelector('[aria-current="step"]')!.textContent).toContain("Thread");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Investigate the staging bootstrap" }));
+    expect(steps.querySelector('[aria-current="step"]')!.textContent).toContain("Excerpts");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Preview completed excerpts" }));
+    await within(dialog).findByText(preview.messages[0]!.quote);
+    expect(steps.querySelector('[aria-current="step"]')!.textContent).toContain("Start");
+    expect(within(dialog).getByRole("button", { name: "Start drafting" }).matches(":disabled")).toBe(false);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close draft preview" }));
+    await waitFor(() => expect(document.activeElement).toBe(slot.getByRole("button", { name: "Draft from a thread" })));
+    expect(calls(slot, "draftStart")).toHaveLength(0);
+  });
+  test("compact drafting uses the kit drawer, keeps excerpt and confirmation guards, and returns focus", async () => {
+    const backend = fixture(); backend.source({ ...preview, execution: { ...preview.execution, permissionMode: "full" } });
+    const slot = renderSlot({ component: () => <CompactViewportOverrideProvider isCompactViewport><DraftsTab section={section} /></CompactViewportOverrideProvider> }, {}, backend.options);
+    await slot.findByText("No drafts yet.");
+    const opener = slot.getByRole("button", { name: "Draft from a thread" }); fireEvent.click(opener);
+    const dialog = await slot.findByRole("dialog", { name: "Draft from a thread" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Investigate the staging bootstrap" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Preview completed excerpts" }));
+    await within(dialog).findByText(preview.messages[0]!.quote);
+    expect(within(dialog).getByText("1 completed message · 36 characters · 5 omitted")).toBeTruthy();
+    const start = within(dialog).getByRole("button", { name: "Start drafting" });
+    expect(start.matches(":disabled")).toBe(true);
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: "Run this draft with full access" }));
+    expect(start.matches(":disabled")).toBe(false);
+    start.focus(); fireEvent.keyDown(start, { key: "Escape" });
+    await waitFor(() => expect(document.activeElement).toBe(opener));
+    expect(calls(slot, "draftStart")).toHaveLength(0);
+  });
+  test("drafts tab shows saved titles and real state, hides raw ids, and opens section knowledge", async () => {
+    const backend = fixture();
+    backend.options.rpc.knowledgeShow = ({ id }) => ({ entry: { id, workstreamId: ws.id, subject: "staging", title: "Staging uses the new bootstrap", text: "The source finding.", kind: "finding", state: "approved", facet: "orientation", applicability: { environment: { mode: "not-applicable" }, host: { mode: "not-applicable" } }, sources: [], revision: 2, actor, createdAt: now, updatedAt: now, expiresAt: null, approval: { actor, at: now }, supersedes: [], supersededBy: null, conflicts: [] }, workstream: ws });
+    backend.jobs([job({ status: "completed", candidateResults: [{ intendedId: "kn_savedone", canonicalId: "kn_savedone", status: "saved", error: null }] })]);
+    const slot = renderSlot({ component: () => <DraftsTab section={section} /> }, {}, backend.options);
+    await slot.findByText("Staging uses the new bootstrap"); expect(slot.getByText("Approved")).toBeTruthy();
+    const row = slot.getByRole("button", { name: "Review saved suggestion 1" });
+    expect(row.textContent).not.toContain("kn_savedone");
+    fireEvent.click(row);
+    expect(slot.inspection.navigateCalls.at(-1)).toEqual({ method: "toPluginPanel", path: "cortex", options: { subPath: `sections/${section.id}/knowledge/kn_savedone` } });
+    fireEvent.click(slot.getByRole("button", { name: "Open drafting session" }));
+    expect(slot.inspection.navigateCalls.at(-1)).toEqual({ method: "toThread", threadId: "thr_workerxx" });
+    expect(slot.getByText(/Nothing was accepted or adopted as a Rule automatically/)).toBeTruthy();
+  });
+  test("drafts tab pages all cards and keeps failed/no-save results and original workstream links", async () => {
+    const backend = fixture();
+    backend.jobs([...Array.from({ length: 20 }, () => job({ requestId: crypto.randomUUID(), status: "stopped" })), job({ workstreamId: "ws_original", status: "completed", candidateResults: [{ intendedId: "kn_duplicate", canonicalId: "kn_existing", status: "no-save", error: null }, { intendedId: "kn_failed", canonicalId: null, status: "failed", error: "Save unavailable" }] })]);
+    const slot = renderSlot({ component: () => <DraftsTab section={section} /> }, {}, backend.options);
+    await slot.findByText("No new takeaway was saved");
+    expect(slot.getByText("Suggestion save failed: Save unavailable")).toBeTruthy();
+    expect(slot.getByRole("status").textContent).toContain("This draft stays with its original workstream");
+    fireEvent.click(slot.getByRole("button", { name: "Open existing takeaway" }));
+    expect(slot.inspection.navigateCalls.at(-1)).toEqual({ method: "toPluginPanel", path: "cortex", options: { subPath: "workstreams/ws_original/kn_existing" } });
+    fireEvent.click(slot.getByRole("button", { name: "Earlier drafts" }));
+    await waitFor(() => expect(slot.container.querySelectorAll("[data-cortex-draft-job]")).toHaveLength(20));
+    expect(slot.getByRole("button", { name: "Earlier drafts" }).matches(":disabled")).toBe(true);
+    expect(slot.getByRole("button", { name: "More drafts" }).matches(":disabled")).toBe(false);
   });
 });

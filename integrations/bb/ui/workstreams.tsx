@@ -7,12 +7,13 @@ import { Icon } from "@/components/ui/icon";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { actorWord, facetWord, plural, STATE_LOOK } from "./copy";
+import { actorWord, dimensionWord, facetWord } from "./copy";
+import { KnowledgeStateMark } from "./marks";
 import { type RpcFailure, useHistory, useWorkstream, useWorkstreamWrites } from "./data";
 import { ConfirmDialog, ProposeDialog } from "./dialogs";
 import { KnowledgeActions, KnowledgeDetail } from "./knowledge";
-import { displayState, facetsOf, groupKnowledge, shortTime } from "./model";
-import { EmptyNote, FailureNotice, LoadingRows, PagedFooter, Segmented, TONE_TEXT } from "./parts";
+import { facetsOf, groupKnowledge, shortTime } from "./model";
+import { EmptyNote, FailureNotice, LoadingRows, PagedFooter, Segmented } from "./parts";
 import { CORTEX_PAGE_PATH } from "./thread-context";
 import type { Knowledge, Workstream } from "./types";
 
@@ -96,212 +97,104 @@ export function WorkstreamDialog({
   );
 }
 
-function EntryRow({ entry, selected, onSelect, now }: { entry: Knowledge; selected: boolean; onSelect: () => void; now: number }) {
-  const state = displayState(entry, now);
-  const look = STATE_LOOK[state];
-  return (
-    <li>
-      <button
-        type="button"
-        aria-current={selected ? "true" : undefined}
-        onClick={onSelect}
-        className={cn(
-          "flex w-full items-start gap-2 px-3 py-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset",
-          selected ? "bg-surface-selected" : "hover:bg-state-hover",
-        )}
-      >
-        <Icon name={look.icon} className={cn("mt-0.5 size-4 shrink-0", TONE_TEXT[look.tone])} aria-label={look.word} />
-        <span className="min-w-0 flex-1">
-          <span className="line-clamp-2 text-[12.5px] font-semibold text-foreground">{entry.title}</span>
-          <span className="mt-0.5 line-clamp-2 text-[11.5px] text-muted-foreground">
-            {entry.kind === "directive" ? "Directive" : "Finding"} · {facetWord(entry.facet)}
-            {entry.applicability.environment.mode === "value" ? ` · ${entry.applicability.environment.value}` : ""}
-          </span>
-        </span>
-      </button>
-    </li>
-  );
+
+function EntryRow({ entry, selected, onSelect }: { entry: Knowledge; selected: boolean; onSelect: () => void }) {
+  return <li>
+    <button type="button" aria-current={selected ? "true" : undefined} onClick={onSelect}
+      className={cn("cortex-knowledge-row grid w-full gap-x-3 gap-y-1 border-b border-border-seam px-3 py-3 text-left hover:bg-state-hover focus-visible:ring-1 focus-visible:ring-ring", selected && "bg-surface-selected")}>
+      <KnowledgeStateMark entry={entry} />
+      <span className="min-w-0 font-semibold break-words">{entry.title}</span>
+      <span className="text-muted-foreground">{facetWord(entry.facet)}</span>
+      <span className="min-w-0 break-words text-muted-foreground">{dimensionWord("environment", entry.applicability.environment)} · {dimensionWord("host", entry.applicability.host)}</span>
+      <span className="text-muted-foreground">{shortTime(entry.updatedAt)}</span>
+    </button>
+  </li>;
 }
 
-function WorkstreamHistory({ id }: { id: string }) {
+export function WorkstreamEdits({ id }: { id: string }) {
   const [pages, setPages] = useState(1);
   const read = useHistory(id, pages);
-  if (read.error) return <FailureNotice failure={read.error} onRetry={read.refetch} />;
+  if (read.error && !read.data) return <FailureNotice failure={read.error} onRetry={read.refetch} />;
   if (read.data === undefined) return <LoadingRows label="Loading history" />;
   if (read.data.revisions.length === 0) return <EmptyNote icon="Clock">No edits yet.</EmptyNote>;
-  return (
-    <div>
-      <p className="mb-1 text-[11.5px] text-muted-foreground">Edits to the workstream's name, description and archive state. Each entry's own history is in its detail.</p>
-      <ol className="flex flex-col">
-        {read.data.revisions.map(revision => (
-          <li key={`${revision.id}-${revision.revision}`} className="flex flex-wrap items-baseline gap-x-2 border-t border-border-seam py-2 text-[12.5px] first:border-t-0">
-            <span className="font-semibold text-foreground">{revision.action}</span>
-            <span className="truncate text-foreground">{"title" in revision.snapshot ? revision.snapshot.title : revision.snapshot.name}</span>
-            <span className="font-mono text-[11px] text-muted-foreground">rev {revision.revision}</span>
-            <span className="flex-1" />
-            <span className="text-[11.5px] text-muted-foreground">
-              {actorWord(revision.actor)} · {shortTime(revision.at)}
-            </span>
-            {revision.reason ? (
-              <span data-content className="basis-full text-[12px] text-muted-foreground">
-                {revision.reason}
-              </span>
-            ) : null}
-          </li>
-        ))}
-      </ol>
-      <PagedFooter
-        shown={read.data.revisions.length}
-        total={read.data.total}
-        noun="edits"
-        onMore={() => setPages(pages + 1)}
-        changedWhileReading={read.data.changedWhileReading}
-        onRetry={read.refetch}
-      />
-    </div>
-  );
+  return <section data-cortex data-part="WorkstreamEdits" className="min-w-0 text-[12.5px]">
+    {read.error ? <FailureNotice failure={read.error} onRetry={read.refetch} /> : null}
+    <p className="mb-3 text-muted-foreground">Workstream edits. Entry history is in its detail.</p>
+    <div className="cortex-edits-row grid gap-3 border-b border-border-seam py-2 font-semibold"><span>Change</span><span>By</span><span>When</span></div>
+    <ol>{read.data.revisions.map(revision => <li key={`${revision.id}-${revision.revision}`} className="cortex-edits-row grid gap-3 border-b border-border-seam py-3">
+      <span className="min-w-0 break-words"><b>{revision.action}</b> · {"title" in revision.snapshot ? revision.snapshot.title : revision.snapshot.name} · rev {revision.revision}{revision.reason ? <span data-content className="mt-1 block text-muted-foreground">{revision.reason}</span> : null}</span>
+      <span className="min-w-0 break-words text-muted-foreground">{revision.actor.type === "agent" ? "Agent" : actorWord(revision.actor)}</span>
+      <span className="text-muted-foreground">{shortTime(revision.at)}</span>
+    </li>)}</ol>
+    <PagedFooter shown={read.data.revisions.length} total={read.data.total} noun="edits" onMore={() => setPages(pages + 1)} changedWhileReading={read.data.changedWhileReading} onRetry={read.refetch} />
+  </section>;
 }
 
-/** One workstream: its saved knowledge grouped by what threads get, each entry's evidence and history. */
-export function WorkstreamPage({ id, selectedId }: { id: string; selectedId: string | null }) {
+export function WorkstreamKnowledge({ id, selectedId = null, onSelect, onClose }: { id: string; selectedId?: string | null; onSelect?: (id: string) => void; onClose?: () => void }) {
   const read = useWorkstream(id);
   const navigate = useBbNavigate();
-  const now = Date.now();
-  const [tab, setTab] = useState<"knowledge" | "history">("knowledge");
   const [facet, setFacet] = useState("all");
-  const [dialog, setDialog] = useState<"add" | "edit" | "archive" | null>(null);
+  const [adding, setAdding] = useState(false);
   const [showDetail, setShowDetail] = useState(selectedId !== null);
-  const writes = useWorkstreamWrites();
+  useEffect(() => setShowDetail(selectedId !== null), [selectedId]);
   const entries = read.data?.entries ?? [];
   const facets = useMemo(() => facetsOf(entries), [entries]);
   const shown = facet === "all" ? entries : entries.filter(entry => entry.facet === facet);
-  const groups = groupKnowledge(shown, now);
-  const selected = entries.find(entry => entry.id === selectedId) ?? groups[0]?.entries[0] ?? null;
-  if (read.error && read.data === undefined) return <div className="p-4 md:p-5"><FailureNotice failure={read.error} onRetry={read.refetch} /></div>;
-  if (read.data === undefined) return <div className="p-4 md:p-5"><LoadingRows label="Loading workstream" /></div>;
-  const { workstream, total } = read.data;
+  const selected = entries.find(entry => entry.id === selectedId) ?? groupKnowledge(shown, Date.now())[0]?.entries[0] ?? null;
   const select = (entryId: string) => {
-    navigate.toPluginPanel(CORTEX_PAGE_PATH, { subPath: `workstreams/${id}/${entryId}`, replace: true });
+    if (onSelect) onSelect(entryId);
+    else navigate.toPluginPanel(CORTEX_PAGE_PATH, { subPath: `workstreams/${id}/${entryId}`, replace: true });
     setShowDetail(true);
   };
-  const counts = groupKnowledge(entries, now);
-  return (
-    <div className="flex h-full min-h-0 flex-col">
-      {read.error ? <FailureNotice failure={read.error} onRetry={read.refetch} /> : null}
-      <div className="shrink-0 border-b border-border-seam px-4 pt-3 md:px-5">
-        <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-[17px] font-semibold text-foreground">{workstream.name}</h2>
-          {workstream.archived ? <span className="text-[11.5px] text-muted-foreground">Archived</span> : null}
-          <span className="font-mono text-[11px] text-muted-foreground">rev {workstream.revision}</span>
-          <span className="flex-1" />
-          <Button size="sm" onClick={() => setDialog("add")}>
-            <Icon name="Plus" className="size-4" aria-hidden />
-            Add knowledge
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => setDialog("edit")}>
-            Edit
-          </Button>
-          {workstream.archived ? null : (
-            <Button size="sm" variant="ghost" onClick={() => setDialog("archive")}>
-              Archive
-            </Button>
-          )}
-        </div>
-        {workstream.description ? (
-          <p data-content className="mt-1 line-clamp-2 max-w-3xl text-[12.5px] text-muted-foreground">
-            {workstream.description}
-          </p>
-        ) : null}
-        <p className="mt-1.5 flex flex-wrap gap-x-3 text-[12px] text-muted-foreground">
-          {counts.map(group => (
-            <span key={group.id}>
-              <span className="font-semibold text-foreground tabular-nums">{group.entries.length}</span> {group.label.toLowerCase()}
-            </span>
-          ))}
-        </p>
-        <div className="mt-2 flex flex-wrap items-center gap-3 pb-2">
-          <Segmented
-            label="View"
-            value={tab}
-            options={[
-              { value: "knowledge", label: "Saved knowledge" },
-              { value: "history", label: "Workstream edits" },
-            ]}
-            onChange={setTab}
-          />
-          {tab === "knowledge" && facets.length > 1 ? (
-            <Segmented label="Topic" value={facet} options={[{ value: "all", label: "All topics" }, ...facets.map(f => ({ value: f, label: facetWord(f) }))]} onChange={setFacet} />
-          ) : null}
-        </div>
-      </div>
-      {tab === "history" ? (
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 md:px-5">
-          <WorkstreamHistory id={id} />
-        </div>
-      ) : entries.length === 0 ? (
-        <div className="p-4 md:p-5">
-          <EmptyNote
-            icon="Layers"
-            action={
-              <Button size="sm" variant="outline" onClick={() => setDialog("add")}>
-                Add knowledge
-              </Button>
-            }
-          >
-            No saved knowledge yet. Connected threads get only the workstream's name until you approve something.
-          </EmptyNote>
-        </div>
-      ) : (
-        <div className="flex min-h-0 flex-1">
-          <div className={cn("min-h-0 w-full overflow-y-auto border-r border-border-seam lg:w-[22rem] lg:shrink-0", showDetail && "hidden lg:block")}>
-            {groups.map(group => (
-              <section key={group.id} aria-label={group.label}>
-                <h3 className="sticky top-0 z-10 flex items-center gap-2 border-b border-border-seam bg-background px-3 py-1.5 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
-                  {group.label}
-                  <span className="tabular-nums">{group.entries.length}</span>
-                </h3>
-                <ul>
-                  {group.entries.map(entry => (
-                    <EntryRow key={entry.id} entry={entry} now={now} selected={entry.id === selected?.id} onSelect={() => select(entry.id)} />
-                  ))}
-                </ul>
-              </section>
-            ))}
-            {total > entries.length ? <p className="px-3 py-2 text-[11.5px] text-muted-foreground">Showing {entries.length} of {total}. Search the library for the rest.</p> : null}
-          </div>
-          {selected ? (
-            <div className={cn("min-w-0 flex-1 overflow-y-auto px-4 py-4 md:px-5", showDetail ? "block" : "hidden lg:block")}>
-              <Button variant="ghost" size="sm" className="mb-2 lg:hidden" onClick={() => setShowDetail(false)}>
-                <Icon name="ChevronLeft" className="size-4" aria-hidden />
-                {workstream.name}
-              </Button>
-              <KnowledgeDetail
-                entry={selected}
-                workstream={workstream}
-                onOpen={select}
-                actions={<KnowledgeActions entry={selected} workstream={workstream} />}
-              />
-            </div>
-          ) : null}
-        </div>
-      )}
-      <ProposeDialog workstream={workstream} facets={facets} open={dialog === "add"} onOpenChange={open => setDialog(open ? "add" : null)} />
-      <WorkstreamDialog workstream={workstream} open={dialog === "edit"} onOpenChange={open => setDialog(open ? "edit" : null)} />
-      <ConfirmDialog
-        title={`Archive ${workstream.name}?`}
-        facts={[
-          { icon: "Minus", text: "Connected threads stop getting its knowledge from their next session." },
-          { icon: "Archive", text: "Its knowledge and history stay readable." },
-          { icon: "SideChat", text: "Sessions already running keep what they received." },
-        ]}
-        confirm="Archive"
-        open={dialog === "archive"}
-        onOpenChange={open => setDialog(open ? "archive" : null)}
-        onConfirm={async () => {
-          await writes.editWorkstream({ id: workstream.id, expectedRevision: workstream.revision, archived: true, reason: "Archived in Cortex" });
-          toast(`Archived ${workstream.name}`);
-        }}
-      />
+  if (read.error && !read.data) return <FailureNotice failure={read.error} onRetry={read.refetch} />;
+  if (!read.data) return <LoadingRows label="Loading workstream" />;
+  const { workstream, total } = read.data;
+  return <section data-cortex data-part="WorkstreamKnowledge" className="cortex-workstream-knowledge min-w-0 text-[12.5px]">
+    {read.error ? <FailureNotice failure={read.error} onRetry={read.refetch} /> : null}
+    <div className="mb-3 flex min-w-0 flex-wrap items-center gap-2">
+      <div className="cortex-topic-tabs min-w-0 flex-1 overflow-x-auto"><Segmented label="Topic" value={facet} options={[{ value: "all", label: "All topics" }, ...facets.map(f => ({ value: f, label: facetWord(f) }))]} onChange={setFacet} /></div>
+      <Button size="sm" onClick={() => setAdding(true)}><Icon name="Plus" className="size-4" aria-hidden />Add knowledge</Button>
     </div>
-  );
+    {entries.length === 0 ? <EmptyNote icon="Layers">No saved knowledge yet. Connected threads get only the workstream's name until you approve something.</EmptyNote> :
+      <div className={cn("cortex-knowledge-layout grid min-w-0 gap-4", showDetail && "cortex-detail-open")}>
+        <div className="cortex-master min-w-0">
+          <div aria-hidden className="cortex-knowledge-heading cortex-knowledge-row grid gap-3 border-b border-border-seam px-3 py-2 font-semibold text-muted-foreground"><span>State</span><span>Entry</span><span>Topic</span><span>Applies to</span><span>Updated</span></div>
+          <ul aria-label="All knowledge">{shown.map(entry => <EntryRow key={entry.id} entry={entry} selected={selectedId === entry.id} onSelect={() => select(entry.id)} />)}</ul>
+          {shown.length === 0 ? <EmptyNote>No knowledge in this topic.</EmptyNote> : null}
+          {total > entries.length ? <p className="px-3 py-2 text-muted-foreground">Showing {entries.length} of {total}. Search the library for the rest.</p> : null}
+        </div>
+        {selected && (showDetail || !onSelect) ? <div className={cn("cortex-detail min-w-0 rounded-md border border-border-seam bg-card p-4", !showDetail && "cortex-detail-idle")}>
+          <Button variant="ghost" size="sm" className="cortex-detail-back mb-2" onClick={() => { setShowDetail(false); onClose?.(); }}><Icon name="ChevronLeft" className="size-4" aria-hidden />{workstream.name}</Button>
+          {onClose ? <Button variant="ghost" size="icon" aria-label="Close entry" onClick={() => { setShowDetail(false); onClose(); }}><Icon name="X" className="size-4" aria-hidden /></Button> : null}
+          <KnowledgeDetail entry={selected} workstream={workstream} onOpen={select} actions={<KnowledgeActions entry={selected} workstream={workstream} />} />
+        </div> : null}
+      </div>}
+    <ProposeDialog workstream={workstream} facets={facets} open={adding} onOpenChange={setAdding} />
+  </section>;
+}
+
+export function WorkstreamPage({ id, selectedId }: { id: string; selectedId: string | null }) {
+  const read = useWorkstream(id);
+  const [tab, setTab] = useState<"knowledge" | "history">("knowledge");
+  const [dialog, setDialog] = useState<"edit" | "archive" | null>(null);
+  const writes = useWorkstreamWrites();
+  if (read.error && !read.data) return <div className="p-4"><FailureNotice failure={read.error} onRetry={read.refetch} /></div>;
+  if (!read.data) return <LoadingRows label="Loading workstream" />;
+  const { workstream } = read.data;
+  return <div data-cortex className="cortex-section h-full min-h-0 overflow-y-auto text-foreground">
+    <header className="border-b border-border-seam px-4 py-3">
+      <div className="flex flex-wrap items-center gap-2"><h2 className="min-w-0 flex-1 break-words text-[17px] font-semibold">{workstream.name}</h2>
+        {workstream.archived ? <span className="text-muted-foreground">Archived</span> : null}
+        <Button size="sm" variant="outline" onClick={() => setDialog("edit")}>Edit</Button>
+        {!workstream.archived ? <Button size="sm" variant="ghost" onClick={() => setDialog("archive")}>Archive</Button> : null}
+      </div>
+      {workstream.description ? <p data-content className="mt-1 line-clamp-2 text-[12.5px] text-muted-foreground">{workstream.description}</p> : null}
+      <div className="mt-3"><Segmented label="View" value={tab} options={[{ value: "knowledge", label: "Saved knowledge" }, { value: "history", label: "Workstream edits" }]} onChange={setTab} /></div>
+    </header>
+    <div className="p-4">{tab === "history" ? <WorkstreamEdits id={id} /> : <WorkstreamKnowledge id={id} selectedId={selectedId} />}</div>
+    <WorkstreamDialog workstream={workstream} open={dialog === "edit"} onOpenChange={open => setDialog(open ? "edit" : null)} />
+    <ConfirmDialog title={`Archive ${workstream.name}?`} facts={[{ icon: "Minus", text: "Connected threads stop getting its knowledge from their next session." }, { icon: "Archive", text: "Its knowledge and history stay readable." }, { icon: "SideChat", text: "Sessions already running keep what they received." }]} confirm="Archive" open={dialog === "archive"} onOpenChange={open => setDialog(open ? "archive" : null)} onConfirm={async () => {
+      await writes.editWorkstream({ id: workstream.id, expectedRevision: workstream.revision, archived: true, reason: "Archived in Cortex" }); toast(`Archived ${workstream.name}`);
+    }} />
+  </div>;
 }

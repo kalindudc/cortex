@@ -6,8 +6,9 @@ import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 import { sectionRpcContract, type Section, type SectionEligibility } from "./section-contract";
 import { workstreamRpcContract } from "./workstream-contract";
 import type { Knowledge, Workstream } from "./ui/types";
-import { toast } from "sonner";
+import { type Action, toast } from "sonner";
 import { CaptureDialog, TakeawayPanel } from "./ui/takeaway";
+import { ConnectSectionDialog, SectionPage } from "./ui/sections";
 
 vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { error: vi.fn() }) }));
 const contract = { ...workstreamRpcContract, ...sectionRpcContract };
@@ -20,7 +21,7 @@ const mark = { status: "unmarked", originalTitle: null, decoratedTitle: null, er
 const section = (id = "sec_envoy", bound = true): Section => ({ id, name: id === "sec_envoy" ? "Envoy cluster-service" : "OTLP routing", canonicalName: id === "sec_envoy" ? "Envoy cluster-service" : "OTLP routing", threadCount: 1, marker: mark, connectionJob: null, binding: { key: id, revision: bound ? 1 : 0, binding: bound ? { workstreamId: ws.id, topic: null, budgetTokens: 400, requiredKnowledgeIds: [] } : null } });
 let app: Awaited<ReturnType<typeof loadPluginApp>>;
 beforeAll(async () => { app = await loadPluginApp(() => import("./app")); });
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 function fixture(bound = true) {
   let current = entry;
@@ -52,6 +53,260 @@ function renderSection(bound = true) {
   return { backend, slot };
 }
 const calls = (slot: ReturnType<typeof renderSlot>, method: string) => slot.inspection.rpcCalls.filter(call => call.method === method);
+
+test.each(["over-budget", "missing-required", "unavailable", "unbound"] as const)("section brief labels selected entries without claiming delivery for %s", async status => {
+  const backend = fixture();
+  const original = backend.options.rpc.sectionDetail!;
+  backend.options.rpc.sectionDetail = input => ({ ...original(input), eligibility: { computedAt: now, status, error: null, entries: [{ knowledge: { ...entry, state: "approved", approval: { actor, at: now } }, text: entry.text, estimatedTokens: 50, origin: "canonical", overrideActor: null }], notices: [], exclusions: [], exactText: entry.text, estimatedTokens: 50, budgetTokens: 400 } });
+  const page = renderSlot({ component: SectionPage }, { id: "sec_envoy" }, backend.options);
+  await page.findByRole("heading", { name: /Sends nothing:/ });
+  expect(page.queryByRole("list", { name: "Goes to new threads" })).toBeNull();
+});
+
+test("connect choices show connections without reading every workstream", async () => {
+  const backend = fixture(false);
+  const page = renderSlot({ component: () => <ConnectSectionDialog section={backend.sections[0]!} workstreams={Array.from({ length: 30 }, (_, i) => ({ ...ws, id: `ws_choice${i}`, name: `Choice ${i}` }))} connections={[]} onClose={() => {}} /> }, {}, backend.options);
+  await page.findByRole("radio", { name: "Use Choice 29" });
+  expect(calls(page, "workstreamShow")).toHaveLength(0);
+});
+
+test("connect intent is consumed with replace after opening", async () => {
+  const backend = fixture(false);
+  const page = renderSlot({ component: SectionPage }, { id: "sec_envoy", connect: true }, backend.options);
+  await page.findByRole("dialog", { name: "Share context in Envoy cluster-service" });
+  expect(page.inspection.navigateCalls).toContainEqual({ method: "toPluginPanel", path: "cortex", options: { subPath: "sections/sec_envoy/brief", replace: true } });
+});
+
+test("held observations offer Open rather than promising to record an observation", async () => {
+  const backend = fixture();
+  const original = backend.options.rpc.sectionDetail!;
+  backend.options.rpc.sectionDetail = async input => { const data = await original(input); return { ...data, eligibility: { ...data.eligibility, exclusions: [{ id: entry.id, reason: "expired; needs recheck" }] } }; };
+  const page = renderSlot({ component: SectionPage }, { id: "sec_envoy" }, backend.options);
+  const held = await page.findByRole("region", { name: "Held back" });
+  expect(within(held).queryByRole("button", { name: "Record what you see now…" })).toBeNull();
+  fireEvent.click(within(held).getByRole("button", { name: "Open" }));
+  expect(page.inspection.navigateCalls.at(-1)).toMatchObject({ options: { subPath: `sections/sec_envoy/brief/${entry.id}` } });
+});
+
+test.each([
+  ["its own scope is unknown", { environment: { mode: "unknown" }, host: { mode: "unknown" } }, false],
+  ["the section has no target", { environment: { mode: "value", value: "staging" }, host: { mode: "not-applicable" } }, true],
+] as const)("an empty brief offers Set targets only when targets would help: %s", async (_, applicability, offersTargets) => {
+  const backend = fixture();
+  const original = backend.options.rpc.sectionDetail!;
+  const held = { ...entry, state: "approved" as const, approval: { actor, at: now }, applicability };
+  backend.options.rpc.knowledgeShow = () => ({ entry: held, workstream: ws });
+  backend.options.rpc.sectionDetail = async input => { const data = await original(input); return { ...data, review: { items: [{ entry: held, workstream: ws, hints: [] }], total: 1, limit: 50, offset: 0 }, eligibility: { ...data.eligibility, exclusions: [{ id: entry.id, reason: "environment or host unknown/mismatched" }] } }; };
+  const page = renderSlot({ component: SectionPage }, { id: "sec_envoy" }, backend.options);
+  const status = await page.findByText(/No entry reaches new threads yet\./);
+  await waitFor(() => expect(status.textContent).toContain("1 approved entry is held back."));
+  expect(within(status.parentElement!).queryByRole("button", { name: "Set targets" }) !== null).toBe(offersTargets);
+  if (!offersTargets) expect(status.textContent).toContain("Open each one to say where it applies.");
+});
+
+test("suggestion token estimate is explicitly approximate and text-only", async () => {
+  const { slot } = renderSection();
+  const card = await slot.findByRole("region", { name: entry.title });
+  expect(within(card).getByText(/^Suggested · text ~/)).toBeTruthy();
+});
+
+test("Accept explains missing targets in visible text and compact Everywhere is a button", async () => {
+  const { slot } = renderSection();
+  const card = await slot.findByRole("region", { name: entry.title });
+  expect(within(card).getByText("Choose environment and host first").closest('[role="tooltip"]')).toBeNull();
+  expect(within(card).queryByRole("radiogroup", { name: "Where it applies" })).toBeNull();
+  fireEvent.click(within(card).getByRole("button", { name: "Everywhere" }));
+  expect(within(card).queryByText("Choose environment and host first")).toBeNull();
+});
+
+test.each(["Close entry", "Back to brief"])("section entry focuses the sheet and restores its opener on %s", async close => {
+  const backend = fixture();
+  const original = backend.options.rpc.sectionDetail!;
+  backend.options.rpc.sectionDetail = async input => { const data = await original(input); return { ...data, eligibility: { ...data.eligibility, entries: [{ knowledge: { ...entry, state: "approved", approval: { actor, at: now } }, text: entry.text, estimatedTokens: 50, origin: "canonical", overrideActor: null }] } }; };
+  const page = renderSlot({ component: SectionPage }, { id: "sec_envoy" }, backend.options);
+  const opener = await page.findByRole("button", { name: `Open ${entry.title}` });
+  opener.focus(); fireEvent.click(opener);
+  page.rerender(<SectionPage id="sec_envoy" entryId={entry.id} />);
+  const closeButton = await page.findByRole("button", { name: "Close entry" });
+  await waitFor(() => expect(document.activeElement).toBe(closeButton));
+  fireEvent.click(page.getByRole("button", { name: close }));
+  page.rerender(<SectionPage id="sec_envoy" />);
+  await waitFor(() => expect(document.activeElement).toBe(page.getByRole("button", { name: `Open ${entry.title}` })));
+});
+
+test.each([true, false])("target chip tooltip reflects unknown targets only (unknown: %s)", async unknown => {
+  const backend = fixture();
+  backend.sections[0]!.binding.binding!.applicability = { environment: unknown ? { mode: "unknown" } : { mode: "value", value: "staging" }, host: { mode: "not-applicable" } };
+  const page = renderSlot({ component: SectionPage }, { id: "sec_envoy" }, backend.options);
+  const chip = await page.findByRole("button", { name: unknown ? "Environment ?" : "Environment staging" });
+  fireEvent.keyDown(document, { key: "Tab" });
+  act(() => chip.focus());
+  const tooltip = await page.findByRole("tooltip");
+  expect(tooltip.textContent).toBe(unknown ? "Unknown never counts as any environment, so entries that need one stay out." : "Change targets");
+});
+
+describe("section ledger", () => {
+  test("over-budget refusal comes from eligibility status, including scope overhead", async () => {
+    const backend = fixture();
+    const original = backend.options.rpc.sectionDetail!;
+    backend.options.rpc.sectionDetail = input => ({ ...original(input), eligibility: { computedAt: now, status: "over-budget", error: "Nothing was silently truncated.", entries: [], notices: [], exclusions: [], exactText: "Scope overhead", estimatedTokens: 500, budgetTokens: 400 } });
+    const page = renderSlot({ component: SectionPage }, { id: "sec_envoy" }, backend.options);
+    expect(await page.findByText(/New threads get no brief until it fits/)).toBeTruthy();
+    fireEvent.click(page.getByRole("button", { name: "Raise budget" }));
+    expect(await page.findByRole("dialog", { name: "Connect section Envoy cluster-service" })).toBeTruthy();
+    expect(page.container.querySelector('[data-part="BriefList"]')?.textContent).not.toContain("cut");
+  });
+  test("binding dialog Disconnect Undo restores the original binding at the returned revision", async () => {
+    const backend = fixture();
+    const saved = backend.sections[0]!.binding.binding;
+    backend.options.rpc.setSectionBinding = input => {
+      backend.sections[0]!.binding = { key: input.sectionId, revision: input.expectedRevision + 1, binding: input.binding };
+      return backend.sections[0]!.binding;
+    };
+    const page = renderSlot({ component: SectionPage }, { id: "sec_envoy" }, backend.options);
+    fireEvent.click(await page.findByRole("button", { name: "Environment ?" }));
+    const dialog = await page.findByRole("dialog", { name: "Connect section Envoy cluster-service" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Disconnect" }));
+    await waitFor(() => expect(page.queryByRole("dialog")).toBeNull());
+    const action = vi.mocked(toast).mock.calls.filter(call => call[0] === "Disconnected for future sessions.").at(-1)![1]!.action as Action;
+    await act(async () => { await action.onClick({} as never); });
+    expect(calls(page, "setSectionBinding").map(call => call.input)).toEqual([
+      { sectionId: "sec_envoy", expectedRevision: 1, binding: null },
+      { sectionId: "sec_envoy", expectedRevision: 2, binding: saved },
+    ]);
+  });
+
+  test("a failed Disconnect Undo reports the conflict without bypassing the revision", async () => {
+    const backend = fixture();
+    backend.options.rpc.setSectionBinding = input => {
+      if (input.binding) throw new Error("Binding changed before Undo");
+      return { key: input.sectionId, revision: 2, binding: null };
+    };
+    const page = renderSlot({ component: SectionPage }, { id: "sec_envoy" }, backend.options);
+    fireEvent.click(await page.findByRole("button", { name: "Environment ?" }));
+    const dialog = await page.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Disconnect" }));
+    await waitFor(() => expect(page.queryByRole("dialog")).toBeNull());
+    const action = vi.mocked(toast).mock.calls.filter(call => call[0] === "Disconnected for future sessions.").at(-1)![1]!.action as Action;
+    await act(async () => { await action.onClick({} as never); });
+    expect(toast.error).toHaveBeenCalledWith("Binding changed before Undo");
+    expect(calls(page, "setSectionBinding")[1]!.input).toMatchObject({ expectedRevision: 2 });
+    expect(calls(page, "setSectionBinding")).toHaveLength(2);
+  });
+
+  test("acceptance does not invent eligibility when a saved entry stays held", async () => {
+    const backend = fixture();
+    backend.options.rpc.sectionCandidateAccept = () => {
+      const approved = { ...entry, state: "approved" as const, revision: 2, approval: { actor, at: now } };
+      backend.change(approved);
+      return { outcome: "updated", entry: approved };
+    };
+    const page = renderSlot({ component: SectionPage }, { id: "sec_envoy" }, backend.options);
+    const card = await page.findByRole("region", { name: entry.title });
+    fireEvent.click(within(card).getByRole("button", { name: "Everywhere" }));
+    fireEvent.click(within(card).getByRole("button", { name: "Accept" }));
+    await waitFor(() => expect(calls(page, "sectionCandidateAccept")).toHaveLength(1));
+    await waitFor(() => expect(page.queryByRole("region", { name: entry.title })).toBeNull());
+    expect(page.queryByRole("button", { name: `Open ${entry.title}` })).toBeNull();
+    expect(page.getByRole("img", { name: /0 of 400 tokens/ }).querySelector("[data-segment-key]")).toBeNull();
+  });
+
+  test("entry selection and Close stay in the section brief route", async () => {
+    const backend = fixture();
+    const page = renderSlot({ component: SectionPage }, { id: "sec_envoy", entryId: entry.id }, backend.options);
+    const panel = await waitFor(() => {
+      const sheet = page.container.querySelector('[data-part="KnowledgeSheet"]');
+      expect(sheet?.textContent).toContain(entry.title);
+      return sheet as HTMLElement;
+    });
+    expect(within(panel).getByRole("button", { name: "Back to brief" })).toBeTruthy();
+    fireEvent.click(within(panel).getByRole("button", { name: "Close entry" }));
+    expect(page.inspection.navigateCalls).toContainEqual({ method: "toPluginPanel", path: "cortex", options: { subPath: "sections/sec_envoy/brief" } });
+  });
+
+  test("tabs use section sub-routes and connect intent opens the dialog", async () => {
+    const backend = fixture(false);
+    const slot = renderSlot({ component: SectionPage }, { id: "sec_envoy", connect: true }, backend.options);
+    expect(await slot.findByRole("dialog", { name: "Share context in Envoy cluster-service" })).toBeTruthy();
+    slot.unmount();
+    const bound = fixture();
+    const page = renderSlot({ component: SectionPage }, { id: "sec_envoy" }, bound.options);
+    fireEvent.mouseDown(await page.findByRole("tab", { name: /All knowledge/ }), { button: 0, ctrlKey: false });
+    expect(page.inspection.navigateCalls).toContainEqual({ method: "toPluginPanel", path: "cortex", options: { subPath: "sections/sec_envoy/knowledge" } });
+  });
+
+  test.each([false, true])("accepted suggestions collapse and land only from refreshed eligibility (reduced motion: %s)", async reduced => {
+    vi.stubGlobal("matchMedia", vi.fn((query: string) => ({ matches: query.includes("prefers-reduced-motion") && reduced, media: query, addEventListener: vi.fn(), removeEventListener: vi.fn(), addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn(), onchange: null })));
+    const backend = fixture();
+    let approved: Knowledge | null = null;
+    const original = backend.options.rpc.sectionDetail!;
+    backend.options.rpc.sectionDetail = input => ({ ...original(input), review: { items: approved ? [] : [{ entry, workstream: ws, hints: [] }], total: approved ? 0 : 1, limit: 50, offset: 0 }, eligibility: { computedAt: now, status: "ready", error: null, entries: approved ? [{ knowledge: approved, text: approved.text, estimatedTokens: 50, origin: "canonical", overrideActor: null }] : [], notices: [], exclusions: [], exactText: "", estimatedTokens: approved ? 50 : 0, budgetTokens: 400 } });
+    backend.options.rpc.sectionCandidateAccept = () => { approved = { ...entry, state: "approved", revision: 2, approval: { actor, at: now } }; return { outcome: "updated", entry: approved }; };
+    const page = renderSlot({ component: SectionPage }, { id: "sec_envoy" }, backend.options);
+    const card = await page.findByRole("region", { name: entry.title });
+    fireEvent.click(within(card).getByRole("button", { name: "Everywhere" }));
+    fireEvent.click(within(card).getByRole("button", { name: "Accept" }));
+    const landed = await page.findByRole("button", { name: new RegExp(`Open ${entry.title}`) });
+    expect(landed.classList.contains("cortex-landed")).toBe(true);
+    expect(landed.textContent).toContain("just now");
+    expect(page.getByRole("img", { name: /50 of 400 tokens/ }).querySelector(`[data-segment-key="${entry.id}"]`)).toBeTruthy();
+    await waitFor(() => expect(page.queryByRole("region", { name: entry.title })).toBeNull());
+    fireEvent.mouseEnter(landed);
+    expect(page.getByRole("img").querySelector(".cortex-strip-highlight")?.getAttribute("data-segment-key")).toBe(entry.id);
+    fireEvent.click(landed);
+    expect(page.inspection.navigateCalls).toContainEqual({ method: "toPluginPanel", path: "cortex", options: { subPath: `sections/sec_envoy/brief/${entry.id}` } });
+    vi.unstubAllGlobals();
+  });
+
+  test.each([false, true])("accepted card stays in place and cannot reappear enabled during a slow refetch (reduced motion: %s)", async reduced => {
+    vi.stubGlobal("matchMedia", vi.fn((query: string) => ({ matches: query.includes("prefers-reduced-motion") && reduced, media: query, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+    const backend = fixture();
+    const original = backend.options.rpc.sectionDetail!;
+    let refresh: (() => void) | null = null;
+    let accepted = false;
+    const second = { ...entry, id: "kn_second", title: "Second suggestion" };
+    backend.options.rpc.sectionDetail = async input => {
+      if (accepted) await new Promise<void>(resolve => { refresh = resolve; });
+      return { ...original(input), review: { items: (accepted ? [second] : [entry, second]).map(entry => ({ entry, workstream: ws, hints: [] })), total: accepted ? 1 : 2, limit: 50, offset: 0 } };
+    };
+    backend.options.rpc.sectionCandidateAccept = () => { accepted = true; return { outcome: "updated", entry: { ...entry, state: "approved", revision: 2, approval: { actor, at: now } } }; };
+    const page = renderSlot({ component: SectionPage }, { id: "sec_envoy" }, backend.options);
+    const card = await page.findByRole("region", { name: entry.title });
+    fireEvent.click(within(card).getByRole("button", { name: "Everywhere" }));
+    fireEvent.click(within(card).getByRole("button", { name: "Accept" }));
+    await waitFor(() => expect(refresh).not.toBeNull());
+    expect(page.container.querySelectorAll('[data-part="SuggestionCard"]')[0]?.getAttribute("aria-label")).toBe(entry.title);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 350)); });
+    const button = within(card).getByRole("button", { name: "Accept" }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    fireEvent.click(button);
+    expect(calls(page, "sectionCandidateAccept")).toHaveLength(1);
+    await act(async () => { refresh!(); });
+    await waitFor(() => expect(page.queryByRole("region", { name: entry.title })).toBeNull());
+  });
+
+  test("failed acceptance restores the card with an error", async () => {
+    const backend = fixture();
+    backend.options.rpc.sectionCandidateAccept = () => { throw new Error("Acceptance failed"); };
+    const page = renderSlot({ component: SectionPage }, { id: "sec_envoy" }, backend.options);
+    const card = await page.findByRole("region", { name: entry.title });
+    fireEvent.click(within(card).getByRole("button", { name: "Everywhere" }));
+    fireEvent.click(within(card).getByRole("button", { name: "Accept" }));
+    await within(card).findByText(/Acceptance failed/);
+    expect((within(card).getByRole("button", { name: "Accept" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  test("Reject remains immediate without an unsupported candidate transition", async () => {
+    const backend = fixture();
+    backend.options.rpc.knowledgeTransition = input => ({ outcome: "updated", entry: { ...entry, state: input.state, revision: input.expectedRevision + 1 } });
+    const page = renderSlot({ component: SectionPage }, { id: "sec_envoy" }, backend.options);
+    const card = await page.findByRole("region", { name: entry.title });
+    fireEvent.click(within(card).getByRole("button", { name: "Reject" }));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("Rejected. Threads never get it."));
+    expect(calls(page, "knowledgeTransition")).toHaveLength(1);
+    expect(calls(page, "knowledgeTransition")[0]!.input).toMatchObject({ id: entry.id, expectedRevision: 1, state: "rejected" });
+  });
+});
 
 describe("approved section-first flow", () => {
   test("message selection opens a sourced capture with exact sequence and quote, not client-supplied attribution", () => {
@@ -156,18 +411,19 @@ describe("approved section-first flow", () => {
     expect(slot.inspection.navigateCalls.filter(call => call.method === "toCompose")).toEqual([{ method: "toCompose", options: { placement: { sectionId, pinned: false }, focusPrompt: true } }]);
   });
 
-  test("sidebar mirrors actual bb sections and keeps advanced library/connections reachable", async () => {
+  test("sidebar mirrors actual bb sections and keeps library, workstreams and connection overview reachable", async () => {
     const backend = fixture();
     const slot = renderSlot({ component: app.navPanels[0]!.experimental_sidebar! }, { subPath: "sections/sec_envoy" }, backend.options);
     expect(await slot.findByRole("button", { name: "OTLP routing" })).toBeTruthy();
     expect(slot.getAllByRole("button", { name: "Envoy cluster-service", hidden: true }).find(button => button.getAttribute("aria-current") === "page")).toBeTruthy();
     expect(slot.getByRole("button", { name: "Library" })).toBeTruthy();
-    expect(slot.getByRole("button", { name: "Connections" })).toBeTruthy();
+    expect(slot.getByRole("button", { name: "Overview" })).toBeTruthy();
+    expect(slot.getByRole("button", { name: "Workstreams 1 workstream" })).toBeTruthy();
   });
 
   test("connect creates and shares in one confirmed job, with no required topic/token setup", async () => {
     const { slot } = renderSection(false);
-    fireEvent.click(await slot.findByRole("button", { name: "Share context in this section" }));
+    fireEvent.click(await slot.findByRole("button", { name: /^Share context in (?:Envoy cluster-service|One|🧠 My own name)/ }));
     const dialog = await slot.findByRole("dialog", { name: "Share context in Envoy cluster-service" });
     fireEvent.click(within(dialog).getByRole("radio", { name: "New workstream" }));
     expect(within(dialog).queryByRole("textbox", { name: "Topic" })).toBeNull();
@@ -180,11 +436,10 @@ describe("approved section-first flow", () => {
 
   test("connecting an existing workstream leaves the native title unchanged", async () => {
     const { slot } = renderSection(false);
-    fireEvent.click(await slot.findByRole("button", { name: "Share context in this section" }));
+    fireEvent.click(await slot.findByRole("button", { name: /^Share context in (?:Envoy cluster-service|One|🧠 My own name)/ }));
     const dialog = await slot.findByRole("dialog");
     expect(dialog.textContent).not.toContain("🧠");
-    fireEvent.click(within(dialog).getByRole("radio", { name: "Use existing" }));
-    fireEvent.click(within(dialog).getByRole("button", { name: /Envoy cluster-service.*Not connected/ }));
+    fireEvent.click(within(dialog).getByRole("radio", { name: "Use Envoy cluster-service" }));
     fireEvent.click(within(dialog).getByRole("button", { name: "Share context" }));
     await waitFor(() => expect(calls(slot, "sectionConnect")).toHaveLength(1));
     expect(calls(slot, "sectionConnect")[0]!.input).toMatchObject({ choice: { kind: "reuse", workstreamId: ws.id, expectedWorkstreamRevision: ws.revision }, expectedTitle: "Envoy cluster-service", markTitle: false });
@@ -194,7 +449,7 @@ describe("approved section-first flow", () => {
     const { backend, slot } = renderSection(false);
     const message = "Native title decoration is disabled. The SVG is shown in Cortex only.";
     backend.options.rpc.sectionConnect = input => ({ requestId: input.requestId, sectionId: input.sectionId, workstreamId: ws.id, status: "connected", expectedRevision: 0, bindingRevision: 1, error: null, marker: { ...mark, status: "failed", error: message } });
-    fireEvent.click(await slot.findByRole("button", { name: "Share context in this section" }));
+    fireEvent.click(await slot.findByRole("button", { name: /^Share context in (?:Envoy cluster-service|One|🧠 My own name)/ }));
     const dialog = await slot.findByRole("dialog");
     fireEvent.click(within(dialog).getByRole("radio", { name: "New workstream" }));
     fireEvent.click(within(dialog).getByRole("button", { name: "Share context" }));
@@ -204,7 +459,7 @@ describe("approved section-first flow", () => {
 
   test("connected unmarked sections offer no native title application", async () => {
     const { slot } = renderSection();
-    const opener = await slot.findByRole("button", { name: "Advanced section actions" });
+    const opener = await slot.findByRole("button", { name: "Sharing Envoy cluster-service" });
     fireEvent.keyDown(opener, { key: "Enter" });
     await slot.findByRole("menuitem", { name: "Stop sharing…" });
     expect(slot.queryByRole("menuitem", { name: "Apply title mark" })).toBeNull();
@@ -217,7 +472,7 @@ describe("approved section-first flow", () => {
     const card = await slot.findByRole("region", { name: entry.title });
     const accept = within(card).getByRole("button", { name: "Accept" });
     expect(accept.hasAttribute("disabled")).toBe(true);
-    fireEvent.click(within(card).getByRole("radio", { name: "Everywhere" }));
+    fireEvent.click(within(card).getByRole("button", { name: "Everywhere" }));
     fireEvent.click(accept);
     await waitFor(() => expect(calls(slot, "sectionCandidateAccept")).toHaveLength(1));
     expect(calls(slot, "sectionCandidateAccept")[0]!.input).toMatchObject({ id: entry.id, expectedRevision: 1, expectedBindingRevision: 1, applicability: { environment: { mode: "not-applicable" }, host: { mode: "not-applicable" } } });

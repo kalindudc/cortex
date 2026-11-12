@@ -10,7 +10,8 @@ import { cn } from "@/lib/utils";
 import { dimensionWord, ORIENTATION, STATUS_LOOK, tokens } from "./copy";
 import { isConflict, type RpcFailure, useKnowledgeEntries, useWorkstreamWrites } from "./data";
 import { type DiffOp, wordDiff } from "./model";
-import { Applicability, FailureNotice, KnowledgeText, Segmented, StateMark } from "./parts";
+import { Applicability, FailureNotice, Hint, KnowledgeText, Segmented, StateMark } from "./parts";
+import "./review.css";
 import type { Binding, ContextEntry, Dimension, Knowledge, ThreadContext, Workstream } from "./types";
 
 const FIELD_LABEL = "text-[11.5px] font-semibold text-foreground";
@@ -208,16 +209,18 @@ export function EditKnowledgeDialog({
   const unchanged = title.trim() === base.title && text.trim() === base.text;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl">
+      <DialogContent data-cortex data-part="EditKnowledgeDialog" className="cortex-knowledge-dialog max-w-xl">
         <DialogHeader>
           <DialogTitle>Edit saved knowledge</DialogTitle>
           <DialogDescription>
             Revision {base.revision} · <StateMark state={base.state} />
           </DialogDescription>
         </DialogHeader>
-        <ScopeNote icon="Layers">
-          Changes it for every thread in {workstream?.name ?? "this workstream"} from their next session. A change to approved knowledge needs approval again. History keeps every revision.
-        </ScopeNote>
+        <div className="flex flex-wrap items-center gap-2 text-[12px] text-muted-foreground">
+          <span>Changes it for every thread in {workstream?.name ?? "this workstream"} from their next session.</span>
+          <Hint text={`Changes it for every thread in ${workstream?.name ?? "this workstream"} from their next session. History keeps every revision.`}><span className="inline-flex items-center gap-1"><Icon name="Info" className="size-3.5" aria-hidden />Scope</span></Hint>
+          <span>A change to approved knowledge needs approval again.</span>
+        </div>
         <Field label="Title" htmlFor="cortex-edit-title">
           <Input id="cortex-edit-title" value={title} onChange={event => setTitle(event.target.value)} className="text-[13px]" />
         </Field>
@@ -240,7 +243,8 @@ export function EditKnowledgeDialog({
           </div>
         ) : null}
         {newer ? (
-          <div className="flex flex-col gap-1.5">
+          <div role="alert" className="flex min-w-0 flex-col gap-2 rounded-md border border-border-seam bg-surface-attention p-3">
+            <p className="text-[13px] font-semibold text-attention">Revision {newer.revision} was saved while you edited.</p>
             <p className="text-[12px] text-muted-foreground">Revision {newer.revision} now says:</p>
             <p data-content className="text-[13px] whitespace-pre-wrap break-words">{newer.text}</p>
             <DiffText ops={wordDiff(newer.text, text)} label="Your text compared with the newer revision" />
@@ -625,7 +629,7 @@ export function ProposeDialog({
   const ready = title.trim() !== "" && text.trim() !== "";
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl">
+      <DialogContent data-cortex data-part="ProposeDialog" className="cortex-knowledge-dialog max-w-xl">
         <DialogHeader>
           <DialogTitle>Add knowledge to {workstream.name}</DialogTitle>
           <DialogDescription>Threads get it only after it is approved.</DialogDescription>
@@ -761,7 +765,7 @@ export function ObserveDialog({
   const ready = ref.trim() !== "" && (mode === "evidence" || value.trim() !== "");
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl">
+      <DialogContent data-cortex data-part="ObserveDialog" className="cortex-knowledge-dialog max-w-xl">
         <DialogHeader>
           <DialogTitle>{mode === "evidence" ? "Add a source" : "Record what you see now"}</DialogTitle>
           <DialogDescription>{entry.title}</DialogDescription>
@@ -805,6 +809,7 @@ export function ConfirmDialog({
   open,
   onOpenChange,
   onConfirm,
+  secondaryAction,
 }: {
   title: string;
   facts: ReadonlyArray<{ icon: string; text: string }>;
@@ -813,6 +818,7 @@ export function ConfirmDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onConfirm: () => Promise<void>;
+  secondaryAction?: { label: string; onClick: () => void };
 }) {
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<RpcFailure | null>(null);
@@ -821,7 +827,7 @@ export function ConfirmDialog({
   }, [open]);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent data-cortex data-part="ConfirmDialog" className="cortex-knowledge-dialog max-w-md">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription className="sr-only">{facts.map(fact => fact.text).join(" ")}</DialogDescription>
@@ -839,6 +845,7 @@ export function ConfirmDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
+          {secondaryAction ? <Button variant="outline" disabled={busy} onClick={secondaryAction.onClick}>{secondaryAction.label}</Button> : null}
           <Button
             variant={destructive ? "destructive" : "default"}
             disabled={busy}

@@ -81,16 +81,21 @@ export function StatusPill({
   status,
   canWrite,
   onChoose,
+  track = false,
 }: {
   status: CortexStatus;
   canWrite: boolean;
   onChoose: (status: CortexStatus) => void;
+  track?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const className = track
+    ? "inline-flex min-h-7 flex-1 items-center justify-center gap-1 border border-primary bg-primary px-2 text-xs font-semibold text-primary-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+    : pillClass(status);
   if (!canWrite) {
     return (
-      <span className={pillClass(status)} data-testid="status-pill">
-        <StatusDot status={status} />
+      <span className={className} data-testid="status-pill" aria-current={track ? "step" : undefined}>
+        {track ? null : <StatusDot status={status} />}
         {STATUS_LABEL[status]}
       </span>
     );
@@ -102,8 +107,8 @@ export function StatusPill({
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
-        <button type="button" className={pillClass(status)} aria-label={`Status: ${STATUS_LABEL[status]}. Change status`}>
-          <StatusDot status={status} />
+        <button type="button" className={className} aria-current={track ? "step" : undefined} aria-label={`Status: ${STATUS_LABEL[status]}. Change status`}>
+          {track ? null : <StatusDot status={status} />}
           {STATUS_LABEL[status]}
           <Icon name="ChevronDown" className="size-3.5 opacity-80" aria-hidden />
         </button>
@@ -111,7 +116,7 @@ export function StatusPill({
       <DropdownMenuContent
         align="start"
         mobileTitle="Status"
-        className="w-64"
+        className="w-64 pointer-coarse:[&_[role=menuitem]]:min-h-11 max-[480px]:[&_[role=menuitem]]:min-h-11"
         onKeyDown={event => {
           const picked = BY_KEY.get(event.key);
           if (picked === undefined || event.metaKey || event.ctrlKey || event.altKey) return;
@@ -137,10 +142,48 @@ export function StatusPill({
   );
 }
 
+const TRACK = ["draft", "open", "review", "done"] as const;
+
+export function StatusTrack({ status, canWrite, onChoose }: {
+  status: CortexStatus;
+  canWrite: boolean;
+  onChoose: (status: CortexStatus) => void;
+}) {
+  const current = TRACK.findIndex(step => step === status);
+  const blocked = status === "blocked";
+  const blockClass = cn(
+    "ml-1 inline-flex min-h-7 min-w-7 shrink-0 items-center justify-center gap-1 border px-2 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+    blocked ? "border-destructive bg-surface-destructive text-destructive-text" : "border-border-seam text-muted-foreground hover:bg-state-hover",
+  );
+  return (
+    <div role="group" aria-label="Task status" className="mt-3 flex min-w-0 flex-wrap gap-y-1">
+      <div className="flex min-w-0 flex-1 basis-60">
+        {TRACK.map((step, index) => {
+          if (step === status) return <StatusPill key={step} status={status} canWrite={canWrite} onChoose={onChoose} track />;
+          const className = cn(
+            "inline-flex min-h-7 min-w-0 flex-1 items-center justify-center gap-1 border border-border-seam px-2 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+            index < current ? "bg-success/10 text-success" : "text-muted-foreground",
+          );
+          const content = <>{index < current ? <Icon name="Check" className="size-3 shrink-0" aria-hidden /> : null}{STATUS_LABEL[step]}</>;
+          return canWrite
+            ? <button key={step} type="button" className={cn(className, "hover:bg-state-hover")} onClick={() => onChoose(step)}>{content}</button>
+            : <span key={step} className={className}>{content}</span>;
+        })}
+      </div>
+      {canWrite ? (
+        <button type="button" className={blockClass} aria-pressed={blocked} aria-label={blocked ? "Unblock task" : "Block task"} title={blocked ? "Unblock task" : "Blocked"} onClick={() => onChoose(blocked ? "open" : "blocked")}>
+          <Icon name="AlertTriangle" className="size-3.5" aria-hidden />
+          {blocked ? "Blocked" : null}
+        </button>
+      ) : blocked ? <span className={blockClass} data-testid="status-pill"><Icon name="AlertTriangle" className="size-3.5" aria-hidden />Blocked</span> : null}
+    </div>
+  );
+}
+
 /** One click to cortex's next status: draft→open, open→review, review→done, blocked→open, done→open. */
 export function NextStepButton({ status, onChoose }: { status: CortexStatus; onChoose: (status: CortexStatus) => void }) {
   return (
-    <Button variant="outline" size="sm" className="h-[26px] gap-1.5 px-2.5" onClick={() => onChoose(NEXT_STATUS[status])}>
+    <Button size="sm" className="h-7 gap-1.5 bg-primary px-2.5 text-primary-foreground hover:bg-primary/90" onClick={() => onChoose(NEXT_STATUS[status])}>
       {NEXT_LABEL[status]}
       <Icon name="ArrowRight" className="size-3.5" aria-hidden />
     </Button>

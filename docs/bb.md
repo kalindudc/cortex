@@ -6,8 +6,8 @@ sources: [integrations/bb/, src/commands/agents.ts, src/commands/workstream.ts, 
 # Cortex in bb
 
 Cortex gives each connected bb section a shared brief: accepted takeaways that new threads can start with.
-Its page follows your real sections; workstreams keep the knowledge independent of section names and lifetimes.
-The thread's Cortex and Memory tabs retain task actions and detailed context controls.
+The page opens on an Overview; a section shows its brief as a budget bar, suggestions inline, and why entries are held.
+Workstreams keep knowledge independent of section names; the thread's Cortex and Memory tabs keep task and context controls.
 
 ## Install and upgrade
 

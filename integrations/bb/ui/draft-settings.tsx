@@ -29,11 +29,11 @@ export function DraftModelChoice({ setting, value, onChange, disabled }: { setti
   const overridden = selectionKey(value) !== selectionKey(setting);
   const first = catalog.providers.find(provider => provider.available);
   const pick = (next: ExperimentalProviderModelPickerValue) => { const parsed = toSelection(next); if (!parsed.success) return; setSeed(null); onChange(parsed.data); };
-  return <div role="group" aria-label="Model for this draft" className="grid gap-2">
-    <span className="font-semibold">Model for this draft</span>
+  return <div role="group" aria-label="Model for this draft" className="grid min-w-0 gap-1.5 rounded-md border border-border-seam p-3 text-[12px] [overflow-wrap:anywhere] [&_*]:min-w-0 [&_button]:h-auto [&_button]:min-h-11 [&_button]:max-w-full [&_button]:whitespace-normal [&_input]:text-[16px] [&_select]:text-[16px]">
+    <span className="font-semibold text-foreground">Model for this draft</span>
     {shown === null
       ? <div className="flex flex-wrap items-center gap-2"><span>Follows the source thread's model</span><Button variant="outline" disabled={disabled || !first} onClick={() => { if (first) setSeed({ providerId: first.id, model: "", reasoningLevel: "" }); }}>Choose a model for this draft</Button></div>
-      : <div className="flex min-w-0 flex-wrap items-center gap-2"><ProviderModelPicker value={shown} onChange={pick} disabled={disabled} />{overridden || seed !== null ? <Button variant="ghost" disabled={disabled} onClick={() => { setSeed(null); onChange(setting); }}>Use Drafting setting</Button> : null}</div>}
+      : <div className="flex min-w-0 flex-wrap items-center gap-2 [&>*]:max-w-full"><ProviderModelPicker value={shown} onChange={pick} disabled={disabled} />{overridden || seed !== null ? <Button variant="ghost" disabled={disabled} onClick={() => { setSeed(null); onChange(setting); }}>Use Drafting setting</Button> : null}</div>}
     {shown !== null ? <p className="text-muted-foreground">{overridden ? "This draft only. Your Drafting setting stays as it is." : "From your Drafting setting."}</p> : null}
   </div>;
 }

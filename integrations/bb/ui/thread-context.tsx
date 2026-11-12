@@ -2,6 +2,7 @@ import { type ReactNode, useState } from "react";
 import {
   experimental_copyToClipboard,
   experimental_Diff as Diff,
+  experimental_ThreadStatusGlyph as ThreadStatusGlyph,
   experimental_useSidebarThreads,
   useBbNavigate,
   useSettings,
@@ -19,12 +20,15 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Icon } from "@/components/ui/icon";
 import { Input } from "@/components/ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useTaskSearch } from "../panel/menus";
 import {
   bindingWord,
   facetWord,
-  KIND_LOOK,
+  BRIEF_KIND_LOOK,
+  dimensionWord,
   ORIGIN_WORD,
   plural,
   ROUTE_WORD,
@@ -36,14 +40,18 @@ import {
   type RpcFailure,
   useDeliveryReceipts,
   useKnowledgeSearch,
+  useKnowledgeEntries,
   useThreadContext,
   useWorkstreams,
   useWorkstreamWrites,
 } from "./data";
 import { BindingDialog, ChangeForThreadDialog, EditKnowledgeDialog, PrepareDraftDialog } from "./dialogs";
 import { activeGrants, changedLineCount, dismissedFor, shortTime, unifiedPatch, type Visibility, visibilityOf } from "./model";
-import { Applicability, BudgetBar, EmptyNote, FailureNotice, Heading, IconButton, LoadingRows, PagedFooter, StateMark, TONE_TEXT } from "./parts";
-import type { ContextEntry, DeliveryReceipt, ThreadContext } from "./types";
+import { Applicability, EmptyNote, FailureNotice, Heading, Hint, IconButton, LoadingRows, PagedFooter, StateMark, TONE_TEXT } from "./parts";
+import { BriefStrip } from "./brief-strip";
+import { heldReason, ReasonChip } from "./marks";
+import type { ContextEntry, DeliveryReceipt, Knowledge, ThreadContext } from "./types";
+import "./thread-context.css";
 
 export const CORTEX_PAGE_PATH = "cortex";
 
@@ -84,11 +92,16 @@ export function VisibilityControl({ context }: { context: ThreadContext }) {
   ];
   const detail = visibilityDetail(context, defaultShown);
   return (
+    <div className="flex shrink-0 items-center gap-1">
+      <button type="button" role="switch" aria-checked={!context.dismissed} aria-label="Above composer" onClick={() => void choose(context.dismissed ? "shown" : "hidden")} className="flex items-center gap-1.5 rounded-sm text-[11.5px] text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
+        <span aria-hidden className={cn("inline-flex h-4 w-7 items-center rounded-sm border border-border-seam p-0.5", context.dismissed ? "bg-surface-recessed" : "bg-primary")}>
+          <span className={cn("size-2.5 rounded-sm bg-primary-foreground", !context.dismissed && "ml-auto")} />
+        </span>
+        Above composer
+      </button>
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2.5 text-[12px]" aria-label={`Above the composer: ${detail}. Change`}>
-          <Icon name={context.dismissed ? "EyeOff" : "Eye"} className="size-3.5" aria-hidden />
-          {context.dismissed ? "Hidden above composer" : "Shown above composer"}
+        <Button variant="ghost" size="icon" className="size-7" aria-label={`Above the composer: ${detail}. Change`}>
           <Icon name="ChevronDown" className="size-3.5" aria-hidden />
         </Button>
       </DropdownMenuTrigger>
@@ -103,6 +116,7 @@ export function VisibilityControl({ context }: { context: ThreadContext }) {
         <p className="px-2 pt-1 pb-1.5 text-[11px] leading-snug text-muted-foreground">Hiding changes only what you see. Threads still get their context.</p>
       </DropdownMenuContent>
     </DropdownMenu>
+    </div>
   );
 }
 
@@ -111,16 +125,16 @@ function Scope({ context, sectionName, onConnect }: { context: ThreadContext; se
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <Icon name="Layers" className="size-4 text-primary" aria-hidden />
-        <span className="text-[14px] font-semibold text-foreground">{context.workstream?.name ?? "No workstream"}</span>
-        <span className="text-[12.5px] text-muted-foreground">· {topic ? facetWord(topic) : "Shared basics only"}</span>
+        <Icon name="Brain" className="size-4 shrink-0 text-primary" aria-hidden />
+        <span className="min-w-0 break-words text-[13px] font-semibold text-foreground">{context.workstream?.name ?? "No workstream"}</span>
+        <span className="text-[12.5px] text-muted-foreground">· {topic ? facetWord(topic) : "Shared basics"}</span>
         <span className="flex-1" />
         <span className="text-[11.5px] text-muted-foreground">{bindingWord(context, sectionName)}</span>
         <Button variant="ghost" size="sm" className="h-7 px-2 text-[12px]" onClick={onConnect}>
           Change…
         </Button>
       </div>
-      <div className="flex flex-wrap items-center gap-2 text-[11.5px] text-muted-foreground">
+      <div className="cortex-context-targets flex flex-wrap items-center gap-2 text-[11.5px] text-muted-foreground">
         <span>Targets</span>
         <Applicability value={context.applicability} />
       </div>
@@ -136,7 +150,7 @@ function EntryMenu({
 }: {
   context: ThreadContext;
   entry: ContextEntry;
-  onChange: () => void;
+  onChange?: () => void;
   onEdit: () => void;
 }) {
   const writes = useWorkstreamWrites();
@@ -168,10 +182,10 @@ function EntryMenu({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" mobileTitle={entry.knowledge.title} className="w-72">
         <p className="px-2 pt-1.5 pb-1 text-[11px] font-semibold text-muted-foreground">This thread only</p>
-        <DropdownMenuItem onSelect={onChange}>
-          <Icon name="Pencil" aria-hidden />
+        {onChange ? <DropdownMenuItem onSelect={onChange}>
+          <Icon name="Edit" aria-hidden />
           Change for this thread…
-        </DropdownMenuItem>
+        </DropdownMenuItem> : null}
         <DropdownMenuItem onSelect={() => void override({ excluded: true, text: null }, "Left out of this thread's next context")}>
           <Icon name="Minus" aria-hidden />
           Leave out of this thread
@@ -203,13 +217,13 @@ function EntryMenu({
 
 function EntryRow({ context, entry }: { context: ThreadContext; entry: ContextEntry }) {
   const [dialog, setDialog] = useState<"change" | "edit" | null>(null);
-  const kind = KIND_LOOK[entry.knowledge.kind];
+  const kind = BRIEF_KIND_LOOK[entry.knowledge.kind];
   const local = entry.origin === "thread-only";
   return (
     <li className="flex items-start gap-2 border-t border-border-seam py-2 first:border-t-0">
       <Icon name={kind.icon} className={cn("mt-0.5 size-4 shrink-0", local ? "text-attention" : "text-primary")} aria-label={kind.word} />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-[12.5px] font-semibold text-foreground" title={entry.knowledge.title}>
+        <p className="line-clamp-2 break-words text-[12.5px] font-semibold text-foreground" title={entry.knowledge.title}>
           {entry.knowledge.title}
         </p>
         <p data-content className="line-clamp-2 text-[12.5px] text-foreground">
@@ -220,7 +234,8 @@ function EntryRow({ context, entry }: { context: ThreadContext; entry: ContextEn
           {" · "}
           {facetWord(entry.knowledge.facet)}
           {" · "}
-          <span className="tabular-nums">{tokens(entry.estimatedTokens)}</span>
+          <span className="tabular-nums">{tokens(entry.estimatedTokens)} tokens</span>
+          {" · "}{plural(entry.knowledge.sources.length, "source")}
         </p>
       </div>
       <EntryMenu context={context} entry={entry} onChange={() => setDialog("change")} onEdit={() => setDialog("edit")} />
@@ -230,31 +245,42 @@ function EntryRow({ context, entry }: { context: ThreadContext; entry: ContextEn
   );
 }
 
-function NoticeRow({ notice }: { notice: ThreadContext["notices"][number] }) {
+function NoticeRow({ context, notice, knowledge }: { context: ThreadContext; notice: ThreadContext["notices"][number]; knowledge?: Knowledge }) {
+  const [dialog, setDialog] = useState<"edit" | null>(null);
+  const local = context.overrides.find(row => row.knowledgeId === notice.id);
+  const entry: ContextEntry | null = knowledge ? {
+    knowledge, text: local?.text ?? knowledge.text, origin: local?.text ? "thread-only" : "canonical", overrideActor: local?.actor ?? null, estimatedTokens: notice.estimatedTokens,
+  } : null;
   return (
     <li className="flex items-start gap-2 border-t border-border-seam py-2 first:border-t-0">
-      <Icon name="TriangleAlert" className="mt-0.5 size-4 shrink-0 text-warning-text" aria-label="Notice" />
+      <Icon name="EyeOff" className="mt-0.5 size-4 shrink-0 text-warning-text" aria-label="Notice" />
       <div className="min-w-0 flex-1">
-        <p className="text-[12.5px] text-foreground">{notice.reason}</p>
-        <p className="mt-0.5 text-[11.5px] text-muted-foreground">
-          Notice only, its text is held back · <span className="font-mono">{notice.id}</span>
-          {notice.sources.length > 0 ? ` · ${plural(notice.sources.length, "source")}` : ""} · <span className="tabular-nums">{tokens(notice.estimatedTokens)}</span>
-        </p>
+        <p className="line-clamp-2 break-words text-[12.5px] font-medium text-foreground" title={knowledge?.title ?? notice.id}>{knowledge?.title ?? "Saved knowledge"}</p>
+        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11.5px] text-muted-foreground">
+          <span>Notice only</span>
+          <ReasonChip reason={heldReason(notice, { entry: knowledge, applicability: context.applicability })} />
+          <span className="tabular-nums">{tokens(notice.estimatedTokens)} tokens</span>
+          <span>{plural(notice.sources.length, "source")}</span>
+        </div>
       </div>
+      {entry ? <>
+        <EntryMenu context={context} entry={entry} onEdit={() => setDialog("edit")} />
+        <EditKnowledgeDialog entry={entry.knowledge} workstream={context.workstream} open={dialog === "edit"} onOpenChange={open => setDialog(open ? "edit" : null)} />
+      </> : null}
     </li>
   );
 }
 
-function ExcludedRow({ context, exclusion }: { context: ThreadContext; exclusion: ThreadContext["exclusions"][number] }) {
+function ExcludedRow({ context, exclusion, knowledge }: { context: ThreadContext; exclusion: ThreadContext["exclusions"][number]; knowledge?: Knowledge }) {
   const writes = useWorkstreamWrites();
   const local = context.overrides.find(row => row.knowledgeId === exclusion.id && row.excluded);
   return (
     <li className="flex items-center gap-2 border-t border-border-seam py-1.5 first:border-t-0 text-[12.5px]">
       <Icon name="Minus" className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-      <span className="shrink-0 font-mono text-[11.5px] text-muted-foreground">{exclusion.id}</span>
-      <span className="min-w-0 flex-1 truncate text-foreground" title={exclusion.reason}>
-        {exclusion.reason}
-      </span>
+      <div className="min-w-0 flex-1">
+        <p className="line-clamp-2 break-words text-foreground" title={knowledge?.title ?? exclusion.id}>{knowledge?.title ?? "Saved knowledge"}</p>
+        <ReasonChip reason={heldReason(exclusion, { entry: knowledge, applicability: context.applicability })} />
+      </div>
       {local ? (
         <Button
           variant="outline"
@@ -309,10 +335,10 @@ function ShareDialog({ context, open, onOpenChange }: { context: ThreadContext; 
       : (tasks.results ?? []).map(row => ({ id: String(row.id), title: row.title, meta: `#${row.id} · ${row.lane}` }));
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl">
+      <DialogContent data-cortex data-cortex-context className="max-w-xl">
         <DialogHeader>
           <DialogTitle>Share with this thread</DialogTitle>
-          <DialogDescription>From this thread's next session only. You can revoke it later; a running session keeps what it already has.</DialogDescription>
+          <DialogDescription>From the next session. Revoke later; running sessions keep their text.</DialogDescription>
         </DialogHeader>
         <div className="flex flex-wrap gap-2">
           {(["knowledge", "legacy-task"] as const).map(option => (
@@ -335,8 +361,8 @@ function ShareDialog({ context, open, onOpenChange }: { context: ThreadContext; 
         <ul className="max-h-72 overflow-y-auto">
           {rows.map(row => (
             <li key={row.id} className="flex items-center gap-2 border-t border-border-seam py-1.5 text-[12.5px]">
-              <span className="min-w-0 flex-1 truncate text-foreground">{row.title}</span>
-              <span className="shrink-0 text-[11.5px] text-muted-foreground">{row.meta}</span>
+              <div className="min-w-0 flex-1"><p className="break-words text-foreground">{row.title}</p>
+              <p className="break-words text-[11.5px] text-muted-foreground">{row.meta}</p></div>
               <Button variant="outline" size="sm" className="h-7 px-2 text-[12px]" onClick={() => void share(mode, row.id, row.title)}>
                 Share
               </Button>
@@ -354,7 +380,7 @@ function ShareDialog({ context, open, onOpenChange }: { context: ThreadContext; 
   );
 }
 
-function Grants({ context }: { context: ThreadContext }) {
+function Grants({ context, knowledge, compact = false }: { context: ThreadContext; knowledge: Map<string, Knowledge>; compact?: boolean }) {
   const writes = useWorkstreamWrites();
   const [open, setOpen] = useState(false);
   const grants = activeGrants(context);
@@ -368,14 +394,14 @@ function Grants({ context }: { context: ThreadContext }) {
           </Button>
         }
       >
-        Shared with this thread
+        {compact ? "Shared in" : "Shared with this thread"}
       </Heading>
       {grants.length === 0 ? <p className="text-[12px] text-muted-foreground">Nothing from outside {context.workstream?.name ?? "the workstream"}.</p> : null}
       <ul>
         {grants.map(grant => (
           <li key={`${grant.kind}-${grant.id}`} className="flex items-center gap-2 border-t border-border-seam py-1.5 first:border-t-0 text-[12.5px]">
             <Icon name={grant.kind === "knowledge" ? "Layers" : "Archive"} className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-            <span className="min-w-0 flex-1 truncate font-mono text-foreground">{grant.kind === "legacy-task" ? `#${grant.id}` : grant.id}</span>
+            <span className="min-w-0 flex-1 break-words text-foreground" title={grant.id}>{grant.kind === "legacy-task" ? `Task #${grant.id}` : knowledge.get(grant.id)?.title ?? "Shared knowledge"}</span>
             <span className="shrink-0 text-[11.5px] text-muted-foreground">by you · {shortTime(grant.grantedAt)}</span>
             <Button
               variant="outline"
@@ -420,7 +446,7 @@ export function ExactText({ text, label = "Exact text" }: { text: string; label?
         data-content
         tabIndex={0}
         aria-label={label}
-        className="max-h-96 overflow-auto rounded-md border border-border-seam bg-muted/40 px-3 py-2 font-mono text-[12px] whitespace-pre-wrap break-words text-foreground"
+        className="max-h-96 min-w-0 overflow-auto rounded-md border border-border-seam bg-surface-recessed px-3 py-2 font-mono text-[12px] whitespace-pre-wrap break-words text-foreground"
       >
         {text}
       </pre>
@@ -463,41 +489,38 @@ export function ChangesSinceLast({ context }: { context: ThreadContext }) {
   );
 }
 
-/** What goes into this thread's next context, the cut, and what stays out and why. */
-export function NextContext({ context }: { context: ThreadContext }) {
+export function NextContext({ context, compact = false }: { context: ThreadContext; compact?: boolean }) {
+  const [shown, setShown] = useState(20);
   const going = context.entries.length + context.notices.length;
-  const changes = context.lastReceipt ? changedLineCount(context.lastReceipt.text, context.exactText) : 0;
+  const noticeIds = new Set(context.notices.map(notice => notice.id));
+  const leftOut = context.exclusions.filter(exclusion => !noticeIds.has(exclusion.id));
+  const ids = [...new Set([
+    ...context.notices.slice(0, shown).map(notice => notice.id),
+    ...leftOut.slice(0, shown).map(exclusion => exclusion.id),
+    ...activeGrants(context).filter(grant => grant.kind === "knowledge").map(grant => grant.id),
+  ])];
+  const reads = useKnowledgeEntries(ids);
+  const knowledge = new Map(context.entries.map(entry => [entry.knowledge.id, entry.knowledge]));
+  for (const read of reads) if (read.data) knowledge.set(read.data.entry.id, read.data.entry);
+  const failure = reads.find(read => read.error);
+  const excluded = <>
+    {leftOut.length === 0 ? <p className="text-[12px] text-muted-foreground">Nothing left out.</p> : null}
+    <ul>{leftOut.slice(0, shown).map(exclusion => <ExcludedRow key={exclusion.id} context={context} exclusion={exclusion} knowledge={knowledge.get(exclusion.id)} />)}</ul>
+  </>;
   return (
-    <div className="flex flex-col">
-      <Heading count={going}>Goes in</Heading>
-      {going === 0 ? <p className="text-[12px] text-muted-foreground">Nothing approved applies to this thread yet.</p> : null}
-      <ul>
-        {context.entries.map(entry => (
-          <EntryRow key={entry.knowledge.id} context={context} entry={entry} />
-        ))}
-        {context.notices.map(notice => (
-          <NoticeRow key={notice.id} notice={notice} />
-        ))}
-      </ul>
-      <div role="separator" aria-label={`Budget ${context.budgetTokens} tokens`} className="my-2 flex items-center gap-2 text-[11px] font-semibold text-foreground">
-        <span className="h-px flex-1 bg-foreground" />
-        <span className="tabular-nums">cut · {context.budgetTokens} tokens</span>
-        <span className="h-px flex-1 bg-foreground" />
-      </div>
-      <Heading count={context.exclusions.length}>Stays out</Heading>
-      {context.exclusions.length === 0 ? <p className="text-[12px] text-muted-foreground">Nothing left out.</p> : null}
-      <ul>
-        {context.exclusions.map(exclusion => (
-          <ExcludedRow key={exclusion.id} context={context} exclusion={exclusion} />
-        ))}
-      </ul>
-      <Grants context={context} />
-      <Fold label="Exact text" count={tokens(context.estimatedTokens)}>
-        <ExactText text={context.exactText} label="Next context" />
-      </Fold>
-      <Fold label="Changes since last prepared" count={context.lastReceipt ? plural(changes, "line") : undefined}>
-        <ChangesSinceLast context={context} />
-      </Fold>
+    <div className="flex min-w-0 flex-col gap-2">
+      <section aria-label="Goes in">
+        <Heading count={going}>Goes in</Heading>
+        {going === 0 ? <p className="text-[12px] text-muted-foreground">Nothing approved applies to this thread yet.</p> : null}
+        <ul>
+          {context.entries.map(entry => <EntryRow key={entry.knowledge.id} context={context} entry={entry} />)}
+          {context.notices.slice(0, shown).map(notice => <NoticeRow key={notice.id} context={context} notice={notice} knowledge={knowledge.get(notice.id)} />)}
+        </ul>
+      </section>
+      {failure?.error ? <FailureNotice failure={failure.error} onRetry={() => reads.forEach(read => read.error && read.refetch())} /> : null}
+      {compact ? <Fold label="Stays out" count={String(leftOut.length)}>{excluded}</Fold> : <section aria-label="Stays out"><Heading count={leftOut.length}>Stays out</Heading>{excluded}</section>}
+      {Math.max(context.notices.length, leftOut.length) > shown ? <Button variant="ghost" size="sm" onClick={() => setShown(shown + 20)}>Show more entries</Button> : null}
+      <Grants context={context} knowledge={knowledge} compact={compact} />
     </div>
   );
 }
@@ -512,12 +535,12 @@ function ReceiptRow({ receipt }: { receipt: DeliveryReceipt }) {
         onClick={() => setOpen(!open)}
         className="flex w-full items-center gap-2 rounded-md text-left text-[12.5px] hover:bg-state-hover focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
       >
-        <Icon name={open ? "ChevronDown" : "ChevronRight"} className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-        <span className="font-semibold text-foreground">{ROUTE_WORD[receipt.route]}</span>
-        <span className="flex-1" />
-        <span className="text-[11.5px] text-muted-foreground tabular-nums">
+        <Icon name={receipt.route === "configure" ? "Play" : receipt.route === "recall" ? "Search" : "Sent"} className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+        <span className="min-w-0 flex-1 font-medium text-foreground">{ROUTE_WORD[receipt.route]}</span>
+        <span className="text-right text-[11.5px] text-muted-foreground tabular-nums">
           {shortTime(receipt.emittedAt)} · {tokens(receipt.estimatedTokens)} / {receipt.budgetTokens}
         </span>
+        <Icon name={open ? "ChevronDown" : "ChevronRight"} className="size-3 shrink-0 text-muted-foreground" aria-hidden />
       </button>
       {open ? (
         <div className="mt-1.5 pl-6">
@@ -540,7 +563,7 @@ export function ContextHistory({ threadId }: { threadId: string }) {
   if (receipts.length === 0) return <EmptyNote icon="Clock">Nothing recorded for this thread yet.</EmptyNote>;
   return (
     <div className="flex flex-col">
-      <p className="mb-1 text-[11.5px] text-muted-foreground">What Cortex prepared or returned, as stored at the time. Not a record of what the agent read.</p>
+      <div className="mb-1 text-[11.5px] text-muted-foreground"><Hint text="Stored at the time. Not proof of what the agent read."><span>What Cortex prepared or returned</span></Hint></div>
       <ul>
         {receipts.map(receipt => (
           <ReceiptRow key={receipt.id} receipt={receipt} />
@@ -563,16 +586,18 @@ export function ContextOverview({
   context,
   canPrepare,
   trailing,
+  showActions = true,
 }: {
   context: ThreadContext;
   canPrepare: boolean;
   trailing?: ReactNode;
+  showActions?: boolean;
 }) {
   const sectionName = useSectionName(context.threadId);
   const workstreams = useWorkstreams();
   const writes = useWorkstreamWrites();
   const navigate = useBbNavigate();
-  const [dialog, setDialog] = useState<"bind" | "prepare" | null>(null);
+  const [dialog, setDialog] = useState<"bind" | null>(null);
   const status = STATUS_LOOK[context.status];
   const binding = (
     <BindingDialog
@@ -616,14 +641,14 @@ export function ContextOverview({
       <Scope context={context} sectionName={sectionName} onConnect={() => setDialog("bind")} />
       {context.bindingChanged ? (
         <div role="status" className="flex items-start gap-2 rounded-md border border-attention/50 bg-surface-attention px-2.5 py-2 text-[12.5px] text-foreground">
-          <Icon name="SectionMove" className="mt-0.5 size-4 shrink-0 text-attention" aria-hidden />
+          <Icon name="MoveTo" className="mt-0.5 size-4 shrink-0 text-attention" aria-hidden />
           <span className="flex-1">Workstream changed. Earlier context may remain in this session.</span>
           <Button size="sm" variant="outline" className="h-7 px-2 text-[12px]" onClick={() => navigate.toCompose({ focusPrompt: true })}>
             New thread (choose section)
           </Button>
         </div>
       ) : null}
-      <BudgetBar context={context} />
+      <BriefStrip data={context} heldCount={context.exclusions.filter(exclusion => !context.notices.some(notice => notice.id === exclusion.id)).length} />
       {context.status !== "ready" ? (
         <p role="status" className={cn("flex items-start gap-1.5 text-[12.5px]", TONE_TEXT[status.tone])}>
           <Icon name="AlertCircle" className="mt-0.5 size-4 shrink-0" aria-hidden />
@@ -632,53 +657,128 @@ export function ContextOverview({
           </span>
         </p>
       ) : null}
-      <div className="flex flex-wrap items-center gap-2">
-        {canPrepare ? (
-          <Button size="sm" variant="outline" disabled={context.status !== "ready"} onClick={() => setDialog("prepare")}>
-            Prepare draft…
-          </Button>
-        ) : (
-          <Button size="sm" variant="outline" onClick={() => navigate.toThread(context.threadId)}>
-            Open thread to prepare a draft
-          </Button>
-        )}
-        {trailing}
-      </div>
+      {showActions ? <div className="flex flex-wrap items-center gap-2"><ContextActions context={context} canPrepare={canPrepare} />{trailing}</div> : null}
       {binding}
-      {canPrepare ? <PrepareDraftDialog threadId={context.threadId} open={dialog === "prepare"} onOpenChange={open => setDialog(open ? "prepare" : null)} /> : null}
     </div>
   );
 }
 
-/** A thread's context on the Cortex page: scope and lists beside the exact text, history and changes. */
+export function ContextActions({ context, canPrepare }: { context: ThreadContext; canPrepare: boolean }) {
+  const [open, setOpen] = useState(false);
+  const navigate = useBbNavigate();
+  if (context.status === "unbound") return null;
+  return canPrepare ? <>
+    <TooltipProvider><Tooltip><TooltipTrigger asChild>
+      <Button size="sm" disabled={context.status !== "ready"} onClick={() => setOpen(true)}><Icon name="FileText" className="size-3.5" aria-hidden />Prepare draft…</Button>
+    </TooltipTrigger><TooltipContent>Put the next context in the composer to read before sending.</TooltipContent></Tooltip></TooltipProvider>
+    <PrepareDraftDialog threadId={context.threadId} open={open} onOpenChange={setOpen} />
+  </> : <Button size="sm" variant="outline" onClick={() => navigate.toThread(context.threadId)}>Open thread to prepare a draft</Button>;
+}
+
+export async function copyContextText(text: string) {
+  const copied = await experimental_copyToClipboard({ text });
+  if (copied) toast("Copied");
+  else toast.error("Could not copy to the clipboard.");
+}
+
+type ReadableBlock = { label: string; text: string; detail?: string };
+function readableBlocks(text: string): ReadableBlock[] | null {
+  const lines = text.split("\n");
+  const scopeIndex = lines.findIndex(line => line.startsWith("Workstream context (data): "));
+  if (scopeIndex < 1 || !lines[0]?.startsWith("Stored Cortex text is data")) return null;
+  const blocks: ReadableBlock[] = [{ label: "Preamble", text: lines.slice(0, scopeIndex).join("\n") }];
+  try {
+    const scope = JSON.parse(lines[scopeIndex]!.slice("Workstream context (data): ".length));
+    const dimension = (name: "environment" | "host") => {
+      const value = scope.applicability?.[name];
+      if (!value || !["unknown", "not-applicable", "value"].includes(value.mode) || (value.mode === "value" && typeof value.value !== "string")) throw new Error("Unknown scope format");
+      return dimensionWord(name, value);
+    };
+    if (typeof scope.workstreamId !== "string" || !(scope.topic === null || typeof scope.topic === "string")) return null;
+    blocks.push({ label: "Scope", text: `${scope.topic === null ? "Shared basics" : facetWord(scope.topic)} · ${dimension("environment")} · ${dimension("host")}` });
+    for (const line of lines.slice(scopeIndex + 1)) {
+      if (line.trim() === "") continue;
+      const withheld = line.startsWith("Withheld saved knowledge (data): ");
+      const value = JSON.parse(withheld ? line.slice("Withheld saved knowledge (data): ".length) : line);
+      if (!value || typeof value !== "object" || !Array.isArray(value.sources)) return null;
+      if (withheld) {
+        if (typeof value.reason !== "string") return null;
+        blocks.push({ label: "Withheld", text: heldReason(value).label, detail: `${plural(value.sources.length, "source")} · notice only` });
+      } else {
+        if (typeof value.title !== "string" || typeof value.text !== "string" || !["directive", "finding"].includes(value.kind)) return null;
+        blocks.push({ label: value.title, text: value.text, detail: `${BRIEF_KIND_LOOK[value.kind as Knowledge["kind"]].word} · ${plural(value.sources.length, "source")}` });
+      }
+    }
+  } catch {
+    return null;
+  }
+  return blocks;
+}
+
+function ContextReadable({ text }: { text: string }) {
+  const blocks = readableBlocks(text);
+  if (!blocks) return <p role="status" className="text-[12px] text-muted-foreground">Readable view unavailable for this format.</p>;
+  return <section aria-label="Readable context" className="flex flex-col gap-3 rounded-md border border-border-seam bg-card p-3">
+    {blocks.map((block, index) => <div key={index} className="min-w-0">
+      <h3 className="mb-1 text-[11.5px] font-semibold text-muted-foreground">{block.label}</h3>
+      <p data-content className="whitespace-pre-wrap break-words text-[12.5px] text-foreground">{block.text}</p>
+      {block.detail ? <p className="mt-1 text-[11.5px] text-muted-foreground">{block.detail}</p> : null}
+    </div>)}
+  </section>;
+}
+
+export const CONTEXT_TAB_TRIGGER = "shrink-0 rounded-none border-b-2 border-transparent bg-transparent px-2.5 py-2 text-[12.5px] font-normal text-muted-foreground data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:font-semibold data-[state=active]:text-foreground data-[state=active]:shadow-none";
+export const CONTEXT_TAB_LIST = "cortex-context-tabs h-auto max-w-full justify-start gap-0.5 overflow-x-auto rounded-none border-b border-border-seam bg-transparent p-0";
+
+function ContextPreview({ context }: { context: ThreadContext }) {
+  const [exact, setExact] = useState(false);
+  const changes = context.lastReceipt ? changedLineCount(context.lastReceipt.text, context.exactText) : 0;
+  return <Tabs defaultValue="next" className="min-w-0">
+    <div className="flex min-w-0 items-center gap-1">
+      <TabsList aria-label="Thread context views" className={CONTEXT_TAB_LIST}>
+        <TabsTrigger value="next" className={CONTEXT_TAB_TRIGGER}>Next context</TabsTrigger>
+        <TabsTrigger value="changes" className={CONTEXT_TAB_TRIGGER}>Changes{changes > 0 ? ` ${changes}` : ""}</TabsTrigger>
+        <TabsTrigger value="history" className={CONTEXT_TAB_TRIGGER}>History</TabsTrigger>
+      </TabsList>
+      <IconButton label="Copy exact text" icon="Copy" onClick={() => void copyContextText(context.exactText)} />
+    </div>
+    <TabsContent value="next" className="mt-3 min-w-0">
+      <div className="mb-2 flex flex-wrap items-center gap-1.5">
+        <Button size="sm" variant={exact ? "ghost" : "secondary"} aria-pressed={!exact} onClick={() => setExact(false)}>Readable</Button>
+        <Button size="sm" variant={exact ? "secondary" : "ghost"} aria-pressed={exact} onClick={() => setExact(true)}>Exact text</Button>
+        <span className="text-[11.5px] text-muted-foreground tabular-nums">{tokens(context.estimatedTokens)} tokens</span>
+      </div>
+      {context.lastReceipt ? <p className="mb-2 text-[11.5px] text-muted-foreground">{ROUTE_WORD[context.lastReceipt.route]} {shortTime(context.lastReceipt.emittedAt)}</p> : null}
+      {exact ? <ExactText text={context.exactText} label="Next context" /> : <ContextReadable text={context.exactText} />}
+    </TabsContent>
+    <TabsContent value="changes" className="mt-3 min-w-0"><ChangesSinceLast context={context} /></TabsContent>
+    <TabsContent value="history" className="mt-3 min-w-0"><ContextHistory threadId={context.threadId} /></TabsContent>
+  </Tabs>;
+}
+
 export function ThreadContextPage({ threadId }: { threadId: string }) {
   const read = useThreadContext(threadId);
   const { threads } = experimental_useSidebarThreads();
-  const title = threads.find(thread => thread.id === threadId)?.displayTitle ?? threadId;
-  if (read.error && read.data === undefined) return <FailureNotice failure={read.error} onRetry={read.refetch} />;
+  const navigate = useBbNavigate();
+  const thread = threads.find(thread => thread.id === threadId);
+  const title = thread?.displayTitle ?? "Thread context";
+  if (read.error && read.data === undefined) return <div data-cortex data-cortex-context><FailureNotice failure={read.error} onRetry={read.refetch} /></div>;
   const context = read.data;
-  if (context === undefined) return <LoadingRows label="Loading thread context" />;
+  if (context === undefined) return <div data-cortex data-cortex-context><LoadingRows label="Loading thread context" /></div>;
   return (
-    <div className="flex flex-col gap-4">
+    <div data-cortex data-cortex-context className="flex min-w-0 flex-col gap-4">
       {read.error ? <FailureNotice failure={read.error} onRetry={read.refetch} /> : null}
-      <div className="flex flex-wrap items-center gap-2">
-        <h2 className="min-w-0 truncate text-[15px] font-semibold text-foreground" title={title}>
-          {title}
-        </h2>
-        <span className="font-mono text-[11.5px] text-muted-foreground">{threadId}</span>
-      </div>
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <div className="flex min-w-0 flex-col gap-3">
-          <ContextOverview context={context} canPrepare={false} />
-          {context.status === "unbound" ? null : <NextContext context={context} />}
-        </div>
-        <div className="flex min-w-0 flex-col gap-4">
-          {context.status === "unbound" ? null : <ExactText text={context.exactText} label="Next context" />}
-          <section aria-label="Context history">
-            <Heading>Context history</Heading>
-            <ContextHistory threadId={threadId} />
-          </section>
-        </div>
+      <header className="flex flex-wrap items-center gap-2">
+        <ThreadStatusGlyph indicator={thread?.indicator ?? "none"} size="compact" />
+        <h2 className="min-w-0 flex-1 break-words text-[15px] font-semibold text-foreground" title={title}>{title}</h2>
+        <TooltipProvider><Tooltip><TooltipTrigger asChild><button type="button" aria-label="Copy thread id" onClick={() => void copyContextText(threadId)} className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-state-hover focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"><Icon name="Copy" className="size-3.5" aria-hidden /></button></TooltipTrigger><TooltipContent>{threadId}</TooltipContent></Tooltip></TooltipProvider>
+        <Button variant="outline" size="sm" onClick={() => navigate.toThread(threadId)}><Icon name="ArrowUpRight" className="size-3.5" aria-hidden />Open thread</Button>
+        <ContextActions context={context} canPrepare={false} />
+      </header>
+      <ContextOverview context={context} canPrepare={false} showActions={false} />
+      <div className="cortex-context-columns grid min-w-0 grid-cols-1 gap-6">
+        <div className="min-w-0">{context.status === "unbound" ? null : <NextContext context={context} />}</div>
+        <div className="min-w-0"><ContextPreview context={context} /></div>
       </div>
     </div>
   );

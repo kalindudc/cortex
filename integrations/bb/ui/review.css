@@ -1,0 +1,103 @@
+[data-cortex].cortex-review, [data-cortex].cortex-library {
+  container-type: inline-size;
+  min-width: 0;
+}
+
+[data-cortex] .cortex-master-detail {
+  display: grid;
+  grid-template-columns: minmax(0, 22rem) minmax(0, 1fr);
+  min-height: 0;
+  flex: 1;
+}
+
+[data-cortex] .cortex-master, [data-cortex] .cortex-detail {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+[data-cortex] .cortex-detail {
+  padding: 20px;
+}
+
+[data-cortex] .cortex-back {
+  display: none;
+}
+
+[data-cortex] .cortex-compare {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+[data-cortex].cortex-knowledge, [data-cortex].cortex-knowledge-dialog {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+[data-cortex] .cortex-knowledge-values {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px 16px;
+  font-size: 12px;
+}
+
+[data-cortex] .cortex-knowledge-values dt {
+  color: var(--cortex-muted);
+}
+
+[data-cortex] .cortex-choice, [data-cortex] .cortex-filter {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+@container (max-width: 819px) {
+  [data-cortex] .cortex-master-detail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  [data-cortex] .cortex-master-detail:not([data-show-detail]) > .cortex-detail,
+  [data-cortex] .cortex-master-detail[data-show-detail] > .cortex-master {
+    display: none;
+  }
+  [data-cortex] .cortex-back {
+    display: inline-flex;
+  }
+  [data-cortex] .cortex-master {
+    border-right: none;
+  }
+  [data-cortex] .cortex-detail {
+    padding: 16px;
+  }
+  [data-cortex] .cortex-compare {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@container (max-width: 480px) {
+  [data-cortex] .cortex-choice {
+    padding: 10px 8px;
+  }
+  [data-cortex] .cortex-knowledge-values {
+    column-gap: 10px;
+  }
+}
+
+/* Target and input sizes follow the viewport and pointer, never a container:
+   a narrow pane on a desktop is still used with a mouse. */
+@media (max-width: 480px), (pointer: coarse) {
+  [data-cortex].cortex-review button, [data-cortex].cortex-library button,
+  [data-cortex].cortex-knowledge button, [data-cortex].cortex-knowledge-dialog button,
+  [data-cortex].cortex-knowledge-dialog [role="radio"] {
+    min-height: 44px;
+  }
+  [data-cortex].cortex-knowledge button[aria-label="Copy id"],
+  [data-cortex].cortex-knowledge button[aria-label="Close"],
+  [data-cortex].cortex-knowledge button[aria-haspopup="menu"] {
+    min-width: 44px;
+  }
+  [data-cortex].cortex-review input, [data-cortex].cortex-library input,
+  [data-cortex].cortex-knowledge-dialog input, [data-cortex].cortex-knowledge-dialog textarea,
+  [data-cortex].cortex-knowledge-dialog select {
+    font-size: 16px;
+  }
+}

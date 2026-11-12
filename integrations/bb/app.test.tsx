@@ -344,7 +344,7 @@ describe("header", () => {
     expect(slot.getByRole("button", { name: "Files unchanged" })).toBeTruthy();
     expect(slot.getByRole("progressbar", { name: "Plan progress" }).getAttribute("aria-valuenow")).toBe("3");
     expect(slot.getByText("3/13 tasks")).toBeTruthy();
-    expect(slot.getByText("Updated 4m ago · 4 updates · 2 not yet in the body")).toBeTruthy();
+    expect(slot.getByText("Updated 4m ago · 4 updates")).toBeTruthy();
   });
 
   test("the status menu lists every status with their keys and checks the current one; a key picks", async () => {
@@ -445,7 +445,7 @@ describe("freshness", () => {
     const slot = panel(
       handlers(threadState(), { task: () => detail(1, { staleness: { verdict: "unverifiable", reason: "elsewhere" } }) }),
     );
-    expect((await slot.findByRole("button", { name: "Not checked" })).getAttribute("title")).toBe(
+    expect((await slot.findByRole("button", { name: "Freshness not checked" })).getAttribute("title")).toBe(
       "Freshness not checked: elsewhere",
     );
     expect(slot.getByTestId("freshness-callout").textContent).toContain("Freshness not checked: elsewhere.");
@@ -755,10 +755,10 @@ describe("header task action", () => {
     expect(empty.item()).toBeNull();
     empty.lifecycle.unmount();
     const cases = [
-      ["draft", "Draft", "CircleDot"],
+      ["draft", "Draft", "EditFile"],
       ["open", "Open", "Circle"],
       ["review", "In review", "Eye"],
-      ["blocked", "Blocked", "OctagonPause"],
+      ["blocked", "Blocked", "Pause"],
       ["done", "Done", "CircleCheck"],
     ] as const;
     for (const [status, label, icon] of cases) {
@@ -1124,7 +1124,7 @@ describe("Memory tab", () => {
     tasks: ids.map(id => ({ id, title: `Stream ${id}`, lane: id === 9 ? "infra" : "cortex", status: "open" as const })),
   });
 
-  test("an unbound thread defaults to Task memory; a bound thread defaults to Next context and can switch to tasks and history", async () => {
+  test("an unbound thread defaults to Task memory; a bound thread defaults to Section brief and can switch to tasks and history", async () => {
     const unbound = tab();
     await waitFor(() => expect(calls(unbound, "threadContext")).toHaveLength(1));
     await waitFor(() => expect(unbound.getByRole("tab", { name: "Task memory" }).getAttribute("aria-selected")).toBe("true"));
@@ -1133,13 +1133,13 @@ describe("Memory tab", () => {
       threadContext: () => boundContext(),
       memory: () => busy,
     }));
-    await waitFor(() => expect(bound.getByRole("tab", { name: "Next context" }).getAttribute("aria-selected")).toBe("true"));
+    await waitFor(() => expect(bound.getByRole("tab", { name: "Section brief" }).getAttribute("aria-selected")).toBe("true"));
     expect(bound.queryByRole("region", { name: "In context" })).toBeNull();
     fireEvent.mouseDown(bound.getByRole("tab", { name: "Task memory" }));
     expect(await within(bound.getByRole("region", { name: "Working on" })).findByRole("button", { name: "Open #7 Stream 7 in the Cortex tab" })).toBeTruthy();
-    fireEvent.mouseDown(bound.getByRole("tab", { name: "Context history" }));
+    fireEvent.mouseDown(bound.getByRole("tab", { name: "History" }));
     await waitFor(() => expect(calls(bound, "deliveryReceipts")).toEqual([{ threadId: THREAD, limit: 20, offset: 0 }]));
-    expect(bound.getByRole("tab", { name: "Context history" }).getAttribute("aria-selected")).toBe("true");
+    expect(bound.getByRole("tab", { name: "History" }).getAttribute("aria-selected")).toBe("true");
   });
 
   test("shows the health line, Working on, In context with titles and reasons, the totals and the legend", async () => {
@@ -1195,22 +1195,21 @@ describe("Memory tab", () => {
     const slot = tab(
       handlers(threadState(), { setMemoryMode: ({ mode }) => memoryState({ override: mode, mode: mode ?? "write" }) }),
     );
-    await openMenu(await slot.findByRole("button", { name: /Memory for this thread: Follow the setting \(Look up and save\)/ }));
-    const menu = await slot.findByRole("menu");
-    expect(within(menu).getAllByRole("menuitem").map(item => item.textContent)).toEqual([
-      "Follow the setting (Look up and save)",
+    const group = await slot.findByRole("radiogroup", { name: "Memory for this thread" });
+    expect(within(group).getAllByRole("radio").map(item => item.textContent)).toEqual([
+      "Follow setting\nLook up and save",
       "Look up and save",
       "Look up only",
       "Off",
     ]);
-    fireEvent.click(within(menu).getByRole("menuitem", { name: "Look up only" }));
+    fireEvent.click(within(group).getByRole("radio", { name: "Look up only" }));
     await waitFor(() => expect(calls(slot, "setMemoryMode")).toEqual([{ threadId: THREAD, mode: "read" }]));
-    expect(await slot.findByRole("button", { name: /Memory for this thread: Look up only/ })).toBeTruthy();
-    expect(slot.getByText("A change applies when bb next starts this thread's agent.")).toBeTruthy();
+    expect(slot.getByRole("radio", { name: "Look up only" }).getAttribute("aria-checked")).toBe("true");
+    expect(slot.getByText("Applies from the agent's next start")).toBeTruthy();
     expect(toast).toHaveBeenCalledWith("Applies when bb next starts this thread's agent");
   });
 
-  test("a child thread's menu follows look up only; a failed change shows an error", async () => {
+  test("a child thread's mode follows look up only; a failed change shows an error", async () => {
     const slot = tab(
       handlers(threadState(), {
         memory: () => memoryState({ child: true, mode: "read", view: memoryView({ role: "reader" }) }),
@@ -1219,8 +1218,8 @@ describe("Memory tab", () => {
         },
       }),
     );
-    await openMenu(await slot.findByRole("button", { name: /Follow the setting \(Look up only\)/ }));
-    fireEvent.click(await slot.findByRole("menuitem", { name: "Off" }));
+    expect((await slot.findByRole("radio", { name: /Follow setting\s+Look up only/ })).getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(slot.getByRole("radio", { name: "Off" }));
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Could not change memory: metadata is read-only"));
   });
 

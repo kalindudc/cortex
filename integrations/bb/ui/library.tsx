@@ -1,39 +1,38 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { experimental_useSidebarThreads, useBbNavigate } from "@get-bb/plugin-sdk/app";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Icon } from "@/components/ui/icon";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { dimensionWord, facetWord, plural, STATE_LOOK } from "./copy";
-import { useBindings, useKnowledgeSearch, useReviewQueue, useWorkstreams, useWorkstreamWrites } from "./data";
-import { BindingDialog } from "./dialogs";
+import { BRIEF_STATE_LOOK, facetWord, plural } from "./copy";
+import { useBindings, useKnowledgeEntries, useKnowledgeSearch, useReviewQueue } from "./data";
 import { KnowledgeActions, KnowledgeDetail } from "./knowledge";
 import { displayState } from "./model";
-import { EmptyNote, FailureNotice, LoadingRows, Segmented, TONE_TEXT } from "./parts";
+import { EmptyNote, FailureNotice, Hint, LoadingRows, Segmented, TONE_TEXT } from "./parts";
 import { CORTEX_PAGE_PATH } from "./thread-context";
-import type { Binding, Knowledge, Workstream } from "./types";
+import type { Knowledge, Workstream } from "./types";
+import "./review.css";
 
 function ResultRow({ entry, workstream, selected, onSelect }: { entry: Knowledge; workstream: Workstream; selected: boolean; onSelect: () => void }) {
-  const look = STATE_LOOK[displayState(entry, Date.now())];
+  const look = BRIEF_STATE_LOOK[displayState(entry, Date.now())];
   return (
-    <li>
+    <li className="border-b border-border-seam">
       <button
         type="button"
         aria-current={selected ? "true" : undefined}
         onClick={onSelect}
         className={cn(
-          "flex w-full items-start gap-2 px-3 py-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset",
-          selected ? "bg-surface-selected" : "hover:bg-state-hover",
+          "flex w-full min-w-0 items-start gap-2 border-l-2 px-4 py-3 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset",
+          selected ? "border-primary bg-surface-selected" : "border-transparent hover:bg-state-hover",
         )}
       >
         <Icon name={look.icon} className={cn("mt-0.5 size-4 shrink-0", TONE_TEXT[look.tone])} aria-label={look.word} />
         <span className="min-w-0 flex-1">
-          <span className="line-clamp-2 text-[12.5px] font-semibold text-foreground">{entry.title}</span>
-          <span className="mt-0.5 line-clamp-2 text-[11.5px] text-muted-foreground">
-            {workstream.name} · {facetWord(entry.facet)} · {look.word}
-          </span>
+          <span className="line-clamp-2 text-[13px] font-semibold text-foreground" title={entry.title}>{entry.title}</span>
+          <span className="mt-1 block text-[12px] text-muted-foreground">{workstream.name} · {facetWord(entry.facet)}</span>
         </span>
+        <span className={cn("max-w-24 text-right text-[11.5px]", TONE_TEXT[look.tone])}>{look.word}</span>
       </button>
     </li>
   );
@@ -45,199 +44,83 @@ export function Library() {
   const [view, setView] = useState<"search" | "similar">("search");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showDetail, setShowDetail] = useState(false);
+  const [workstreamFilter, setWorkstreamFilter] = useState("all");
+  const [stateFilter, setStateFilter] = useState("all");
+  const inputRef = useRef<HTMLInputElement>(null);
+  const navigate = useBbNavigate();
+  const sidebar = experimental_useSidebarThreads();
+  const bindings = useBindings();
   const search = useKnowledgeSearch(view === "search" ? query : "");
   const queue = useReviewQueue();
   const similar = (queue.data?.items ?? []).filter(item => item.hints.length > 0);
   const items = view === "search" ? (search.data?.items ?? []) : similar;
-  const selected = items.find(item => item.entry.id === selectedId) ?? items[0] ?? null;
+  const visible = items.filter(item => (workstreamFilter === "all" || item.workstream.id === workstreamFilter) && (stateFilter === "all" || displayState(item.entry, Date.now()) === stateFilter));
+  const selectedRow = visible.find(item => item.entry.id === selectedId) ?? (selectedId === null ? visible[0] : null) ?? null;
+  const extra = useKnowledgeEntries(selectedId && !visible.some(item => item.entry.id === selectedId) ? [selectedId] : [])[0];
+  const selected = selectedRow ?? (extra?.data ? { ...extra.data, hints: [] } : null);
+  const workstreams = [...new Map(items.map(item => [item.workstream.id, item.workstream])).values()];
+  const states = [...new Set(items.map(item => displayState(item.entry, Date.now())))];
   const read = view === "search" ? search : queue;
+  const usedBy = sidebar.sections.filter(section => bindings.data?.bindings.some(row => row.key === section.id && row.binding?.workstreamId === selected?.workstream.id));
+  const resetSelection = () => { setSelectedId(null); setShowDetail(false); };
+  const open = (id: string) => { setSelectedId(id); setShowDetail(true); };
+  const filtered = workstreamFilter !== "all" || stateFilter !== "all";
+  const count = filtered ? `${visible.length} of ${items.length} loaded matches` : view === "search" && search.data ? search.data.total > items.length ? `First ${items.length} of ${search.data.total}` : plural(search.data.total, "match", "matches") : plural(items.length, "similar entry", "similar entries");
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border-seam px-4 py-3 md:px-5">
-        <Segmented
-          label="Library view"
-          value={view}
-          options={[
-            { value: "search", label: "Search" },
-            { value: "similar", label: `Similar entries${similar.length ? ` · ${similar.length}` : ""}` },
-          ]}
-          onChange={next => {
-            setView(next);
-            setSelectedId(null);
-            setShowDetail(false);
-          }}
-        />
-        {view === "search" ? (
-          <div className="relative w-full max-w-md">
-            <Icon name="Search" className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
-            <Input aria-label="Search saved knowledge" placeholder="Search saved knowledge" value={query} onChange={event => setQuery(event.target.value)} className="h-8 pl-8 text-[13px]" />
-          </div>
-        ) : null}
-        {view === "search" && search.data ? (
-          <span className="text-[12px] text-muted-foreground">
-            {search.data.total > search.data.items.length ? `First ${search.data.items.length} of ${search.data.total}` : plural(search.data.total, "match", "matches")}
-          </span>
-        ) : null}
-      </div>
-      {read.error ? (
-        <div className="p-4 md:p-5">
-          <FailureNotice failure={read.error} onRetry={read.refetch} />
-        </div>
-      ) : view === "search" && query.trim() === "" ? (
-        <div className="p-4 md:p-5">
-          <EmptyNote icon="Search">Search titles, text and sources in every workstream, including history.</EmptyNote>
-        </div>
-      ) : read.isLoading ? (
-        <div className="p-4 md:p-5">
-          <LoadingRows label="Searching" />
-        </div>
-      ) : items.length === 0 ? (
-        <div className="p-4 md:p-5">
-          <EmptyNote icon="Search">{view === "search" ? "Nothing matches." : "No entries waiting for review look like others."}</EmptyNote>
-        </div>
-      ) : (
-        <div className="flex min-h-0 flex-1">
-          <ul aria-label="Results" className={cn("min-h-0 w-full overflow-y-auto border-r border-border-seam lg:w-[22rem] lg:shrink-0", showDetail && "hidden lg:block")}>
-            {items.map(item => (
-              <ResultRow
-                key={item.entry.id}
-                entry={item.entry}
-                workstream={item.workstream}
-                selected={item.entry.id === selected?.entry.id}
-                onSelect={() => {
-                  setSelectedId(item.entry.id);
-                  setShowDetail(true);
-                }}
-              />
-            ))}
-          </ul>
-          {selected ? (
-            <div className={cn("min-w-0 flex-1 overflow-y-auto px-4 py-4 md:px-5", showDetail ? "block" : "hidden lg:block")}>
-              <Button variant="ghost" size="sm" className="mb-2 lg:hidden" onClick={() => setShowDetail(false)}>
-                <Icon name="ChevronLeft" className="size-4" aria-hidden />
-                Results
-              </Button>
-              <KnowledgeDetail entry={selected.entry} workstream={selected.workstream} actions={<KnowledgeActions entry={selected.entry} workstream={selected.workstream} />}>
-                {selected.hints.length > 0 ? (
-                  <p className="text-[12px] text-muted-foreground">
-                    Similar to {selected.hints.map(hint => hint.id).join(", ")}. Compare and decide in Needs you.
-                  </p>
-                ) : null}
-              </KnowledgeDetail>
+    <div data-cortex data-part="Library" role="region" aria-label="Knowledge library" tabIndex={0} className="cortex-library flex h-full min-h-0 flex-col focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" onKeyDown={event => {
+      const target = event.target as HTMLElement;
+      if (event.key !== "/" || event.ctrlKey || event.metaKey || event.altKey || target.closest("input, textarea, select, [contenteditable]:not([contenteditable=false]), [role=dialog], [role=menu]")) return;
+      event.preventDefault();
+      setView("search");
+      resetSelection();
+      requestAnimationFrame(() => inputRef.current?.focus());
+    }}>
+      <div className="cortex-master-detail" data-show-detail={showDetail || undefined}>
+        <div className="cortex-master border-r border-border-seam">
+          <header className="flex min-w-0 flex-col gap-2 border-b border-border-seam p-4">
+            {view === "search" ? <div className="relative min-w-0">
+              <Icon name="Search" className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
+              <Input ref={inputRef} aria-label="Search saved knowledge" placeholder="Search saved knowledge" value={query} onChange={event => { setQuery(event.target.value); resetSelection(); }} className="h-8 min-w-0 pl-8 pr-8 text-[13px]" />
+              <kbd aria-hidden className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 border border-border-seam px-1 text-[11px] text-muted-foreground">/</kbd>
+            </div> : null}
+            <Segmented label="Library view" value={view} options={[{ value: "search", label: "Search" }, { value: "similar", label: `Similar entries${similar.length ? ` · ${similar.length}` : ""}` }]} onChange={next => { setView(next); resetSelection(); setWorkstreamFilter("all"); setStateFilter("all"); }} />
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5" role="group" aria-label="Filter loaded results">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild><Button variant="outline" size="sm" className="cortex-filter h-auto min-h-7 px-2 py-1 text-[12px]">{workstreams.find(ws => ws.id === workstreamFilter)?.name ?? "All workstreams"}<Icon name="ChevronDown" className="size-3" aria-hidden /></Button></DropdownMenuTrigger>
+                <DropdownMenuContent data-cortex className="cortex-knowledge" mobileTitle="Workstream" align="start">
+                  {[{ id: "all", name: "All workstreams" }, ...workstreams].map(ws => <DropdownMenuItem key={ws.id} onSelect={() => { setWorkstreamFilter(ws.id); resetSelection(); }}>{ws.name}</DropdownMenuItem>)}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild><Button variant="outline" size="sm" className="cortex-filter h-auto min-h-7 px-2 py-1 text-[12px]">{stateFilter === "all" ? "Any state" : BRIEF_STATE_LOOK[stateFilter as keyof typeof BRIEF_STATE_LOOK].word}<Icon name="ChevronDown" className="size-3" aria-hidden /></Button></DropdownMenuTrigger>
+                <DropdownMenuContent data-cortex className="cortex-knowledge" mobileTitle="State" align="start">
+                  <DropdownMenuItem onSelect={() => { setStateFilter("all"); resetSelection(); }}>Any state</DropdownMenuItem>
+                  {states.map(state => <DropdownMenuItem key={state} onSelect={() => { setStateFilter(state); resetSelection(); }}><Icon name={BRIEF_STATE_LOOK[state].icon} aria-hidden />{BRIEF_STATE_LOOK[state].word}</DropdownMenuItem>)}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <Hint text="Filters apply only to the results currently loaded."><span className="inline-flex items-center text-muted-foreground"><Icon name="Info" className="size-3.5" aria-label="About result filters" /></span></Hint>
             </div>
+          </header>
+          {read.error ? <div className="p-4"><FailureNotice failure={read.error} onRetry={read.refetch} /></div> : null}
+          {view === "search" && query.trim() === "" ? <div className="p-4"><EmptyNote icon="Search">Search titles, text and sources in every workstream, including history.</EmptyNote></div>
+            : read.isLoading && !read.data ? <div className="p-4"><LoadingRows label="Searching" /></div>
+            : visible.length === 0 ? <div className="p-4"><EmptyNote icon="Search">{filtered ? "No loaded results match these filters." : view === "search" ? "Nothing matches." : "No entries waiting for review look like others."}</EmptyNote></div>
+            : <>
+              <p className="border-b border-border-seam px-4 py-2 text-[12px] text-muted-foreground">{count}</p>
+              <ul aria-label="Results">{visible.map(item => <ResultRow key={item.entry.id} entry={item.entry} workstream={item.workstream} selected={item.entry.id === selected?.entry.id} onSelect={() => open(item.entry.id)} />)}</ul>
+            </>}
+        </div>
+        <div className="cortex-detail">
+          <Button variant="ghost" size="sm" className="cortex-back mb-3" onClick={() => setShowDetail(false)}><Icon name="ChevronLeft" aria-hidden />Results</Button>
+          {extra?.error ? <FailureNotice failure={extra.error} onRetry={extra.refetch} /> : extra?.isLoading ? <LoadingRows label="Loading knowledge" /> : selected ? (
+            <KnowledgeDetail key={selected.entry.id} entry={selected.entry} workstream={selected.workstream} onOpen={open} actions={<KnowledgeActions entry={selected.entry} workstream={selected.workstream} />}>
+              {usedBy.length > 0 ? <dl className="cortex-knowledge-values"><dt>Used by</dt><dd className="flex min-w-0 flex-wrap gap-2">{usedBy.map(section => <Button key={section.id} variant="link" size="sm" className="cortex-filter h-auto p-0 text-[12px]" onClick={() => navigate.toPluginPanel(CORTEX_PAGE_PATH, { subPath: `sections/${section.id}` })}>{section.name}</Button>)}</dd></dl> : null}
+              {bindings.error ? <FailureNotice failure={bindings.error} onRetry={bindings.refetch} title="Could not read connected sections" /> : null}
+              {selected.hints.length > 0 ? <Button variant="link" size="sm" className="cortex-filter h-auto self-start p-0 text-[12px]" onClick={() => navigate.toPluginPanel(CORTEX_PAGE_PATH, { subPath: "review" })}>Compare {plural(selected.hints.length, "similar entry", "similar entries")} in Review<Icon name="ArrowUpRight" aria-hidden /></Button> : null}
+            </KnowledgeDetail>
           ) : null}
         </div>
-      )}
-    </div>
-  );
-}
-
-function targetsWord(binding: Binding): string {
-  const applicability = binding.applicability;
-  if (!applicability) return "Targets not chosen";
-  return `${dimensionWord("environment", applicability.environment)} · ${dimensionWord("host", applicability.host)}`;
-}
-
-/** bb sections and the workstream each one points to; threads in a section follow it, children follow their parent. */
-export function Bindings() {
-  const sidebar = experimental_useSidebarThreads();
-  const bindings = useBindings();
-  const workstreams = useWorkstreams();
-  const writes = useWorkstreamWrites();
-  const navigate = useBbNavigate();
-  const [editing, setEditing] = useState<string | null>(null);
-  if (bindings.error && bindings.data === undefined) return <div className="p-4 md:p-5"><FailureNotice failure={bindings.error} onRetry={bindings.refetch} /></div>;
-  if (bindings.data === undefined || sidebar.status === "loading") return <div className="p-4 md:p-5"><LoadingRows label="Loading bindings" /></div>;
-  const rows = new Map(bindings.data.bindings.map(row => [row.key, row]));
-  const names = new Map((workstreams.data?.workstreams ?? []).map(ws => [ws.id, ws.name]));
-  const sections = sidebar.sections;
-  const editingSection = sections.find(section => section.id === editing) ?? null;
-  const editingRow = editing ? rows.get(editing) : undefined;
-  return (
-    <div className="h-full overflow-y-auto p-4 md:p-5">
-      {bindings.error ? <FailureNotice failure={bindings.error} onRetry={bindings.refetch} /> : null}
-      <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">
-        <div className="flex flex-col gap-0.5 text-[12.5px] text-muted-foreground">
-          <p>Threads in a connected section get its approved knowledge from their next session.</p>
-          <p>Child threads without a section follow their parent.</p>
-          <p>This sets what Cortex sends, not what an agent can read.</p>
-        </div>
-        {sections.length === 0 ? (
-          <EmptyNote icon="SectionAdd">No bb sections yet. Create one in the sidebar, or connect a single thread from its Memory tab.</EmptyNote>
-        ) : (
-          <ul aria-label="Sections" className="flex flex-col rounded-md border border-border-seam">
-            {sections.map(section => {
-              const row = rows.get(section.id);
-              const binding = row?.binding ?? null;
-              const threads = sidebar.threads.filter(thread => thread.sectionId === section.id && !thread.isArchived);
-              return (
-                <li key={section.id} className="flex flex-col gap-1.5 border-t border-border-seam px-3 py-2.5 first:border-t-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Icon name="Folder" className="size-4 text-muted-foreground" aria-hidden />
-                    <span className="text-[13px] font-semibold text-foreground">{section.name}</span>
-                    <Icon name="ArrowRight" className="size-3.5 text-muted-foreground" aria-hidden />
-                    {binding ? (
-                      <span className="text-[13px] text-foreground">
-                        {names.get(binding.workstreamId) ?? binding.workstreamId}
-                        <span className="text-muted-foreground"> · {binding.topic ? facetWord(binding.topic) : "Shared basics only"}</span>
-                      </span>
-                    ) : (
-                      <span className="text-[13px] text-muted-foreground">Not connected</span>
-                    )}
-                    <span className="flex-1" />
-                    <span className="text-[11.5px] text-muted-foreground">{plural(threads.length, "thread")}</span>
-                    <Button size="sm" variant="outline" className="h-7 px-2 text-[12px]" onClick={() => setEditing(section.id)}>
-                      {binding ? "Change…" : "Connect…"}
-                    </Button>
-                  </div>
-                  {binding ? (
-                    <p className="pl-6 text-[11.5px] text-muted-foreground">
-                      {targetsWord(binding)} · budget {binding.budgetTokens} tokens
-                      {binding.requiredKnowledgeIds.length > 0 ? ` · ${plural(binding.requiredKnowledgeIds.length, "required entry", "required entries")}` : ""}
-                    </p>
-                  ) : null}
-                  {binding && threads.length > 0 ? (
-                    <div className="flex flex-wrap gap-1.5 pl-6">
-                      {threads.slice(0, 6).map(thread => (
-                        <Button
-                          key={thread.id}
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 max-w-56 px-2 text-[12px]"
-                          aria-label={`Thread context for ${thread.displayTitle}`}
-                          onClick={() => navigate.toPluginPanel(CORTEX_PAGE_PATH, { subPath: `threads/${thread.id}` })}
-                        >
-                          <span className="truncate" title={thread.displayTitle}>
-                            {thread.displayTitle}
-                          </span>
-                        </Button>
-                      ))}
-                      {threads.length > 6 ? <span className="self-center text-[11.5px] text-muted-foreground">{threads.length - 6} more</span> : null}
-                    </div>
-                  ) : null}
-                </li>
-              );
-            })}
-          </ul>
-        )}
       </div>
-      {editingSection ? (
-        <BindingDialog
-          target="section"
-          name={editingSection.name}
-          current={editingRow?.binding ?? null}
-          expectedRevision={editingRow?.revision ?? 0}
-          workstreams={workstreams.data?.workstreams ?? []}
-          open
-          onOpenChange={open => {
-            if (!open) setEditing(null);
-          }}
-          onSave={async (binding, expectedRevision) => {
-            await writes.setSectionBinding({ sectionId: editingSection.id, expectedRevision, binding });
-            toast(binding ? `${editingSection.name} connected. Applies from each thread's next session.` : `${editingSection.name} disconnected for future sessions`);
-          }}
-        />
-      ) : null}
     </div>
   );
 }

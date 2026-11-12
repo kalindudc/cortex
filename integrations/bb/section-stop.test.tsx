@@ -50,7 +50,7 @@ function setup({ owned = true, title = "🧠 One", bound = true }: { owned?: boo
 }
 const calls = (slot: ReturnType<typeof renderSlot>, method: string) => slot.inspection.rpcCalls.filter(call => call.method === method);
 async function advanced(slot: ReturnType<typeof renderSlot>, action: string) {
-  const opener = await slot.findByRole("button", { name: "Advanced section actions" });
+  const opener = await slot.findByRole("button", { name: action === "Stop sharing…" ? "Sharing One" : "Advanced section actions" });
   fireEvent.keyDown(opener, { key: "Enter" });
   fireEvent.click(await slot.findByRole("menuitem", { name: action }));
 }
@@ -59,7 +59,7 @@ async function stop(slot: ReturnType<typeof renderSlot>) {
   const dialog = await slot.findByRole("dialog", { name: "Stop sharing context in this section?" });
   fireEvent.click(within(dialog).getByRole("button", { name: "Stop sharing" }));
   await waitFor(() => expect(slot.queryByRole("dialog")).toBeNull());
-  await slot.findByRole("button", { name: "Share context in this section" });
+  await slot.findByRole("button", { name: /^Share context in / });
 }
 test("SectionPage Stop keeps the native title and owned history until an explicit legacy Remove", async () => {
   const { slot, service, update, title } = setup();
@@ -107,12 +107,11 @@ test("an explicit Remove failure remains visible after Stop without automatic re
 });
 test("SectionPage connects through public SDK and real backend without any native rename", async () => {
   const { slot, service, update, title } = setup({ owned: false, title: "One", bound: false });
-  fireEvent.click(await slot.findByRole("button", { name: "Share context in this section" }));
+  fireEvent.click(await slot.findByRole("button", { name: "Share context in One" }));
   const dialog = await slot.findByRole("dialog");
   expect(dialog.querySelector('[data-icon="Brain"]')).toBeTruthy();
   expect(dialog.textContent).not.toContain("🧠");
-  fireEvent.click(within(dialog).getByRole("radio", { name: "Use existing" }));
-  fireEvent.click(within(dialog).getByRole("button", { name: /One.*Not connected/ }));
+  fireEvent.click(within(dialog).getByRole("radio", { name: "Use One" }));
   fireEvent.click(within(dialog).getByRole("button", { name: "Share context" }));
   await waitFor(() => expect(service.store.section("sec_one").binding?.workstreamId).toBe(workstream.id));
   await slot.findByText("Sharing One");

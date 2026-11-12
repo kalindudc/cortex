@@ -6,6 +6,7 @@ import { CompactViewportOverrideProvider } from "./components/ui/hooks/use-compa
 import { sectionRpcContract, type Section } from "./section-contract";
 import { workstreamRpcContract } from "./workstream-contract";
 import { SectionPage } from "./ui/sections";
+import { NeedsYou } from "./ui/review";
 import type { Knowledge, Workstream } from "./ui/types";
 
 vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { error: vi.fn() }) }));
@@ -31,6 +32,87 @@ function renderReview(compact: boolean, single = false) {
   const component = () => <CompactViewportOverrideProvider isCompactViewport={compact}><SectionPage id={section.id} /></CompactViewportOverrideProvider>;
   return renderSlot({ component }, {}, { rpc: rpc as PluginRpcTestHandlers<typeof contract>, experimental_rpcContract: contract, sidebarThreads: { sections: [], threads: [] } });
 }
+function renderQueue(related: Knowledge[] = []) {
+  const suggestion = related.length ? { ...entry, sources: [{ ref: "https://example.com/evidence", authorType: "human" as const, observedAt: now }] } : entry;
+  const entries = new Map([suggestion, next, ...related].map(row => [row.id, row]));
+  const rpc: Partial<PluginRpcTestHandlers<typeof contract>> = {
+    reviewQueue: () => ({ items: [...entries.values()].filter(row => row.state === "candidate").map(row => ({ entry: row, workstream: ws, hints: row.id === suggestion.id ? related.map(other => ({ id: other.id, reason: "same-subject" as const })) : [] })), total: 2, limit: 100, offset: 0 }),
+    knowledgeShow: ({ id }) => ({ entry: entries.get(id)!, workstream: ws }),
+    knowledgeEvidence: input => ({ outcome: "updated", entry: entries.get(input.id)! }),
+    knowledgeTransition: input => {
+      const changed = { ...entries.get(input.id)!, state: input.state, revision: 2 };
+      entries.set(input.id, changed);
+      return { outcome: "updated", entry: changed };
+    },
+  };
+  return renderSlot({ component: NeedsYou }, {}, { rpc: rpc as PluginRpcTestHandlers<typeof contract>, experimental_rpcContract: contract, sidebarThreads: { sections: [], threads: [] } });
+}
+
+test("Review root owns J/K, number choices and Enter confirmation", async () => {
+  const slot = renderQueue();
+  await slot.findByRole("radiogroup", { name: "Your call" });
+  const root = slot.getByRole("region", { name: "Review queue" });
+  fireEvent.keyDown(root, { key: "j" });
+  await waitFor(() => expect(within(slot.getByRole("list", { name: "Waiting for your review" })).getByRole("button", { name: /Next suggestion/ }).getAttribute("aria-current")).toBe("true"));
+  fireEvent.keyDown(root, { key: "k" });
+  fireEvent.keyDown(root, { key: "1" });
+  await waitFor(() => expect((slot.getByRole("button", { name: "Confirm: Approve" }) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.keyDown(document.body, { key: "Enter" });
+  expect(slot.rpcCalls.filter(call => call.method === "knowledgeTransition")).toHaveLength(0);
+  fireEvent.keyDown(root, { key: "Enter" });
+  await waitFor(() => expect(slot.rpcCalls.filter(call => call.method === "knowledgeTransition")).toHaveLength(1));
+  expect(slot.rpcCalls.find(call => call.method === "knowledgeTransition")?.input).toMatchObject({ id: entry.id, expectedRevision: 1, state: "approved" });
+});
+
+test("Enter on a focused Reject option selects it without writing the previously chosen Approve", async () => {
+  const slot = renderQueue();
+  fireEvent.click(await slot.findByRole("radio", { name: /^Approve/ }));
+  const reject = slot.getByRole("radio", { name: /Reject/ });
+  reject.focus();
+  fireEvent.keyDown(reject, { key: "Enter" });
+  expect(slot.rpcCalls.filter(call => call.method === "knowledgeTransition")).toHaveLength(0);
+  expect(reject.getAttribute("aria-checked")).toBe("true");
+});
+
+test("Review retains the ninth decision shortcut after loading more related entries", async () => {
+  const related = Array.from({ length: 4 }, (_, index): Knowledge => ({ ...entry, id: `kn_related${index}`, title: `Related finding ${index}`, state: "approved", revision: index + 2 }));
+  const slot = renderQueue(related);
+  await slot.findByRole("radio", { name: /Approve and replace Related finding 2/ });
+  fireEvent.click(slot.getByRole("button", { name: "Compare 1 more of 1 not loaded" }));
+  await slot.findByRole("radio", { name: /Keep Related finding 3, add these sources to it/ });
+  const root = slot.getByRole("region", { name: "Review queue" });
+  fireEvent.keyDown(root, { key: "9" });
+  await slot.findByRole("button", { name: "Confirm: Keep Related finding 3, add these sources to it" });
+  fireEvent.keyDown(root, { key: "Enter" });
+  await waitFor(() => expect(slot.rpcCalls.filter(call => call.method === "knowledgeTransition")).toHaveLength(1));
+  expect(slot.rpcCalls.find(call => call.method === "knowledgeEvidence")?.input).toMatchObject({ id: related[3]!.id, expectedRevision: related[3]!.revision });
+  expect(slot.rpcCalls.find(call => call.method === "knowledgeTransition")?.input).toMatchObject({ id: entry.id, expectedRevision: entry.revision, state: "rejected" });
+});
+
+test("Review shortcuts ignore fields, editable content, dialogs and modified keys", async () => {
+  const slot = renderQueue();
+  await slot.findByRole("radiogroup", { name: "Your call" });
+  const root = slot.getByRole("region", { name: "Review queue" });
+  for (const tag of ["input", "textarea", "select", "div"]) {
+    const field = document.createElement(tag);
+    if (tag === "div") field.setAttribute("contenteditable", "true");
+    root.append(field);
+    fireEvent.keyDown(field, { key: "j" });
+    fireEvent.keyDown(field, { key: "1" });
+    fireEvent.keyDown(field, { key: "Enter" });
+    field.remove();
+  }
+  fireEvent.keyDown(root, { key: "j", ctrlKey: true });
+  fireEvent.keyDown(root, { key: "1", metaKey: true });
+  expect((slot.getByRole("button", { name: "Choose an option" }) as HTMLButtonElement).disabled).toBe(true);
+  expect(within(slot.getByRole("list", { name: "Waiting for your review" })).getByRole("button", { name: /First suggestion/ }).getAttribute("aria-current")).toBe("true");
+  fireEvent.click(slot.getByRole("button", { name: "Edit first" }));
+  const dialog = await slot.findByRole("dialog", { name: "Edit saved knowledge" });
+  fireEvent.keyDown(dialog, { key: "j" });
+  fireEvent.keyDown(dialog, { key: "1" });
+  expect(slot.rpcCalls.filter(call => call.method === "knowledgeTransition")).toHaveLength(0);
+});
+
 async function openFirst(slot: ReturnType<typeof renderSlot>) {
   const card = await slot.findByRole("region", { name: entry.title });
   const opener = within(card).getByRole("button", { name: "Edit" });

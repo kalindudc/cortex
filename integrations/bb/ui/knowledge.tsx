@@ -1,4 +1,5 @@
 import { type ReactNode, useState } from "react";
+import { experimental_useSidebarThreads, useBbNavigate } from "@get-bb/plugin-sdk/app";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -10,20 +11,30 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
-import { actorWord, facetWord, plural } from "./copy";
-import { type RpcFailure, useHistory, useWorkstreamWrites } from "./data";
+import { actorWord, AUTHOR_WORD, facetWord, SOURCE_STATUS_WORD } from "./copy";
+import { type RpcFailure, useHistory, useKnowledgeEntries, useWorkstreamWrites } from "./data";
 import { ConfirmDialog, EditKnowledgeDialog, ObserveDialog } from "./dialogs";
 import { displayState, isExpired, relativeAge, shortTime } from "./model";
-import { Applicability, ApprovalLine, FailureNotice, Heading, KindMark, KnowledgeText, LoadingRows, PagedFooter, SourceList, StateMark } from "./parts";
-import type { Knowledge, Workstream } from "./types";
+import { Applicability, FailureNotice, Hint, KnowledgeText, LoadingRows, PagedFooter } from "./parts";
+import { type HeldReason, KindMark, KnowledgeStateMark, ReasonChip } from "./marks";
+import { CORTEX_PAGE_PATH } from "./thread-context";
+import type { Knowledge, KnowledgeSource, Workstream } from "./types";
+import "./review.css";
 
 function Pointers({ entry, onOpen }: { entry: Knowledge; onOpen?: (id: string) => void }) {
   const rows: Array<[string, string, string[]]> = [
     ["RotateCcw", "Replaces", entry.supersedes],
-    ["TriangleAlert", "Disputes", entry.conflicts],
+    ["AlertTriangle", "Disputes", entry.conflicts],
     ...(entry.supersededBy ? ([["ArrowUpRight", "Replaced by", [entry.supersededBy]]] as Array<[string, string, string[]]>) : []),
   ];
   const shown = rows.filter(([, , ids]) => ids.length > 0);
+  const ids = [...new Set(shown.flatMap(([, , values]) => values))];
+  const reads = useKnowledgeEntries(ids);
+  const navigate = useBbNavigate();
+  const open = (id: string) => {
+    if (onOpen) onOpen(id);
+    else navigate.toPluginPanel(CORTEX_PAGE_PATH, { subPath: `workstreams/${entry.workstreamId}/${id}` });
+  };
   if (shown.length === 0) return null;
   return (
     <div className="flex flex-col gap-1 text-[12px]">
@@ -31,22 +42,12 @@ function Pointers({ entry, onOpen }: { entry: Knowledge; onOpen?: (id: string) =
         <p key={label} className="flex flex-wrap items-center gap-1.5 text-muted-foreground">
           <Icon name={icon} className="size-3.5" aria-hidden />
           {label}
-          {ids.map(id =>
-            onOpen ? (
-              <button
-                key={id}
-                type="button"
-                onClick={() => onOpen(id)}
-                className="rounded-sm font-mono text-foreground underline decoration-border underline-offset-2 hover:decoration-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              >
-                {id}
-              </button>
-            ) : (
-              <span key={id} className="font-mono text-foreground">
-                {id}
-              </span>
-            ),
-          )}
+          {ids.map((id, index) => {
+            const related = reads.find(read => read.data?.entry.id === id)?.data?.entry;
+            return <button key={id} type="button" title={id} onClick={() => open(id)} className="min-w-0 rounded-sm text-left text-foreground underline decoration-border underline-offset-2 hover:decoration-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
+              {related?.title || `${label} entry ${index + 1}`}
+            </button>;
+          })}
         </p>
       ))}
     </div>
@@ -125,7 +126,7 @@ export function KnowledgeActions({ entry, workstream }: { entry: Knowledge; work
   };
   const live = entry.state !== "forgotten";
   return (
-    <div className="flex flex-col gap-2">
+    <div data-cortex className="cortex-knowledge flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-1.5">
         {entry.state === "candidate" ? (
           <Button size="sm" onClick={quiet(() => transition("approved", "Approved in Cortex", `Approved. Threads in ${workstream?.name ?? "the workstream"} get it from their next session.`))}>
@@ -139,12 +140,12 @@ export function KnowledgeActions({ entry, workstream }: { entry: Knowledge; work
         ) : null}
         {live ? (
           <Button size="sm" variant="outline" onClick={open("edit")}>
-            Edit…
+            <Icon name="Edit" aria-hidden />Edit
           </Button>
         ) : null}
         {live ? (
           <Button size="sm" variant="outline" onClick={open("evidence")}>
-            Add source…
+            <Icon name="Link" aria-hidden />Add source
           </Button>
         ) : null}
         {live ? (
@@ -154,7 +155,7 @@ export function KnowledgeActions({ entry, workstream }: { entry: Knowledge; work
                 <Icon name="MoreHorizontal" className="size-4" aria-hidden />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" mobileTitle={entry.title} className="w-60">
+            <DropdownMenuContent data-cortex className="cortex-knowledge w-60" align="end" mobileTitle={entry.title}>
               {entry.state === "approved" ? (
                 <DropdownMenuItem onSelect={quiet(() => transition("recheck", "Sent for re-check in Cortex", "Held back until someone re-checks it"))}>
                   <Icon name="Clock" aria-hidden />
@@ -178,6 +179,8 @@ export function KnowledgeActions({ entry, workstream }: { entry: Knowledge; work
                 <Icon name="Trash2" aria-hidden />
                 Forget…
               </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => void copyKnowledgeId(entry.id)}><Icon name="Copy" aria-hidden />Copy id</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         ) : null}
@@ -203,15 +206,51 @@ export function KnowledgeActions({ entry, workstream }: { entry: Knowledge; work
         facts={[
           { icon: "Trash2", text: "Removes its text from Cortex and from history reads. Who and when stay." },
           { icon: "SideChat", text: "Does not erase text already sent to running sessions." },
-          { icon: "Archive", text: "Archive instead keeps the text for history." },
+          { icon: "Archive", text: "Cannot be undone. Archive instead keeps the text for history." },
+          { icon: "Copy", text: "Exports and backups are not erased." },
         ]}
         confirm="Forget"
         destructive
         open={dialog === "forget"}
         onOpenChange={close}
         onConfirm={() => transition("forgotten", "Forgotten in Cortex", "Forgotten")}
+        secondaryAction={{ label: "Archive instead", onClick: open("archive") }}
       />
     </div>
+  );
+}
+
+async function copyKnowledgeId(id: string) {
+  try {
+    await navigator.clipboard.writeText(id);
+    toast("Copied id");
+  } catch {
+    toast.error("Could not copy the id.");
+  }
+}
+
+function KnowledgeSourceQuote({ source }: { source: KnowledgeSource }) {
+  const navigate = useBbNavigate();
+  const sidebar = experimental_useSidebarThreads();
+  const [expanded, setExpanded] = useState(false);
+  const thread = /^@thread:([^#]+)#msg=(\d+)$/.exec(source.ref);
+  const web = /^https?:\/\/\S+$/.test(source.ref);
+  const long = !!source.excerpt && (source.excerpt.length > 280 || source.excerpt.split("\n").length > 3);
+  const label = thread ? `${sidebar.threads.find(row => row.id === thread[1])?.displayTitle ?? "Source thread"} · msg ${thread[2]}` : source.ref.startsWith("bb:manual:") ? "Written by you" : web ? source.ref : "Source reference";
+  return (
+    <li className="min-w-0 border-l-2 border-border-seam bg-surface-recessed px-3 py-2" data-part="SourceExcerpt">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-muted-foreground">
+        <span className="inline-flex items-center gap-1"><Icon name={source.authorType === "agent" ? "Bot" : source.authorType === "human" ? "UserRound" : "Info"} className="size-3.5 shrink-0" aria-hidden />{AUTHOR_WORD[source.authorType]}</span>
+        {thread || web ? <button type="button" title={source.ref} aria-label={label} className="min-w-0 break-words rounded-sm text-left underline decoration-border underline-offset-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" onClick={() => {
+          if (thread) navigate.toThread(thread[1]!);
+          else if (!navigate.openUrl(source.ref)) toast.error("bb could not open this link here.");
+        }}>{label}</button> : <span title={source.ref}>{label}</span>}
+        <time dateTime={source.observedAt}>{shortTime(source.observedAt)}</time>
+        {source.status ? <Hint text="Reported by whoever added the source; Cortex did not check it."><span className={source.status === "available" ? "" : "text-warning-text"}>{SOURCE_STATUS_WORD[source.status] ?? "available"}</span></Hint> : null}
+      </div>
+      {source.excerpt ? <blockquote data-content className={cn("mt-1 text-[13px] leading-relaxed whitespace-pre-wrap text-foreground", long && !expanded && "line-clamp-3")}>{source.excerpt}</blockquote> : null}
+      {long ? <Button variant="ghost" size="sm" className="mt-1 h-auto px-0 text-[11.5px]" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? "Show less" : `Show all ${source.excerpt!.length.toLocaleString()} characters`}</Button> : null}
+    </li>
   );
 }
 
@@ -222,60 +261,64 @@ export function KnowledgeDetail({
   actions,
   onOpen,
   children,
+  onClose,
+  reason,
+  facts,
 }: {
   entry: Knowledge;
   workstream: Workstream | null;
   actions?: ReactNode;
   onOpen?: (id: string) => void;
   children?: ReactNode;
+  onClose?: () => void;
+  reason?: HeldReason;
+  facts?: ReactNode;
 }) {
   const now = Date.now();
+  const sidebar = experimental_useSidebarThreads();
+  const author = (actor: Knowledge["actor"]) => {
+    if (actor.type !== "agent") return actorWord(actor);
+    const thread = sidebar.threads.find(row => `bb-${row.id}` === actor.id);
+    return thread ? `Agent in ${thread.displayTitle}` : "Agent";
+  };
   const [showHistory, setShowHistory] = useState(false);
   return (
-    <section aria-label={entry.title} className="flex min-w-0 flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <StateMark state={displayState(entry, now)} />
+    <section data-cortex data-part="KnowledgeSheet" aria-label={entry.title} className="cortex-knowledge flex min-w-0 flex-col gap-3">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+        <KnowledgeStateMark entry={entry} />
         <KindMark kind={entry.kind} />
-        <span className="text-[11.5px] text-muted-foreground">{facetWord(entry.facet)}</span>
         {workstream ? <span className="text-[11.5px] text-muted-foreground">{workstream.name}</span> : null}
+        <span className="text-[11.5px] text-muted-foreground">{facetWord(entry.facet)}</span>
+        <span className="text-[11px] text-muted-foreground">rev {entry.revision}</span>
+        {facts}
         <span className="flex-1" />
-        <span className="font-mono text-[11px] text-muted-foreground">
-          {entry.id} · rev {entry.revision}
-        </span>
+        <Hint text={`Copy id ${entry.id}`}><Button variant="ghost" size="sm" className="size-7 p-0" aria-label="Copy id" onClick={() => void copyKnowledgeId(entry.id)}><Icon name="Copy" className="size-3.5" aria-hidden /></Button></Hint>
+        {onClose ? <Button variant="ghost" size="sm" className="size-7 p-0" aria-label="Close" onClick={onClose}><Icon name="X" className="size-3.5" aria-hidden /></Button> : null}
       </div>
-      <h3 className="text-[15px] leading-snug font-semibold text-foreground">{entry.title}</h3>
+      <h3 data-content className="text-[17px] leading-snug font-semibold text-foreground">{entry.title}</h3>
       {entry.state === "forgotten" ? (
         <p className="text-[12.5px] text-muted-foreground">Its text was forgotten. Who changed it and when stay in history.</p>
-      ) : (
-        <KnowledgeText text={entry.text} />
-      )}
-      <div className="flex flex-col gap-1.5">
-        <Applicability value={entry.applicability} />
-        <ApprovalLine entry={entry} />
-        <ExpiryLine entry={entry} now={now} />
-        <p className="text-[11.5px] text-muted-foreground">
-          Last change by {actorWord(entry.actor)} · {relativeAge(entry.updatedAt, now)}
-        </p>
-        <Pointers entry={entry} onOpen={onOpen} />
+      ) : <KnowledgeText text={entry.text} />}
+      <dl className="cortex-knowledge-values">
+        <dt>Applies to</dt><dd className="min-w-0"><Applicability value={entry.applicability} /></dd>
+        {reason ? <><dt>In this brief</dt><dd><ReasonChip reason={reason} /></dd></> : null}
+        <dt>Approved</dt><dd>{entry.approval ? `Approved by ${author(entry.approval.actor)} · ${shortTime(entry.approval.at)}` : "Not approved"}</dd>
+        <dt>Last change</dt><dd>{author(entry.actor)} · {relativeAge(entry.updatedAt, now)}</dd>
+        {entry.expiresAt ? <><dt>Re-check</dt><dd><ExpiryLine entry={entry} now={now} /></dd></> : null}
+      </dl>
+      <Pointers entry={entry} onOpen={onOpen} />
+      <div className="flex flex-col gap-2">
+        <h3 className="flex items-center gap-2 text-[13px] font-semibold">Sources <span className="text-[11.5px] font-normal text-muted-foreground">{entry.sources.length}</span></h3>
+        {entry.sources.length === 0 ? <p className="text-[12px] text-muted-foreground">No sources.</p> : <ul className="flex min-w-0 flex-col gap-2">{entry.sources.map((source, index) => <KnowledgeSourceQuote key={`${entry.id}-${index}-${source.ref}`} source={source} />)}</ul>}
       </div>
       {children}
-      {actions}
-      <div>
-        <Heading count={entry.sources.length}>Sources</Heading>
-        <SourceList sources={entry.sources} />
+      <div className="flex flex-wrap items-start gap-2">
+        <div className="min-w-0 flex-1">{actions}</div>
+        <Button variant="ghost" size="sm" className="h-auto min-h-7 px-2 text-[12px]" aria-label={showHistory ? "Hide history" : "Show history"} aria-expanded={showHistory} onClick={() => setShowHistory(!showHistory)}>
+          <Icon name="TimeSchedule" className="size-3.5" aria-hidden />History · {entry.revision}
+        </Button>
       </div>
-      <div>
-        <Heading
-          trailing={
-            <Button variant="ghost" size="sm" className="h-7 px-2 text-[12px]" aria-expanded={showHistory} onClick={() => setShowHistory(!showHistory)}>
-              {showHistory ? "Hide" : "Show"}
-            </Button>
-          }
-        >
-          History
-        </Heading>
-        {showHistory ? <KnowledgeHistory id={entry.id} /> : null}
-      </div>
+      {showHistory ? <KnowledgeHistory key={entry.id} id={entry.id} /> : null}
     </section>
   );
 }

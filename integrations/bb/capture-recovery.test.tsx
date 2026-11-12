@@ -212,7 +212,7 @@ test("a typed whole-source preflight refusal permits explicit manual conversion 
   expect(within(dialog).getByRole("textbox", { name: "Text" })).toBe(field);
   expect((field as HTMLTextAreaElement).value).toBe("My edited takeaway stays here.");
   expect(dialog.querySelector("blockquote")).toBeNull();
-  expect(await within(dialog).findByText(/No message source claimed/)).toBeTruthy();
+  expect(await within(dialog).findByText(/Written by you · no message source/)).toBeTruthy();
   expect(within(dialog).getByRole("radio", { name: "Everywhere" }).getAttribute("aria-checked")).toBe("true");
   expect(within(dialog).getByRole("radio", { name: "Rule to follow" }).getAttribute("aria-checked")).toBe("true");
   expect(calls(slot, "sectionCapture")).toHaveLength(1);

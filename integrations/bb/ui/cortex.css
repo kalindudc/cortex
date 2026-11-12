@@ -1,0 +1,69 @@
+[data-cortex] {
+  --cortex-muted: color-mix(in oklab, var(--muted-foreground) 78%, var(--foreground));
+}
+
+[data-cortex].text-muted-foreground,
+[data-cortex] .text-muted-foreground {
+  color: var(--cortex-muted);
+}
+
+[data-cortex] .cortex-strip-segment {
+  box-sizing: border-box;
+  min-width: 0;
+  box-shadow: inset -2px 0 0 var(--background);
+  transition: width 420ms cubic-bezier(.2, .7, .2, 1);
+  animation: cortex-strip-enter 420ms cubic-bezier(.2, .7, .2, 1);
+}
+
+[data-cortex] .cortex-strip-directive {
+  background-color: color-mix(in oklab, var(--primary) 70%, var(--foreground));
+}
+
+[data-cortex] .cortex-hatch-notice {
+  background: repeating-linear-gradient(135deg, var(--attention) 0 3px, transparent 3px 6px);
+}
+
+[data-cortex] .cortex-hatch-cut {
+  background: repeating-linear-gradient(135deg, var(--destructive) 0 3px, transparent 3px 6px);
+  outline: 1px solid var(--destructive);
+  outline-offset: -1px;
+}
+
+[data-cortex] .cortex-strip-segment:hover,
+[data-cortex] .cortex-strip-highlight {
+  box-shadow: inset -2px 0 0 var(--background), inset 0 -3px 0 var(--foreground);
+}
+
+[data-cortex].cortex-landed,
+[data-cortex] .cortex-landed {
+  animation: cortex-landed 900ms ease-out;
+}
+
+@keyframes cortex-strip-enter {
+  from { width: 0; }
+}
+
+@keyframes cortex-landed {
+  from {
+    background-color: var(--surface-selected);
+    box-shadow: inset 3px 0 0 var(--primary);
+  }
+  to {
+    background-color: transparent;
+    box-shadow: inset 3px 0 0 transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-cortex],
+  [data-cortex] * {
+    transition: none !important;
+    animation: none !important;
+  }
+
+  [data-cortex].cortex-landed,
+  [data-cortex] .cortex-landed {
+    background-color: var(--surface-selected);
+    box-shadow: inset 3px 0 0 var(--primary);
+  }
+}

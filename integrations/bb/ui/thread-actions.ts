@@ -16,8 +16,8 @@ import { useDefaultShown, visibilityDetail } from "./thread-context";
 import { openTakeaway } from "./takeaway";
 
 export const saveTakeawayAction: PluginThreadActionRegistration = {
-  id: "cortex-save-takeaway", title: "Save takeaway", icon: "BookmarkPlus", group: "cortex",
-  item: ({ experimental_panel }) => ({ label: "Save takeaway…", icon: "BookmarkPlus", run: () => { if (!openTakeaway(experimental_panel)) toast.error("bb could not open Save as takeaway here."); } }),
+  id: "cortex-save-takeaway", title: "Save takeaway", icon: "Star", group: "cortex",
+  item: ({ experimental_panel }) => ({ label: "Save takeaway…", icon: "Star", run: () => { if (!openTakeaway(experimental_panel)) toast.error("bb could not open Save as takeaway here."); } }),
 };
 
 type TaskData = { shown: boolean; focus: Map<string, CortexThreadState["links"][number]> };

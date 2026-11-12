@@ -30,10 +30,10 @@ import { TONE_TEXT } from "./parts";
 import type { ThreadContext } from "./types";
 
 const STATUS_ICON: Record<keyof typeof STATUS_LABEL, string> = {
-  draft: "CircleDot",
+  draft: "EditFile",
   open: "Circle",
   review: "Eye",
-  blocked: "OctagonPause",
+  blocked: "Pause",
   done: "CircleCheck",
 };
 export const taskIcon = (status: keyof typeof STATUS_LABEL) => STATUS_ICON[status];
@@ -161,7 +161,7 @@ export function ContextSegmentSummary({ threadId, isExpanded, onToggle }: Experi
   const status = context ? STATUS_LOOK[context.status] : null;
   const memoryLook = widget.showMemory ? markerLook(widget.memory ?? null, widget.memoryFailure?.message ?? null) : null;
   const blocked = widget.failure !== null || !!context?.error || (context !== undefined && context.status !== "ready" && context.status !== "unbound") || memoryLook?.tone === "error";
-  const glyph = blocked ? "CircleAlert" : held > 0 || memoryLook?.tone === "warning" ? "TriangleAlert" : "Brain";
+  const glyph = blocked ? "AlertCircle" : held > 0 || memoryLook?.tone === "warning" ? "AlertTriangle" : "Brain";
   const root = useRef<HTMLButtonElement>(null);
   const label = `${summaryLabel(widget)}. ${isExpanded ? "Hide" : "Show"} details`;
   const fit = useFittedTier(root, label);
@@ -199,7 +199,7 @@ export function ContextSegmentSummary({ threadId, isExpanded, onToggle }: Experi
           </span>
           {held > 0 ? (
             <span className="inline-flex shrink-0 items-center gap-0.5 text-warning-text">
-              <Icon name="TriangleAlert" className="size-3" aria-hidden />
+              <Icon name="AlertTriangle" className="size-3" aria-hidden />
               <span className="tabular-nums">{held}</span>
               <span className="sr-only">held back</span>
             </span>
@@ -264,7 +264,7 @@ export function ContextSegmentDetails({ threadId, isExpanded }: ExperimentalThre
           {context.entries.length > 3 ? <li className="text-[11.5px] text-muted-foreground">{plural(context.entries.length - 3, "more item")}</li> : null}
           {context.notices.length > 0 ? (
             <li className="flex items-center gap-2 text-warning-text">
-              <Icon name="TriangleAlert" className="size-3.5" aria-hidden />
+              <Icon name="AlertTriangle" className="size-3.5" aria-hidden />
               {plural(context.notices.length, "notice")} only, text held back for review
             </li>
           ) : null}

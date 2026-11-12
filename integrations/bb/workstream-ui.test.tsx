@@ -411,8 +411,8 @@ describe("plain language", () => {
     const card = renderSlot(cardSection(), { threadId: THREAD, projectId: "proj_1", environment: null }, options(backend));
     await card.findByText(/Envoy/);
     const tab = renderMemoryTab(backend);
-    await tab.findByText(/Next context/);
-    const page = renderSlot(app.navPanels[0]!, { subPath: "" }, options(backend));
+    await tab.findByRole("tab", { name: "Section brief" });
+    const page = renderSlot(app.navPanels[0]!, { subPath: "review" }, options(backend));
     await page.findByRole("region", { name: candidate.title });
     for (const view of [slot, card, tab, page]) expect(view.container.textContent).not.toMatch(JARGON);
   });
@@ -476,7 +476,7 @@ describe("thread-only versus every-thread edits", () => {
     backend.shown.set("kn_e1", { ...approved, revision: 3, state: "candidate", approval: null, text: "Someone else's wording." });
     fireEvent.click(within(dialog).getByRole("button", { name: "Load the newer revision" }));
     expect(await within(dialog).findByText("Revision 3 now says:")).toBeTruthy();
-    expect(calls(tab, "knowledgeShow")).toEqual([{ id: "kn_e1" }, { id: "kn_e1" }]);
+    expect(calls(tab, "knowledgeShow")).toEqual([{ id: "kn_e3" }, { id: "kn_e7" }, { id: "kn_e1" }, { id: "kn_e1" }]);
     expect((field as HTMLTextAreaElement).value).toBe("My careful wording.");
   });
 });
@@ -484,13 +484,13 @@ describe("thread-only versus every-thread edits", () => {
 describe("sources are evidence, approval is separate", () => {
   test("a person's source on a candidate is not approval; an agent's source on approved knowledge names the approver", async () => {
     const backend = makeBackend();
-    const page = renderSlot(app.navPanels[0]!, { subPath: "" }, options(backend));
+    const page = renderSlot(app.navPanels[0]!, { subPath: "review" }, options(backend));
     const detail = await page.findByRole("region", { name: candidate.title });
     expect(within(detail).getByText("Person")).toBeTruthy();
     expect(within(detail).getByText("Not approved")).toBeTruthy();
 
     const ws = renderSlot(app.navPanels[0]!, { subPath: "workstreams/ws_envoy" }, options(backend));
-    const current = await ws.findByRole("region", { name: "In thread context" });
+    const current = await ws.findByRole("list", { name: "All knowledge" });
     fireEvent.click(within(current).getByRole("button", { name: new RegExp(approved.title) }));
     const approvedDetail = await ws.findByRole("region", { name: approved.title });
     expect(within(approvedDetail).getByText("Agent")).toBeTruthy();
@@ -499,7 +499,7 @@ describe("sources are evidence, approval is separate", () => {
 
   test("a refused approval shows the backend's reason", async () => {
     const backend = makeBackend({ transitionFailure: { code: "forbidden", message: "Only a person can approve." } });
-    const page = renderSlot(app.navPanels[0]!, { subPath: "" }, options(backend));
+    const page = renderSlot(app.navPanels[0]!, { subPath: "review" }, options(backend));
     await page.findByRole("region", { name: candidate.title });
     fireEvent.click(within(page.getByRole("radiogroup", { name: "Your call" })).getByRole("radio", { name: /^Approve/ }));
     fireEvent.click(within(page.container).getByRole("button", { name: "Confirm: Approve" }));
@@ -514,14 +514,14 @@ describe("states", () => {
     expect((await tab.findByRole("alert")).textContent).toMatch(/Cortex is unavailable/);
     backend.threadFailure = null;
     fireEvent.click(tab.getByRole("button", { name: "Retry" }));
-    expect(await tab.findByText(/Next context/)).toBeTruthy();
+    expect(await tab.findByRole("tab", { name: "Section brief" })).toBeTruthy();
   });
 
   test("Context history labels each route without claiming use", async () => {
     const backend = makeBackend();
     const tab = renderMemoryTab(backend);
-    fireEvent.mouseDown(await tab.findByRole("tab", { name: /Context history/ }));
-    fireEvent.click(await tab.findByRole("tab", { name: /Context history/ }));
+    fireEvent.mouseDown(await tab.findByRole("tab", { name: "History" }));
+    fireEvent.click(await tab.findByRole("tab", { name: "History" }));
     expect(await tab.findByText("Prepared for session startup")).toBeTruthy();
     expect(tab.getByText("Returned by recall")).toBeTruthy();
     expect(tab.container.textContent).not.toMatch(/\bused\b|delivered/i);
@@ -595,7 +595,7 @@ describe("compact status priority", () => {
         const slot = renderSlot({ component }, {}, { ...configured, rpc: rpc as PluginRpcTestHandlers<typeof rpcContract>, settings: { memoryChip: memoryEnabled, taskChip: false } });
         const button = await slot.findByRole("button", { name: /Cortex/ });
         await waitFor(() => {
-          const expected = ["read-error", "over-budget", "unavailable", "memory-error", "held-and-memory-error"].includes(state) ? "CircleAlert" : state === "held" || state === "memory-stale" ? "TriangleAlert" : "Brain";
+          const expected = ["read-error", "over-budget", "unavailable", "memory-error", "held-and-memory-error"].includes(state) ? "AlertCircle" : state === "held" || state === "memory-stale" ? "AlertTriangle" : "Brain";
           expect(button.querySelector("[data-cortex-summary-icon] [data-icon]")?.getAttribute("data-icon")).toBe(expected);
         });
         await act(async () => observed.get(button)?.([{ target: button, contentRect: { width } } as unknown as ResizeObserverEntry], {} as ResizeObserver));
@@ -790,12 +790,14 @@ describe("review fixes", () => {
     for (const entry of others) backend.shown.set(entry.id, entry);
     backend.shown.delete("kn_h2");
     backend.queue = [{ entry: candidate, workstream, hints: others.map(entry => ({ id: entry.id, reason: "same-subject" as const })) }];
-    const page = renderSlot(app.navPanels[0]!, { subPath: "" }, options(backend));
+    const page = renderSlot(app.navPanels[0]!, { subPath: "review" }, options(backend));
     const choices = await page.findByRole("radiogroup", { name: "Your call" });
     await waitFor(() => expect(within(choices).getByRole("radio", { name: /Approve and replace Older entry 3/ })).toBeTruthy());
     expect(calls(page, "knowledgeShow")).toEqual([{ id: "kn_h1" }, { id: "kn_h2" }, { id: "kn_h3" }]);
     expect(within(choices).queryByRole("radio", { name: /Older entry 2/ })).toBeNull();
-    expect((await page.findByRole("alert")).textContent).toMatch(/kn_h2 could not be read/);
+    const unreadable = await page.findByRole("alert");
+    expect(unreadable.textContent).toMatch(/Related entry could not be read/);
+    expect(within(unreadable).getByText("Related entry").getAttribute("title")).toBe("kn_h2");
     expect(within(choices).queryByRole("radio", { name: /Older entry 4/ })).toBeNull();
     fireEvent.click(page.getByRole("button", { name: "Compare 2 more of 2 not loaded" }));
     await waitFor(() => expect(within(page.getByRole("radiogroup", { name: "Your call" })).getByRole("radio", { name: /Approve and replace Older entry 5/ })).toBeTruthy());
@@ -814,10 +816,10 @@ describe("review fixes", () => {
       snapshot: approved,
     }));
     const ws = renderSlot(app.navPanels[0]!, { subPath: "workstreams/ws_envoy" }, options(backend));
-    const current = await ws.findByRole("region", { name: "In thread context" });
+    const current = await ws.findByRole("list", { name: "All knowledge" });
     fireEvent.click(within(current).getByRole("button", { name: new RegExp(approved.title) }));
     const detail = await ws.findByRole("region", { name: approved.title });
-    fireEvent.click(within(detail).getByRole("button", { name: "Show" }));
+    fireEvent.click(within(detail).getByRole("button", { name: "Show history" }));
     expect(await within(detail).findByText("Change 120")).toBeTruthy();
     expect(within(detail).queryByText("Change 70")).toBeNull();
     expect(calls(ws, "workstreamHistory")).toEqual([
@@ -849,7 +851,7 @@ describe("review fixes", () => {
     const excerpt = `${"The gateway owns TLS for every listener. ".repeat(12)}End of excerpt.`;
     const url = "https://example.com/runbooks/envoy-gateway/tls-ownership-and-listener-certificates";
     backend.queue = [{ entry: { ...candidate, sources: [{ ref: url, excerpt, authorType: "human", observedAt: iso(-90) }] }, workstream, hints: [] }];
-    const page = renderSlot(app.navPanels[0]!, { subPath: "" }, { ...options(backend), openUrl: () => true });
+    const page = renderSlot(app.navPanels[0]!, { subPath: "review" }, { ...options(backend), openUrl: () => true });
     const detail = await page.findByRole("region", { name: candidate.title });
     const more = within(detail).getByRole("button", { name: `Show all ${excerpt.length.toLocaleString()} characters` });
     expect(more.getAttribute("aria-expanded")).toBe("false");

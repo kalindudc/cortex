@@ -14,6 +14,7 @@ import { TAKEAWAY_TAB_ID, TakeawayPanel, saveMessageAction } from "./ui/takeaway
 import { saveTakeawayAction } from "./ui/thread-actions";
 import { DraftingSettings } from "./ui/draft-settings";
 import "./ui/section.css";
+import "./ui/cortex.css";
 
 export default definePluginApp(app => {
   app.slots.settingsSection({ id: "drafting", title: "Drafting", component: DraftingSettings });
@@ -65,7 +66,7 @@ export default definePluginApp(app => {
   app.slots.experimental_threadAction(taskHeaderAction);
   app.slots.experimental_threadAction(contextVisibilityAction);
   app.slots.experimental_threadAction(saveTakeawayAction);
-  app.slots.experimental_tab({ context: { kind: "thread" }, availability: "action", id: TAKEAWAY_TAB_ID, title: "Save takeaway", icon: "BookmarkPlus", component: TakeawayPanel });
+  app.slots.experimental_tab({ context: { kind: "thread" }, availability: "action", id: TAKEAWAY_TAB_ID, title: "Save takeaway", icon: "Star", component: TakeawayPanel });
   app.slots.messageAction(saveMessageAction);
   app.slots.messageDirective({ id: "cortex", component: CortexCard });
 });
