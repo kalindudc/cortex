@@ -70,6 +70,23 @@ export function withoutMention(draft: ComposerDraftSnapshot, pill: ComposerMenti
   };
 }
 
+/** Where the row's folded or open choice is kept; folded unless the person opened it last time. */
+export const newThreadRowKey = (pluginId: string) => `${pluginId}.cortex.new-thread-row`;
+function readRowFolded(pluginId: string): boolean {
+  try {
+    return window.localStorage.getItem(newThreadRowKey(pluginId)) !== "open";
+  } catch {
+    return true;
+  }
+}
+function saveRowFolded(pluginId: string, folded: boolean): void {
+  try {
+    window.localStorage.setItem(newThreadRowKey(pluginId), folded ? "folded" : "open");
+  } catch {
+    // A blocked store only loses the remembered choice; the row still folds and opens.
+  }
+}
+
 export const pillLabel = (changes: number, sectionName: string) =>
   `Cortex: ${plural(changes, "change")} to the ${sectionName} brief`;
 
@@ -95,9 +112,14 @@ function NewThreadContext({ projectId }: { projectId: string | null }) {
   const [cleared, setCleared] = useState(false);
   const [retained, setRetained] = useState<PendingSelection | null>(null);
   const rowButton = useRef<HTMLButtonElement>(null);
+  const [folded, setFoldedState] = useState(() => readRowFolded(pluginId));
+  const chipButton = useRef<HTMLButtonElement>(null);
+  const foldButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     const open = (event: Event) => {
       if ((event as CustomEvent<string>).detail !== composer.key) return;
+      setFoldedState(false);
+      saveRowFolded(pluginId, false);
       setExpanded(true);
       requestAnimationFrame(() => rowButton.current?.focus());
     };
@@ -241,6 +263,15 @@ function NewThreadContext({ projectId }: { projectId: string | null }) {
     return row ? `${row.entries} · ${tokens(row.estimatedTokens)}` : "Nothing shared";
   };
   const refusedNow = !!refused && !placementFixed;
+  // A refused send or a broken pill needs the row open to be fixed; a note opens it until it is folded away.
+  const pinnedOpen = refusedNow || !!problem;
+  const showFolded = folded && !pinnedOpen && !note && !failure;
+  const setFolded = (next: boolean) => {
+    setFoldedState(next);
+    saveRowFolded(pluginId, next);
+    if (next) { setExpanded(false); setNote(null); setFailure(null); }
+    requestAnimationFrame(() => (next ? chipButton : foldButton).current?.focus());
+  };
   const changeCount = changes.length;
   const briefShown = !!(effective && binding && !off);
   const nonEmpty = briefShown && (effective?.entries.length ?? 0) > 0;
@@ -258,6 +289,22 @@ function NewThreadContext({ projectId }: { projectId: string | null }) {
     : unverified
       ? "Picked with Cortex's New thread button. bb files the thread where you last chose; pick here to be sure."
       : "Filed here from this menu. Change it to file the thread in another section.";
+  if (showFolded) {
+    const chipLabel = `Show Cortex context${changeCount && !off ? ` · ${plural(changeCount, "change")} for this thread` : ""}${blocked ? " · sends no brief" : ""}`;
+    return (
+      <section data-cortex data-part="NewThreadContext" aria-label="Cortex context for this new thread" className="cortex-nt nt-folded">
+        <TooltipProvider><Tooltip><TooltipTrigger asChild>
+          <button ref={chipButton} type="button" className="nt-chipbtn" aria-label={chipLabel} onClick={() => setFolded(false)}>
+            <Icon name="Brain" className={cn("nt-ic", off ? "nt-muted" : "nt-pri")} aria-hidden />
+            <span>Cortex</span>
+            {changeCount > 0 && !off && <span className="nt-mark nt-pri" aria-hidden><Icon name="EditFile" className="nt-ic" /><b>{changeCount}</b></span>}
+            {blocked && <Icon name="CircleX" className="nt-ic nt-bad" aria-hidden />}
+            <Icon name="ChevronRight" className="nt-chev" aria-hidden />
+          </button>
+        </TooltipTrigger><TooltipContent data-cortex className="max-w-72">{read.error ? "Cortex couldn't read the brief" : `Starts with ${pickedName ?? (cleared ? "no section" : "a section you choose")}: ${summary}`}</TooltipContent></Tooltip></TooltipProvider>
+      </section>
+    );
+  }
   return (
     <section data-cortex data-part="NewThreadContext" aria-label="Cortex context for this new thread"
       className={cn("cortex-nt", refusedNow && "nt-refused")}
@@ -277,6 +324,7 @@ function NewThreadContext({ projectId }: { projectId: string | null }) {
           <button type="button" className="nt-btn nt-solid" onClick={() => fileIn(pending!.sectionId)}>File in {nameOf(pending!.sectionId)}</button>
           <button type="button" className="nt-btn" onClick={removePill}>Remove pill</button>
         </> : <>
+          {!pinnedOpen && <button ref={foldButton} type="button" className="nt-fold" aria-label="Hide Cortex context" title="Fold to the left" onClick={() => setFolded(true)}><Icon name="ChevronLeft" className="nt-ic" aria-hidden /></button>}
           <span className="nt-lead"><Icon name="Brain" className={cn("nt-ic", off ? "nt-muted" : "nt-pri")} aria-hidden /><span className="nt-w">Starts with</span></span>
           {!off && <DropdownMenu>
             <TooltipProvider><Tooltip><TooltipTrigger asChild>

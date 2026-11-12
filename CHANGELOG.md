@@ -2,6 +2,13 @@
 
 Cortex follows [semantic versioning](https://semver.org). Each release has a section below, newest first.
 
+## 0.107.1 - 2026-11-12
+
+- **Cortex's row on bb's New thread screen folds out of the way.** It starts as a small Cortex chip at the left of the
+  message box, which shows how many changes you made for this thread. Click it to see and change what the thread
+  starts with, and use the arrow at the row's left to fold it back. It stays folded or open as you last left it, and
+  a refused send opens it so you can fix it.
+
 ## 0.107.0 - 2026-11-12
 
 - **See what a new thread starts with before you send.** On bb's New thread screen, a Cortex row above the message

@@ -333,8 +333,8 @@ test("registers the Cortex and Memory tabs, header action, context segment and c
   expect(app.threadHeaderActions).toEqual([]);
   // Not a prompt-box action: bb mounts only the three most-used plugins' actions there. The only composer
   // customization is the New thread banner and its keyboard path in the + menu.
-  expect(app.composerCustomizations.map(c => [c.id, c.scopes, c.banners?.map(b => b.id), c.actions, c.plusMenu?.map(item => item.id), c.sendMenu])).toEqual([
-    ["cortex-new-thread", ["new-thread"], ["context"], undefined, ["context"], undefined],
+  expect(app.composerCustomizations.map(c => [c.id, c.scopes, c.banners?.map(b => [b.id, b.chrome]), c.actions, c.plusMenu?.map(item => item.id), c.sendMenu])).toEqual([
+    ["cortex-new-thread", ["new-thread"], [["context", "bare"]], undefined, ["context"], undefined],
   ]);
   expect(app.messageDirectives.map(directive => directive.id)).toEqual(["cortex"]);
 });

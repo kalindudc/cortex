@@ -77,13 +77,13 @@ The Memory tab shows the workstream, topic and targets, what is selected, what s
 prepared for the thread. The estimate is approximate; when required knowledge is missing or context exceeds its budget
 or the SDK's startup limit, the preview explains the refusal before sending, never silently truncating constraints.
 
-On bb's New thread screen, Cortex's expandable row previews the picked section's brief and ordinary memory; a
-remembered pick is marked, not verified placement. Its menu files the draft in a section, unpinned, or clears it. Edit
-or leave entries out for this thread; removing the pill restores normal context, and Put back restores its section and
-changes. A send with changes is refused if the section or knowledge changed; the row offers recovery. Shared edits are
-separate and revision-checked; if someone changed it first, your input stays available for review. The existing task
-action Exclude from automatic memory is task-wide, not a thread-only choice. Direct task reads by ID remain possible,
-and exclusion does not remove text already in a session.
+On bb's New thread screen, a Cortex chip on the left opens into a row previewing the picked section's brief and
+ordinary memory; it remembers whether you left it open, and a refused send opens it. A remembered pick is marked, not
+verified placement. Its menu files the draft in a section, unpinned, or clears it. Edit or leave entries out for this
+thread; removing the pill restores normal context, and Put back restores its section and changes. A send with changes
+is refused if the section or knowledge changed; the row offers recovery. Shared edits are separate and
+revision-checked; if someone changed it first, your input stays for review. The task action Exclude from automatic
+memory is task-wide, not thread-only. Reads by ID still work, and exclusion cannot take back text a session already has.
 
 Prepare context inserts a visible draft for you to inspect and send. Preparing a draft is not delivery. A reference
 adds information; it cannot replace a running session's earlier text. Start a fresh thread when a clean context is

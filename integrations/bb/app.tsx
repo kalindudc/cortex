@@ -70,11 +70,12 @@ export default definePluginApp(app => {
   app.slots.experimental_tab({ context: { kind: "thread" }, availability: "action", id: TAKEAWAY_TAB_ID, title: "Save takeaway", icon: "Star", component: TakeawayPanel });
   app.slots.messageAction(saveMessageAction);
   app.slots.messageDirective({ id: "cortex", component: CortexCard });
-  // bb renders composer banners on its root New thread composer; this card follows that composer's draft.
+  // bb renders composer banners on its root New thread composer; this row follows that composer's draft. It is bare
+  // because bb's card would stretch the folded chip across the whole composer.
   app.composer.customize({
     id: "cortex-new-thread",
     scopes: ["new-thread"],
-    banners: [{ id: "context", chrome: "card", component: NewThreadContextBanner }],
+    banners: [{ id: "context", chrome: "bare", component: NewThreadContextBanner }],
     plusMenu: [{ id: "context", label: "What this thread starts with", icon: "Brain", run: ({ composer }) => { window.dispatchEvent(new CustomEvent(NEW_THREAD_OPEN, { detail: composer.key })); } }],
   });
 });

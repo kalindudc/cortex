@@ -1,17 +1,21 @@
-/* Cortex's row on bb's New thread screen. It sits inside bb's composer banner card, which draws the border and
-   surface, so this only lays out the row and the expanded brief. */
+/* Cortex's row on bb's New thread screen. It registers as a bare banner and draws bb's card look itself, because
+   bb's card fills the banner column and the folded chip has to sit narrow on the left. */
 [data-cortex].cortex-nt {
   --nt-muted: color-mix(in oklab, var(--muted-foreground) 70%, var(--foreground));
   --nt-in: var(--primary);
   container-type: inline-size;
   min-width: 0;
-  border-radius: inherit;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 0.5rem);
+  background: var(--surface-raised-solid);
   color: var(--foreground);
   font-size: 12.5px;
   line-height: 18px;
 }
+/* Inline-size containment would size a shrink-to-fit chip to zero, so the folded chip drops it. */
+[data-cortex].cortex-nt.nt-folded { justify-self: start; max-width: 100%; container-type: normal; }
 [data-cortex].cortex-nt.nt-refused {
-  background: color-mix(in oklab, var(--destructive) 9%, transparent);
+  background: color-mix(in oklab, var(--destructive) 9%, var(--surface-raised-solid));
   box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--destructive) 45%, transparent);
 }
 .cortex-nt .nt-ic { width: 14px; height: 14px; flex: none; }
@@ -23,13 +27,20 @@
 .cortex-nt .nt-num { font-variant-numeric: tabular-nums; }
 .cortex-nt .nt-grow { flex: 1 1 auto; min-width: 0; }
 .cortex-nt .nt-sp { flex: 1 1 0; }
-.cortex-nt :where(.nt-btn, .nt-sec, .nt-tog, .nt-ttl, .nt-quick button) { font: inherit; color: inherit; background: transparent; border: 0; padding: 0; margin: 0; text-align: left; }
-.cortex-nt :where(.nt-btn, .nt-sec, .nt-tog, .nt-ttl, .nt-quick button):focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.cortex-nt :where(.nt-btn, .nt-sec, .nt-tog, .nt-ttl, .nt-quick button, .nt-chipbtn, .nt-fold) { font: inherit; color: inherit; background: transparent; border: 0; padding: 0; margin: 0; text-align: left; }
+.cortex-nt :where(.nt-btn, .nt-sec, .nt-tog, .nt-ttl, .nt-quick button, .nt-chipbtn, .nt-fold):focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 
 /* The section menu is portaled outside the row. Long names wrap instead of stretching it past the window. */
 [data-cortex].cortex-nt-menu { max-width: min(32rem, calc(100vw - 2rem)); }
 .cortex-nt-menu .nt-mi-name { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .cortex-nt-menu .nt-mi-meta { flex: none; margin-left: 12px; font-size: 12px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* The folded chip and the button that folds the row back to it */
+.cortex-nt .nt-chipbtn { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 8px 0 10px; white-space: nowrap; }
+.cortex-nt .nt-chipbtn:hover { background: var(--state-hover); }
+.cortex-nt .nt-chipbtn .nt-chev { margin-left: 2px; }
+.cortex-nt .nt-fold { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 22px; height: 26px; margin-left: -6px; color: var(--nt-muted); }
+.cortex-nt .nt-fold:hover { background: var(--state-hover); color: var(--foreground); }
 
 /* The collapsed row */
 .cortex-nt .nt-row { display: flex; align-items: center; gap: 4px; min-width: 0; min-height: 34px; padding: 1px 4px 1px 10px; }
@@ -153,7 +164,8 @@
 }
 /* Touch and phone: 44 px targets */
 @media (max-width: 767px), (pointer: coarse) {
-  .cortex-nt .nt-btn, .cortex-nt .nt-sec, .cortex-nt .nt-tog { min-height: 44px; }
+  .cortex-nt .nt-btn, .cortex-nt .nt-sec, .cortex-nt .nt-tog, .cortex-nt .nt-chipbtn { min-height: 44px; }
+  .cortex-nt .nt-fold { min-width: 44px; min-height: 44px; }
   .cortex-nt .nt-btn.nt-icon { min-width: 44px; }
   .cortex-nt .nt-row { min-height: 46px; }
   .cortex-nt button.nt-ttl, .cortex-nt .nt-quick button { min-height: 44px; }

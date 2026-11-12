@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, waitFor, within } from "@testing-library/react";
 import { loadPluginApp, type PluginRpcTestHandlers, renderSlot } from "@get-bb/plugin-sdk/testing/app";
 import type { ComposerMention } from "@get-bb/plugin-sdk/app";
-import { afterEach, beforeAll, expect, test, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
 import {
   type NewThreadMemory,
   PENDING_MENTION_PROVIDER,
@@ -13,7 +13,7 @@ import {
   pendingSelectionSchema,
 } from "./pending-context-contract";
 import { type SectionEligibility, sectionRpcContract } from "./section-contract";
-import { NewThreadContextBanner, withoutMention } from "./ui/new-thread";
+import { NewThreadContextBanner, newThreadRowKey, withoutMention } from "./ui/new-thread";
 import { readComposeSection, REMEMBER_MS, rememberComposeSection } from "./ui/new-thread-section";
 import type { Knowledge, Workstream } from "./ui/types";
 import { workstreamRpcContract } from "./workstream-contract";
@@ -36,9 +36,13 @@ let app: Awaited<ReturnType<typeof loadPluginApp>>;
 beforeAll(async () => {
   app = await loadPluginApp(() => import("./app"));
 });
+// Most tests read the opened row; the folded chip, the default, has its own tests below.
+const ROW_KEY = newThreadRowKey(PLUGIN);
+beforeEach(() => { localStorage.setItem(ROW_KEY, "open"); });
 afterEach(() => {
   cleanup();
   sessionStorage.clear();
+  localStorage.clear();
 });
 
 type Fixture = { failPreview?: boolean; empty?: boolean; status?: SectionEligibility["status"]; memory?: NewThreadMemory; pendingDraftKey?: string; problem?: string | null };
@@ -119,12 +123,44 @@ test("registered only on new-thread, with a keyboard plus-menu path", async () =
   expect(app.composerCustomizations[0]?.scopes).toEqual(["new-thread"]);
   const slot = renderSlot({ component: NewThreadContextBanner }, {}, { ...backend(), composer: { scope: { kind: "thread", threadId: "thr_aaaaaaaa" } } });
   expect(slot.container.querySelector("[data-part=NewThreadContext]")).toBeNull();
-  cleanup(); rememberEnvoy();
-  const live = render(); await waitFor(() => expect(summary(live)).toBe("2 entries · ~380/400 tokens"));
+  cleanup(); rememberEnvoy(); localStorage.removeItem(ROW_KEY);
+  const live = render(); expect(await live.findByRole("button", { name: "Show Cortex context" })).toBeTruthy();
   const item = app.composerCustomizations[0]?.plusMenu?.[0];
   expect(item?.label).toBe("What this thread starts with");
   await act(async () => { await item?.run({ composer: live.inspection.composer as never }); });
   expect(await live.findByRole("list", { name: "Goes in automatically when you send" })).toBeTruthy();
+  expect(summary(live)).toBe("2 entries · ~380/400 tokens");
+  expect(localStorage.getItem(ROW_KEY)).toBe("open");
+});
+
+test("folds to a Cortex chip on the left by default and remembers the choice", async () => {
+  localStorage.removeItem(ROW_KEY); rememberEnvoy();
+  const slot = render();
+  const chip = await slot.findByRole("button", { name: "Show Cortex context" });
+  expect(slot.container.querySelector("[data-part=NewThreadContext]")?.classList.contains("nt-folded")).toBe(true);
+  expect(slot.queryByRole("button", { name: "What this thread starts with" })).toBeNull();
+  fireEvent.click(chip);
+  await waitFor(() => expect(summary(slot)).toBe("2 entries · ~380/400 tokens"));
+  expect(localStorage.getItem(ROW_KEY)).toBe("open");
+  fireEvent.click(slot.getByRole("button", { name: "Hide Cortex context" }));
+  expect(await slot.findByRole("button", { name: "Show Cortex context" })).toBeTruthy();
+  expect(localStorage.getItem(ROW_KEY)).toBe("folded");
+  cleanup(); rememberEnvoy();
+  expect(await render().findByRole("button", { name: "Show Cortex context" })).toBeTruthy();
+});
+
+test("the folded chip counts this thread's changes", async () => {
+  const options = seededDraft(); localStorage.setItem(ROW_KEY, "folded");
+  const slot = render(options);
+  expect(await slot.findByRole("button", { name: "Show Cortex context · 1 change for this thread" })).toBeTruthy();
+});
+
+test("a refused send opens a folded row and it cannot fold until resolved", async () => {
+  const options = seededDraft({ refusedPlacement: { sectionId: "sec_otlp" } }); localStorage.setItem(ROW_KEY, "folded");
+  const slot = render(options);
+  expect(await slot.findByText("Not sent · bb filed it in OTLP routing")).toBeTruthy();
+  expect(slot.queryByRole("button", { name: "Hide Cortex context" })).toBeNull();
+  expect(localStorage.getItem(ROW_KEY)).toBe("folded");
 });
 
 test("unknown section shows memory, quick picks and after-send matching tasks", async () => {
