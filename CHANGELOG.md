@@ -2,6 +2,16 @@
 
 Cortex follows [semantic versioning](https://semver.org). Each release has a section below, newest first.
 
+## 0.105.4 - 2026-11-12
+
+- **Choose the model for each draft.** Draft from a thread now has bb's model picker, with every provider you have
+  enabled. It starts from your Drafting setting; a different choice applies to that draft only and leaves the setting
+  unchanged. Changing the model after a preview asks for a fresh preview, and the dialog says what Start is waiting for.
+- **Drafting accepts a model saved without a service tier.** bb's model picker leaves the tier out until you pick
+  one, and drafting refused such a choice with "Choose a concrete service tier". It now uses bb's standard tier, shows
+  it in the preview before Start and keeps it fixed for the job, so a draft never picks up a faster, costlier tier
+  from project defaults. A tier you chose explicitly is kept as before.
+
 ## 0.105.3 - 2026-11-12
 
 - **Draft from a thread works on Pi and Claude Code threads.** Those threads list finished messages without grouping

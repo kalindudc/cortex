@@ -12,6 +12,32 @@ export function RequestedDraftModel({ value }: { value: DraftSelection }) {
   return <span className="break-words">{provider?.displayName ?? value.providerId} · {value.model}{value.reasoningLevel ? ` · Thinking: ${value.reasoningLevel}` : ""}{value.serviceTier ? ` · Tier: ${value.serviceTier}` : ""}</span>;
 }
 
+/** Compares choices the way a job pins them: a tier left out means bb's standard tier. */
+export function selectionKey(value: DraftSelection | null): string {
+  return value === null ? "follow-source" : JSON.stringify([value.providerId, value.model, value.reasoningLevel, value.serviceTier ?? "default"]);
+}
+
+function toSelection(value: ExperimentalProviderModelPickerValue) {
+  return draftSelectionSchema.safeParse({ providerId: value.providerId, model: value.model, reasoningLevel: value.reasoningLevel, ...(value.serviceTier === undefined ? {} : { serviceTier: value.serviceTier }) });
+}
+
+/** The model one draft runs on: the Drafting setting, unless the person picks another for this draft. */
+export function DraftModelChoice({ setting, value, onChange, disabled }: { setting: DraftSelection | null; value: DraftSelection | null; onChange(next: DraftSelection | null): void; disabled: boolean }) {
+  const catalog = experimental_useProviders();
+  const [seed, setSeed] = useState<ExperimentalProviderModelPickerValue | null>(null);
+  const shown = value ?? seed;
+  const overridden = selectionKey(value) !== selectionKey(setting);
+  const first = catalog.providers.find(provider => provider.available);
+  const pick = (next: ExperimentalProviderModelPickerValue) => { const parsed = toSelection(next); if (!parsed.success) return; setSeed(null); onChange(parsed.data); };
+  return <div role="group" aria-label="Model for this draft" className="grid gap-2">
+    <span className="font-semibold">Model for this draft</span>
+    {shown === null
+      ? <div className="flex flex-wrap items-center gap-2"><span>Follows the source thread's model</span><Button variant="outline" disabled={disabled || !first} onClick={() => { if (first) setSeed({ providerId: first.id, model: "", reasoningLevel: "" }); }}>Choose a model for this draft</Button></div>
+      : <div className="flex min-w-0 flex-wrap items-center gap-2"><ProviderModelPicker value={shown} onChange={pick} disabled={disabled} />{overridden || seed !== null ? <Button variant="ghost" disabled={disabled} onClick={() => { setSeed(null); onChange(setting); }}>Use Drafting setting</Button> : null}</div>}
+    {shown !== null ? <p className="text-muted-foreground">{overridden ? "This draft only. Your Drafting setting stays as it is." : "From your Drafting setting."}</p> : null}
+  </div>;
+}
+
 export function DraftingSettings() {
   const read = useDraftConfig();
   const writes = useDraftWrites();
@@ -30,8 +56,7 @@ export function DraftingSettings() {
   const stale = read.data !== undefined && read.data.revision !== draft.revision;
   const dirty = read.data !== undefined && JSON.stringify(draft.selection) !== JSON.stringify(read.data.selection);
   const choose = (value: ExperimentalProviderModelPickerValue) => {
-    const next = { providerId: value.providerId, model: value.model, reasoningLevel: value.reasoningLevel, ...(value.serviceTier === undefined ? {} : { serviceTier: value.serviceTier }) };
-    const parsed = draftSelectionSchema.safeParse(next);
+    const parsed = toSelection(value);
     if (!parsed.success) { setFailure({ code: "invalid_input", message: "Choose a concrete provider and model before saving." }); return; }
     setSeed(null); setDraft({ ...draft, selection: parsed.data }); setFailure(null); setSaved(false);
   };
@@ -43,7 +68,7 @@ export function DraftingSettings() {
     finally { pending.current = false; setBusy(false); }
   };
   return <div data-cortex-drafting-settings="" className="grid max-w-2xl gap-3 text-[13px] text-foreground">
-    <p>Applies to future drafting jobs only. Existing jobs keep their requested model.</p>
+    <p>Applies to future drafting jobs only. Existing jobs keep their requested model, and each draft can choose a different model for itself.</p>
     {read.error ? <FailureNotice failure={read.error} onRetry={read.refetch} /> : null}
     <div className="grid gap-2"><span className="font-semibold">Requested model</span>
       {shown === null ? <div className="flex flex-wrap items-center gap-2"><span>Follow source thread model</span><Button variant="outline" disabled={busy || !first} onClick={() => { if (first) { setSeed({ providerId: first.id, model: "", reasoningLevel: "" }); setSaved(false); } }}>Choose a model</Button></div> : <div className="flex min-w-0 flex-wrap items-center gap-2"><ProviderModelPicker value={shown} onChange={choose} disabled={busy} />{draft.selection === null ? <Button variant="ghost" disabled={busy} onClick={() => { setSeed(null); setFailure(null); }}>Cancel model choice</Button> : <Button variant="outline" disabled={busy} onClick={() => { setSeed(null); setDraft({ ...draft, selection: null }); setSaved(false); setFailure(null); }}>Follow source thread model</Button>}</div>}

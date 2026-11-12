@@ -5,10 +5,10 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
 import { useIsCompactViewport } from "@/components/ui/hooks/use-compact-viewport";
-import type { DraftJob, DraftPreview } from "../draft-contract";
+import type { DraftJob, DraftPreview, DraftSelection } from "../draft-contract";
 import type { Section } from "../section-contract";
 import { failureOf, useDraftCapabilities, useDraftConfig, useDraftJobs, useDraftJob, useDraftWrites, type RpcFailure } from "./data";
-import { RequestedDraftModel } from "./draft-settings";
+import { DraftModelChoice, RequestedDraftModel, selectionKey } from "./draft-settings";
 import { discardPendingDraft, draftRecoveryScope, pendingDraft, readPendingDraft, savePendingDraft, type DraftRecoveryScope, type PendingDraft } from "./draft-intent";
 import { FailureNotice, LoadingRows } from "./parts";
 import { CORTEX_PAGE_PATH } from "./thread-context";
@@ -113,15 +113,23 @@ function ScopedDraftDialog({ section, threads, open, onClose, onReturnFocus, rec
     const timer = setTimeout(() => setExpired(true), Math.max(0, remaining));
     return () => clearTimeout(timer);
   }, [preview]);
+  const setting = config.data?.selection ?? null;
+  // undefined until the person picks a model for this draft; until then the draft follows the Drafting setting.
+  const [choice, setChoice] = useState<DraftSelection | null | undefined>(undefined);
+  const model = choice === undefined ? setting : choice;
+  const overridden = choice !== undefined && selectionKey(choice) !== selectionKey(setting);
+  const [previewedModel, setPreviewedModel] = useState<string | null>(null);
   const sourcePresent = threads.some(thread => thread.id === sourceId);
   const bindingChanged = preview !== null && (preview.bindingRevision !== section.binding.revision || preview.workstreamId !== section.binding.binding?.workstreamId);
   const configChanged = preview !== null && config.data !== undefined && config.data.revision > preview.execution.configRevision;
-  const canStart = recoveryScope.key !== null && !recoveryError && !intent && !busy && !failure && !expired && sourcePresent && section.binding.binding !== null && preview !== null && preview.sourceThreadId === sourceId && preview.sectionId === section.id && !bindingChanged && !configChanged && capabilities.data?.available === true && config.data !== undefined && !config.error && !capabilities.error;
+  const modelChanged = preview !== null && !configChanged && previewedModel !== selectionKey(model);
+  const canStart = !modelChanged && recoveryScope.key !== null && !recoveryError && !intent && !busy && !failure && !expired && sourcePresent && section.binding.binding !== null && preview !== null && preview.sourceThreadId === sourceId && preview.sectionId === section.id && !bindingChanged && !configChanged && capabilities.data?.available === true && config.data !== undefined && !config.error && !capabilities.error;
   const loadPreview = async () => {
     const threadId = sourceId;
     if (pending.current || intent || !sourcePresent || !section.binding.binding) return;
     pending.current = true; setBusy(true); setFailure(null);
-    try { setPreview(await writes.preview({ sectionId: section.id, expectedBindingRevision: section.binding.revision, sourceThreadId: threadId })); }
+    const key = selectionKey(model);
+    try { setPreview(await writes.preview({ sectionId: section.id, expectedBindingRevision: section.binding.revision, sourceThreadId: threadId, ...(overridden && model !== null ? { selection: model } : {}) })); setPreviewedModel(key); }
     catch (cause) { setFailure(failureOf(cause)); }
     finally { pending.current = false; setBusy(false); }
   };
@@ -172,10 +180,13 @@ function ScopedDraftDialog({ section, threads, open, onClose, onReturnFocus, rec
     }}>
       {shownJob ? <>{live.error ? <FailureNotice failure={live.error} onRetry={live.refetch} /> : null}<DraftJobView job={shownJob} onChange={setJob} /><p>Progress stays in this section after closing.</p>{terminal(shownJob) ? <Button variant="outline" className="justify-self-start" onClick={discard}>Prepare another draft</Button> : null}</> : <>
         <div role="group" aria-label="Source thread" className="grid gap-2"><span className="font-semibold">Source thread in {section.canonicalName}</span><div className={cn("grid gap-1.5", !compact && "max-h-64 overflow-y-auto pr-1")}>{threads.map(thread => { const chosen = sourceId === thread.id; return <Button key={thread.id} variant="outline" data-cortex-source-chosen={chosen ? "" : undefined} className={cn("h-auto min-h-11 justify-start gap-2 whitespace-normal text-left", chosen && "border-primary bg-primary/10 text-foreground")} disabled={busy || intent !== null} aria-pressed={chosen} onClick={() => { setSourceId(thread.id); setFailure(null); }}><Icon name={chosen ? "CircleCheck" : "Circle"} className={cn("size-4 shrink-0", chosen ? "text-primary" : "text-muted-foreground")} aria-hidden />{thread.name}</Button>; })}</div>{threads.length === 0 ? <p role="status">No source thread is listed in this section.</p> : null}</div>
+        {!intent ? <DraftModelChoice setting={setting} value={model} onChange={setChoice} disabled={busy || config.data === undefined} /> : null}
         {!intent ? <Button variant="outline" className="justify-self-start" disabled={busy || !sourcePresent || !section.binding.binding} onClick={() => void loadPreview()}>{busy ? "Preparing preview…" : "Preview completed excerpts"}</Button> : null}
+        {!intent && !preview && !failure && !busy ? <p role="status" className="text-muted-foreground">{sourcePresent ? "Preview the completed excerpts to enable Start." : "Choose a source thread, then preview its completed excerpts to enable Start."}</p> : null}
         {failure ? <FailureNotice failure={failure} /> : null}
-        {preview ? <section aria-label="Completed source excerpts" className="grid min-w-0 gap-3 text-[13px]"><p>{preview.label}</p><p>{preview.messages.length} completed message{preview.messages.length === 1 ? "" : "s"} · {preview.messages.reduce((count, message) => count + message.quote.length, 0).toLocaleString()} excerpt characters · {preview.omittedMessages} messages omitted</p><p>Requested model: <RequestedDraftModel value={preview.execution} /></p><Button variant="ghost" className="justify-self-start" onClick={() => navigate.toThread(preview.sourceThreadId)}>Open source thread</Button>{preview.messages.map(message => <div key={`${message.messageId}:${message.messageSeq}`} className="grid min-w-0 gap-1 border-l-2 border-border-seam pl-3"><p className="break-all">{message.ref} · {message.role} · {message.authorType}</p><p>Completed {new Date(message.completedAt).toLocaleString()} · Characters {message.start + 1}–{message.end} of {message.totalChars.toLocaleString()}</p><blockquote data-content className="whitespace-pre-wrap break-words">{message.quote}</blockquote></div>)}</section> : null}
+        {preview ? <section aria-label="Completed source excerpts" className="grid min-w-0 gap-3 text-[13px]"><p>{preview.label}</p><p>{preview.messages.length} completed message{preview.messages.length === 1 ? "" : "s"} · {preview.messages.reduce((count, message) => count + message.quote.length, 0).toLocaleString()} excerpt characters · {preview.omittedMessages} messages omitted</p><p>Requested model: <RequestedDraftModel value={preview.execution} />{preview.execution.origin === "override" ? " (this draft only)" : ""}</p><Button variant="ghost" className="justify-self-start" onClick={() => navigate.toThread(preview.sourceThreadId)}>Open source thread</Button>{preview.messages.map(message => <div key={`${message.messageId}:${message.messageSeq}`} className="grid min-w-0 gap-1 border-l-2 border-border-seam pl-3"><p className="break-all">{message.ref} · {message.role} · {message.authorType}</p><p>Completed {new Date(message.completedAt).toLocaleString()} · Characters {message.start + 1}–{message.end} of {message.totalChars.toLocaleString()}</p><blockquote data-content className="whitespace-pre-wrap break-words">{message.quote}</blockquote></div>)}</section> : null}
         {bindingChanged ? <p role="status">Section connection changed since this preview. Your preview is retained; prepare a new preview before starting.</p> : null}
+        {modelChanged ? <p role="status">The model for this draft changed since this preview. Preview again before starting.</p> : null}
         {configChanged ? <p role="status">Drafting settings changed since this preview. Your preview is retained; prepare a new preview before starting.</p> : null}
         {expired ? <p role="status">This preview expired. Prepare a new preview before starting.</p> : null}
         {preview && (!sourcePresent || preview.sourceThreadId !== sourceId) ? <p role="status">The preview is not for the current source choice. Prepare its completed excerpts before starting.</p> : null}

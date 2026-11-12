@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { BbPluginApi, MessageDispatchHookContext, MessageDispatchHookDecision, PluginAgentConfiguration, PluginAgentConfigurationContext } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import { createDraftExecutionResolver } from "./draft-execution";
-import { DRAFT_LIMITS, DRAFT_DEADLINE_MS, draftJobSchema, draftRecordSchema, draftRpcMethods, type DraftConfig, type DraftJob, type DraftRecord } from "./draft-contract";
+import { DRAFT_LIMITS, DRAFT_DEADLINE_MS, draftJobSchema, draftRecordSchema, draftRpcMethods, type DraftConfig, type DraftJob, type DraftRecord, type DraftSelection } from "./draft-contract";
 import { DRAFT_BOOTSTRAP, DRAFT_WORKER_INSTRUCTIONS, draftWorkerMarkerSchema, hasDraftMarker } from "./draft-policy";
 import { draftHash, draftProposals, extractDraftSource, turnOutcomes, validateDraftOutput, verifyDraftSource } from "./draft-validation";
 import type { Knowledge } from "./workstream-contract";
@@ -14,6 +14,10 @@ const textOf = (parts: readonly { type: string; text?: string }[]) => parts.map(
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error)).slice(0, 8000);
 const normalize = (text: string) => text.normalize("NFKC").toLowerCase().replace(/\s+/g, " ").trim();
 const sourceKey = (s: Knowledge["sources"][number]) => JSON.stringify([s.ref, s.authorType, s.observedAt, s.excerpt ?? ""]);
+/** The model a draft chose for itself, re-checked at Start instead of the Drafting setting. */
+function overrideOf(r: DraftRecord): DraftSelection | undefined {
+  return r.execution.origin === "override" ? executionConfig(r, false).selection ?? undefined : undefined;
+}
 function executionConfig(r: DraftRecord, follow = true): DraftConfig {
   return { revision: r.execution.configRevision, selection: follow && r.execution.origin === "source-thread" ? null : { providerId: r.execution.providerId, model: r.execution.model, reasoningLevel: r.execution.reasoningLevel, ...(r.execution.serviceTier === undefined ? {} : { serviceTier: r.execution.serviceTier }) }, updatedAt: null, updatedBy: null };
 }
@@ -119,7 +123,7 @@ export function createDraftService(bb: BbPluginApi, workstreams: Workstreams) {
     if (canonical.workstream.archived) throw new Error("The connected workstream is archived.");
     const timeline = await bb.sdk.threads.timeline({ threadId: thread.id, segmentLimit: String(DRAFT_LIMITS.segments), includeNestedRows: "true", summaryOnly: "false", deferContent: "false", signal });
     const turns = timeline.rows.some(row => row.kind === "conversation") ? await outcomesOf(thread.id, signal) : new Map();
-    const execution = await resolver.resolve(thread.id, signal);
+    const execution = await resolver.resolve(thread.id, signal, undefined, undefined, input.selection);
     const again = await bb.sdk.threads.get({ threadId: thread.id, signal });
     if (again.sectionId !== input.sectionId || again.archivedAt !== null || again.deletedAt !== null || workstreams.store.section(input.sectionId).revision !== binding.revision) throw new Error("Draft source changed during preview. Refresh preview; no source was retargeted.");
     const source = extractDraftSource({ sectionId: input.sectionId, sourceThreadId: thread.id, bindingRevision: binding.revision, workstreamId: canonical.workstream.id, workstreamRevision: canonical.workstream.revision, historySnapshot: timeline.timelinePage.historySnapshot }, timeline.rows, Date.now(), turns);
@@ -138,7 +142,7 @@ export function createDraftService(bb: BbPluginApi, workstreams: Workstreams) {
       bb.realtime.publish("drafts", { sectionId: r.sectionId, requestId: r.requestId, revision: r.revision });
       try {
         checkLive(current(r.requestId)); await verifySource(r, signal);
-        const fresh = await resolver.resolve(r.sourceThreadId, signal, executionConfig(r));
+        const fresh = await resolver.resolve(r.sourceThreadId, signal, executionConfig(r), undefined, overrideOf(r));
         resolver.compare(fresh.execution, r.execution);
         if (fresh.personalProjectId !== r.personalProjectId) throw new Error("Draft preview personal route changed. Refresh preview.");
         checkLive(current(r.requestId));
@@ -152,7 +156,7 @@ export function createDraftService(bb: BbPluginApi, workstreams: Workstreams) {
         const row = await setupQueue(current(r.requestId), created.id, signal);
         change(r.requestId, { worker: { state: "known", threadId: created.id }, bootstrapQueueId: row.id, setupUpdatedAt: row.updatedAt, setupSendAt: row.sendAt });
         checkLive(current(r.requestId)); await verifySource(current(r.requestId), signal);
-        const pinned = await resolver.resolve(r.sourceThreadId, signal, executionConfig(r, false), { hostId: r.execution.hostId, personalProjectId: r.personalProjectId! });
+        const pinned = await resolver.resolve(r.sourceThreadId, signal, executionConfig(r, false), { hostId: r.execution.hostId, personalProjectId: r.personalProjectId! }, overrideOf(r));
         resolver.compare({ ...pinned.execution, origin: r.execution.origin }, r.execution);
         const ready = current(r.requestId); checkLive(ready);
         const unchanged = await setupQueue(ready, created.id, signal);

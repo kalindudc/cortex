@@ -50,7 +50,7 @@ function setup() {
         expect(JSON.stringify(input)).not.toContain(message.text);
         const r = service.store.active()[0]; expect(r.worker.state).toBe("requesting"); expect(r.personalProjectId).toBe("project_personal");
         metadata = input.pluginMetadata;
-        queue = makeQueueEntry({ id: "queued_one", threadId: worker.id, content: input.input as any, sendAt: input.sendAt!, state: "scheduled", origin: "plugin", originPluginId: "cortex", initiator: "agent", senderThreadId: source.id, model: "model-a", reasoningLevel: "high", serviceTier: "priority", permissionMode: "accept-edits", updatedAt: Date.now() });
+        queue = makeQueueEntry({ id: "queued_one", threadId: worker.id, content: input.input as any, sendAt: input.sendAt!, state: "scheduled", origin: "plugin", originPluginId: "cortex", initiator: "agent", senderThreadId: source.id, model: input.model ?? "model-a", reasoningLevel: input.reasoningLevel ?? "high", serviceTier: input.serviceTier ?? "default", permissionMode: "accept-edits", updatedAt: Date.now() });
         state.listing = [worker];
         if (state.setupLost) throw new Error("spawn response lost");
         return worker;
@@ -78,7 +78,7 @@ function setup() {
   service = createDraftService(host.bb, ws);
   host.bb.rpc.register(draftRpcContract, draftHandlers(service));
   function lastActivation() { const calls = host.harness.inspection.sdk.callsTo("threads.queuedMessages.update"); return ((calls.at(-1)?.[0] as any)?.input ?? []).map((p: any) => p.text).join(""); }
-  function dispatch() { return makeMessageDispatchHookContext({ thread: worker, project: { id: "project_personal", kind: "personal" } as any, host: makeHostResponse({ id: "host_one" }), queuedMessages: queue ? [queue] : [], input: { blocks: queue?.content ?? [], text: queue?.content.map((p: any) => p.text ?? "").join("") ?? "" }, requestedExecution: { providerId: "provider-a", model: "model-a", reasoningLevel: "high", serviceTier: "priority", permissionMode: "accept-edits" }, origin: "plugin", originPluginId: "cortex", senderThreadId: source.id, initiator: "agent" }); }
+  function dispatch() { return makeMessageDispatchHookContext({ thread: worker, project: { id: "project_personal", kind: "personal" } as any, host: makeHostResponse({ id: "host_one" }), queuedMessages: queue ? [queue] : [], input: { blocks: queue?.content ?? [], text: queue?.content.map((p: any) => p.text ?? "").join("") ?? "" }, requestedExecution: { providerId: "provider-a", model: queue?.model ?? "model-a", reasoningLevel: queue?.reasoningLevel ?? "high", serviceTier: queue?.serviceTier ?? "priority", permissionMode: "accept-edits" }, origin: "plugin", originPluginId: "cortex", senderThreadId: source.id, initiator: "agent" }); }
   async function intent() { const preview = await service.sourcePreview({ sectionId: "sec_one", expectedBindingRevision: 1, sourceThreadId: source.id }); return { requestId: randomUUID(), sectionId: "sec_one", expectedBindingRevision: 1, sourceThreadId: source.id, sourceSnapshotId: preview.snapshotId, expectedConfigRevision: preview.execution.configRevision }; }
   return { ...host, service, ws, entries, mutate, state, source, message, canonical, intent, dispatch, worker: () => worker, metadata: () => metadata, queue: () => queue, setQueue: (next: typeof queue) => { queue = next; }, lastActivation };
 }
@@ -396,6 +396,36 @@ test("known owned worker configure supplies no Cortex tools/skills/primer while 
   expect(s.service.configuration(makePluginAgentConfigurationContext({ thread: forged, pluginMetadata: s.metadata() }))?.tools).toEqual([]);
   expect(s.service.guard(makeMessageDispatchHookContext({ thread: forged }))).toBeNull();
   expect(s.service.configuration(makePluginAgentConfigurationContext({ thread: s.source, pluginMetadata: {} }))).toBeNull();
+});
+test("a saved model choice without a tier previews, starts and dispatches on bb's standard tier", async () => {
+  const s = setup();
+  s.service.configSet({ expectedRevision: 0, selection: { providerId: "provider-a", model: "model-a", reasoningLevel: "high" } });
+  const input = await s.intent(); const result = await s.service.start(input);
+  expect(result.status, result.error ?? undefined).toBe("running");
+  expect(s.service.store.get(input.requestId)!.execution).toMatchObject({ serviceTier: "default", origin: "configured" });
+  expect(s.harness.inspection.sdk.callsTo("threads.spawn")[0]?.[0]).toMatchObject({ model: "model-a", reasoningLevel: "high", serviceTier: "default" });
+  expect(s.service.guard(s.dispatch())).toEqual({ action: "proceed" });
+  const ctx = s.dispatch();
+  expect(s.service.guard({ ...ctx, requestedExecution: { ...ctx.requestedExecution, serviceTier: "priority" } })?.action).toBe("reject");
+});
+test("a model chosen for one draft runs that draft, survives Start's re-checks and leaves the setting alone", async () => {
+  const s = setup();
+  s.harness.sdk.stub("providers.models", async () => ({ providers: [{ id: "provider-a", available: true, capabilities: { modelCatalogScope: "host", permissionModes: ["accept-edits"], supportsServiceTier: true } }], models: [{ model: "model-a", routeProviderId: "provider-a", supportedReasoningEfforts: [{ reasoningEffort: "high" }], supportedServiceTiers: [{ id: "priority" }] }, { model: "model-b", routeProviderId: "provider-a", supportedReasoningEfforts: [{ reasoningEffort: "low" }], supportedServiceTiers: [] }] }) as any);
+  s.service.configSet({ expectedRevision: 0, selection: { providerId: "provider-a", model: "model-a", reasoningLevel: "high", serviceTier: "priority" } });
+  const preview = await s.service.sourcePreview({ sectionId: "sec_one", expectedBindingRevision: 1, sourceThreadId: s.source.id, selection: { providerId: "provider-a", model: "model-b", reasoningLevel: "low" } });
+  expect(preview.execution).toMatchObject({ model: "model-b", reasoningLevel: "low", serviceTier: "default", origin: "override", configRevision: 1 });
+  const input = { requestId: randomUUID(), sectionId: "sec_one", expectedBindingRevision: 1, sourceThreadId: s.source.id, sourceSnapshotId: preview.snapshotId, expectedConfigRevision: 1 };
+  const result = await s.service.start(input);
+  expect(result.status, result.error ?? undefined).toBe("running");
+  expect(s.harness.inspection.sdk.callsTo("threads.spawn")[0]?.[0]).toMatchObject({ model: "model-b", reasoningLevel: "low", serviceTier: "default" });
+  expect(s.service.guard(s.dispatch())).toEqual({ action: "proceed" });
+  expect(s.service.configGet().selection).toMatchObject({ model: "model-a" });
+});
+test("a model chosen for one draft is refused when the catalog no longer offers it, with no fallback", async () => {
+  const s = setup();
+  await expect(s.service.sourcePreview({ sectionId: "sec_one", expectedBindingRevision: 1, sourceThreadId: s.source.id, selection: { providerId: "provider-a", model: "model-gone", reasoningLevel: "high" } })).rejects.toThrow(/unavailable.*no fallback/);
+  await expect(s.service.sourcePreview({ sectionId: "sec_one", expectedBindingRevision: 1, sourceThreadId: s.source.id, selection: { providerId: "provider-a", model: "model-a", reasoningLevel: "ultra" } })).rejects.toThrow(/reasoning level is unavailable/);
+  expect(s.harness.inspection.sdk.callsTo("threads.spawn")).toHaveLength(0);
 });
 test("worker dispatch rejects extra input, Send-now/inline mapping gaps, host/execution mismatch and expired jobs", async () => {
   const s = setup(); const input = await s.intent(); await s.service.start(input);

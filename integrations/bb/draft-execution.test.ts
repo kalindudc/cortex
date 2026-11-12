@@ -73,6 +73,21 @@ test.each([
   expect(s.harness.inspection.sdk.callsTo("threads.spawn")).toHaveLength(0);
 });
 
+test.each([
+  { supportsServiceTier: true, expected: "default" },
+  { supportsServiceTier: false, expected: undefined },
+])("a picker choice saved without a tier pins bb's standard tier only when the provider has tiers ($supportsServiceTier)", async ({ supportsServiceTier, expected }) => {
+  // The saved Codex choice and catalog shape from a real install: the picker omits the tier until one is picked.
+  const s = setup();
+  s.harness.sdk.stub("providers.models", async () => ({ providers: [{ id: "codex", available: true, capabilities: { modelCatalogScope: "host", permissionModes: ["accept-edits"], supportsServiceTier } }], models: [{ model: "gpt-6.1-sol", supportedReasoningEfforts: [{ reasoningEffort: "xhigh" }], supportedServiceTiers: [{ id: "fast", label: "Fast" }] }] }) as any);
+  s.store.configSet(0, { providerId: "codex", model: "gpt-6.1-sol", reasoningLevel: "xhigh" }, { id: "you", type: "human" });
+  const { execution } = await s.resolver.resolve("thr_aaaaaaaa");
+  expect(execution.serviceTier).toBe(expected);
+  expect(execution).toMatchObject({ providerId: "codex", model: "gpt-6.1-sol", reasoningLevel: "xhigh", origin: "configured" });
+  s.store.configSet(1, { providerId: "codex", model: "gpt-6.1-sol", reasoningLevel: "xhigh", serviceTier: "fast" }, { id: "you", type: "human" });
+  expect((await s.resolver.resolve("thr_aaaaaaaa")).execution.serviceTier).toBe("fast");
+});
+
 test("missing source concrete defaults asks for Settings choice instead of a list-first model", async () => {
   const s = setup(); s.harness.sdk.stub("threads.defaultExecutionOptions", async () => null);
   await expect(s.resolver.resolve("thr_aaaaaaaa")).rejects.toThrow(/Choose the drafting model/);

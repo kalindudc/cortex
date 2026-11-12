@@ -63,6 +63,16 @@ test("config changes affect future jobs only and cannot reroute a pinned job", (
   expect(() => store.create(record())).toThrow(/config.*revision/);
 });
 
+test("a saved choice without a tier accepts only bb's standard tier as its pinned execution", () => {
+  const { store } = setup();
+  const { serviceTier: _tier, ...untiered } = selection;
+  store.configSet(0, untiered, actor);
+  const configured = (serviceTier: string | undefined) => { const r = record({ ...sourceFixture(), sectionId: `sec_${serviceTier ?? "none"}` }); const { serviceTier: _old, ...execution } = r.execution; return { ...r, intent: { ...r.intent, expectedConfigRevision: 1 }, execution: { ...execution, ...(serviceTier === undefined ? {} : { serviceTier }), configRevision: 1, origin: "configured" as const } }; };
+  expect(() => store.create(configured("fast"))).toThrow(/pinned config selection/);
+  expect(store.create(configured("default")).execution.serviceTier).toBe("default");
+  expect(store.create(configured(undefined)).execution.serviceTier).toBeUndefined();
+});
+
 test("one active per section, three globally; unknown workers retain capacity after cancel", () => {
   const { store } = setup(); const first = store.create(record());
   expect(() => store.create(record())).toThrow(/section/);

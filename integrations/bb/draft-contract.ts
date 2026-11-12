@@ -10,7 +10,7 @@ const id = z.string().min(1).max(200);
 const at = z.string().datetime();
 export const draftSelectionSchema = z.object({ providerId: id, model: z.string().min(1).max(500), reasoningLevel: z.string().max(200), serviceTier: z.string().min(1).max(200).optional() }).strict();
 export const draftConfigSchema = z.object({ revision, selection: draftSelectionSchema.nullable(), updatedAt: at.nullable(), updatedBy: actorSchema.extend({ type: z.literal("human") }).nullable() }).strict();
-export const draftExecutionSchema = draftSelectionSchema.extend({ hostId: id, configRevision: revision, origin: z.enum(["configured", "source-thread"]) }).strict();
+export const draftExecutionSchema = draftSelectionSchema.extend({ hostId: id, configRevision: revision, origin: z.enum(["configured", "source-thread", "override"]) }).strict();
 // A message delivered during a running turn keeps the sequence it was sent at, which is before its own range.
 export const draftSourceMessageSchema = z.object({ messageId: id, messageSeq: revision, threadId: contextThreadIdSchema, turnId: id, completedAt: at,
   sourceSeqStart: revision, sourceSeqEnd: revision, role: z.enum(["user", "assistant"]), authorType: z.enum(["human", "agent", "system", "unknown"]), observedAt: at,
@@ -55,7 +55,8 @@ export const draftRpcMethods = {
   draftConfigGet: { input: z.null(), output: draftConfigSchema },
   draftConfigSet: { input: z.object({ expectedRevision: revision, selection: draftSelectionSchema.nullable() }).strict(), output: draftConfigSchema },
   draftCapabilities: { input: z.null(), output: z.object({ available: z.boolean(), reason: z.string().nullable(), maxActivePerSection: z.literal(1), maxActiveGlobal: z.literal(3), maxFindings: z.literal(3), maxMessages: z.literal(12), maxSourceChars: z.literal(16384), maxQuoteChars: z.literal(8192), maxOutputBytes: z.literal(32768) }).strict() },
-  draftSourcePreview: { input: z.object({ sectionId: id, expectedBindingRevision: revision, sourceThreadId: contextThreadIdSchema }).strict(), output: draftPreviewSchema },
+  // `selection` picks the model for this one draft instead of the Drafting setting.
+  draftSourcePreview: { input: z.object({ sectionId: id, expectedBindingRevision: revision, sourceThreadId: contextThreadIdSchema, selection: draftSelectionSchema.optional() }).strict(), output: draftPreviewSchema },
   draftStart: { input: draftStartInputSchema, output: draftJobSchema },
   draftJob: { input: z.object(target).strict(), output: draftJobSchema },
   draftJobs: { input: z.object({ sectionId: id, limit: z.number().int().min(1).max(50).default(20), offset: revision.default(0) }).strict(), output: z.object({ jobs: z.array(draftJobSchema), total: revision, limit: revision, offset: revision }).strict() },
