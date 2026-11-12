@@ -2,6 +2,12 @@
 
 Cortex follows [semantic versioning](https://semver.org). Each release has a section below, newest first.
 
+## 0.105.2 - 2026-11-11
+
+- **The context row never clips its text.** When the composer row is crowded, the Cortex summary shows the full
+  line, then just "Cortex", then only its icon, choosing by what actually fits instead of fixed widths. Text is never
+  cut off, and the icon alone takes the least room.
+
 ## 0.105.1 - 2026-11-11
 
 - **Connected sections keep ordinary Cortex memory.** Threads in a section with a shared brief again get the memory

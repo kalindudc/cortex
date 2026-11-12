@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { type RefObject, useLayoutEffect, useRef, useState } from "react";
 import {
   type ExperimentalThreadContextCardProps,
   type ExperimentalThreadContextSegmentInput,
@@ -108,6 +108,43 @@ function summaryLabel(widget: Widget): string {
   return [state, context?.error, widget.failure?.message, memory, task].filter(Boolean).join(". ");
 }
 
+/** The icon plus the button's padding: the segment never shrinks below its icon. */
+const ICON_ONLY_WIDTH = 28;
+/** Below this, not even the icon and "Cortex" fit, so measuring is skipped. */
+const SHORT_MIN_WIDTH = 76;
+export type SummaryFit = "full" | "short" | "icon";
+const NARROWER: Record<SummaryFit, SummaryFit> = { full: "short", short: "icon", icon: "icon" };
+
+/**
+ * The widest summary that fits without clipping any text: the full line, then "Cortex", then the icon alone. The
+ * button's width is its share of the row (flex basis 0), not its content, so stepping down cannot change what it
+ * measures. A wider row or new content starts again from the full line.
+ */
+export function useFittedTier(root: RefObject<HTMLElement | null>, content: string): SummaryFit {
+  const [width, setWidth] = useState<number | null>(null);
+  const key = `${width ?? ""}\u0000${content}`;
+  const [measured, setMeasured] = useState<{ key: string; fit: SummaryFit } | null>(null);
+  const fit: SummaryFit =
+    measured?.key === key ? measured.fit : width !== null && width < SHORT_MIN_WIDTH ? "icon" : "full";
+  useLayoutEffect(() => {
+    const target = root.current;
+    if (!target || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(entries => {
+      const entry = entries.find(entry => entry.target === target);
+      if (entry) setWidth(entry.borderBoxSize?.[0]?.inlineSize ?? entry.contentRect.width);
+    });
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [root]);
+  useLayoutEffect(() => {
+    const target = root.current;
+    if (!target) return;
+    const next = fit !== "icon" && target.scrollWidth > target.clientWidth ? NARROWER[fit] : fit;
+    if (measured?.key !== key || measured.fit !== next) setMeasured({ key, fit: next });
+  });
+  return fit;
+}
+
 /** One line in the context row: the workstream, its budget, what is held back, and the memory mark. */
 export function ContextSegmentSummary({ threadId, isExpanded, onToggle }: ExperimentalThreadContextSegmentProps) {
   const widget = useWidget(threadId);
@@ -118,20 +155,10 @@ export function ContextSegmentSummary({ threadId, isExpanded, onToggle }: Experi
   const blocked = widget.failure !== null || !!context?.error || (context !== undefined && context.status !== "ready" && context.status !== "unbound") || memoryLook?.tone === "error";
   const glyph = blocked ? "CircleAlert" : held > 0 || memoryLook?.tone === "warning" ? "TriangleAlert" : "Brain";
   const root = useRef<HTMLButtonElement>(null);
-  const [width, setWidth] = useState(240);
-  useLayoutEffect(() => {
-    const target = root.current;
-    if (!target || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(entries => {
-      const entry = entries.find(entry => entry.target === target);
-      if (entry) setWidth(entry.borderBoxSize?.[0]?.inlineSize ?? entry.contentRect.width);
-    });
-    observer.observe(target);
-    return () => observer.disconnect();
-  }, []);
-  const iconOnly = width < 100;
-  const complete = width >= 240;
   const label = `${summaryLabel(widget)}. ${isExpanded ? "Hide" : "Show"} details`;
+  const fit = useFittedTier(root, label);
+  const iconOnly = fit === "icon";
+  const complete = fit === "full";
   return (
     <button
       type="button"
@@ -140,29 +167,30 @@ export function ContextSegmentSummary({ threadId, isExpanded, onToggle }: Experi
       aria-label={label}
       title={label}
       onClick={onToggle}
-      style={{ flex: "1 1 0%", minWidth: 0 }}
+      style={{ flex: "1 1 0%", minWidth: ICON_ONLY_WIDTH }}
       data-cortex-summary=""
-      className="inline-flex h-7 min-w-0 max-w-full items-center gap-1.5 rounded-md px-1.5 text-[12px] text-muted-foreground hover:bg-state-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      data-cortex-fit={fit}
+      className="inline-flex h-7 max-w-full items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-md px-1.5 text-[12px] text-muted-foreground hover:bg-state-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
     >
       <span data-cortex-summary-icon="" className="inline-flex shrink-0">
         <Icon name={glyph} className={cn("size-3.5", glyph === "Brain" ? "text-primary" : "text-foreground")} aria-hidden />
       </span>
       {!iconOnly ? <>
-      {!complete ? <span data-cortex-extra="" className="min-w-0 truncate text-foreground">Cortex</span> : context === undefined ? (
+      {!complete ? <span data-cortex-extra="" className="shrink-0 text-foreground">Cortex</span> : context === undefined ? (
         <>
-          <span className="min-w-0 truncate text-foreground">Cortex unavailable</span>
+          <span className="shrink-0 text-foreground">Cortex unavailable</span>
         </>
       ) : context.status === "unbound" ? (
-        <span className="text-foreground">Cortex</span>
+        <span className="shrink-0 text-foreground">Cortex</span>
       ) : (
         <>
-          <span data-cortex-extra="" className="min-w-0 truncate font-semibold text-foreground">{context.workstream?.name}</span>
+          <span data-cortex-extra="" className="shrink-0 font-semibold text-foreground">{context.workstream?.name}</span>
 
           <span className={cn("shrink-0 whitespace-nowrap tabular-nums text-foreground", context.status === "ready" ? "" : TONE_TEXT[status!.tone])}>
             {context.status === "ready" ? plural(context.entries.length, "takeaway") : status!.word}
           </span>
           {held > 0 ? (
-            <span className="inline-flex items-center gap-0.5 text-warning-text">
+            <span className="inline-flex shrink-0 items-center gap-0.5 text-warning-text">
               <Icon name="TriangleAlert" className="size-3" aria-hidden />
               <span className="tabular-nums">{held}</span>
               <span className="sr-only">held back</span>
@@ -171,7 +199,7 @@ export function ContextSegmentSummary({ threadId, isExpanded, onToggle }: Experi
         </>
       )}
       {complete && widget.showMemory ? <MemoryMark memory={widget.memory} failure={widget.memoryFailure} /> : null}
-      {width >= 140 ? <Icon name={isExpanded ? "ChevronDown" : "ChevronRight"} className="size-3.5 shrink-0" aria-hidden /> : null}
+      <Icon name={isExpanded ? "ChevronDown" : "ChevronRight"} className="size-3.5 shrink-0" aria-hidden />
       </> : null}
     </button>
   );

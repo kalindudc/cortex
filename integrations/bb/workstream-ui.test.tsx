@@ -639,6 +639,64 @@ describe("crowded composer allocation", () => {
   });
 });
 
+describe("summary fits without clipping text", () => {
+  test("shows the widest summary that fits, then the icon alone, and widens again", async () => {
+    const observers = new Map<Element, ResizeObserverCallback>();
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(private callback: ResizeObserverCallback) {}
+      observe(target: Element) { observers.set(target, this.callback); }
+      disconnect() { observers.clear(); }
+    });
+    let allocated = 400;
+    // jsdom has no layout: model the button's content width from what it renders, and its box from its share.
+    const contentWidth = (el: Element) => {
+      const visible = el.cloneNode(true) as Element;
+      for (const hidden of Array.from(visible.querySelectorAll(".sr-only"))) hidden.remove();
+      return 12 + 7 * (visible.textContent ?? "").length + 20 * visible.querySelectorAll("[data-icon]").length;
+    };
+    const client = Object.getOwnPropertyDescriptor(Element.prototype, "clientWidth")!;
+    const scroll = Object.getOwnPropertyDescriptor(Element.prototype, "scrollWidth")!;
+    Object.defineProperty(HTMLElement.prototype, "clientWidth", { configurable: true, get(this: HTMLElement) { return this.hasAttribute("data-cortex-summary") ? allocated : client.get!.call(this); } });
+    Object.defineProperty(HTMLElement.prototype, "scrollWidth", { configurable: true, get(this: HTMLElement) { return this.hasAttribute("data-cortex-summary") ? Math.max(allocated, contentWidth(this)) : scroll.get!.call(this); } });
+    try {
+      const { slot } = renderSegment(makeBackend(), false);
+      const button = await slot.findByRole("button", { name: /Cortex context.*Show details/ });
+      const resize = async (width: number) => {
+        allocated = width;
+        await act(async () => observers.get(button)?.([{ target: button, contentRect: { width } } as unknown as ResizeObserverEntry], {} as ResizeObserver));
+      };
+      const noClipping = () => expect(button.querySelector(".truncate")).toBeNull();
+
+      await resize(400);
+      expect(button.getAttribute("data-cortex-fit")).toBe("full");
+      expect(button.textContent).toContain("Envoy");
+      noClipping();
+      const full = contentWidth(button);
+
+      await resize(full - 1);
+      expect(button.getAttribute("data-cortex-fit")).toBe("short");
+      expect(button.textContent).toBe("Cortex");
+      noClipping();
+      const short = contentWidth(button);
+
+      await resize(short - 1);
+      expect(button.getAttribute("data-cortex-fit")).toBe("icon");
+      expect(button.textContent).toBe("");
+      expect(button.querySelectorAll("[data-icon]")).toHaveLength(1);
+      expect(button.style.minWidth).toBe("28px");
+
+      await resize(full);
+      expect(button.getAttribute("data-cortex-fit")).toBe("full");
+      expect(button.textContent).toContain("Envoy");
+      expect(button.getAttribute("title")).toBe(button.getAttribute("aria-label"));
+    } finally {
+      delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth;
+      delete (HTMLElement.prototype as { scrollWidth?: number }).scrollWidth;
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
 describe("refresh regressions with runtime-faithful per-hook clients", () => {
   test("visible, summary and details share one read, while unrelated hosts stay isolated", async () => {
     const first = renderSegment(makeBackend()).slot;
