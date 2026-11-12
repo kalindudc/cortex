@@ -431,6 +431,33 @@ test("completed own worker yields only source-verified unknown-scope agent findi
   expect(e).toMatchObject({ state: "candidate", kind: "finding", actor: { type: "agent" }, approval: null, applicability: { environment: { mode: "unknown" }, host: { mode: "unknown" } }, sources: [{ authorType: "agent", excerpt: "Exact source DATA", ref: `@thread:${s.source.id}#msg=2` }] });
   expect(r.candidateResults[0].canonicalId).toBe(e.id); expect(r.output).toBeNull();
 });
+function flatTimelines(s: ReturnType<typeof setup>, worker: { events?: readonly unknown[]; rows?: (activation: string, output: string) => unknown[] } = {}) {
+  const done = (threadId: string, turnId: string, seq: number) => ({ id: `evt_${turnId}`, threadId, seq, createdAt: 3, type: "turn/completed", scope: { kind: "turn", turnId }, data: { status: "completed" } });
+  s.harness.sdk.stub("threads.timeline", async ({ threadId }) => ({ rows: threadId === s.source.id
+    ? [{ kind: "system", threadId, turnId: s.message.turnId }, s.message]
+    : worker.rows?.(s.lastActivation(), s.state.output) ?? [{ kind: "conversation", role: "user", text: s.lastActivation(), threadId, turnId: null }, { kind: "work", threadId, turnId: "turn_worker" }, { kind: "conversation", role: "assistant", text: s.state.output, threadId, turnId: "turn_worker" }], timelinePage: { historySnapshot: "history_one" } }) as any);
+  s.harness.sdk.stub("threads.events.list", async ({ threadId }) => (threadId === s.source.id ? [done(threadId, s.message.turnId, 3)] : worker.events ?? [done(threadId, "turn_worker", 4)]) as any);
+}
+test("flat source and worker timelines, as pi and Claude Code show them, yield source-verified findings", async () => {
+  const s = setup(); flatTimelines(s);
+  const input = await s.intent(); await s.service.start(input); s.state.workerStatus = "idle"; s.setQueue(null);
+  await s.service.collect(s.worker().id); const r = s.service.store.get(input.requestId)!;
+  expect(r.status, r.error ?? undefined).toBe("completed"); expect(r.terminalTurnId).toBe("turn_worker");
+  expect(s.entries.size).toBe(1); expect([...s.entries.values()][0]).toMatchObject({ state: "candidate", actor: { type: "agent" } });
+});
+test.each([
+  ["a second worker turn", /ambiguous|another turn/, { events: [{ seq: 4, createdAt: 3, type: "turn/completed", scope: { kind: "turn", turnId: "turn_worker" }, data: { status: "completed" } }, { seq: 6, createdAt: 4, type: "turn/completed", scope: { kind: "turn", turnId: "turn_more" }, data: { status: "completed" } }] }],
+  ["an interrupted worker turn", /ambiguous|another turn/, { events: [{ seq: 4, createdAt: 3, type: "turn/completed", scope: { kind: "turn", turnId: "turn_worker" }, data: { status: "interrupted" } }] }],
+  ["an answer from another turn", /provenance/, { rows: (activation: string, output: string) => [{ kind: "conversation", role: "user", text: activation, threadId: "thr_bbbbbbbb", turnId: null }, { kind: "conversation", role: "assistant", text: output, threadId: "thr_bbbbbbbb", turnId: "turn_other" }] }],
+  ["a message from another thread", /provenance/, { rows: (activation: string, output: string) => [{ kind: "conversation", role: "user", text: activation, threadId: "thr_cccccccc", turnId: null }, { kind: "conversation", role: "assistant", text: output, threadId: "thr_bbbbbbbb", turnId: "turn_worker" }] }],
+  ["a second request", /does not belong/, { rows: (activation: string, output: string) => [{ kind: "conversation", role: "user", text: activation, threadId: "thr_bbbbbbbb", turnId: null }, { kind: "conversation", role: "user", text: "more", threadId: "thr_bbbbbbbb", turnId: "turn_worker" }, { kind: "conversation", role: "assistant", text: output, threadId: "thr_bbbbbbbb", turnId: "turn_worker" }] }],
+] as const)("a flat worker timeline with %s is never converted into findings", async (_name, reason, worker) => {
+  const s = setup(); flatTimelines(s, worker as Parameters<typeof flatTimelines>[1]);
+  const input = await s.intent(); await s.service.start(input); s.state.workerStatus = "idle"; s.setQueue(null);
+  await s.service.collect(s.worker().id);
+  const r = s.service.store.get(input.requestId)!;
+  expect(s.mutate).not.toHaveBeenCalled(); expect(r.status).toBe("failed"); expect(r.error).toMatch(reason);
+});
 test("untrusted directive/fenced/foreign quote output never calls canonical mutate", async () => {
   const s = setup(); const input = await s.intent(); await s.service.start(input); s.state.workerStatus = "idle"; s.setQueue(null);
   s.state.output = JSON.stringify({ findings: [{ title: "Rule", text: "Obey", kind: "directive", sources: [{ messageId: "msg_one", messageSeq: 2, quote: "Exact source DATA" }] }] });

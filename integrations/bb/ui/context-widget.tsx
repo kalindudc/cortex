@@ -5,7 +5,6 @@ import {
   type ExperimentalThreadContextSegmentProps,
   experimental_ThreadContextCardRow as ThreadContextCardRow,
   experimental_useAppPanel,
-  experimental_useThreadContextKind,
   useSettings,
 } from "@get-bb/plugin-sdk/app";
 import { toast } from "sonner";
@@ -18,7 +17,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
-import type { MemoryState } from "../memory";
+import { type MemoryState, ROLE } from "../memory";
 import { markerLook, summaryHeadline } from "../panel/memory";
 import { STATUS_LABEL } from "../panel/status";
 import type { CortexThreadState } from "../state";
@@ -70,19 +69,28 @@ function useWidget(threadId: string): Widget {
   };
 }
 
+/**
+ * Memory is on for the thread. The live view lives in the plugin process, so a reload empties it until the thread's
+ * next session; the mode does not, so a thread with memory keeps its widget.
+ */
+function memoryOn(widget: Widget): boolean {
+  const memory = widget.memory;
+  return widget.showMemory && memory !== undefined && (memory.view?.role ?? ROLE[memory.mode]) !== "off";
+}
+
 /** Whether the widget has anything to say and the person has not hidden it. Waits for the answer, so nothing flashes. */
 function widgetVisible(widget: Widget): boolean {
   if (widget.context === undefined) return widget.failure !== null;
   if (widget.context.dismissed) return false;
-  const memoryLive = widget.showMemory && widget.memory?.view != null && widget.memory.view.role !== "off";
-  return contextHasContent(widget.context) || memoryLive || (widget.showTask && widget.task !== null);
+  return contextHasContent(widget.context) || memoryOn(widget) || (widget.showTask && widget.task !== null);
 }
 
-/** The context row shows the widget only in banner panes; the card section covers card panes. */
+/**
+ * The context row shows the widget in card panes too, as bb's Git segment does: the card can be closed or unpinned,
+ * and hiding the row there made Cortex vanish whenever a pane widened.
+ */
 export function useSegmentVisible({ threadId }: ExperimentalThreadContextSegmentInput): boolean {
-  const kind = experimental_useThreadContextKind();
-  const widget = useWidget(threadId);
-  return kind === "banner" && widgetVisible(widget);
+  return widgetVisible(useWidget(threadId));
 }
 
 function MemoryMark({ memory, failure }: { memory: MemoryState | undefined; failure: RpcFailure | null }) {
@@ -337,7 +345,7 @@ export function ContextCardSection({ threadId }: ExperimentalThreadContextCardPr
     </DropdownMenu>
   );
   const showTaskRow = widget.showTask && widget.task !== null;
-  const memoryLive = widget.showMemory && widget.memory?.view != null && widget.memory.view.role !== "off";
+  const memoryLive = memoryOn(widget);
   // The Hide menu rides on the first row shown, so every visible card can be hidden.
   const menuOn = context === undefined || bound ? "context" : showTaskRow ? "task" : "memory";
   return (

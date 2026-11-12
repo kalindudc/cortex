@@ -11,11 +11,12 @@ const at = z.string().datetime();
 export const draftSelectionSchema = z.object({ providerId: id, model: z.string().min(1).max(500), reasoningLevel: z.string().max(200), serviceTier: z.string().min(1).max(200).optional() }).strict();
 export const draftConfigSchema = z.object({ revision, selection: draftSelectionSchema.nullable(), updatedAt: at.nullable(), updatedBy: actorSchema.extend({ type: z.literal("human") }).nullable() }).strict();
 export const draftExecutionSchema = draftSelectionSchema.extend({ hostId: id, configRevision: revision, origin: z.enum(["configured", "source-thread"]) }).strict();
+// A message delivered during a running turn keeps the sequence it was sent at, which is before its own range.
 export const draftSourceMessageSchema = z.object({ messageId: id, messageSeq: revision, threadId: contextThreadIdSchema, turnId: id, completedAt: at,
   sourceSeqStart: revision, sourceSeqEnd: revision, role: z.enum(["user", "assistant"]), authorType: z.enum(["human", "agent", "system", "unknown"]), observedAt: at,
   ref: z.string().min(1).max(2000), start: revision, end: revision, totalChars: revision,
   quote: knowledgeSourceSchema.shape.excerpt.unwrap().min(1), messageHash: z.string().regex(/^[a-f0-9]{64}$/), quoteHash: z.string().regex(/^[a-f0-9]{64}$/),
-}).strict().refine(m => m.start <= m.end && m.end <= m.totalChars && m.end - m.start === m.quote.length && m.sourceSeqStart <= m.messageSeq && m.messageSeq <= m.sourceSeqEnd, "Source excerpt span/sequence does not match its dimensions.");
+}).strict().refine(m => m.start <= m.end && m.end <= m.totalChars && m.end - m.start === m.quote.length && m.sourceSeqStart <= m.sourceSeqEnd && m.messageSeq <= m.sourceSeqEnd, "Source excerpt span/sequence does not match its dimensions.");
 export const draftSourceSnapshotSchema = z.object({ snapshotId: z.string().uuid(), sectionId: id, sourceThreadId: contextThreadIdSchema,
   bindingRevision: revision, workstreamId: workstreamIdSchema, workstreamRevision: z.number().int().positive(), capturedAt: at, expiresAt: at, historySnapshot: z.string().min(1).max(1000),
   label: z.string().min(1).max(1000), omittedMessages: revision, messages: z.array(draftSourceMessageSchema).min(1).max(DRAFT_LIMITS.messages),

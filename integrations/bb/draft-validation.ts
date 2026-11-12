@@ -7,11 +7,45 @@ export const draftHash = (text: string) => createHash("sha256").update(text).dig
 const rowSourceSchema = z.object({ kind: z.literal("conversation"), id: z.string().min(1), messageSeq: z.number().int().nonnegative(), sourceSeqStart: z.number().int().nonnegative(), sourceSeqEnd: z.number().int().nonnegative(), threadId: z.string(), turnId: z.string(), role: z.enum(["user", "assistant"]), initiator: z.enum(["user", "agent", "system"]).optional(), text: z.string().max(1_000_000), createdAt: z.number().finite(), turnRequest: z.object({ status: z.enum(["accepted", "pending", "rejected"]) }).passthrough().nullable().optional() }).passthrough();
 const turnSchema = z.object({ kind: z.literal("turn"), threadId: z.string(), turnId: z.string().min(1), sourceSeqStart: z.number().int().nonnegative(), sourceSeqEnd: z.number().int().nonnegative(), status: z.enum(["completed", "pending", "error", "interrupted"]), completedAt: z.number().finite().nullable(), children: z.array(z.unknown()).max(DRAFT_LIMITS.rows).nullable() }).passthrough();
 type Frame = Pick<DraftSource, "sectionId" | "sourceThreadId" | "bindingRevision" | "workstreamId" | "workstreamRevision" | "historySnapshot">;
-export function extractDraftSource(frame: Frame, rawRows: unknown[], now = Date.now()): DraftSource {
+const turnEventSchema = z.object({ seq: z.number().int().nonnegative(), createdAt: z.number().finite(), type: z.literal("turn/completed"), threadId: z.string().optional(), scope: z.object({ kind: z.literal("turn"), turnId: z.string().min(1) }).passthrough(), data: z.object({ status: z.string() }).passthrough() }).passthrough();
+/** How one turn ended, from bb's `turn/completed` event: needed when the timeline lists messages flat, without turn rows. */
+export type TurnOutcome = { status: string; completedAt: number; seq: number };
+/**
+ * Each turn's outcome by turn id, from a thread's `turn/completed` events; rows that are not one, or belong to another
+ * thread, are ignored.
+ */
+export function turnOutcomes(events: readonly unknown[], threadId: string): Map<string, TurnOutcome> {
+  const outcomes = new Map<string, TurnOutcome>();
+  for (const raw of events) {
+    const event = turnEventSchema.safeParse(raw);
+    if (!event.success || (event.data.threadId !== undefined && event.data.threadId !== threadId)) continue;
+    outcomes.set(event.data.scope.turnId, { status: event.data.data.status, completedAt: event.data.createdAt, seq: event.data.seq });
+  }
+  return outcomes;
+}
+export function extractDraftSource(frame: Frame, rawRows: unknown[], now = Date.now(), turns: ReadonlyMap<string, TurnOutcome> = new Map()): DraftSource {
   if (rawRows.length > DRAFT_LIMITS.rows) throw new Error("Source exceeds the bounded timeline row limit.");
   const eligible: Array<{ message: z.infer<typeof rowSourceSchema>; completedAt: number }> = [];
   let count = rawRows.length;
+  const admit = (message: z.infer<typeof rowSourceSchema>, completedAt: number) => {
+    if (message.turnRequest && message.turnRequest.status !== "accepted") throw new Error("Source message was not accepted in the completed turn.");
+    if (message.text.length === 0) return;
+    if (eligible.some(e => e.message.id === message.id || e.message.messageSeq === message.messageSeq)) throw new Error("Duplicate source message identity in timeline.");
+    eligible.push({ message, completedAt });
+  };
   for (const raw of rawRows) {
+    if (typeof raw === "object" && raw !== null && "kind" in raw && raw.kind === "conversation") {
+      // A flat timeline: the message counts only when its turn's own event says that turn completed after it. A
+      // thread's first message has no turn id, in the timeline or when re-read, so it cannot be pinned and is left out.
+      const turnId = Reflect.get(raw, "turnId");
+      const outcome = typeof turnId === "string" ? turns.get(turnId) : undefined;
+      if (!outcome || outcome.status !== "completed") continue;
+      const message = rowSourceSchema.parse(raw);
+      if (message.threadId !== frame.sourceThreadId) throw new Error("Source message thread or completed turn does not match.");
+      if (message.messageSeq > message.sourceSeqEnd || message.sourceSeqEnd > outcome.seq) throw new Error("Source message is outside its completed turn range.");
+      admit(message, outcome.completedAt);
+      continue;
+    }
     if (typeof raw !== "object" || raw === null || !("kind" in raw) || raw.kind !== "turn") continue;
     const turn = turnSchema.parse(raw);
     if (turn.threadId !== frame.sourceThreadId) throw new Error("Source turn belongs to a foreign thread.");
@@ -21,11 +55,8 @@ export function extractDraftSource(frame: Frame, rawRows: unknown[], now = Date.
       if (typeof child !== "object" || child === null || !("kind" in child) || child.kind !== "conversation") continue;
       const message = rowSourceSchema.parse(child);
       if (message.threadId !== frame.sourceThreadId || message.turnId !== turn.turnId) throw new Error("Source message thread or completed turn does not match.");
-      if (message.sourceSeqStart < turn.sourceSeqStart || message.sourceSeqEnd > turn.sourceSeqEnd || message.messageSeq < message.sourceSeqStart || message.messageSeq > message.sourceSeqEnd) throw new Error("Source message is outside its completed turn range.");
-      if (message.turnRequest && message.turnRequest.status !== "accepted") throw new Error("Source message was not accepted in the completed turn.");
-      if (message.text.length === 0) continue;
-      if (eligible.some(e => e.message.id === message.id || e.message.messageSeq === message.messageSeq)) throw new Error("Duplicate source message identity in timeline.");
-      eligible.push({ message, completedAt: turn.completedAt });
+      if (message.sourceSeqStart < turn.sourceSeqStart || message.sourceSeqEnd > turn.sourceSeqEnd || message.messageSeq > message.sourceSeqEnd) throw new Error("Source message is outside its completed turn range.");
+      admit(message, turn.completedAt);
     }
   }
   if (eligible.length === 0) throw new Error("No recent completed messages are available for drafting.");

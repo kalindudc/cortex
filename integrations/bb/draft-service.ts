@@ -4,11 +4,12 @@ import { z } from "zod";
 import { createDraftExecutionResolver } from "./draft-execution";
 import { DRAFT_LIMITS, DRAFT_DEADLINE_MS, draftJobSchema, draftRecordSchema, draftRpcMethods, type DraftConfig, type DraftJob, type DraftRecord } from "./draft-contract";
 import { DRAFT_BOOTSTRAP, DRAFT_WORKER_INSTRUCTIONS, draftWorkerMarkerSchema, hasDraftMarker } from "./draft-policy";
-import { draftHash, draftProposals, extractDraftSource, validateDraftOutput, verifyDraftSource } from "./draft-validation";
+import { draftHash, draftProposals, extractDraftSource, turnOutcomes, validateDraftOutput, verifyDraftSource } from "./draft-validation";
 import type { Knowledge } from "./workstream-contract";
 import type { Workstreams } from "./workstreams";
 
 type WorkerThread = Awaited<ReturnType<BbPluginApi["sdk"]["threads"]["get"]>>;
+type TimelineRows = Extract<Awaited<ReturnType<BbPluginApi["sdk"]["threads"]["timeline"]>>, { rows: unknown }>["rows"];
 const textOf = (parts: readonly { type: string; text?: string }[]) => parts.map(p => p.type === "text" ? p.text ?? "" : "").join("");
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error)).slice(0, 8000);
 const normalize = (text: string) => text.normalize("NFKC").toLowerCase().replace(/\s+/g, " ").trim();
@@ -117,10 +118,11 @@ export function createDraftService(bb: BbPluginApi, workstreams: Workstreams) {
     const canonical = await workstreams.cli.show({ id: binding.binding.workstreamId, limit: 1, offset: 0 }, signal);
     if (canonical.workstream.archived) throw new Error("The connected workstream is archived.");
     const timeline = await bb.sdk.threads.timeline({ threadId: thread.id, segmentLimit: String(DRAFT_LIMITS.segments), includeNestedRows: "true", summaryOnly: "false", deferContent: "false", signal });
+    const turns = timeline.rows.some(row => row.kind === "conversation") ? await outcomesOf(thread.id, signal) : new Map();
     const execution = await resolver.resolve(thread.id, signal);
     const again = await bb.sdk.threads.get({ threadId: thread.id, signal });
     if (again.sectionId !== input.sectionId || again.archivedAt !== null || again.deletedAt !== null || workstreams.store.section(input.sectionId).revision !== binding.revision) throw new Error("Draft source changed during preview. Refresh preview; no source was retargeted.");
-    const source = extractDraftSource({ sectionId: input.sectionId, sourceThreadId: thread.id, bindingRevision: binding.revision, workstreamId: canonical.workstream.id, workstreamRevision: canonical.workstream.revision, historySnapshot: timeline.timelinePage.historySnapshot }, timeline.rows);
+    const source = extractDraftSource({ sectionId: input.sectionId, sourceThreadId: thread.id, bindingRevision: binding.revision, workstreamId: canonical.workstream.id, workstreamRevision: canonical.workstream.revision, historySnapshot: timeline.timelinePage.historySnapshot }, timeline.rows, Date.now(), turns);
     return store.snapshotPut(source, execution.execution, execution.personalProjectId);
   }
   async function start(input: z.infer<typeof draftRpcMethods.draftStart.input>, signal?: AbortSignal): Promise<DraftJob> {
@@ -265,6 +267,29 @@ export function createDraftService(bb: BbPluginApi, workstreams: Workstreams) {
     r = current(id);
     return view(change(id, { status: r.cancellation.state !== "none" ? "stopped" : proposals.length === 0 ? "nothing-to-save" : "completed", active: false, output: null, error: null, retry: "none", progress: proposals.length === 0 ? "Nothing supported was found; no canonical write was made." : "Finding candidates were saved for explicit human review; no Rule was approved." }));
   }
+  /** The thread's recent turn outcomes; a flat timeline has no turn rows, so completion comes from these events. */
+  async function outcomesOf(threadId: string, signal?: AbortSignal) {
+    return turnOutcomes(await bb.sdk.threads.events.list({ threadId, types: ["turn/completed"], order: "desc", limit: "100", signal }), threadId);
+  }
+  /** The worker's single completed turn: its id, its one request and its answer, from turn rows or a flat timeline. */
+  async function workerTurn(threadId: string, rows: TimelineRows, signal?: AbortSignal) {
+    const grouped = rows.filter((row): row is Extract<typeof row, { kind: "turn" }> => row.kind === "turn");
+    if (grouped.length > 0) {
+      if (grouped.length !== 1) throw new Error("Worker completed output is ambiguous or contains another turn.");
+      const turn = grouped[0]; const children = turn.children ?? [];
+      if (children.some(c => c.kind === "conversation" && (c.threadId !== threadId || c.turnId !== turn.turnId))) throw new Error("Worker message thread/turn provenance does not match its completed turn.");
+      if (turn.threadId !== threadId || turn.status !== "completed" || turn.completedAt === null || children.length > DRAFT_LIMITS.rows) throw new Error("Worker output does not belong to the single completed activated source turn.");
+      const messages = children.flatMap(c => c.kind === "conversation" ? [c] : []);
+      return { turnId: turn.turnId, requests: messages.filter(c => c.role === "user"), answers: messages.filter(c => c.role === "assistant") };
+    }
+    const outcomes = [...(await outcomesOf(threadId, signal))];
+    if (outcomes.length !== 1 || outcomes[0]![1].status !== "completed") throw new Error("Worker completed output is ambiguous or contains another turn.");
+    const turnId = outcomes[0]![0];
+    const messages = rows.flatMap(row => row.kind === "conversation" ? [row] : []);
+    // The request arrives as the thread's first message, before bb assigns it a turn; every answer must be the turn's.
+    if (messages.some(m => m.threadId !== threadId || (m.role === "assistant" ? m.turnId !== turnId : m.turnId !== null && m.turnId !== turnId))) throw new Error("Worker message thread/turn provenance does not match its completed turn.");
+    return { turnId, requests: messages.filter(m => m.role === "user"), answers: messages.filter(m => m.role === "assistant") };
+  }
   async function collectUnlocked(threadId: string, signal?: AbortSignal): Promise<void> {
     let r = store.byWorker(threadId); if (!r || r.output !== null || ["completed", "nothing-to-save", "failed", "stopped"].includes(r.status)) return;
     if (r.cancellation.state !== "none") { await stopOwned(r.requestId, signal); return; }
@@ -274,13 +299,9 @@ export function createDraftService(bb: BbPluginApi, workstreams: Workstreams) {
       if (!r.admittedRequestId || !r.activationHash || !r.activationAttempted) throw new Error("No privately admitted source turn was observed; setup output cannot become findings.");
       const page = await bb.sdk.threads.timeline({ threadId, segmentLimit: "2", summaryOnly: "false", deferContent: "false", includeNestedRows: "true", signal });
       if (page.rows.length > DRAFT_LIMITS.rows) throw new Error("Worker output exceeds bounded turn rows.");
-      const turns = page.rows.filter((row): row is Extract<typeof row, { kind: "turn" }> => row.kind === "turn");
-      if (turns.length !== 1) throw new Error("Worker completed output is ambiguous or contains another turn.");
-      const turn = turns[0]; const children = turn.children ?? [];
-      if (children.some(c => c.kind === "conversation" && (c.threadId !== threadId || c.turnId !== turn.turnId))) throw new Error("Worker message thread/turn provenance does not match its completed turn.");
-      const requests = children.filter(c => c.kind === "conversation" && c.role === "user");
-      if (turn.threadId !== threadId || turn.status !== "completed" || turn.completedAt === null || children.length > DRAFT_LIMITS.rows || requests.length !== 1 || requests[0].kind !== "conversation" || draftHash(requests[0].text) !== r.activationHash) throw new Error("Worker output does not belong to the single completed activated source turn.");
-      const answer = children.filter(c => c.kind === "conversation" && c.role === "assistant").map(c => c.kind === "conversation" ? c.text : "").join("\n");
+      const turn = await workerTurn(threadId, page.rows, signal);
+      if (turn.requests.length !== 1 || draftHash(turn.requests[0]!.text) !== r.activationHash) throw new Error("Worker output does not belong to the single completed activated source turn.");
+      const answer = turn.answers.map(c => c.text).join("\n");
       const output = validateDraftOutput(answer, r.source); await verifySource(r, signal); checkLive(current(r.requestId));
       r = change(r.requestId, { status: "validating", output, findingCount: output.findings.length, terminalTurnId: turn.turnId, progress: "Source and strict JSON are verified. Confirming worker inactivity before saving candidates." });
       await stopOwned(r.requestId, signal); await save(r.requestId, signal);

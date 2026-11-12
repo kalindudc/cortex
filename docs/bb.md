@@ -42,9 +42,9 @@ checkout and the machine running the agent are not deployment targets. An unknow
 ## Draft from a thread
 
 Choose the model in Cortex's Drafting settings, then Save. The default follows the source thread's model;
-changes affect future drafts only. Choose a thread in the connected section and inspect its completed-message
-excerpts and requested model before Start. The preview is not the whole conversation or proof of provider use.
-Suggestions keep their sources and await your individual review; no Rule or approval is adopted automatically.
+changes affect future drafts only. Choose a thread in the connected section and inspect excerpts from its finished
+turns (never its first message, which has no turn to check) and the model before Start. The preview is not the whole
+conversation or proof of provider use. Suggestions await your individual review; nothing is adopted automatically.
 After reload, check the original request. Stop requested is not stopped; partial saved results remain linked.
 Save recovery uses the original result without another model turn. The helper omits Cortex tools and memory;
 provider-native tools and other plugins are not a security sandbox.
@@ -95,10 +95,10 @@ Direct shell and Cortex CLI access remain outside this accidental-selection cont
 
 ## Keep conversations clear
 
-The composer summary shrinks with available space, down to one icon that still opens its details. Collapse it
-for a short summary, or close it completely; the per-thread preference survives reloads. Restore it from the thread
-action or Memory tab. The global default can hide it without disabling memory; each thread can override or follow
-that default. Closing the widget changes presentation only, not knowledge sharing.
+The composer summary shrinks with available space, down to one icon that opens its details, and stays in wide panes
+beside bb's context card. Collapse it, or close it; the per-thread preference survives reloads. Restore it from the
+thread action or Memory tab. The global default can hide it without disabling memory; each thread can override or
+follow that default. Closing the widget changes presentation only, not knowledge sharing.
 
 ## Work with tasks
 

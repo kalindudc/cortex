@@ -913,7 +913,7 @@ describe("memory context marker", () => {
     expect((await loading.findByText("Memory: loading")).parentElement!.getAttribute("data-tone")).toBe("muted");
   });
 
-  test("uses the banner segment or the card section without a duplicate banner in card panes", async () => {
+  test("keeps the segment in card panes, where the card can be closed, beside the card section", async () => {
     const banner = contextSurface();
     expect(await banner.findByText("Memory: nothing loaded yet")).toBeTruthy();
     expect(banner.getByTestId("context-surface").getAttribute("data-visible")).toBe("true");
@@ -927,8 +927,8 @@ describe("memory context marker", () => {
     const row = await card.findByRole("button", { name: /^Nothing loaded yet/ });
     expect(row.getAttribute("data-icon")).toBe("Brain");
     expect(row.textContent).toBe("Nothing loaded yet○");
-    expect(segment.getByTestId("context-surface").getAttribute("data-visible")).toBe("false");
-    expect(within(segment.container).queryByRole("button")).toBeNull();
+    await waitFor(() => expect(segment.getByTestId("context-surface").getAttribute("data-visible")).toBe("true"));
+    expect(await within(segment.container).findByText("Memory: nothing loaded yet")).toBeTruthy();
     fireEvent.click(row);
     expect(card.inspection.experimental_panelCalls).toEqual([openCall("cortex-memory")]);
   });

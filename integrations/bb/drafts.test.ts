@@ -3,7 +3,7 @@ import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
 import { afterEach, expect, test } from "vitest";
 import { draftOutputSchema, draftSourceSnapshotSchema, draftRpcContract, type DraftRecord, type DraftSource } from "./draft-contract";
 import { createDraftStore, DRAFT_MIGRATIONS } from "./draft-store";
-import { draftProposals, extractDraftSource, validateDraftOutput, verifyDraftSource } from "./draft-validation";
+import { draftProposals, extractDraftSource, turnOutcomes, validateDraftOutput, verifyDraftSource } from "./draft-validation";
 
 const now = Date.now();
 const at = new Date(now).toISOString();
@@ -109,6 +109,31 @@ test("source excerpts come only from completed selected-thread turns and retain 
   expect(() => extractDraftSource(frame, [{ ...turn, status: "pending" }], now)).toThrow(/completed/);
   expect(() => extractDraftSource(frame, [{ ...turn, children: [{ ...message, threadId: "thr_bbbbbbbb" }] }], now)).toThrow(/thread|source/);
   expect(() => extractDraftSource(frame, [{ ...turn, children: [{ ...message, messageSeq: 99 }] }], now)).toThrow(/range/);
+});
+
+test("a flat timeline counts a message only when its own turn's completion event follows it", () => {
+  const event = (turnId: string, seq: number, status = "completed") => ({ id: `evt_${turnId}`, threadId: message.threadId, seq, createdAt: now - 500, type: "turn/completed", scope: { kind: "turn", turnId }, data: { status } });
+  const answer = { ...message, id: "msg_two", messageSeq: 20, sourceSeqStart: 18, sourceSeqEnd: 20, role: "assistant", initiator: undefined, text: "The answer" };
+  const running = { ...message, id: "msg_three", messageSeq: 30, sourceSeqStart: 30, sourceSeqEnd: 30, turnId: "turn_two", text: "Still running" };
+  const interrupted = { ...message, id: "msg_four", messageSeq: 40, sourceSeqStart: 40, sourceSeqEnd: 40, turnId: "turn_three", text: "Interrupted" };
+  const firstMessage = { ...message, id: "msg_seed", messageSeq: 1, sourceSeqStart: 1, sourceSeqEnd: 1, turnId: null, text: "Seed" };
+  const flat = [firstMessage, message, { kind: "work", threadId: message.threadId, turnId: "turn_one" }, answer, running, interrupted];
+  const turns = turnOutcomes([event("turn_one", 21), event("turn_three", 41, "interrupted"), { ...event("turn_two", 31), threadId: "thr_bbbbbbbb" }, { nonsense: true }], message.threadId);
+  expect(() => extractDraftSource(frame, flat, now)).toThrow(/No recent completed messages/);
+  const s = extractDraftSource(frame, flat, now, turns);
+  expect(s.messages.map(m => m.messageId)).toEqual(["msg_one", "msg_two"]);
+  expect(s.messages[1]).toMatchObject({ turnId: "turn_one", authorType: "agent", quote: "The answer" });
+  expect(() => extractDraftSource(frame, [{ ...message, sourceSeqEnd: 22, messageSeq: 22, sourceSeqStart: 22 }], now, turns)).toThrow(/range/);
+  expect(() => extractDraftSource(frame, [{ ...message, threadId: "thr_bbbbbbbb" }], now, turns)).toThrow(/thread/);
+  expect(() => extractDraftSource(frame, [message, { ...message, id: "msg_one" , messageSeq: 15, sourceSeqStart: 15, sourceSeqEnd: 15 }], now, turns)).toThrow(/Duplicate/);
+});
+
+test("a message sent while a turn ran keeps its earlier sequence and still pins and verifies", () => {
+  const steered = { ...message, messageSeq: 12, sourceSeqStart: 14, sourceSeqEnd: 14 };
+  const s = extractDraftSource(frame, [{ ...turn, children: [steered] }], now);
+  expect(s.messages[0]).toMatchObject({ messageSeq: 12, sourceSeqStart: 14, sourceSeqEnd: 14 });
+  expect(() => verifyDraftSource(s, [steered], now)).not.toThrow();
+  expect(() => extractDraftSource(frame, [{ ...turn, children: [{ ...message, messageSeq: 15 }] }], now)).toThrow(/range/);
 });
 
 test("source window is explicitly bounded rather than a whole-message claim", () => {

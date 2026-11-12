@@ -231,6 +231,27 @@ describe("explicit section drafting", () => {
     expect(within(dialog).getByRole("button", { name: "Start drafting" }).matches(":disabled")).toBe(true);
     expect(calls(slot, "draftStart")).toHaveLength(0);
   });
+  test("the chosen source thread is marked, the choice can move, and a refusal shows once beside the picker", async () => {
+    const backend = fixture(); const detail = backend.rpc.sectionDetail!;
+    backend.rpc.sectionDetail = () => { const d = detail(); return { ...d, threads: [...d.threads, { id: "thr_secondxx", name: "Second thread" }] }; };
+    backend.rpc.draftSourcePreview = () => { throw { code: "invalid", message: "No recent completed messages are available for drafting." }; };
+    const { slot } = sectionPage(backend);
+    fireEvent.click(await slot.findByRole("button", { name: "Draft from a thread" }));
+    const dialog = await slot.findByRole("dialog", { name: "Draft from a thread" });
+    const first = within(dialog).getByRole("button", { name: "Investigate the staging bootstrap" }); const second = within(dialog).getByRole("button", { name: "Second thread" });
+    fireEvent.click(second);
+    expect(second.getAttribute("aria-pressed")).toBe("true"); expect(first.getAttribute("aria-pressed")).toBe("false");
+    expect(Array.from(dialog.querySelectorAll("[data-cortex-source-chosen]"))).toEqual([second]);
+    fireEvent.click(first);
+    expect(Array.from(dialog.querySelectorAll("[data-cortex-source-chosen]"))).toEqual([first]);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Preview completed excerpts" }));
+    const refusal = await within(dialog).findByText("No recent completed messages are available for drafting.");
+    expect(within(dialog).getAllByText("No recent completed messages are available for drafting.")).toHaveLength(1);
+    const start = within(dialog).getByRole("button", { name: "Start drafting" });
+    expect(refusal.compareDocumentPosition(start) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(refusal.compareDocumentPosition(within(dialog).getByRole("button", { name: "Preview completed excerpts" })) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+    expect(first.matches(":disabled")).toBe(false); expect(calls(slot, "draftStart")).toHaveLength(0);
+  });
   test("settings or binding changes retain the pinned preview and block stale Start", async () => {
     const { slot, backend } = sectionPage(); const dialog = await openPreview(slot); const quote = dialog.querySelector("blockquote");
     backend.config({ revision: 2, selection, updatedAt: now, updatedBy: actor });

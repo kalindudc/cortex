@@ -697,6 +697,31 @@ describe("summary fits without clipping text", () => {
   });
 });
 
+describe("the segment stays on threads whose memory is on", () => {
+  const render = (memory: MemoryState, memoryChip = true) => {
+    const backend = makeBackend({ unbound: true });
+    const props = { threadId: THREAD, projectId: "proj_1", environment: null, segments: [], isExpanded: false, onToggle: vi.fn() };
+    const reg = segment();
+    const Both = () => <div data-testid="segment" data-visible={String(reg.useVisible ? reg.useVisible(props) : true)} />;
+    const configured = options(backend);
+    return renderSlot({ component: Both }, {}, { ...configured, rpc: handlers(backend, { memory: () => memory }), settings: { ...configured.settings, memoryChip, taskChip: false } });
+  };
+  test.each([["write", "true"], ["read", "true"], ["off", "false"]] as const)("an unshared thread in %s mode with no live memory view (a plugin reload) shows: %s", async (mode, visible) => {
+    const slot = render({ ...memoryState(), mode, view: null });
+    await waitFor(() => expect(calls(slot, "memory")).toHaveLength(1));
+    await waitFor(() => expect(slot.getByTestId("segment").getAttribute("data-visible")).toBe(visible));
+  });
+  test("a live view that says off hides it, and the memory setting turned off hides it", async () => {
+    const off = render({ ...memoryState(), view: { ...memoryState().view!, role: "off" } });
+    await waitFor(() => expect(calls(off, "memory")).toHaveLength(1));
+    await act(async () => {});
+    expect(within(off.container).getByTestId("segment").getAttribute("data-visible")).toBe("false");
+    const hidden = render({ ...memoryState(), view: null }, false);
+    await act(async () => {});
+    expect(within(hidden.container).getByTestId("segment").getAttribute("data-visible")).toBe("false");
+  });
+});
+
 describe("refresh regressions with runtime-faithful per-hook clients", () => {
   test("visible, summary and details share one read, while unrelated hosts stay isolated", async () => {
     const first = renderSegment(makeBackend()).slot;

@@ -2,6 +2,17 @@
 
 Cortex follows [semantic versioning](https://semver.org). Each release has a section below, newest first.
 
+## 0.105.3 - 2026-11-12
+
+- **Draft from a thread works on Pi and Claude Code threads.** Those threads list finished messages without grouping
+  them into turns, so drafting found nothing to use. Cortex now confirms each turn finished from bb's own record of
+  it, and still leaves out unfinished and interrupted turns. A thread's first message is still left out, because bb
+  gives it no turn to check against. Messages sent while a turn was running are accepted too.
+- **Choosing a source thread is clear.** The chosen thread is marked, the list scrolls when a section has many
+  threads, and a refusal appears beside the list instead of below the dialog.
+- **The context row stays put.** It no longer disappears after Cortex reloads while memory is on, and it stays above
+  the composer in wide panes, where bb's context card can be closed.
+
 ## 0.105.2 - 2026-11-11
 
 - **The context row never clips its text.** When the composer row is crowded, the Cortex summary shows the full
