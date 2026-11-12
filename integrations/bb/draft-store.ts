@@ -89,10 +89,12 @@ export function createDraftStore(db: Database) {
         if (old) { if (old.fingerprint !== record.fingerprint) throw new Error("Draft request ID conflict: existing intent cannot be replaced."); return old; }
         const config = configGet();
         if (config.revision !== record.execution.configRevision) throw new Error("Draft config revision changed before job persistence.");
-        // A saved choice without a tier runs on bb's standard tier, which the resolver pins as "default".
-        const tier = record.execution.serviceTier === "default" && config.selection?.serviceTier === undefined ? undefined : record.execution.serviceTier;
+        // The resolver pins bb's standard tier for a saved choice without one, and drops the tier for providers that have none.
+        const e = record.execution, chosen = config.selection;
+        const tierMatches = e.serviceTier === undefined || e.serviceTier === (chosen?.serviceTier ?? "default");
+        const matchesConfig = chosen === null ? e.origin === "source-thread" : e.origin === "configured" && e.providerId === chosen.providerId && e.model === chosen.model && e.reasoningLevel === chosen.reasoningLevel && tierMatches;
         // A draft that chose its own model skips the setting comparison; the config revision check above still applies.
-        if (record.execution.origin !== "override" && (config.selection === null ? record.execution.origin !== "source-thread" : record.execution.origin !== "configured" || payload(config.selection) !== payload({ providerId: record.execution.providerId, model: record.execution.model, reasoningLevel: record.execution.reasoningLevel, ...(tier === undefined ? {} : { serviceTier: tier }) }))) throw new Error("Draft execution does not match the pinned config selection.");
+        if (e.origin !== "override" && !matchesConfig) throw new Error("Draft execution does not match the pinned config selection.");
         const sectionCount = (db.prepare("SELECT count(*) AS n FROM cortex_draft_jobs WHERE section_id=? AND active=1").get(record.sectionId) as { n: number }).n;
         if (sectionCount >= DRAFT_LIMITS.activePerSection) throw new Error("An active draft job already exists in this section.");
         const globalCount = (db.prepare("SELECT count(*) AS n FROM cortex_draft_jobs WHERE active=1").get() as { n: number }).n;

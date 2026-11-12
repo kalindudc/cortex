@@ -297,6 +297,35 @@ describe("explicit section drafting", () => {
     fireEvent.click(within(group).getByRole("button", { name: "Use Drafting setting" }));
     await within(group).findByText("Follows the source thread's model");
   });
+  test("a full-access draft shows a warning and starts only after the person confirms it, once per preview", async () => {
+    const backend = fixture(); const full = { ...preview, execution: { providerId: "pi", model: "openai/gpt-6.1-sol", reasoningLevel: "high", hostId: "host_primary", configRevision: 0, origin: "source-thread" as const, permissionMode: "full" as const } };
+    backend.source(full);
+    (backend.rpc as PluginRpcTestHandlers<typeof contract>).draftStart = input => { const out = job({ requestId: input.requestId, execution: full.execution }); backend.jobs([out]); return out; };
+    const { slot } = sectionPage(backend); const dialog = await openPreview(slot);
+    const warning = await within(dialog).findByText("This draft runs with full access");
+    expect(within(dialog).getByText(/Full access/, { selector: "span" })).toBeTruthy();
+    const start = within(dialog).getByRole("button", { name: "Start drafting" });
+    expect(start.matches(":disabled")).toBe(true);
+    const confirm = within(dialog).getByRole("checkbox", { name: "Run this draft with full access" });
+    fireEvent.click(confirm); expect(start.matches(":disabled")).toBe(false);
+    fireEvent.click(confirm); expect(start.matches(":disabled")).toBe(true);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Preview completed excerpts" }));
+    await waitFor(() => expect(calls(slot, "draftSourcePreview")).toHaveLength(2));
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Preview completed excerpts" }).matches(":disabled")).toBe(false));
+    expect(within(dialog).getByRole("checkbox", { name: "Run this draft with full access" })).toHaveProperty("checked", false);
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: "Run this draft with full access" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Start drafting" }));
+    await waitFor(() => expect(calls(slot, "draftStart")).toHaveLength(1));
+    expect(calls(slot, "draftStart")[0]!.input).toMatchObject({ fullAccessConfirmed: true });
+    expect(warning).toBeTruthy();
+  });
+  test("an accept-edits draft has no full-access warning or confirmation", async () => {
+    const { slot } = sectionPage(); const dialog = await openPreview(slot);
+    expect(within(dialog).queryByText("This draft runs with full access")).toBeNull();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Start drafting" }));
+    await waitFor(() => expect(calls(slot, "draftStart")).toHaveLength(1));
+    expect(calls(slot, "draftStart")[0]!.input).not.toHaveProperty("fullAccessConfirmed");
+  });
   test("settings or binding changes retain the pinned preview and block stale Start", async () => {
     const { slot, backend } = sectionPage(); const dialog = await openPreview(slot); const quote = dialog.querySelector("blockquote");
     backend.config({ revision: 2, selection, updatedAt: now, updatedBy: actor });

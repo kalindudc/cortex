@@ -6,10 +6,10 @@ import { draftSelectionSchema, type DraftConfig, type DraftSelection } from "../
 import { failureOf, useDraftConfig, useDraftWrites, type RpcFailure } from "./data";
 import { FailureNotice, LoadingRows } from "./parts";
 
-export function RequestedDraftModel({ value }: { value: DraftSelection }) {
+export function RequestedDraftModel({ value }: { value: DraftSelection & { permissionMode?: "full" } }) {
   const { providers } = experimental_useProviders();
   const provider = providers.find(row => row.id === value.providerId);
-  return <span className="break-words">{provider?.displayName ?? value.providerId} · {value.model}{value.reasoningLevel ? ` · Thinking: ${value.reasoningLevel}` : ""}{value.serviceTier ? ` · Tier: ${value.serviceTier}` : ""}</span>;
+  return <span className="break-words">{provider?.displayName ?? value.providerId} · {value.model}{value.reasoningLevel ? ` · Thinking: ${value.reasoningLevel}` : ""}{value.serviceTier ? ` · Tier: ${value.serviceTier}` : ""}{value.permissionMode === "full" ? " · Full access" : ""}</span>;
 }
 
 /** Compares choices the way a job pins them: a tier left out means bb's standard tier. */

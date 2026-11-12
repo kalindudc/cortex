@@ -41,13 +41,13 @@ checkout and the machine running the agent are not deployment targets. An unknow
 
 ## Draft from a thread
 
-Choose the model in Cortex's Drafting settings, then Save, or pick one for a single draft in its dialog. The default
-follows the source thread's model; changes affect future drafts only. Choose a thread in the connected section and inspect excerpts from its finished
-turns (never its first message, which has no turn to check) and the model before Start. The preview is not the whole
-conversation or proof of provider use. Suggestions await your individual review; nothing is adopted automatically.
-After reload, check the original request. Stop requested is not stopped; partial saved results remain linked.
-Save recovery uses the original result without another model turn. The helper omits Cortex tools and memory;
-provider-native tools and other plugins are not a security sandbox.
+Pick the model in Drafting settings, or in the dialog for one draft; the default is the source thread's model. Choose a
+thread in the connected section and inspect excerpts from its finished turns (never its first message, which has no turn
+to check) and the model before Start. The preview is not the whole conversation or proof of provider use. Suggestions
+await your individual review; nothing is adopted automatically. After reload, check the original request. Stop requested
+is not stopped; partial saved results remain linked. Save recovery reuses the original result. The helper omits Cortex
+tools and memory and uses accept-edits where offered; for a provider that runs only with full access, such as Pi, Start
+waits until you confirm it for that draft. Provider-native tools and other plugins are not a security sandbox.
 
 ## Review saved knowledge
 

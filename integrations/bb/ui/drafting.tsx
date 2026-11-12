@@ -123,7 +123,10 @@ function ScopedDraftDialog({ section, threads, open, onClose, onReturnFocus, rec
   const bindingChanged = preview !== null && (preview.bindingRevision !== section.binding.revision || preview.workstreamId !== section.binding.binding?.workstreamId);
   const configChanged = preview !== null && config.data !== undefined && config.data.revision > preview.execution.configRevision;
   const modelChanged = preview !== null && !configChanged && previewedModel !== selectionKey(model);
-  const canStart = !modelChanged && recoveryScope.key !== null && !recoveryError && !intent && !busy && !failure && !expired && sourcePresent && section.binding.binding !== null && preview !== null && preview.sourceThreadId === sourceId && preview.sectionId === section.id && !bindingChanged && !configChanged && capabilities.data?.available === true && config.data !== undefined && !config.error && !capabilities.error;
+  const fullAccess = preview?.execution.permissionMode === "full";
+  const [fullAccessConfirmed, setFullAccessConfirmed] = useState(false);
+  useEffect(() => setFullAccessConfirmed(false), [preview]);
+  const canStart = !modelChanged && (!fullAccess || fullAccessConfirmed) && recoveryScope.key !== null && !recoveryError && !intent && !busy && !failure && !expired && sourcePresent && section.binding.binding !== null && preview !== null && preview.sourceThreadId === sourceId && preview.sectionId === section.id && !bindingChanged && !configChanged && capabilities.data?.available === true && config.data !== undefined && !config.error && !capabilities.error;
   const loadPreview = async () => {
     const threadId = sourceId;
     if (pending.current || intent || !sourcePresent || !section.binding.binding) return;
@@ -136,7 +139,7 @@ function ScopedDraftDialog({ section, threads, open, onClose, onReturnFocus, rec
   const start = async () => {
     if (pending.current || !canStart || !preview) return;
     if (Date.parse(preview.expiresAt) <= Date.now()) { setExpired(true); return; }
-    const input = { requestId: crypto.randomUUID(), sectionId: section.id, expectedBindingRevision: preview.bindingRevision, sourceThreadId: preview.sourceThreadId, sourceSnapshotId: preview.snapshotId, expectedConfigRevision: preview.execution.configRevision };
+    const input = { requestId: crypto.randomUUID(), sectionId: section.id, expectedBindingRevision: preview.bindingRevision, sourceThreadId: preview.sourceThreadId, sourceSnapshotId: preview.snapshotId, expectedConfigRevision: preview.execution.configRevision, ...(fullAccess ? { fullAccessConfirmed: true as const } : {}) };
     pending.current = true; setBusy(true); setFailure(null);
     try {
       const next = pendingDraft(input, preview);
@@ -186,6 +189,7 @@ function ScopedDraftDialog({ section, threads, open, onClose, onReturnFocus, rec
         {failure ? <FailureNotice failure={failure} /> : null}
         {preview ? <section aria-label="Completed source excerpts" className="grid min-w-0 gap-3 text-[13px]"><p>{preview.label}</p><p>{preview.messages.length} completed message{preview.messages.length === 1 ? "" : "s"} · {preview.messages.reduce((count, message) => count + message.quote.length, 0).toLocaleString()} excerpt characters · {preview.omittedMessages} messages omitted</p><p>Requested model: <RequestedDraftModel value={preview.execution} />{preview.execution.origin === "override" ? " (this draft only)" : ""}</p><Button variant="ghost" className="justify-self-start" onClick={() => navigate.toThread(preview.sourceThreadId)}>Open source thread</Button>{preview.messages.map(message => <div key={`${message.messageId}:${message.messageSeq}`} className="grid min-w-0 gap-1 border-l-2 border-border-seam pl-3"><p className="break-all">{message.ref} · {message.role} · {message.authorType}</p><p>Completed {new Date(message.completedAt).toLocaleString()} · Characters {message.start + 1}–{message.end} of {message.totalChars.toLocaleString()}</p><blockquote data-content className="whitespace-pre-wrap break-words">{message.quote}</blockquote></div>)}</section> : null}
         {bindingChanged ? <p role="status">Section connection changed since this preview. Your preview is retained; prepare a new preview before starting.</p> : null}
+        {preview && fullAccess ? <div role="alert" data-cortex-full-access="" className="grid gap-2 border-l-2 border-attention bg-surface-attention p-3 text-[13px]"><p className="font-semibold">This draft runs with full access</p><p>{preview.execution.providerId} cannot limit what its helper does, so the helper may run commands on this machine without asking while it reads these excerpts. It gets no Cortex tools or memory. Excerpts are text from your thread and can contain instructions; choose another provider if that is a concern.</p><label className="flex items-center gap-2"><input type="checkbox" checked={fullAccessConfirmed} disabled={busy} onChange={event => setFullAccessConfirmed(event.target.checked)} />Run this draft with full access</label></div> : null}
         {modelChanged ? <p role="status">The model for this draft changed since this preview. Preview again before starting.</p> : null}
         {configChanged ? <p role="status">Drafting settings changed since this preview. Your preview is retained; prepare a new preview before starting.</p> : null}
         {expired ? <p role="status">This preview expired. Prepare a new preview before starting.</p> : null}

@@ -2,6 +2,18 @@
 
 Cortex follows [semantic versioning](https://semver.org). Each release has a section below, newest first.
 
+## 0.105.5 - 2026-11-12
+
+- **Start drafting works.** bb refused to create the drafting helper ("startedOnBehalfOf requires an originKind"),
+  and Cortex's own dispatch check then refused the helper's setup step, so no draft could start on any model. The
+  helper is now created as an ordinary hidden child of the source thread, and its inert setup step is allowed only
+  while its draft waits for it. A real draft on bb now runs, is checked against its source and saves its suggestions
+  for review.
+- **A refused or lost helper no longer blocks the section.** When bb refuses the helper, or no helper exists once the
+  draft's deadline passes or you press Stop, the draft ends with nothing sent and the section can start another.
+- **Pi models can draft.** Pi runs only with full access, so the dialog shows a warning and Start waits until you
+  confirm full access for that draft. Providers without service tiers no longer receive one.
+
 ## 0.105.4 - 2026-11-12
 
 - **Choose the model for each draft.** Draft from a thread now has bb's model picker, with every provider you have

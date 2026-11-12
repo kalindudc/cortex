@@ -14,6 +14,7 @@ const textOf = (parts: readonly { type: string; text?: string }[]) => parts.map(
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error)).slice(0, 8000);
 const normalize = (text: string) => text.normalize("NFKC").toLowerCase().replace(/\s+/g, " ").trim();
 const sourceKey = (s: Knowledge["sources"][number]) => JSON.stringify([s.ref, s.authorType, s.observedAt, s.excerpt ?? ""]);
+const permissionOf = (r: DraftRecord) => r.execution.permissionMode ?? "accept-edits";
 /** The model a draft chose for itself, re-checked at Start instead of the Drafting setting. */
 function overrideOf(r: DraftRecord): DraftSelection | undefined {
   return r.execution.origin === "override" ? executionConfig(r, false).selection ?? undefined : undefined;
@@ -80,7 +81,7 @@ export function createDraftService(bb: BbPluginApi, workstreams: Workstreams) {
     const rows = await bb.sdk.threads.queuedMessages.list({ threadId: workerId, signal });
     if (rows.length !== 1) throw new Error("Draft setup queue is incomplete/consumed or has extra rows. Stop/discover, never send a replacement message.");
     const row = rows[0];
-    if (row.threadId !== workerId || row.origin !== "plugin" || row.originPluginId !== bb.pluginId || row.senderThreadId !== r.sourceThreadId || row.initiator !== "agent" || row.payload.kind !== "inline" || row.content.length !== 1 || textOf(row.content) !== DRAFT_BOOTSTRAP || row.state !== "scheduled" || row.sendAt === null || row.sendAt <= Date.now() || row.model !== r.execution.model || row.reasoningLevel !== r.execution.reasoningLevel || row.serviceTier !== (r.execution.serviceTier ?? "default") || row.permissionMode !== "accept-edits") throw new Error("Draft setup row expired, changed, or was consumed. It will never receive a new inference message.");
+    if (row.threadId !== workerId || row.origin !== "plugin" || row.originPluginId !== bb.pluginId || row.senderThreadId !== null || row.initiator !== "user" || row.payload.kind !== "inline" || row.content.length !== 1 || textOf(row.content) !== DRAFT_BOOTSTRAP || row.state !== "scheduled" || row.sendAt === null || row.sendAt <= Date.now() || row.model !== r.execution.model || row.reasoningLevel !== r.execution.reasoningLevel || row.serviceTier !== (r.execution.serviceTier ?? "default") || row.permissionMode !== permissionOf(r)) throw new Error("Draft setup row expired, changed, or was consumed. It will never receive a new inference message.");
     if (r.bootstrapQueueId !== null && (r.bootstrapQueueId !== row.id || r.setupUpdatedAt !== row.updatedAt || r.setupSendAt !== row.sendAt)) throw new Error("Draft setup queue revision changed. Refresh recovery; no automatic rebase or resend.");
     return row;
   }
@@ -92,7 +93,7 @@ export function createDraftService(bb: BbPluginApi, workstreams: Workstreams) {
     const pinnedInput = bootstrap
       ? row.id === r.bootstrapQueueId && r.setupUpdatedAt !== null && row.updatedAt === r.setupUpdatedAt && r.setupSendAt !== null && row.sendAt === r.setupSendAt && row.state === "scheduled"
       : activation && r.activationAttempted && row.id === r.activationQueueId && r.activationUpdatedAt !== null && row.updatedAt === r.activationUpdatedAt && row.sendAt === null;
-    if (!pinnedInput || row.threadId !== workerId || row.origin !== "plugin" || row.originPluginId !== bb.pluginId || row.senderThreadId !== r.sourceThreadId || row.initiator !== "agent" || row.payload.kind !== "inline" || row.groupWithNext || row.systemNotice !== null || row.model !== r.execution.model || row.reasoningLevel !== r.execution.reasoningLevel || row.serviceTier !== (r.execution.serviceTier ?? "default") || row.permissionMode !== "accept-edits") throw new Error("Draft queue input, execution, schedule or version changed/unverified; the row was preserved. Resolve the original queued row explicitly, then retry cancellation. No source was resent or worker hidden.");
+    if (!pinnedInput || row.threadId !== workerId || row.origin !== "plugin" || row.originPluginId !== bb.pluginId || row.senderThreadId !== null || row.initiator !== "user" || row.payload.kind !== "inline" || row.groupWithNext || row.systemNotice !== null || row.model !== r.execution.model || row.reasoningLevel !== r.execution.reasoningLevel || row.serviceTier !== (r.execution.serviceTier ?? "default") || row.permissionMode !== permissionOf(r)) throw new Error("Draft queue input, execution, schedule or version changed/unverified; the row was preserved. Resolve the original queued row explicitly, then retry cancellation. No source was resent or worker hidden.");
   }
   async function stopOwned(id: string, signal?: AbortSignal) {
     const r = current(id); const thread = await ownWorker(r, undefined, signal);
@@ -136,6 +137,7 @@ export function createDraftService(bb: BbPluginApi, workstreams: Workstreams) {
       const preview = store.snapshotGet(parsed.sourceSnapshotId);
       if (!preview) throw new Error("Draft source snapshot expired or unavailable. Refresh preview.");
       const { execution, personalProjectId, ...source } = preview; const now = new Date().toISOString();
+      if (execution.permissionMode === "full" && parsed.fullAccessConfirmed !== true) throw new Error(`${execution.providerId} runs drafts with full access: the helper can run commands on this machine without asking. Confirm full access for this draft before Start.`);
       const deadlineAt = new Date(Math.min(Date.now() + DRAFT_DEADLINE_MS, Date.parse(source.expiresAt))).toISOString();
       const r = store.create(draftRecordSchema.parse({ requestId: parsed.requestId, revision: 1, sectionId: parsed.sectionId, sourceThreadId: parsed.sourceThreadId, sourceSnapshotId: parsed.sourceSnapshotId, bindingRevision: parsed.expectedBindingRevision, workstreamId: source.workstreamId, workstreamRevision: source.workstreamRevision, requestedAt: now, updatedAt: now, deadlineAt,
         status: "prepared", execution, worker: { threadId: null, state: "not-requested" }, cancellation: { state: "none", requestedAt: null, confirmedAt: null }, candidateResults: Array.from({ length: 3 }, () => ({ intendedId: `kn_${randomUUID()}`, canonicalId: null, status: "pending", error: null })), progress: "Checking the exact preview/source before native setup.", error: null, retry: "none", intent: parsed, fingerprint: draftHash(JSON.stringify(parsed)), source, requester: workstreams.human(), workerNonce: randomUUID(), bootstrapQueueId: null, activationQueueId: null, active: true, output: null, personalProjectId }));
@@ -149,8 +151,11 @@ export function createDraftService(bb: BbPluginApi, workstreams: Workstreams) {
         const sendAt = Date.now() + 24 * 60 * 60_000;
         change(r.requestId, { status: "setup-requested", worker: { state: "requesting", threadId: null }, setupSendAt: sendAt, progress: "Creating only an inert future setup row; no source has been sent." });
         let created: WorkerThread;
-        try { created = await bb.sdk.threads.spawn({ projectId: r.personalProjectId!, parentThreadId: r.sourceThreadId, senderThreadId: r.sourceThreadId, parentNotifications: "off", visibility: "hidden", sectionId: null, environment: { type: "host", workspace: { type: "personal" }, hostId: r.execution.hostId }, providerId: r.execution.providerId, model: r.execution.model, reasoningLevel: r.execution.reasoningLevel, ...(r.execution.serviceTier === undefined ? {} : { serviceTier: r.execution.serviceTier }), permissionMode: "accept-edits", startedOnBehalfOf: { initiator: "agent", senderThreadId: r.sourceThreadId }, origin: "plugin", input: [{ type: "text", text: DRAFT_BOOTSTRAP, mentions: [] }], sendAt, pluginMetadata: { memoryMode: "off", cortexDraftWorker: { role: "draft-worker", requestId: r.requestId, nonce: r.workerNonce } } }); }
-        catch (e) { change(r.requestId, { status: "setup-uncertain", worker: { state: "unknown", threadId: null }, error: errorText(e), retry: "discover-stop", progress: "Setup response is uncertain. Discover the original nonce; never respawn." }); return view(current(r.requestId)); }
+        try { created = await bb.sdk.threads.spawn({ projectId: r.personalProjectId!, parentThreadId: r.sourceThreadId, parentNotifications: "off", visibility: "hidden", sectionId: null, environment: { type: "host", workspace: { type: "personal" }, hostId: r.execution.hostId }, providerId: r.execution.providerId, model: r.execution.model, reasoningLevel: r.execution.reasoningLevel, ...(r.execution.serviceTier === undefined ? {} : { serviceTier: r.execution.serviceTier }), permissionMode: permissionOf(r), origin: "plugin", input: [{ type: "text", text: DRAFT_BOOTSTRAP, mentions: [] }], sendAt, pluginMetadata: { memoryMode: "off", cortexDraftWorker: { role: "draft-worker", requestId: r.requestId, nonce: r.workerNonce } } }); }
+        catch (e) {
+          if (refusedByBb(e) && await findWorker(current(r.requestId), signal).catch(() => "unknown") === null) { change(r.requestId, { status: "failed", active: false, worker: { state: "stopped", threadId: null }, error: `bb refused to create the drafting helper (${errorText(e)}). No helper exists and nothing was sent.`, retry: "none", progress: "bb refused the helper; nothing was sent." }); return view(current(r.requestId)); }
+          change(r.requestId, { status: "setup-uncertain", worker: { state: "unknown", threadId: null }, error: errorText(e), retry: "discover-stop", progress: "Setup response is uncertain. Discover the original nonce; never respawn." }); return view(current(r.requestId));
+        }
         await ownWorker(current(r.requestId), created.id, signal);
         change(r.requestId, { worker: { state: "known", threadId: created.id } });
         const row = await setupQueue(current(r.requestId), created.id, signal);
@@ -178,20 +183,32 @@ export function createDraftService(bb: BbPluginApi, workstreams: Workstreams) {
   }
   function guard(ctx: MessageDispatchHookContext): MessageDispatchHookDecision | null {
     const r = store.byWorker(ctx.thread.id);
+    if (!r && setupPass(ctx)) return { action: "proceed" };
     if (!r) return restricted(ctx.thread.id, undefined, ctx.thread) ? { action: "reject", message: "Draft worker mapping is incomplete; only an inert setup was authorized. Recover the original private job; no source dispatch is admitted." } : null;
     const rejected = (reason: string): MessageDispatchHookDecision => ({ action: "reject", message: reason });
     if (r.worker.state !== "known" || r.cancellation.state !== "none" || Date.now() >= Date.parse(r.deadlineAt) || !["activating", "queued", "running", "needs-recovery"].includes(r.status) || !r.activationAttempted || !r.activationHash) return rejected("Cortex drafting worker is not admitted in its private phase/deadline. Stop/discover, never Send now.");
-    if (ctx.thread.projectId !== r.personalProjectId || ctx.thread.parentThreadId !== r.sourceThreadId || ctx.thread.visibility !== "hidden" || ctx.thread.originPluginId !== bb.pluginId || ctx.host?.id !== r.execution.hostId || ctx.requestedExecution.providerId !== r.execution.providerId || ctx.requestedExecution.model !== r.execution.model || ctx.requestedExecution.reasoningLevel !== r.execution.reasoningLevel || ctx.requestedExecution.serviceTier !== (r.execution.serviceTier ?? "default") || ctx.requestedExecution.permissionMode !== "accept-edits") return rejected("Draft worker dispatch host/provider/model identity differs from the pinned execution.");
-    if (ctx.attempt !== "start-turn" || ctx.queuedMessages.length !== 1 || ctx.queuedMessages[0].id !== r.activationQueueId || ctx.queuedMessages[0].payload.kind !== "inline" || ctx.origin !== "plugin" || ctx.originPluginId !== bb.pluginId || ctx.senderThreadId !== r.sourceThreadId || ctx.initiator !== "agent" || ctx.input.blocks.length !== 1 || ctx.input.blocks[0].type !== "text" || draftHash(ctx.input.text) !== r.activationHash || draftHash(textOf(ctx.queuedMessages[0].content)) !== r.activationHash) return rejected("Only the privately mapped original queue CAS may dispatch this source. No inline, extra row, follow-up or retry is allowed.");
+    if (ctx.thread.projectId !== r.personalProjectId || ctx.thread.parentThreadId !== r.sourceThreadId || ctx.thread.visibility !== "hidden" || ctx.thread.originPluginId !== bb.pluginId || ctx.host?.id !== r.execution.hostId || ctx.requestedExecution.providerId !== r.execution.providerId || ctx.requestedExecution.model !== r.execution.model || ctx.requestedExecution.reasoningLevel !== r.execution.reasoningLevel || ctx.requestedExecution.serviceTier !== (r.execution.serviceTier ?? "default") || ctx.requestedExecution.permissionMode !== permissionOf(r)) return rejected("Draft worker dispatch host/provider/model identity differs from the pinned execution.");
+    if (ctx.attempt !== "start-turn" || ctx.queuedMessages.length !== 1 || ctx.queuedMessages[0].id !== r.activationQueueId || ctx.queuedMessages[0].payload.kind !== "inline" || ctx.origin !== "plugin" || ctx.originPluginId !== bb.pluginId || ctx.senderThreadId !== null || ctx.initiator !== "user" || ctx.input.blocks.length !== 1 || ctx.input.blocks[0].type !== "text" || draftHash(ctx.input.text) !== r.activationHash || draftHash(textOf(ctx.queuedMessages[0].content)) !== r.activationHash) return rejected("Only the privately mapped original queue CAS may dispatch this source. No inline, extra row, follow-up or retry is allowed.");
     const binding = workstreams.store.section(r.sectionId);
     if (binding.revision !== r.bindingRevision || binding.binding?.workstreamId !== r.workstreamId) return rejected("Draft section binding changed before dispatch.");
     if (r.admittedRequestId === null) change(r.requestId, { status: "running", admittedRequestId: ctx.queuedMessages[0].id, retry: "none", progress: "Native worker is running with Cortex tools and memory withheld. Provider-native tools are not sandboxed." });
     return { action: "proceed" };
   }
+  // bb runs this hook while creating the worker, before spawn returns its id and before bb holds the row until its send time.
+  // Only that inline pass of the inert placeholder, for a job still waiting on its spawn, may proceed.
+  function setupPass(ctx: MessageDispatchHookContext): boolean {
+    if (ctx.attempt !== "start-turn" || ctx.queuedMessages.length !== 0 || ctx.origin !== "plugin" || ctx.originPluginId !== bb.pluginId || ctx.senderThreadId !== null || ctx.initiator !== "user") return false;
+    if (ctx.input.blocks.length !== 1 || ctx.input.blocks[0].type !== "text" || ctx.input.text !== DRAFT_BOOTSTRAP) return false;
+    if (ctx.thread.visibility !== "hidden" || ctx.thread.originPluginId !== bb.pluginId || store.ownsWorker(ctx.thread.id)) return false;
+    const e = ctx.requestedExecution;
+    return store.active().some(j => j.status === "setup-requested" && j.worker.state === "requesting" && j.cancellation.state === "none" && Date.now() < Date.parse(j.deadlineAt)
+      && ctx.thread.projectId === j.personalProjectId && ctx.thread.parentThreadId === j.sourceThreadId && (ctx.host?.id ?? j.execution.hostId) === j.execution.hostId
+      && e.providerId === j.execution.providerId && e.model === j.execution.model && e.reasoningLevel === j.execution.reasoningLevel && e.serviceTier === (j.execution.serviceTier ?? "default") && e.permissionMode === permissionOf(j));
+  }
   function restricted(threadId: string, metadata?: unknown, thread?: Partial<WorkerThread>): boolean {
     if (store.ownsWorker(threadId) || hasDraftMarker(metadata)) return true;
-    if (!thread || thread.originPluginId !== bb.pluginId || thread.visibility !== "hidden") return false;
-    return store.active().some(r => ["requesting", "unknown"].includes(r.worker.state) && r.personalProjectId === thread.projectId && r.sourceThreadId === thread.parentThreadId);
+    // Cortex creates no other hidden threads, so one it cannot map is a draft worker, even after its job ended.
+    return !!thread && thread.originPluginId === bb.pluginId && thread.visibility === "hidden";
   }
   function configuration(ctx: PluginAgentConfigurationContext): PluginAgentConfiguration | null {
     if (!restricted(ctx.thread.id, ctx.pluginMetadata)) return null;
@@ -199,19 +216,12 @@ export function createDraftService(bb: BbPluginApi, workstreams: Workstreams) {
     const admitted = r?.admittedRequestId !== null && r?.worker.state === "known" && r?.cancellation.state === "none" && Date.now() < Date.parse(r.deadlineAt);
     return { tools: [], skills: [], instructions: admitted ? DRAFT_WORKER_INSTRUCTIONS : "This Cortex drafting marker is restrictive only. No approved private normal-dispatch admission is present. Do not process source or use tools; stop/recover through the Cortex job UI." };
   }
-  async function discover(id: string, signal?: AbortSignal) {
-    const r = current(id);
-    if (r.worker.threadId !== null) {
-      const thread = await ownWorker(r, undefined, signal);
-      if (r.bootstrapQueueId === null && !r.activationAttempted) {
-        const rows = await bb.sdk.threads.queuedMessages.list({ threadId: thread.id, signal });
-        if (rows.length > 1 || rows.some(q => q.threadId !== thread.id || q.originPluginId !== bb.pluginId || textOf(q.content) !== DRAFT_BOOTSTRAP)) throw new Error("Known setup queue is incomplete or changed; no input was deleted or activated.");
-        const row = rows[0];
-        if (row) change(id, { bootstrapQueueId: row.id, setupUpdatedAt: row.updatedAt, setupSendAt: r.setupSendAt ?? row.sendAt });
-      }
-      return thread;
-    }
-    if (r.worker.state === "not-requested") throw new Error("No native worker was requested.");
+  // Every page read, archived or not: null means bb holds no thread with this job's nonce.
+  function refusedByBb(e: unknown): boolean {
+    const status = (e as { name?: unknown; status?: unknown } | null)?.status;
+    return e instanceof Error && e.name === "BbHttpError" && typeof status === "number" && status >= 400 && status < 500;
+  }
+  async function findWorker(r: DraftRecord, signal?: AbortSignal): Promise<string | null> {
     const matches = new Set<string>();
     for (const archived of [false, true]) {
       let complete = false;
@@ -227,8 +237,25 @@ export function createDraftService(bb: BbPluginApi, workstreams: Workstreams) {
       }
       if (!complete) throw new Error("Draft worker lookup exceeded its bounded page budget. No inference was retried.");
     }
-    if (matches.size !== 1) throw new Error("Draft worker lookup is incomplete/unresolved or has duplicate nonce matches. No worker was selected or respawned.");
-    const thread = await ownWorker(r, [...matches][0], signal);
+    if (matches.size > 1) throw new Error("Draft worker lookup found duplicate nonce matches. No worker was selected or respawned.");
+    return matches.size === 1 ? [...matches][0] : null;
+  }
+  async function discover(id: string, signal?: AbortSignal) {
+    const r = current(id);
+    if (r.worker.threadId !== null) {
+      const thread = await ownWorker(r, undefined, signal);
+      if (r.bootstrapQueueId === null && !r.activationAttempted) {
+        const rows = await bb.sdk.threads.queuedMessages.list({ threadId: thread.id, signal });
+        if (rows.length > 1 || rows.some(q => q.threadId !== thread.id || q.originPluginId !== bb.pluginId || textOf(q.content) !== DRAFT_BOOTSTRAP)) throw new Error("Known setup queue is incomplete or changed; no input was deleted or activated.");
+        const row = rows[0];
+        if (row) change(id, { bootstrapQueueId: row.id, setupUpdatedAt: row.updatedAt, setupSendAt: r.setupSendAt ?? row.sendAt });
+      }
+      return thread;
+    }
+    if (r.worker.state === "not-requested") throw new Error("No native worker was requested.");
+    const found = await findWorker(r, signal);
+    if (found === null) return null;
+    const thread = await ownWorker(r, found, signal);
     const rows = await bb.sdk.threads.queuedMessages.list({ threadId: thread.id, signal });
     if (rows.length > 1 || rows.some(q => q.threadId !== thread.id || q.originPluginId !== bb.pluginId || textOf(q.content) !== DRAFT_BOOTSTRAP)) throw new Error("Discovered setup contents cannot be mapped safely. No replacement inference was sent.");
     const row = rows[0];
@@ -320,6 +347,12 @@ export function createDraftService(bb: BbPluginApi, workstreams: Workstreams) {
       try {
         let r = current(id); if (r.worker.state === "not-requested" || r.worker.state === "stopped") return view(r);
         const thread = await discover(id, signal); r = current(id);
+        if (thread === null) {
+          if (r.cancellation.state === "none" && Date.now() < Date.parse(r.deadlineAt)) { change(id, { status: "needs-recovery", retry: "discover-stop", progress: "No drafting helper found yet; its setup answer was lost. Stop ends this draft." }); return view(current(id)); }
+          const at = new Date().toISOString();
+          change(id, { status: "stopped", active: false, worker: { state: "stopped", threadId: null }, cancellation: { state: "confirmed", requestedAt: r.cancellation.requestedAt ?? at, confirmedAt: at }, retry: "none", progress: "No drafting helper exists, so nothing was running and nothing was sent." });
+          return view(current(id));
+        }
         if (r.cancellation.state !== "none") await stopOwned(id, signal);
         else if (Date.now() >= Date.parse(r.deadlineAt)) { change(id, { cancellation: { state: "requested", requestedAt: new Date().toISOString(), confirmedAt: null }, status: "cancel-requested", progress: "Draft deadline reached; stopping the owned worker." }); await stopOwned(id, signal); }
         else if (r.activationAttempted && r.admittedRequestId && thread.status === "idle") await collectUnlocked(thread.id, signal);

@@ -550,7 +550,7 @@ function draftIdentity(store: ReadStore, target: InputOf<"draftJob">, recoveryKe
   return identity;
 }
 const executionMatches = (a: DraftJob["execution"], b: DraftJob["execution"]) =>
-  a.providerId === b.providerId && a.model === b.model && a.reasoningLevel === b.reasoningLevel && a.serviceTier === b.serviceTier && a.hostId === b.hostId && a.configRevision === b.configRevision && a.origin === b.origin;
+  a.providerId === b.providerId && a.model === b.model && a.reasoningLevel === b.reasoningLevel && a.serviceTier === b.serviceTier && a.hostId === b.hostId && a.configRevision === b.configRevision && a.origin === b.origin && a.permissionMode === b.permissionMode;
 
 const expectedDraftMatches = (job: DraftJob, expected: PendingDraft) =>
   job.sectionId === expected.input.sectionId && job.requestId === expected.input.requestId && job.sourceThreadId === expected.input.sourceThreadId && job.sourceSnapshotId === expected.input.sourceSnapshotId && job.bindingRevision === expected.input.expectedBindingRevision && job.workstreamId === expected.workstreamId && job.workstreamRevision === expected.workstreamRevision && executionMatches(job.execution, expected.execution);

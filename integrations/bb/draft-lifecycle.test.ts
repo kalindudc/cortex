@@ -12,6 +12,7 @@ import { DRAFT_BOOTSTRAP, draftConsentMethods, draftRetryConsent } from "./draft
 
 const disposers: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const d of disposers.splice(0)) await d(); });
+function bbHttpError(status: number, message: string) { return Object.assign(new Error(`HTTP ${status}: ${message}`), { name: "BbHttpError", status, code: "invalid_request" }); }
 function setup() {
   const source = makeThreadResponse({ id: "thr_aaaaaaaa", sectionId: "sec_one", providerId: "provider-a", visibility: "visible" });
   let worker = makeThreadResponse({ id: "thr_bbbbbbbb", projectId: "project_personal", parentThreadId: source.id, parentNotifications: "off", originKind: null, originPluginId: "cortex", visibility: "hidden", sectionId: null, providerId: "provider-a", status: "pending", environmentId: null });
@@ -20,7 +21,7 @@ function setup() {
   let queue: ReturnType<typeof makeQueueEntry> | null = null;
   let metadata: any = null;
   let service: ReturnType<typeof createDraftService>;
-  const state = { host: "host_one", model: "model-a", reasoningLevel: "high", serviceTier: "priority", setupLost: false, activationLost: false, stopFails: false, listing: [] as ReturnType<typeof makeThreadResponse>[], workerStatus: "pending", output: JSON.stringify({ findings: [{ title: "Sourced finding", text: "A source records the observation.", sources: [{ messageId: message.id, messageSeq: message.messageSeq, quote: "Exact source DATA" }] }] }) };
+  const state = { host: "host_one", model: "model-a", reasoningLevel: "high", serviceTier: "priority", setupLost: false, spawnRefused: false, onCreation: undefined as undefined | ((ctx: ReturnType<typeof makeMessageDispatchHookContext>) => void), activationLost: false, stopFails: false, listing: [] as ReturnType<typeof makeThreadResponse>[], workerStatus: "pending", output: JSON.stringify({ findings: [{ title: "Sourced finding", text: "A source records the observation.", sources: [{ messageId: message.id, messageSeq: message.messageSeq, quote: "Exact source DATA" }] }] }) };
   const entries = new Map<string, Knowledge>();
   const canonical: Workstream = { id: "ws_demo", name: "Envoy", description: "", revision: 1, actor: { id: "you", type: "human" }, archived: false, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" };
   const mutate = vi.fn(async (input: Record<string, any>) => {
@@ -46,11 +47,19 @@ function setup() {
       message: async () => ({ message, before: [], after: [] }) as any,
       list: async () => state.listing,
       spawn: async input => {
+        // bb's create rules (thread-create.ts): startedOnBehalfOf needs a fork, and the first row's author comes only from it.
+        if (input.startedOnBehalfOf != null && input.originKind == null) throw bbHttpError(400, "startedOnBehalfOf requires an originKind");
+        if (state.spawnRefused) throw bbHttpError(400, "invalid_request");
         expect(input.input).toEqual([{ type: "text", text: DRAFT_BOOTSTRAP, mentions: [] }]);
         expect(JSON.stringify(input)).not.toContain(message.text);
         const r = service.store.active()[0]; expect(r.worker.state).toBe("requesting"); expect(r.personalProjectId).toBe("project_personal");
         metadata = input.pluginMetadata;
-        queue = makeQueueEntry({ id: "queued_one", threadId: worker.id, content: input.input as any, sendAt: input.sendAt!, state: "scheduled", origin: "plugin", originPluginId: "cortex", initiator: "agent", senderThreadId: source.id, model: input.model ?? "model-a", reasoningLevel: input.reasoningLevel ?? "high", serviceTier: input.serviceTier ?? "default", permissionMode: "accept-edits", updatedAt: Date.now() });
+        // bb runs the dispatch hook inline while creating the thread, before the send time holds the row; a reject deletes the thread.
+        const creation = makeMessageDispatchHookContext({ thread: worker, project: { id: "project_personal", kind: "personal" } as any, host: makeHostResponse({ id: "host_one" }), queuedMessages: [], input: { blocks: input.input as any, text: (input.input as any[]).map(p => p.text ?? "").join("") }, requestedExecution: { providerId: input.providerId!, model: input.model!, reasoningLevel: input.reasoningLevel!, serviceTier: input.serviceTier ?? "default", permissionMode: input.permissionMode! }, origin: "plugin", originPluginId: "cortex", senderThreadId: null, initiator: "user" });
+        state.onCreation?.(creation);
+        const decision = service.guard(creation);
+        if (decision?.action === "reject") throw bbHttpError(409, decision.message);
+        queue = makeQueueEntry({ id: "queued_one", threadId: worker.id, content: input.input as any, sendAt: input.sendAt!, state: "scheduled", origin: "plugin", originPluginId: "cortex", initiator: input.startedOnBehalfOf?.initiator ?? "user", senderThreadId: input.startedOnBehalfOf?.senderThreadId ?? null, model: input.model ?? "model-a", reasoningLevel: input.reasoningLevel ?? "high", serviceTier: input.serviceTier ?? "default", permissionMode: input.permissionMode ?? "accept-edits", updatedAt: Date.now() });
         state.listing = [worker];
         if (state.setupLost) throw new Error("spawn response lost");
         return worker;
@@ -78,7 +87,7 @@ function setup() {
   service = createDraftService(host.bb, ws);
   host.bb.rpc.register(draftRpcContract, draftHandlers(service));
   function lastActivation() { const calls = host.harness.inspection.sdk.callsTo("threads.queuedMessages.update"); return ((calls.at(-1)?.[0] as any)?.input ?? []).map((p: any) => p.text).join(""); }
-  function dispatch() { return makeMessageDispatchHookContext({ thread: worker, project: { id: "project_personal", kind: "personal" } as any, host: makeHostResponse({ id: "host_one" }), queuedMessages: queue ? [queue] : [], input: { blocks: queue?.content ?? [], text: queue?.content.map((p: any) => p.text ?? "").join("") ?? "" }, requestedExecution: { providerId: "provider-a", model: queue?.model ?? "model-a", reasoningLevel: queue?.reasoningLevel ?? "high", serviceTier: queue?.serviceTier ?? "priority", permissionMode: "accept-edits" }, origin: "plugin", originPluginId: "cortex", senderThreadId: source.id, initiator: "agent" }); }
+  function dispatch() { return makeMessageDispatchHookContext({ thread: worker, project: { id: "project_personal", kind: "personal" } as any, host: makeHostResponse({ id: "host_one" }), queuedMessages: queue ? [queue] : [], input: { blocks: queue?.content ?? [], text: queue?.content.map((p: any) => p.text ?? "").join("") ?? "" }, requestedExecution: { providerId: "provider-a", model: queue?.model ?? "model-a", reasoningLevel: queue?.reasoningLevel ?? "high", serviceTier: queue?.serviceTier ?? "priority", permissionMode: queue?.permissionMode ?? "accept-edits" }, origin: "plugin", originPluginId: "cortex", senderThreadId: null, initiator: "user" }); }
   async function intent() { const preview = await service.sourcePreview({ sectionId: "sec_one", expectedBindingRevision: 1, sourceThreadId: source.id }); return { requestId: randomUUID(), sectionId: "sec_one", expectedBindingRevision: 1, sourceThreadId: source.id, sourceSnapshotId: preview.snapshotId, expectedConfigRevision: preview.execution.configRevision }; }
   return { ...host, service, ws, entries, mutate, state, source, message, canonical, intent, dispatch, worker: () => worker, metadata: () => metadata, queue: () => queue, setQueue: (next: typeof queue) => { queue = next; }, lastActivation };
 }
@@ -100,7 +109,7 @@ test.each(["bootstrap", "activation"] as const)("cancellation preserves observed
   expect(s.queue()).toEqual(edited); expect(s.harness.inspection.sdk.callsTo("threads.queuedMessages.update")).toHaveLength(phase === "bootstrap" ? 0 : 1);
 });
 test.each(["bootstrap", "activation"] as const)("cancellation verifies the %s row execution, schedule, provenance and unchanged version", async phase => {
-  for (const patch of [{ updatedAt: 1 }, { model: "changed" }, { reasoningLevel: "low" }, { serviceTier: "default" }, { permissionMode: "full" as const }, { sendAt: 1 }, { origin: "app" as const }, { originPluginId: "other" }, { senderThreadId: "thr_cccccccc" }, { initiator: "user" as const }, { groupWithNext: true }]) {
+  for (const patch of [{ updatedAt: 1 }, { model: "changed" }, { reasoningLevel: "low" }, { serviceTier: "default" }, { permissionMode: "full" as const }, { sendAt: 1 }, { origin: "app" as const }, { originPluginId: "other" }, { senderThreadId: "thr_cccccccc" }, { initiator: "agent" as const }, { groupWithNext: true }]) {
     const s = setup(); const input = await s.intent(); if (phase === "bootstrap") s.state.setupLost = true;
     await s.service.start(input); if (phase === "bootstrap") await s.service.reconcile(input.requestId);
     const edited = { ...s.queue()!, ...patch }; s.setQueue(edited);
@@ -423,9 +432,91 @@ test("a model chosen for one draft runs that draft, survives Start's re-checks a
 });
 test("a model chosen for one draft is refused when the catalog no longer offers it, with no fallback", async () => {
   const s = setup();
-  await expect(s.service.sourcePreview({ sectionId: "sec_one", expectedBindingRevision: 1, sourceThreadId: s.source.id, selection: { providerId: "provider-a", model: "model-gone", reasoningLevel: "high" } })).rejects.toThrow(/unavailable.*no fallback/);
+  await expect(s.service.sourcePreview({ sectionId: "sec_one", expectedBindingRevision: 1, sourceThreadId: s.source.id, selection: { providerId: "provider-a", model: "model-gone", reasoningLevel: "high" } })).rejects.toThrow(/model-gone is not offered.*for this draft; no fallback/);
   await expect(s.service.sourcePreview({ sectionId: "sec_one", expectedBindingRevision: 1, sourceThreadId: s.source.id, selection: { providerId: "provider-a", model: "model-a", reasoningLevel: "ultra" } })).rejects.toThrow(/reasoning level is unavailable/);
   expect(s.harness.inspection.sdk.callsTo("threads.spawn")).toHaveLength(0);
+});
+function fullAccessProvider(s: ReturnType<typeof setup>) {
+  // Pi's real capabilities: only full access, a workspace catalog and no service tiers.
+  s.harness.sdk.stub("providers.models", async () => ({ providers: [{ id: "provider-a", available: true, capabilities: { modelCatalogScope: "workspace", permissionModes: ["full"], supportsServiceTier: false } }], models: [{ model: "model-a", routeProviderId: "openai", supportedReasoningEfforts: [{ reasoningEffort: "high" }] }], selectedOnlyModels: [] }) as any);
+}
+test("the worker is created as an ordinary hidden plugin child: no agent author, so bb does not require a fork", async () => {
+  const s = setup(); const input = await s.intent();
+  const result = await s.service.start(input);
+  expect(result.status, result.error ?? undefined).toBe("running");
+  const spawned = s.harness.inspection.sdk.callsTo("threads.spawn")[0]?.[0] as Record<string, unknown>;
+  expect(spawned).not.toHaveProperty("startedOnBehalfOf"); expect(spawned).not.toHaveProperty("senderThreadId"); expect(spawned).not.toHaveProperty("originKind");
+  expect(spawned).toMatchObject({ parentThreadId: s.source.id, visibility: "hidden", origin: "plugin" });
+  expect(s.service.guard(s.dispatch())).toEqual({ action: "proceed" });
+  const ctx = s.dispatch();
+  for (const author of [{ initiator: "agent" as const, senderThreadId: s.source.id }, { initiator: "user" as const, senderThreadId: s.source.id }]) expect(s.service.guard({ ...ctx, ...author })?.action).toBe("reject");
+});
+test("bb refusing the worker ends the job without one, frees the section and sends nothing", async () => {
+  const s = setup(); s.state.spawnRefused = true; const input = await s.intent();
+  const result = await s.service.start(input);
+  expect(result).toMatchObject({ status: "failed", worker: { state: "stopped", threadId: null }, retry: "none" });
+  expect(result.error).toMatch(/bb refused to create the drafting helper \(HTTP 400: invalid_request\)/);
+  expect(s.service.store.active()).toHaveLength(0);
+  expect(s.harness.inspection.sdk.callsTo("threads.queuedMessages.update")).toHaveLength(0);
+  s.state.spawnRefused = false;
+  const again = await s.service.start({ ...(await s.intent()), requestId: randomUUID() });
+  expect(again.status, again.error ?? undefined).toBe("running");
+});
+test("a lost setup answer with no worker waits for one until Stop, which ends the job without a worker", async () => {
+  const s = setup(); const input = await s.intent();
+  s.state.setupLost = true;
+  const started = await s.service.start(input); s.state.listing = [];
+  expect(started.status).toBe("setup-uncertain");
+  expect((await s.service.reconcile(input.requestId)).status).toBe("needs-recovery");
+  expect(s.service.store.active()).toHaveLength(1);
+  const job = s.service.store.get(input.requestId)!;
+  const stopped = await s.service.cancel({ sectionId: job.sectionId, requestId: job.requestId, expectedRevision: job.revision });
+  expect(stopped).toMatchObject({ status: "stopped", worker: { state: "stopped", threadId: null }, cancellation: { state: "confirmed" } });
+  expect(s.service.store.active()).toHaveLength(0);
+  for (const call of ["threads.queuedMessages.update", "threads.queuedMessages.delete", "threads.stop"] as const) expect(s.harness.inspection.sdk.callsTo(call)).toHaveLength(0);
+});
+test("the creation pass admits only the inert placeholder for a job waiting on its spawn", async () => {
+  const s = setup(); const input = await s.intent();
+  let seen: any = null;
+  s.state.onCreation = ctx => {
+    seen = ctx;
+    expect(s.service.guard(ctx)).toEqual({ action: "proceed" });
+    for (const patch of [{ input: { blocks: [{ type: "text", text: "source text", mentions: [] }], text: "source text" } }, { queuedMessages: [makeQueueEntry({ id: "queued_x", threadId: ctx.thread.id })] }, { origin: "app" }, { originPluginId: "other" }, { initiator: "agent" }, { senderThreadId: s.source.id }, { attempt: "join-turn" }, { requestedExecution: { ...ctx.requestedExecution, model: "other" } }, { requestedExecution: { ...ctx.requestedExecution, permissionMode: "full" } }, { thread: { ...ctx.thread, parentThreadId: "thr_cccccccc" } }, { thread: { ...ctx.thread, visibility: "visible" } }] as any[])
+      expect(s.service.guard({ ...ctx, ...patch })?.action, JSON.stringify(Object.keys(patch))).not.toBe("proceed");
+  };
+  expect((await s.service.start(input)).status).toBe("running");
+  expect(seen).not.toBeNull();
+  const after = { ...seen, thread: { ...seen.thread, id: "thr_dddddddd" } };
+  expect(s.service.guard(after)?.action).toBe("reject");
+});
+test("a hidden Cortex thread with no job is restricted and never dispatched", () => {
+  const s = setup(); const ctx = s.dispatch();
+  expect(s.service.guard(ctx)?.action).toBe("reject");
+  expect(s.service.restricted(ctx.thread.id, undefined, ctx.thread)).toBe(true);
+  expect(s.service.restricted(ctx.thread.id, undefined, { ...ctx.thread, visibility: "visible" })).toBe(false);
+  expect(s.service.restricted(ctx.thread.id, undefined, { ...ctx.thread, originPluginId: "other" })).toBe(false);
+});
+test("a provider that only runs with full access previews as full access, and Start refuses it until a person confirms", async () => {
+  const s = setup(); fullAccessProvider(s);
+  const preview = await s.service.sourcePreview({ sectionId: "sec_one", expectedBindingRevision: 1, sourceThreadId: s.source.id });
+  expect(preview.execution).toMatchObject({ permissionMode: "full" }); expect(preview.execution).not.toHaveProperty("serviceTier");
+  const input = { requestId: randomUUID(), sectionId: "sec_one", expectedBindingRevision: 1, sourceThreadId: s.source.id, sourceSnapshotId: preview.snapshotId, expectedConfigRevision: preview.execution.configRevision };
+  await expect(s.service.start(input)).rejects.toThrow(/full access.*Confirm full access/);
+  expect(s.service.store.get(input.requestId)).toBeNull(); expect(s.harness.inspection.sdk.callsTo("threads.spawn")).toHaveLength(0);
+  const confirmed = { ...input, requestId: randomUUID(), fullAccessConfirmed: true as const };
+  const result = await s.service.start(confirmed);
+  expect(result.status, result.error ?? undefined).toBe("running");
+  expect(s.harness.inspection.sdk.callsTo("threads.spawn")[0]?.[0]).toMatchObject({ permissionMode: "full" });
+  expect(s.service.guard(s.dispatch())).toEqual({ action: "proceed" });
+  const ctx = s.dispatch();
+  expect(s.service.guard({ ...ctx, requestedExecution: { ...ctx.requestedExecution, permissionMode: "accept-edits" } })?.action).toBe("reject");
+});
+test("an accept-edits draft never asks for full access and refuses a full-access dispatch", async () => {
+  const s = setup(); const input = await s.intent(); await s.service.start(input);
+  expect(s.service.store.get(input.requestId)!.execution).not.toHaveProperty("permissionMode");
+  expect(s.harness.inspection.sdk.callsTo("threads.spawn")[0]?.[0]).toMatchObject({ permissionMode: "accept-edits" });
+  const ctx = s.dispatch();
+  expect(s.service.guard({ ...ctx, requestedExecution: { ...ctx.requestedExecution, permissionMode: "full" } })?.action).toBe("reject");
 });
 test("worker dispatch rejects extra input, Send-now/inline mapping gaps, host/execution mismatch and expired jobs", async () => {
   const s = setup(); const input = await s.intent(); await s.service.start(input);

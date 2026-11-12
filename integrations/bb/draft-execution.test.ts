@@ -40,13 +40,12 @@ test("unchanged preview execution compares exactly and configured selection does
   expect(configured.execution).toMatchObject({ configRevision: 1, origin: "configured", model: "model-a" });
   expect(s.harness.inspection.sdk.callsTo("threads.defaultExecutionOptions")).toHaveLength(1);
 });
-test.each(["unavailable", "host", "personal", "scope", "permission"])("unresolved or unsupported route refuses without model fallback/native creation: %s", async failure => {
+test.each(["unavailable", "host", "personal", "permission"])("unresolved or unsupported route refuses without model fallback/native creation: %s", async failure => {
   const s = setup();
   if (failure === "unavailable") s.state.available = false;
   if (failure === "host") s.state.host = "";
   if (failure === "personal") s.state.personalKind = "repository";
-  if (failure === "scope") s.state.scope = "workspace";
-  if (failure === "permission") s.state.permissions = ["full"];
+  if (failure === "permission") s.state.permissions = [];
   await expect(s.resolver.resolve("thr_aaaaaaaa")).rejects.toThrow();
   expect(s.harness.inspection.sdk.callsTo("threads.spawn")).toHaveLength(0);
 });
@@ -85,7 +84,35 @@ test.each([
   expect(execution.serviceTier).toBe(expected);
   expect(execution).toMatchObject({ providerId: "codex", model: "gpt-6.1-sol", reasoningLevel: "xhigh", origin: "configured" });
   s.store.configSet(1, { providerId: "codex", model: "gpt-6.1-sol", reasoningLevel: "xhigh", serviceTier: "fast" }, { id: "you", type: "human" });
-  expect((await s.resolver.resolve("thr_aaaaaaaa")).execution.serviceTier).toBe("fast");
+  // An explicit tier is kept where the provider has tiers; without them bb runs its standard tier, as for its own threads.
+  expect((await s.resolver.resolve("thr_aaaaaaaa")).execution.serviceTier).toBe(supportsServiceTier ? "fast" : undefined);
+});
+
+test.each([
+  { label: "a routed model in the main list", list: "models" },
+  { label: "a model bb lists only while it is selected", list: "selectedOnlyModels" },
+] as const)("a workspace-catalog provider resolves $label, matched by model id rather than its upstream route", async ({ list }) => {
+  // Real catalog shape: Flare and Pi list models per workspace, and routeProviderId names the upstream route, not the provider.
+  const s = setup();
+  const routed = { id: "openai/gpt-6.1-sol", model: "openai/gpt-6.1-sol", routeProviderId: "openai", displayName: "GPT-6.1 Sol", supportedReasoningEfforts: [{ reasoningEffort: "high" }] };
+  s.harness.sdk.stub("providers.models", async () => ({ providers: [{ id: "flare", available: true, capabilities: { modelCatalogScope: "workspace", permissionModes: ["accept-edits", "full"], supportsServiceTier: false } }], models: list === "models" ? [routed] : [], selectedOnlyModels: list === "selectedOnlyModels" ? [routed] : [] }) as any);
+  s.store.configSet(0, { providerId: "flare", model: "openai/gpt-6.1-sol", reasoningLevel: "high" }, { id: "you", type: "human" });
+  expect((await s.resolver.resolve("thr_aaaaaaaa")).execution).toMatchObject({ providerId: "flare", model: "openai/gpt-6.1-sol", reasoningLevel: "high", origin: "configured" });
+  expect((await s.resolver.resolve("thr_aaaaaaaa")).execution).not.toHaveProperty("serviceTier");
+});
+test.each([
+  { permissions: ["full"], expected: "full" },
+  { permissions: ["accept-edits", "full"], expected: undefined },
+])("a provider offering $permissions runs drafts with permissionMode $expected", async ({ permissions, expected }) => {
+  const s = setup(); s.state.permissions = permissions;
+  const { execution } = await s.resolver.resolve("thr_aaaaaaaa");
+  expect(execution.permissionMode).toBe(expected);
+});
+test("a model the provider does not list is refused without a fallback, naming where to choose another", async () => {
+  const s = setup();
+  await expect(s.resolver.resolve("thr_aaaaaaaa", undefined, undefined, undefined, { providerId: "provider-a", model: "model-gone", reasoningLevel: "high" })).rejects.toThrow(/model-gone.*not offered.*Choose another model for this draft; no fallback/);
+  s.store.configSet(0, { providerId: "provider-a", model: "model-gone", reasoningLevel: "high" }, { id: "you", type: "human" });
+  await expect(s.resolver.resolve("thr_aaaaaaaa")).rejects.toThrow(/model-gone.*not offered.*Drafting settings; no fallback/);
 });
 
 test("missing source concrete defaults asks for Settings choice instead of a list-first model", async () => {

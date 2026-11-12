@@ -10,7 +10,8 @@ const id = z.string().min(1).max(200);
 const at = z.string().datetime();
 export const draftSelectionSchema = z.object({ providerId: id, model: z.string().min(1).max(500), reasoningLevel: z.string().max(200), serviceTier: z.string().min(1).max(200).optional() }).strict();
 export const draftConfigSchema = z.object({ revision, selection: draftSelectionSchema.nullable(), updatedAt: at.nullable(), updatedBy: actorSchema.extend({ type: z.literal("human") }).nullable() }).strict();
-export const draftExecutionSchema = draftSelectionSchema.extend({ hostId: id, configRevision: revision, origin: z.enum(["configured", "source-thread", "override"]) }).strict();
+// permissionMode is present only for providers that cannot run with accept-edits, such as Pi; absent means accept-edits.
+export const draftExecutionSchema = draftSelectionSchema.extend({ hostId: id, configRevision: revision, origin: z.enum(["configured", "source-thread", "override"]), permissionMode: z.literal("full").optional() }).strict();
 // A message delivered during a running turn keeps the sequence it was sent at, which is before its own range.
 export const draftSourceMessageSchema = z.object({ messageId: id, messageSeq: revision, threadId: contextThreadIdSchema, turnId: id, completedAt: at,
   sourceSeqStart: revision, sourceSeqEnd: revision, role: z.enum(["user", "assistant"]), authorType: z.enum(["human", "agent", "system", "unknown"]), observedAt: at,
@@ -42,7 +43,8 @@ export const draftJobSchema = z.object({ requestId: z.string().uuid(), revision:
   progress: z.string().max(2000).nullable(), error: z.string().max(8000).nullable(), retry: z.enum(["none", "lookup-save", "discover-stop"]),
 }).strict();
 export const draftStartInputSchema = z.object({ requestId: z.string().uuid(), sectionId: id, expectedBindingRevision: revision, sourceThreadId: contextThreadIdSchema,
-  sourceSnapshotId: z.string().uuid(), expectedConfigRevision: revision }).strict();
+  // A person confirms each draft that runs with full access; Start refuses one without it.
+  sourceSnapshotId: z.string().uuid(), expectedConfigRevision: revision, fullAccessConfirmed: z.literal(true).optional() }).strict();
 export const draftRecordSchema = draftJobSchema.extend({ candidateResults: z.array(result).length(DRAFT_LIMITS.findings), intent: draftStartInputSchema, fingerprint: z.string().regex(/^[a-f0-9]{64}$/), source: draftSourceSnapshotSchema,
   requester: actorSchema.extend({ type: z.literal("human") }), workerNonce: z.string().uuid(), bootstrapQueueId: id.nullable(), activationQueueId: id.nullable(),
   active: z.boolean(), output: draftOutputSchema.nullable(),
