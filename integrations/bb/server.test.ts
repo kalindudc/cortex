@@ -274,6 +274,23 @@ async function setup(
   };
 }
 
+test("draft RPCs are merged and restrictive worker metadata exits the existing configure before tools/skills/primer", async () => {
+  const s = await setup();
+  expect(await s.harness.behavior.callRpc("draftConfigGet", null)).toMatchObject({ revision: 0, selection: null });
+  const config = await s.harness.behavior.resolveAgentConfiguration(makePluginAgentConfigurationContext({ provider: { id: "claude-code" }, thread: { id: THREAD }, project: { id: PROJECT }, pluginMetadata: { memoryMode: "write", cortexDraftWorker: { forged: true } } }));
+  expect(config.tools).toEqual([]); expect(config.skills).toEqual([]); expect(config.instructions).not.toContain("cortex_update"); expect(config.instructions).not.toContain("PRIMER");
+});
+test("restrictive draft marker suppresses legacy lookup/checkpoint/warmup without affecting an ordinary child", async () => {
+  const s = await setup();
+  s.metadata.set(THREAD, { cortexDraftWorker: { forged: true }, memoryMode: "write" });
+  const before = s.cortex.calls().length;
+  await s.request(THREAD, "source data only"); await s.finish(THREAD, [fileChange("src/test.ts")]);
+  expect(s.cortex.calls().slice(before).filter(c => c.argv[0] === "memory")).toEqual([]);
+  expect(s.sent).toEqual([]);
+  const ordinary = await s.resolve("claude-code", { thread: { id: CHILD, parentThreadId: THREAD }, pluginMetadata: { memoryMode: "off" } });
+  expect(ordinary.tools.map(t => t.name)).toContain("cortex_update");
+});
+
 const fileChange = (...paths: string[]) => ({
   type: "fileChange",
   id: `f-${paths.join(",")}`,

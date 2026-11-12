@@ -49,8 +49,8 @@ With pi (the coding agent cortex ships an extension for), memory arrives on its 
   `@42`), relevant streams it has not seen yet arrive as a hidden message.
 - The `cortex_recall` tool loads a stream (`"@42"`), one section of it (`"@42#next"`), or searches by keywords.
 
-In bb the Cortex plugin gives every provider the primer and `cortex_recall`; pi, Claude Code and Codex get hits too.
-Elsewhere without pi, an agent runs `cortex memory context --query="<the ask>"` once, then `cortex memory show <id>`.
+In bb, providers use ordinary memory in unbound threads and scoped context in connected ones; see
+[what agents receive](bb.md#what-agents-receive). Without pi or bb, use `cortex memory context`, then explicit stream reads.
 
 Streams the ask points at come first, marked linked: a task it names (`@42`, `cortex 42`, `cortex show 42`), a mentioned
 bb thread's streams, or one naming its ticket (`LANE-8`) or pull request (`owner/repo#12`, a PR link). Keyword hits

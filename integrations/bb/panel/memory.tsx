@@ -344,7 +344,7 @@ export function MemoryPanel({ threadId }: ExperimentalThreadActionTabProps): Rea
   const open = (taskId: number) => {
     openTaskTab(panel, threadId, taskId);
   };
-  if (error !== null) {
+  if (error !== null && memory === null) {
     return (
       <div className="p-4">
         <ErrorNotice message={error} onRetry={refetch} />
@@ -359,6 +359,7 @@ export function MemoryPanel({ threadId }: ExperimentalThreadActionTabProps): Rea
   const tab = chosen ?? (bound || context.error !== null ? "context" : "tasks");
   return (
     <div className="h-full overflow-y-auto px-4 pt-3 pb-4 text-[12.5px]">
+      {error !== null ? <ErrorNotice message={error} onRetry={refetch} /> : null}
       <header className="flex items-center gap-2">
         {look.symbol ? (
           <span aria-hidden className={cn("font-mono", SYMBOL_TONE[look.tone])}>
@@ -401,9 +402,8 @@ export function MemoryPanel({ threadId }: ExperimentalThreadActionTabProps): Rea
           </TabsTrigger>
         </TabsList>
         <TabsContent value="context" className="mt-3">
-          {context.error ? (
-            <FailureNotice failure={context.error} onRetry={context.refetch} />
-          ) : context.data === undefined ? (
+          {context.error ? <FailureNotice failure={context.error} onRetry={context.refetch} /> : null}
+          {context.data === undefined ? (
             <LoadingRows label="Loading thread context" />
           ) : (
             <div className="flex flex-col gap-3">

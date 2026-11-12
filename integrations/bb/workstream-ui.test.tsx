@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import type { ComponentType } from "react";
+import { type ComponentType, useMemo } from "react";
 import { act, cleanup, fireEvent, waitFor, within } from "@testing-library/react";
 import { loadPluginApp, type PluginRpcTestHandlers, renderSlot } from "@get-bb/plugin-sdk/testing/app";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
@@ -11,6 +11,16 @@ import { workstreamRpcContract } from "./workstream-contract";
 
 const toast = vi.hoisted(() => Object.assign(vi.fn(), { error: vi.fn(), success: vi.fn() }));
 vi.mock("sonner", () => ({ toast }));
+vi.mock("@get-bb/plugin-sdk/app", async importOriginal => {
+  const sdk = await importOriginal<typeof import("@get-bb/plugin-sdk/app")>();
+  return {
+    ...sdk,
+    useRpc: () => {
+      const transport = sdk.useRpc();
+      return useMemo(() => ({ call: transport.call }), [transport]);
+    },
+  };
+});
 
 const THREAD = "thr_aaaaaaaa";
 const OTHER = "thr_bbbbbbbb";
@@ -466,7 +476,7 @@ describe("thread-only versus every-thread edits", () => {
     backend.shown.set("kn_e1", { ...approved, revision: 3, state: "candidate", approval: null, text: "Someone else's wording." });
     fireEvent.click(within(dialog).getByRole("button", { name: "Load the newer revision" }));
     expect(await within(dialog).findByText("Revision 3 now says:")).toBeTruthy();
-    expect(calls(tab, "knowledgeShow")).toEqual([{ id: "kn_e1" }]);
+    expect(calls(tab, "knowledgeShow")).toEqual([{ id: "kn_e1" }, { id: "kn_e1" }]);
     expect((field as HTMLTextAreaElement).value).toBe("My careful wording.");
   });
 });
@@ -540,6 +550,136 @@ describe("prepare a composer draft", () => {
     expect((await within(dialog).findByRole("alert")).textContent).toMatch(/520 of 400 tokens/);
     expect(within(dialog).queryByRole("button", { name: "Put in composer" })).toBeNull();
     expect(tab.inspection.composer.text).toBe("");
+  });
+});
+
+describe("native composer scope in the legacy changed-workstream view", () => {
+  test("labels native section choice honestly and preserves the generic navigation options", async () => {
+    const backend = makeBackend();
+    const configured = options(backend);
+    const slot = renderMemoryTab(backend, { rpc: { ...configured.rpc, threadContext: ({ threadId }: { threadId: string }) => ({ ...contextFor(backend, threadId), bindingChanged: true }) } });
+    fireEvent.click(await slot.findByRole("button", { name: "New thread (choose section)" }));
+    expect(slot.inspection.navigateCalls.filter(call => call.method === "toCompose")).toEqual([{ method: "toCompose", options: { focusPrompt: true } }]);
+  });
+});
+
+describe("compact status priority", () => {
+  for (const width of [64, 28]) {
+    test.each(["ready", "held", "over-budget", "unavailable", "read-error", "memory-error", "memory-hidden-error", "memory-stale", "held-and-memory-error"])(`%s uses one meaningful glyph at ${width} px`, async state => {
+      const observed = new Map<Element, ResizeObserverCallback>();
+      vi.stubGlobal("ResizeObserver", class {
+        constructor(private callback: ResizeObserverCallback) {}
+        observe(target: Element) { observed.set(target, this.callback); }
+        disconnect() { observed.clear(); }
+      });
+      try {
+        const backend = makeBackend();
+        const configured = options(backend);
+        const memoryEnabled = state.startsWith("memory-") && state !== "memory-hidden-error" || state === "held-and-memory-error";
+        const rpc = {
+          ...configured.rpc,
+          threadContext: ({ threadId }: { threadId: string }): ThreadContext => {
+            if (state === "read-error") throw new Error("Context cannot be read");
+            const base = contextFor(backend, threadId);
+            return { ...base, status: state === "over-budget" || state === "unavailable" ? state : "ready" as const, notices: state === "held" || state === "over-budget" || state === "held-and-memory-error" ? base.notices : [], workstream: state === "unavailable" ? null : base.workstream, entries: state === "unavailable" ? [] : base.entries, exactText: state === "unavailable" ? "" : base.exactText, estimatedTokens: state === "over-budget" ? 450 : state === "unavailable" ? 0 : base.estimatedTokens, error: state === "over-budget" ? "Required context exceeds the budget" : state === "unavailable" ? "Context unavailable" : null };
+          },
+          memory: () => {
+            if (state === "memory-error" || state === "memory-hidden-error" || state === "held-and-memory-error") throw new Error("Memory cannot be read");
+            const memory = memoryState();
+            return state === "memory-stale" ? { ...memory, view: memory.view ? { ...memory.view, stale: { id: 908, detail: "Needs refresh" } } : null } : memory;
+          },
+        };
+        const props = { threadId: THREAD, projectId: "proj_1", environment: null, segments: [], isExpanded: false, onToggle: vi.fn() };
+        const reg = segment();
+        const component = () => reg.useVisible?.(props) ? <reg.summary {...props} /> : null;
+        const slot = renderSlot({ component }, {}, { ...configured, rpc: rpc as PluginRpcTestHandlers<typeof rpcContract>, settings: { memoryChip: memoryEnabled, taskChip: false } });
+        const button = await slot.findByRole("button", { name: /Cortex/ });
+        await waitFor(() => {
+          const expected = ["read-error", "over-budget", "unavailable", "memory-error", "held-and-memory-error"].includes(state) ? "CircleAlert" : state === "held" || state === "memory-stale" ? "TriangleAlert" : "Brain";
+          expect(button.querySelector("[data-cortex-summary-icon] [data-icon]")?.getAttribute("data-icon")).toBe(expected);
+        });
+        await act(async () => observed.get(button)?.([{ target: button, contentRect: { width } } as unknown as ResizeObserverEntry], {} as ResizeObserver));
+        expect(button.textContent).toBe("");
+        expect(button.querySelectorAll("[data-cortex-summary-icon] [data-icon]")).toHaveLength(1);
+        expect(button.getAttribute("title")).toBe(button.getAttribute("aria-label"));
+        fireEvent.click(button);
+        expect(props.onToggle).toHaveBeenCalledTimes(1);
+        expect(calls(slot, "setContextDismissed")).toHaveLength(0);
+        if (state === "memory-hidden-error") expect(calls(slot, "memory")).toHaveLength(0);
+      } finally { vi.unstubAllGlobals(); }
+    });
+  }
+});
+
+describe("crowded composer allocation", () => {
+  test.each([240, 140, 64, 28])("adapts at %i allocated px without changing the viewport", async width => {
+    const observers = new Map<Element, ResizeObserverCallback>();
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(private callback: ResizeObserverCallback) {}
+      observe(target: Element) { observers.set(target, this.callback); }
+      disconnect() { observers.clear(); }
+    });
+    try {
+      const { slot, props } = renderSegment(makeBackend(), false);
+      const button = await slot.findByRole("button", { name: /Cortex context.*Show details/ });
+      await act(async () => {
+        observers.get(button)?.([{ target: button, contentRect: { width } } as unknown as ResizeObserverEntry], {} as ResizeObserver);
+      });
+      expect(button.getAttribute("title")).toBe(button.getAttribute("aria-label"));
+      expect(button.getAttribute("aria-label")).toMatch(/Ready.*takeaway.*held notice/);
+      if (width < 100) {
+        expect(button.textContent).toBe("");
+        expect(button.querySelectorAll("[data-cortex-summary-icon]")).toHaveLength(1);
+        expect(button.querySelector("[data-cortex-extra]")).toBeNull();
+      }
+      fireEvent.click(button);
+      expect(props.onToggle).toHaveBeenCalledTimes(1);
+      expect(calls(slot, "setContextDismissed")).toEqual([]);
+    } finally { vi.unstubAllGlobals(); }
+  });
+});
+
+describe("refresh regressions with runtime-faithful per-hook clients", () => {
+  test("visible, summary and details share one read, while unrelated hosts stay isolated", async () => {
+    const first = renderSegment(makeBackend()).slot;
+    await first.findByText("Envoy");
+    await act(async () => {});
+    expect(calls(first, "threadContext")).toHaveLength(1);
+    expect(calls(first, "memory")).toHaveLength(1);
+    const other = renderSegment(makeBackend({ unbound: true })).slot;
+    await other.findByText("Cortex");
+    expect(calls(other, "threadContext")).toHaveLength(1);
+    expect(within(other.container).queryByText("Envoy")).toBeNull();
+  });
+
+  test("unrelated thread/task events do not reload section reads; refresh failure keeps the open editor, text, caret and focus", async () => {
+    const backend = makeBackend();
+    let fail = false;
+    const page = renderSlot(app.navPanels[0]!, { subPath: "workstreams/ws_envoy" }, options(backend, {
+      rpc: handlers(backend, { workstreamShow: () => {
+        if (fail) throw new Error("Background read failed");
+        return { workstream, entries: [approved, candidate], total: 2, limit: 100, offset: 0 };
+      } }),
+    }));
+    fireEvent.click(await page.findByRole("button", { name: "Add knowledge" }));
+    const dialog = await page.findByRole("dialog", { name: "Add knowledge to Envoy" });
+    const field = within(dialog).getByRole("textbox", { name: "Text" }) as HTMLTextAreaElement;
+    fireEvent.change(field, { target: { value: "My careful unfinished text." } });
+    field.focus();
+    field.setSelectionRange(4, 9);
+    await page.behavior.emitRealtime("thread", { threadId: OTHER });
+    await page.behavior.emitRealtime("task", { taskId: 999 });
+    expect(calls(page, "workstreamShow")).toHaveLength(1);
+    fail = true;
+    await page.behavior.emitRealtime("workstreams", null);
+    await waitFor(() => expect(calls(page, "workstreamShow")).toHaveLength(2));
+    await act(async () => {});
+    expect(page.getByRole("dialog", { name: "Add knowledge to Envoy" })).toBe(dialog);
+    expect(within(dialog).getByRole("textbox", { name: "Text" })).toBe(field);
+    expect(field.value).toBe("My careful unfinished text.");
+    expect([field.selectionStart, field.selectionEnd]).toEqual([4, 9]);
+    expect(document.activeElement).toBe(field);
+    expect(within(page.container).getByRole("alert", { hidden: true }).textContent).toContain("Background read failed");
   });
 });
 

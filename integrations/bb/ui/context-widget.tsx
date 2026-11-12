@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import {
   type ExperimentalThreadContextCardProps,
   type ExperimentalThreadContextSegmentInput,
@@ -102,9 +102,10 @@ function MemoryMark({ memory, failure }: { memory: MemoryState | undefined; fail
 
 function summaryLabel(widget: Widget): string {
   const context = widget.context;
-  if (context === undefined) return "Cortex context could not load";
-  if (context.status === "unbound") return "Cortex memory";
-  return `Cortex context: ${context.workstream?.name ?? "workstream"}${context.binding?.topic ? `, ${context.binding.topic}` : ""}, ${tokens(context.estimatedTokens)} of ${context.budgetTokens} tokens`;
+  const state = context === undefined ? "Cortex context could not load" : context.status === "unbound" ? "Cortex memory. Not connected to a workstream" : `Cortex context: ${context.workstream?.name ?? "workstream"}${context.binding?.topic ? `, ${context.binding.topic}` : ""}. ${STATUS_LOOK[context.status].word}, ${plural(context.entries.length, "takeaway")}, ${plural(context.notices.length, "held notice")}. ${tokens(context.estimatedTokens)} of ${context.budgetTokens} tokens. Preview, not a delivery receipt`;
+  const memory = widget.showMemory ? `Memory: ${markerLook(widget.memory ?? null, widget.memoryFailure?.message ?? null).title}` : null;
+  const task = widget.showTask && widget.task ? `Task #${widget.task.id}: ${widget.task.title}, ${STATUS_LABEL[widget.task.status]}` : null;
+  return [state, context?.error, widget.failure?.message, memory, task].filter(Boolean).join(". ");
 }
 
 /** One line in the context row: the workstream, its budget, what is held back, and the memory mark. */
@@ -113,28 +114,52 @@ export function ContextSegmentSummary({ threadId, isExpanded, onToggle }: Experi
   const context = widget.context;
   const held = context ? context.notices.length : 0;
   const status = context ? STATUS_LOOK[context.status] : null;
+  const memoryLook = widget.showMemory ? markerLook(widget.memory ?? null, widget.memoryFailure?.message ?? null) : null;
+  const blocked = widget.failure !== null || !!context?.error || (context !== undefined && context.status !== "ready" && context.status !== "unbound") || memoryLook?.tone === "error";
+  const glyph = blocked ? "CircleAlert" : held > 0 || memoryLook?.tone === "warning" ? "TriangleAlert" : "Brain";
+  const root = useRef<HTMLButtonElement>(null);
+  const [width, setWidth] = useState(240);
+  useLayoutEffect(() => {
+    const target = root.current;
+    if (!target || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(entries => {
+      const entry = entries.find(entry => entry.target === target);
+      if (entry) setWidth(entry.borderBoxSize?.[0]?.inlineSize ?? entry.contentRect.width);
+    });
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, []);
+  const iconOnly = width < 100;
+  const complete = width >= 240;
+  const label = `${summaryLabel(widget)}. ${isExpanded ? "Hide" : "Show"} details`;
   return (
     <button
       type="button"
       aria-expanded={isExpanded}
-      aria-label={`${summaryLabel(widget)}. ${isExpanded ? "Hide" : "Show"} details`}
+      ref={root}
+      aria-label={label}
+      title={label}
       onClick={onToggle}
+      style={{ flex: "1 1 0%", minWidth: 0 }}
+      data-cortex-summary=""
       className="inline-flex h-7 min-w-0 max-w-full items-center gap-1.5 rounded-md px-1.5 text-[12px] text-muted-foreground hover:bg-state-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
     >
-      {context === undefined ? (
+      <span data-cortex-summary-icon="" className="inline-flex shrink-0">
+        <Icon name={glyph} className={cn("size-3.5", glyph === "Brain" ? "text-primary" : "text-foreground")} aria-hidden />
+      </span>
+      {!iconOnly ? <>
+      {!complete ? <span data-cortex-extra="" className="min-w-0 truncate text-foreground">Cortex</span> : context === undefined ? (
         <>
-          <Icon name="AlertCircle" className="size-3.5 text-destructive-text" aria-hidden />
-          <span className="text-destructive-text">Cortex unavailable</span>
+          <span className="min-w-0 truncate text-foreground">Cortex unavailable</span>
         </>
       ) : context.status === "unbound" ? (
         <span className="text-foreground">Cortex</span>
       ) : (
         <>
-          <Icon name="Layers" className="size-3.5 text-primary" aria-hidden />
-          <span className="truncate font-semibold text-foreground">{context.workstream?.name}</span>
-          {context.binding?.topic ? <span className="truncate">· {facetWord(context.binding.topic)}</span> : null}
-          <span className={cn("tabular-nums", context.status === "ready" ? "" : TONE_TEXT[status!.tone])}>
-            {context.status === "ready" ? tokens(context.estimatedTokens) : status!.word}
+          <span data-cortex-extra="" className="min-w-0 truncate font-semibold text-foreground">{context.workstream?.name}</span>
+
+          <span className={cn("shrink-0 whitespace-nowrap tabular-nums text-foreground", context.status === "ready" ? "" : TONE_TEXT[status!.tone])}>
+            {context.status === "ready" ? plural(context.entries.length, "takeaway") : status!.word}
           </span>
           {held > 0 ? (
             <span className="inline-flex items-center gap-0.5 text-warning-text">
@@ -145,8 +170,9 @@ export function ContextSegmentSummary({ threadId, isExpanded, onToggle }: Experi
           ) : null}
         </>
       )}
-      {widget.showMemory ? <MemoryMark memory={widget.memory} failure={widget.memoryFailure} /> : null}
-      <Icon name={isExpanded ? "ChevronDown" : "ChevronRight"} className="size-3.5" aria-hidden />
+      {complete && widget.showMemory ? <MemoryMark memory={widget.memory} failure={widget.memoryFailure} /> : null}
+      {width >= 140 ? <Icon name={isExpanded ? "ChevronDown" : "ChevronRight"} className="size-3.5 shrink-0" aria-hidden /> : null}
+      </> : null}
     </button>
   );
 }

@@ -600,6 +600,7 @@ import {
   type WorkstreamListQuery,
   type WorkstreamRevision,
   type AdmissionHint,
+  type Source,
   WorkstreamError,
   pageQuery,
   parseContextQuery,
@@ -1209,9 +1210,23 @@ export class Store {
         updatedAt: at,
         actor: m.actor,
       });
+      const reserveId = (id: string) => {
+        if (
+          this.db
+            .query(
+              "SELECT 1 FROM workstreams WHERE id = ? UNION ALL SELECT 1 FROM knowledge WHERE id = ? UNION ALL SELECT 1 FROM workstream_revisions WHERE id = ? LIMIT 1",
+            )
+            .get(id, id, id)
+        )
+          throw new WorkstreamError("Canonical ID is already in use; input was not applied", 409);
+        return id;
+      };
+      const requireSources = (sources: Source[]) => {
+        if (!sources.length) throw new WorkstreamError("Acceptance requires at least one explicit source");
+      };
       if (m.op === "create") {
         const workstream: Workstream = {
-          id: `ws_${crypto.randomUUID()}`,
+          id: reserveId(m.id ?? `ws_${crypto.randomUUID()}`),
           name: m.name,
           description: m.description ?? "",
           revision: 1,
@@ -1236,7 +1251,12 @@ export class Store {
         this.saveWorkstreamEntity(workstream, m.op, m.reason);
         return { outcome: "updated", workstream };
       }
-      if (m.op === "propose") {
+      if (m.op === "propose" || m.op === "save-approved") {
+        if (m.op === "save-approved") {
+          human();
+          requireSources(m.sources);
+        }
+        const id = reserveId(m.id ?? `kn_${crypto.randomUUID()}`);
         const w = this.workstreamEntity<Workstream>("workstreams", m.workstreamId);
         if (w.archived) throw new WorkstreamError("workstream is archived", 409);
         const rows = this.db
@@ -1260,7 +1280,12 @@ export class Store {
             e.kind === m.kind &&
             e.expiresAt === (m.expiresAt ?? null) &&
             [...submittedSources].every(key => existing.has(key))
-          )
+          ) {
+            if (m.op === "save-approved")
+              throw new WorkstreamError(
+                "Identical knowledge already exists; review it explicitly; input was not applied",
+                409,
+              );
             return {
               outcome: "no-save",
               entry: e,
@@ -1268,15 +1293,16 @@ export class Store {
               reason:
                 "Identical normalized claim and subject, facet, kind, applicability and expiry with no new evidence; existing entry preserved. Other collisions are review hints, not semantic no-save decisions.",
             };
+          }
         }
         const entry: Knowledge = {
-          id: `kn_${crypto.randomUUID()}`,
+          id,
           workstreamId: m.workstreamId,
           subject: m.subject,
           title: m.title,
           text: m.text,
           kind: m.kind,
-          state: "candidate",
+          state: m.op === "save-approved" ? "approved" : "candidate",
           facet: m.facet,
           applicability: m.applicability,
           sources: [...new Map(m.sources.map(s => [sourceKey(s), s])).values()],
@@ -1285,12 +1311,13 @@ export class Store {
           createdAt: at,
           updatedAt: at,
           expiresAt: m.expiresAt ?? null,
-          approval: null,
+          approval: m.op === "save-approved" ? { actor: m.actor, at } : null,
           supersedes: [],
           supersededBy: null,
           conflicts: [],
         };
-        this.saveWorkstreamEntity(entry, m.op, "", true);
+        if (m.op === "save-approved") this.assertKnowledgeSubjectFree(entry);
+        this.saveWorkstreamEntity(entry, m.op, m.op === "save-approved" ? m.reason : "", true);
         return { outcome: "created", entry, hints: hints.slice(0, 100) };
       }
       const old = this.workstreamEntity<Knowledge>("knowledge", m.id);
@@ -1299,7 +1326,52 @@ export class Store {
       const entry = next(old);
       const protectedDirective = (e: Knowledge) =>
         e.kind === "directive" && e.approval !== null && e.state === "approved";
-      if (m.op === "edit") {
+      if (m.op === "accept") {
+        human();
+        if (old.state !== "candidate") throw new WorkstreamError("Acceptance requires a current candidate", 409);
+        requireSources(old.sources);
+        const w = this.workstreamEntity<Workstream>("workstreams", old.workstreamId);
+        if (w.archived) throw new WorkstreamError("workstream is archived", 409);
+        entry.applicability = m.applicability;
+        entry.title = m.title ?? old.title;
+        entry.text = m.text ?? old.text;
+        entry.kind = m.kind ?? old.kind;
+        if (m.supersede) {
+          const other = this.workstreamEntity<Knowledge>("knowledge", m.supersede.id);
+          guard(other, m.supersede.expectedRevision);
+          if (
+            entry.id === other.id ||
+            entry.workstreamId !== other.workstreamId ||
+            !sameApplicability(entry.applicability, other.applicability)
+          )
+            throw new WorkstreamError(
+              "Relation requires different entries in the same workstream and applicability",
+              409,
+            );
+          if (["forgotten", "archived", "rejected", "superseded"].includes(other.state))
+            throw new WorkstreamError("Historical entries cannot acquire active relations", 409);
+          if (old.conflicts.some(id => id !== other.id) || other.conflicts.some(id => id !== old.id))
+            throw new WorkstreamError("Additional conflicts require separate resolution; no partial approval", 409);
+          if (protectedDirective(other) && entry.kind !== "directive")
+            throw new WorkstreamError("Only a human-approved directive can supersede an approved directive", 409);
+          this.assertKnowledgeSubjectFree(entry, [other.id]);
+          entry.supersedes = [...new Set([...entry.supersedes, other.id])];
+          entry.conflicts = [];
+          const revisedOther = { ...next(other), state: "superseded" as const, supersededBy: entry.id, conflicts: [] };
+          this.saveWorkstreamEntity(revisedOther, m.op, m.reason);
+        } else {
+          if (old.conflicts.length)
+            throw new WorkstreamError("Resolve conflicts through explicit supersession before approving", 409);
+          this.assertKnowledgeSubjectFree(entry);
+        }
+        entry.state = "approved";
+        entry.approval = { actor: m.actor, at };
+      } else if (m.op === "edit") {
+        if (m.kind !== undefined || m.applicability !== undefined) {
+          human();
+          if (old.state !== "candidate")
+            throw new WorkstreamError("Kind or applicability edits require a current candidate", 409);
+        }
         if (protectedDirective(old)) human();
         if (["superseded", "archived", "rejected"].includes(old.state)) human();
         const { op: _op, actor: _actor, id: _id, expectedRevision: _expected, reason: _reason, ...fields } = m;

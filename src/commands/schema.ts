@@ -119,7 +119,7 @@ export default defineCommand({
         common:
           "Every mutation requires op and actor. Existing IDs require expectedRevision and reason. Unknown fields refuse.",
         mutations: {
-          create: { required: ["name"], optional: ["description"] },
+          create: { required: ["name"], optional: ["description", "id"], id: "ws_ followed by a lowercase UUID" },
           "edit-workstream": {
             required: ["id", "expectedRevision", "reason"],
             optional: ["name", "description", "archived"],
@@ -127,14 +127,46 @@ export default defineCommand({
           },
           propose: {
             required: ["workstreamId", "subject", "title", "text", "kind", "facet", "applicability", "sources"],
-            optional: ["expiresAt"],
+            optional: ["expiresAt", "id"],
+            id: "kn_ followed by a lowercase UUID",
             result:
-              "candidate only; no-save requires identical normalized text and matching subject, facet, kind, applicability and expiry with no new evidence. Other collisions remain reviewable candidates.",
+              "candidate only; with or without id, no-save requires identical normalized text and matching subject, facet, kind, applicability and expiry with no new evidence. No-save returns the existing canonical entry; supplied id remains unused. Other collisions remain reviewable candidates.",
+          },
+          accept: {
+            required: ["id", "expectedRevision", "reason", "applicability"],
+            optional: ["title", "text", "kind", "supersede"],
+            supersede:
+              "explicit replacement: {id, expectedRevision}; guards both entries using final applicability/kind",
+            permission: "human; current candidate with original nonempty sources; both applicability dimensions known",
+            result:
+              "same id, next approved revision, original sources/subject preserved; conflicts require explicit supersession; all writes/history atomic",
+          },
+          "save-approved": {
+            required: [
+              "id",
+              "reason",
+              "workstreamId",
+              "subject",
+              "title",
+              "text",
+              "kind",
+              "facet",
+              "applicability",
+              "sources",
+            ],
+            optional: ["expiresAt"],
+            id: "kn_ followed by a lowercase UUID",
+            permission: "human; explicit nonempty sources and both applicability dimensions known",
+            result:
+              "one approved revision atomically; current-subject conflicts and exact no-new-evidence duplicates refuse without a proposal or implicit adoption",
           },
           edit: {
             required: ["id", "expectedRevision", "reason"],
-            optional: ["title", "text", "facet", "sources", "expiresAt"],
-            result: "new candidate revision; clear approval, protected directive edits require human",
+            optional: ["title", "text", "kind", "applicability", "facet", "sources", "expiresAt"],
+            permission:
+              "supplying kind or applicability requires a human actor and current candidate, even for unchanged values; draft applicability may remain unknown",
+            result:
+              "new candidate revision; clear approval, protected directive edits require human; other legacy edits remain compatible",
           },
           evidence: {
             required: ["id", "expectedRevision", "reason", "sources"],
@@ -155,6 +187,8 @@ export default defineCommand({
           },
         },
         read: "Explicit ID, orientation plus exact topic, approved/applicable/unexpired only; claim-free review notices. No legacy fallback. Consumer grants/budgets/receipts belong to the integration.",
+        stableIds:
+          "Optional create/propose id and required save-approved id let callers persist intent before writing. Any occupied entity/history id fails opaquely with conflict, never returns or overwrites existing data. A lost response must be recovered by explicitly rereading and verifying the intended id, not by creating another id. No receipt or alias is recorded for normalized no-save.",
         trust:
           "Actor attribution is not authentication. Local single-user API; integrations must derive human approval from trusted user actions.",
         semanticDeduplication:

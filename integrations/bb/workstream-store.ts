@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { z } from "zod";
+import { createDraftStore, DRAFT_MIGRATIONS } from "./draft-store";
 import {
   actorSchema,
   bindingRowSchema,
@@ -12,6 +13,8 @@ import {
   type DeliveryReceipt,
   type WorkstreamBinding,
 } from "./workstream-contract";
+
+import { createSectionJobStore, type JobRecord } from "./section-store";
 
 const prefsSchema = z
   .object({
@@ -35,6 +38,10 @@ export function createWorkstreamStore(bb: BbPluginApi) {
     `CREATE TRIGGER IF NOT EXISTS workstream_receipts_immutable_update BEFORE UPDATE ON workstream_receipts BEGIN SELECT RAISE(ABORT, 'delivery receipts are immutable'); END`,
     `CREATE TRIGGER IF NOT EXISTS workstream_receipts_immutable_delete BEFORE DELETE ON workstream_receipts BEGIN SELECT RAISE(ABORT, 'delivery receipts are immutable'); END`,
     `CREATE TABLE IF NOT EXISTS workstream_prepared_bindings (thread_id TEXT PRIMARY KEY, payload TEXT NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS workstream_section_jobs (request_id TEXT PRIMARY KEY, section_id TEXT NOT NULL, payload TEXT NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS workstream_title_marks (section_id TEXT PRIMARY KEY, payload TEXT NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS workstream_binding_history (section_id TEXT NOT NULL, revision INTEGER NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(section_id, revision))`,
+    ...DRAFT_MIGRATIONS,
   ]);
   function thread(threadId: string): Prefs {
     contextThreadIdSchema.parse(threadId);
@@ -65,7 +72,28 @@ export function createWorkstreamStore(bb: BbPluginApi) {
       | undefined;
     return row ? bindingRowSchema.parse(JSON.parse(row.payload)) : { key, revision: 0, binding: null };
   }
+  const jobs = createSectionJobStore(db);
   return {
+    jobs,
+    drafts: createDraftStore(db),
+    connectJob(record: Extract<JobRecord, { kind: "connect" }>, binding: WorkstreamBinding) {
+      return db.transaction(() => {
+        const current = section(record.input.sectionId);
+        if (current.revision !== record.input.expectedRevision)
+          throw new Error("Section binding revision conflict; connection was not applied.");
+        const row = bindingRowSchema.parse({ key: current.key, revision: current.revision + 1, binding });
+        db.prepare(
+          "INSERT INTO workstream_bindings VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET revision=excluded.revision, payload=excluded.payload",
+        ).run(row.key, row.revision, JSON.stringify(row));
+        db.prepare("INSERT INTO workstream_binding_history VALUES (?, ?, ?)").run(
+          row.key,
+          row.revision,
+          JSON.stringify({ ...row, actor: record.actor, at: new Date().toISOString(), requestId: record.requestId }),
+        );
+        jobs.put({ ...record, status: "connected", bindingRevision: row.revision, error: null });
+        return row;
+      })();
+    },
     thread,
     section,
     sections() {
@@ -73,7 +101,12 @@ export function createWorkstreamStore(bb: BbPluginApi) {
         db.prepare("SELECT payload FROM workstream_bindings ORDER BY key LIMIT 1000").all() as { payload: string }[]
       ).map(row => bindingRowSchema.parse(JSON.parse(row.payload)));
     },
-    setSection(key: string, expectedRevision: number, binding: WorkstreamBinding | null) {
+    setSection(
+      key: string,
+      expectedRevision: number,
+      binding: WorkstreamBinding | null,
+      actor?: z.infer<typeof actorSchema>,
+    ) {
       return db.transaction(() => {
         const current = section(key);
         if (current.revision !== expectedRevision)
@@ -84,6 +117,12 @@ export function createWorkstreamStore(bb: BbPluginApi) {
         db.prepare(
           "INSERT INTO workstream_bindings VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET revision=excluded.revision, payload=excluded.payload",
         ).run(key, next.revision, JSON.stringify(next));
+        if (actor)
+          db.prepare("INSERT INTO workstream_binding_history VALUES (?, ?, ?)").run(
+            key,
+            next.revision,
+            JSON.stringify({ ...next, actor: actorSchema.parse(actor), at: new Date().toISOString(), requestId: null }),
+          );
         return next;
       })();
     },

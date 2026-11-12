@@ -177,7 +177,7 @@ export function WorkstreamPage({ id, selectedId }: { id: string; selectedId: str
   const shown = facet === "all" ? entries : entries.filter(entry => entry.facet === facet);
   const groups = groupKnowledge(shown, now);
   const selected = entries.find(entry => entry.id === selectedId) ?? groups[0]?.entries[0] ?? null;
-  if (read.error) return <div className="p-4 md:p-5"><FailureNotice failure={read.error} onRetry={read.refetch} /></div>;
+  if (read.error && read.data === undefined) return <div className="p-4 md:p-5"><FailureNotice failure={read.error} onRetry={read.refetch} /></div>;
   if (read.data === undefined) return <div className="p-4 md:p-5"><LoadingRows label="Loading workstream" /></div>;
   const { workstream, total } = read.data;
   const select = (entryId: string) => {
@@ -187,6 +187,7 @@ export function WorkstreamPage({ id, selectedId }: { id: string; selectedId: str
   const counts = groupKnowledge(entries, now);
   return (
     <div className="flex h-full min-h-0 flex-col">
+      {read.error ? <FailureNotice failure={read.error} onRetry={read.refetch} /> : null}
       <div className="shrink-0 border-b border-border-seam px-4 pt-3 md:px-5">
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="text-[17px] font-semibold text-foreground">{workstream.name}</h2>

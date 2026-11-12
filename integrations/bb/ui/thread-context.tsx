@@ -619,7 +619,7 @@ export function ContextOverview({
           <Icon name="SectionMove" className="mt-0.5 size-4 shrink-0 text-attention" aria-hidden />
           <span className="flex-1">Workstream changed. Earlier context may remain in this session.</span>
           <Button size="sm" variant="outline" className="h-7 px-2 text-[12px]" onClick={() => navigate.toCompose({ focusPrompt: true })}>
-            New thread
+            New thread (choose section)
           </Button>
         </div>
       ) : null}
@@ -655,11 +655,12 @@ export function ThreadContextPage({ threadId }: { threadId: string }) {
   const read = useThreadContext(threadId);
   const { threads } = experimental_useSidebarThreads();
   const title = threads.find(thread => thread.id === threadId)?.displayTitle ?? threadId;
-  if (read.error) return <FailureNotice failure={read.error} onRetry={read.refetch} />;
+  if (read.error && read.data === undefined) return <FailureNotice failure={read.error} onRetry={read.refetch} />;
   const context = read.data;
   if (context === undefined) return <LoadingRows label="Loading thread context" />;
   return (
     <div className="flex flex-col gap-4">
+      {read.error ? <FailureNotice failure={read.error} onRetry={read.refetch} /> : null}
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="min-w-0 truncate text-[15px] font-semibold text-foreground" title={title}>
           {title}

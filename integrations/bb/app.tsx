@@ -10,8 +10,13 @@ import { CortexPage, CortexSidebar, useCortexPageTitle, useNeedsYouBadge } from 
 import { MEMORY_TAB_ID, TASK_TAB_ID } from "./ui/panel-tabs";
 import { contextVisibilityAction, taskHeaderAction } from "./ui/thread-actions";
 import { CORTEX_PAGE_PATH } from "./ui/thread-context";
+import { TAKEAWAY_TAB_ID, TakeawayPanel, saveMessageAction } from "./ui/takeaway";
+import { saveTakeawayAction } from "./ui/thread-actions";
+import { DraftingSettings } from "./ui/draft-settings";
+import "./ui/section.css";
 
 export default definePluginApp(app => {
+  app.slots.settingsSection({ id: "drafting", title: "Drafting", component: DraftingSettings });
   // Tab ids match the retired threadPanelAction ids, so saved tabs and layouts carry over.
   app.slots.experimental_tab({
     context: { kind: "thread" },
@@ -59,5 +64,8 @@ export default definePluginApp(app => {
   });
   app.slots.experimental_threadAction(taskHeaderAction);
   app.slots.experimental_threadAction(contextVisibilityAction);
+  app.slots.experimental_threadAction(saveTakeawayAction);
+  app.slots.experimental_tab({ context: { kind: "thread" }, availability: "action", id: TAKEAWAY_TAB_ID, title: "Save takeaway", icon: "BookmarkPlus", component: TakeawayPanel });
+  app.slots.messageAction(saveMessageAction);
   app.slots.messageDirective({ id: "cortex", component: CortexCard });
 });

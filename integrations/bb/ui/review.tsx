@@ -291,7 +291,7 @@ export function NeedsYou() {
   const workstreams = useMemo(() => [...new Map(items.map(item => [item.workstream.id, item.workstream])).values()], [items]);
   const visible = filter === "all" ? items : items.filter(item => item.workstream.id === filter);
   const selected = visible.find(item => item.entry.id === selectedId) ?? visible[0] ?? null;
-  if (read.error) return <div className="p-4 md:p-5"><FailureNotice failure={read.error} onRetry={read.refetch} /></div>;
+  if (read.error && read.data === undefined) return <div className="p-4 md:p-5"><FailureNotice failure={read.error} onRetry={read.refetch} /></div>;
   if (read.data === undefined) return <div className="p-4 md:p-5"><LoadingRows label="Loading what needs you" /></div>;
   const move = (delta: number) => {
     if (visible.length === 0) return;
@@ -310,6 +310,7 @@ export function NeedsYou() {
   const oldest = items[0];
   return (
     <div className="flex h-full min-h-0 flex-col" onKeyDown={keys}>
+      {read.error ? <FailureNotice failure={read.error} onRetry={read.refetch} /> : null}
       <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-border-seam px-4 py-3 md:px-5">
         <span className="text-[28px] leading-none font-semibold text-foreground tabular-nums">{read.data.total}</span>
         <span className="text-[14px] font-semibold text-foreground">need you</span>

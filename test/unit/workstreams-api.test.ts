@@ -59,6 +59,58 @@ test("typed API uses isolated handlers; event observes committed data, no-save/r
   expect((await api.workstreams.show(w.id)).workstream.name).toBe("New");
 });
 
+test("atomic acceptance publishes one committed event; failed approval and stable-ID collision publish nothing", async () => {
+  const s = open();
+  const runtime = createRuntime();
+  const app = buildApp(s, runtime);
+  const api = createApi(async (p, init) => app.fetch(new Request(`http://localhost${p}`, init)));
+  const w = (await api.workstreams.mutate(create)).workstream as Workstream;
+  const entry = s.mutateWorkstream({
+    op: "propose",
+    actor: { id: "agent", type: "agent" },
+    workstreamId: w.id,
+    subject: "acceptance",
+    title: "Draft",
+    text: "Original",
+    kind: "finding",
+    facet: "orientation",
+    applicability: { environment: { mode: "unknown" }, host: { mode: "unknown" } },
+    sources: [{ ref: "note:human", authorType: "human", observedAt: "2026-01-01T00:00:00.000Z" }],
+  }).entry as Knowledge;
+  const events: unknown[] = [];
+  runtime.events.subscribe(event => {
+    expect(s.workstreamEntry(entry.id)).toMatchObject({ revision: 2, state: "approved", text: "Final" });
+    expect(s.workstreamHistory(entry.id).total).toBe(2);
+    events.push(event);
+  });
+  const acceptance = {
+    op: "accept",
+    actor,
+    id: entry.id,
+    expectedRevision: 1,
+    reason: "Reviewed",
+    text: "Final",
+    applicability: { environment: { mode: "not-applicable" }, host: { mode: "not-applicable" } },
+  };
+  const mutate = (input: unknown) =>
+    app.fetch(
+      new Request("http://localhost/api/workstreams/mutate", {
+        method: "POST",
+        body: JSON.stringify(input),
+        headers: { "content-type": "application/json" },
+      }),
+    );
+  expect((await mutate({ ...acceptance, applicability: entry.applicability })).status).toBe(400);
+  expect(events).toHaveLength(0);
+  expect((await mutate(acceptance)).status).toBe(200);
+  expect(events).toHaveLength(1);
+  expect((await mutate(acceptance)).status).toBe(409);
+  const collision = await mutate({ ...create, id: w.id });
+  expect(collision.status).toBe(409);
+  expect(await collision.text()).not.toContain(w.name);
+  expect(events).toHaveLength(1);
+});
+
 test("malformed bodies, extra fields and invalid pagination refuse without writes", async () => {
   const app = buildApp(open());
   for (const body of [

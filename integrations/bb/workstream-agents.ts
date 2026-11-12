@@ -3,6 +3,7 @@ import { z } from "zod";
 import { contextThreadIdSchema, knowledgeIdSchema, proposalInputSchema } from "./workstream-contract";
 import type { Workstreams } from "./workstreams";
 import { MISSING_CONTEXT } from "./workstreams";
+import type { DraftService } from "./draft-service";
 
 import { CONFIGURE_CONTEXT_MAX, WORKSTREAM_INSTRUCTIONS as boundedInstructions } from "./workstream-policy";
 export { CONFIGURE_CONTEXT_MAX } from "./workstream-policy";
@@ -71,7 +72,7 @@ export function workstreamConfiguration(
   };
 }
 
-export function registerWorkstreamAgents(bb: BbPluginApi, service: Workstreams) {
+export function registerWorkstreamAgents(bb: BbPluginApi, service: Workstreams, drafts?: DraftService) {
   const proposalAttempts = new Map<string, number>();
   const resetProposals = ({ thread }: { thread: { id: string } }): void => {
     proposalAttempts.delete(thread.id);
@@ -80,6 +81,8 @@ export function registerWorkstreamAgents(bb: BbPluginApi, service: Workstreams) 
   bb.events.on("thread.deleted", resetProposals);
   bb.experimental_hooks.on("message.dispatch", async ctx => {
     try {
+      const worker = drafts?.guard(ctx);
+      if (worker) return worker;
       const decision = await service.predispatch(ctx);
       const view = service.peek(ctx.thread.id);
       if (view?.binding && view.exactText.length > CONFIGURE_CONTEXT_MAX)
@@ -122,7 +125,7 @@ export function registerWorkstreamAgents(bb: BbPluginApi, service: Workstreams) 
         },
         ctx.signal,
       );
-      service.invalidate();
+      if (result.outcome !== "no-save") service.invalidateScope({ workstreamId: scope.binding.workstreamId });
       return JSON.stringify(result);
     },
   });
@@ -145,7 +148,7 @@ export function registerWorkstreamAgents(bb: BbPluginApi, service: Workstreams) 
         { op: "conflict", ...input, actor: { id: `bb-${ctx.threadId}`, type: "agent" } },
         ctx.signal,
       );
-      service.invalidate();
+      service.invalidateScope({ workstreamId: scope.binding.workstreamId });
       return JSON.stringify(result);
     },
   });
@@ -158,8 +161,8 @@ export function registerWorkstreamAgents(bb: BbPluginApi, service: Workstreams) 
     }
   };
   bb.events.on("thread.created", warm);
-  bb.events.on("experimental_thread.parentChanged", () => service.invalidate());
-  bb.events.on("thread.deleted", () => service.invalidate());
+  bb.events.on("experimental_thread.parentChanged", ({ thread }) => service.invalidateThreadTree(thread.id));
+  bb.events.on("thread.deleted", ({ thread }) => service.invalidateThreadTree(thread.id));
   for (const event of ["thread.idle", "thread.failed", "thread.archived"] as const)
     bb.events.on(event, ({ thread }) => service.invalidate(thread.id));
   const operationalThreadChanges = new Set([
@@ -192,7 +195,7 @@ export function registerWorkstreamAgents(bb: BbPluginApi, service: Workstreams) 
           if (change.entity === "thread") {
             // BB also reports section moves as title-changed; these must revoke inherited scopes.
             if (change.changes.some(kind => kind !== "environment-changed" && !operationalThreadChanges.has(kind)))
-              service.invalidate();
+              change.id ? service.invalidateThreadTree(change.id) : service.invalidate();
             else if (change.changes.includes("environment-changed")) service.environmentAttached(change.id);
             else if (["idle", "error", "stopping"].includes(change.metadata?.statusChange?.status ?? ""))
               service.invalidate(change.id);

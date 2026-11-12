@@ -4,10 +4,12 @@ import {
   type ExperimentalPluginRpcHandlerContext,
 } from "@get-bb/plugin-sdk";
 import type { Workstreams } from "./workstreams";
+import type { Sections } from "./sections";
 import { workstreamRpcContract, knowledgeIdSchema, contextThreadIdSchema } from "./workstream-contract";
 
 export function workstreamHandlers(
   service: Workstreams,
+  _sections?: Sections,
 ): ExperimentalPluginRpcHandlersWithContext<typeof workstreamRpcContract> {
   const { cli, store } = service;
   async function call<T>(operation: () => Promise<T> | T): Promise<T> {
@@ -37,7 +39,8 @@ export function workstreamHandlers(
   async function mutation(op: string, input: object, ctx: ExperimentalPluginRpcHandlerContext) {
     return call(async () => {
       const result = await cli.mutate({ op, ...input, actor: user(ctx) }, ctx.experimental_signal);
-      service.invalidate();
+      const workstreamId = result.entry?.workstreamId ?? result.workstream?.id;
+      if (workstreamId && result.outcome !== "no-save") service.invalidateScope({ workstreamId });
       return result;
     });
   }
@@ -67,8 +70,8 @@ export function workstreamHandlers(
         user(ctx);
         if (input.binding)
           await cli.show({ id: input.binding.workstreamId, limit: 1, offset: 0 }, ctx.experimental_signal);
-        const row = store.setSection(input.sectionId, input.expectedRevision, input.binding);
-        service.invalidate();
+        const row = store.setSection(input.sectionId, input.expectedRevision, input.binding, service.human());
+        service.invalidateScope({ sectionId: input.sectionId });
         return row;
       }),
     threadContext: ({ threadId }, ctx) => call(() => service.context(threadId, ctx.experimental_signal)),
@@ -79,7 +82,7 @@ export function workstreamHandlers(
         if (input.binding)
           await cli.show({ id: input.binding.workstreamId, limit: 1, offset: 0 }, ctx.experimental_signal);
         store.setThreadBinding(input.threadId, input.expectedRevision, input.binding);
-        service.invalidate();
+        service.invalidateThreadTree(input.threadId);
         return service.context(input.threadId, ctx.experimental_signal);
       }),
     setThreadOverride: (input, ctx) =>
@@ -104,7 +107,7 @@ export function workstreamHandlers(
           actor,
           updatedAt: new Date().toISOString(),
         });
-        service.invalidate();
+        service.invalidate(input.threadId);
         return service.context(input.threadId, ctx.experimental_signal);
       }),
     setThreadGrant: (input, ctx) =>
@@ -117,7 +120,7 @@ export function workstreamHandlers(
         } else if (!/^[1-9]\d*$/.test(input.id))
           throw new Error("An unscoped task reference must be a positive task number.");
         store.setGrant(input.threadId, input.expectedRevision, input.kind, input.id, input.granted, actor);
-        service.invalidate();
+        service.invalidate(input.threadId);
         return service.context(input.threadId, ctx.experimental_signal);
       }),
     contextVisibility: ({ threadIds }) =>

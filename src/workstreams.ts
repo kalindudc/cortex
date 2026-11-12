@@ -67,26 +67,36 @@ export type MutationResult = {
   reason?: string;
 };
 type Guarded = { actor: Actor; id: string; expectedRevision: number; reason: string };
+type ProposalFields = {
+  actor: Actor;
+  workstreamId: string;
+  subject: string;
+  title: string;
+  text: string;
+  kind: Knowledge["kind"];
+  facet: string;
+  applicability: Applicability;
+  sources: Source[];
+  expiresAt?: string | null;
+};
 export type WorkstreamMutation =
-  | { op: "create"; actor: Actor; name: string; description?: string }
+  | { op: "create"; actor: Actor; name: string; description?: string; id?: string }
   | (Guarded & { op: "edit-workstream"; name?: string; description?: string; archived?: boolean })
-  | {
-      op: "propose";
-      actor: Actor;
-      workstreamId: string;
-      subject: string;
-      title: string;
-      text: string;
-      kind: Knowledge["kind"];
-      facet: string;
+  | (ProposalFields & ({ op: "propose"; id?: string } | { op: "save-approved"; id: string; reason: string }))
+  | (Guarded & {
+      op: "accept";
       applicability: Applicability;
-      sources: Source[];
-      expiresAt?: string | null;
-    }
+      title?: string;
+      text?: string;
+      kind?: Knowledge["kind"];
+      supersede?: { id: string; expectedRevision: number };
+    })
   | (Guarded & {
       op: "edit";
       title?: string;
       text?: string;
+      kind?: Knowledge["kind"];
+      applicability?: Applicability;
       facet?: string;
       sources?: Source[];
       expiresAt?: string | null;
@@ -201,18 +211,32 @@ function sources(value: unknown): void {
     timestamp(s.observedAt, "source.observedAt");
   }
 }
+function canonicalId(value: unknown, prefix: "ws" | "kn"): void {
+  string(value, "id", 128);
+  if (!new RegExp(`^${prefix}_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`).test(value))
+    fail(`id must be ${prefix}_ followed by a lowercase UUID`);
+}
+function explicitApplicability(value: unknown): void {
+  applicability(value);
+  const a = value as Applicability;
+  if (a.environment.mode === "unknown" || a.host.mode === "unknown")
+    fail("Acceptance requires explicit known applicability for environment and host");
+}
 export function parseWorkstreamMutation(value: unknown): WorkstreamMutation {
   const m = object(value, "mutation");
   actor(m.actor);
   const base = ["op", "actor"];
   const guarded = [...base, "id", "expectedRevision", "reason"];
   if (m.op === "create") {
-    keys(m, [...base, "name", "description"]);
+    keys(m, [...base, "name", "description", "id"]);
+    if (m.id !== undefined) canonicalId(m.id, "ws");
     string(m.name, "name", 200);
     if (m.description !== undefined) string(m.description, "description", 8192, true);
-  } else if (m.op === "propose") {
+  } else if (m.op === "propose" || m.op === "save-approved") {
     keys(m, [
       ...base,
+      "id",
+      ...(m.op === "save-approved" ? ["reason"] : []),
       "workstreamId",
       "subject",
       "title",
@@ -223,6 +247,11 @@ export function parseWorkstreamMutation(value: unknown): WorkstreamMutation {
       "sources",
       "expiresAt",
     ]);
+    if (m.op === "save-approved" || m.id !== undefined) canonicalId(m.id, "kn");
+    if (m.op === "save-approved") {
+      string(m.reason, "reason", 2048);
+      explicitApplicability(m.applicability);
+    }
     string(m.workstreamId, "workstreamId", 128);
     string(m.subject, "subject", 256);
     string(m.title, "title", 512);
@@ -241,11 +270,27 @@ export function parseWorkstreamMutation(value: unknown): WorkstreamMutation {
       if (m.description !== undefined) string(m.description, "description", 8192, true);
       if (m.archived !== undefined && typeof m.archived !== "boolean") fail("archived must be boolean");
     } else if (m.op === "edit") {
-      keys(m, [...guarded, "title", "text", "facet", "sources", "expiresAt"]);
+      keys(m, [...guarded, "title", "text", "kind", "applicability", "facet", "sources", "expiresAt"]);
       if (m.title !== undefined) string(m.title, "title", 512);
       if (m.text !== undefined) string(m.text, "text", 32768);
+      if (Object.hasOwn(m, "kind") && m.kind !== "directive" && m.kind !== "finding")
+        fail("kind must be directive or finding");
+      if (Object.hasOwn(m, "applicability")) applicability(m.applicability);
       if (m.facet !== undefined) string(m.facet, "facet", 128);
       if (m.sources !== undefined) sources(m.sources);
+    } else if (m.op === "accept") {
+      keys(m, [...guarded, "applicability", "title", "text", "kind", "supersede"]);
+      explicitApplicability(m.applicability);
+      if (m.title !== undefined) string(m.title, "title", 512);
+      if (m.text !== undefined) string(m.text, "text", 32768);
+      if (m.kind !== undefined && m.kind !== "directive" && m.kind !== "finding")
+        fail("kind must be directive or finding");
+      if (m.supersede !== undefined) {
+        const replacement = object(m.supersede, "supersede");
+        keys(replacement, ["id", "expectedRevision"]);
+        string(replacement.id, "supersede.id", 128);
+        revision(replacement.expectedRevision);
+      }
     } else if (m.op === "evidence") {
       keys(m, [...guarded, "sources"]);
       sources(m.sources);

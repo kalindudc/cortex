@@ -2,6 +2,30 @@
 
 Cortex follows [semantic versioning](https://semver.org). Each release has a section below, newest first.
 
+## 0.105.0 - 2026-11-11
+
+- **Section-first setup in bb.** Connect a real section to a new or existing shared brief, see its threads and
+  manage the connection from one place. Listing threads does not import their conversations, and changing the
+  brief does not rewrite running sessions. Cortex uses its Brain SVG without automatically renaming native bb sections.
+- **Save takeaways from messages.** Capture a message or selected passage with a verified source, or write a
+  takeaway manually. Review and edit each suggestion's wording and applicability without losing its identity,
+  source or revision. Uncertain saves retain their original request rather than silently starting another.
+- **Choose a model for background drafting.** Cortex's Drafting settings use bb's native provider/model picker.
+  Preview completed excerpts from one section thread before starting a bounded draft. Findings await individual
+  review; nothing is accepted or adopted as a Rule automatically. Stop, inspect progress and recover partial
+  results without requesting another model turn. The helper omits Cortex tools and memory, not native-provider tools.
+- **Keep conversations quiet and edits intact.** The context row shrinks to one icon when space is tight and can
+  still be closed and restored. Background updates and read failures preserve dialogs, typed text, focus and
+  selection; stale writes and mismatched responses retain the original intent for explicit recovery.
+- **Guarded knowledge transactions and recovery.** Proposal IDs and reviewed acceptance support exact retry
+  recovery without overwriting an occupied ID. Historical no-save results retain their canonical identity and
+  state. Candidate kind and applicability edits stay unapproved, and changed or uncertain queued draft input is
+  preserved instead of being discarded during cancellation.
+- **Recheck startup scope while preparing context.** Withdrawn granted knowledge and thread/environment changes
+  invalidate in-flight preparation. Unresolved startup context never silently falls back to unrelated memory.
+- **Known drafting limitation.** Drafting can refuse completed threads when bb returns their messages outside a
+  grouped turn. Section context, manual takeaways and message capture remain available while this is fixed.
+
 ## 0.104.0 - 2026-11-11
 
 - **Shared context for bb sections.** Connect a section to a workstream so related threads, including children,

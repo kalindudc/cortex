@@ -57,6 +57,28 @@ afterEach(async () => {
 type Subscription = Parameters<BbPluginApi["sdk"]["subscribe"]>[0];
 type ThreadChange = Parameters<Extract<Subscription, { event: "thread:changed" }>["callback"]>[0];
 
+test("shared mutation and ordinary thread deletion signals are scoped, never blanket refresh", async () => {
+  const s = setup();
+  await s.harness.behavior.callRpc("knowledgePropose", {
+    workstreamId: w.id,
+    subject: "new",
+    title: "new",
+    text: "new",
+    kind: "finding",
+    facet: "orientation",
+    applicability,
+    sources: [],
+  });
+  expect(s.harness.realtimeSignals.filter(e => e.channel === "workstreams").map(e => e.payload)).toEqual([
+    { workstreamId: w.id },
+  ]);
+  s.harness.realtimeSignals.length = 0;
+  await s.harness.behavior.emitThreadEvent("thread.deleted", { thread: makeThreadResponse({ id: OTHER }) });
+  expect(s.harness.realtimeSignals.filter(e => e.channel === "workstreams").map(e => e.payload)).toEqual([
+    { threadId: OTHER },
+  ]);
+});
+
 function setup() {
   const subscriptions: Subscription[] = [];
   const mutations: Record<string, unknown>[] = [];

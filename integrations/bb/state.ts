@@ -118,7 +118,7 @@ export type CortexState = {
 };
 
 /** Realtime channels the server publishes; payloads are `{ threadId }`, `{ taskId }`, null, and for memory `{ threadId }` or null (every thread). */
-export type CortexRealtimeChannel = "thread" | "task" | "all" | "memory" | "workstreams";
+export type CortexRealtimeChannel = "thread" | "task" | "all" | "memory" | "workstreams" | "sections" | "drafts";
 
 const taskId = z.number().int().positive();
 const statusSchema = z.enum(STATUSES);

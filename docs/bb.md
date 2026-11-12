@@ -1,17 +1,13 @@
 ---
 budget: 160
-sources: [integrations/bb/server.ts, integrations/bb/state.ts, integrations/bb/watch.ts, integrations/bb/app.tsx,
-  integrations/bb/cli.ts, integrations/bb/detail.ts, integrations/bb/memory.ts, integrations/bb/panel/,
-  integrations/bb/ui/, integrations/bb/workstream-contract.ts, integrations/bb/workstream-cli.ts,
-  integrations/bb/workstream-store.ts, integrations/bb/workstream-rpc.ts, integrations/bb/workstream-agents.ts,
-  integrations/bb/workstreams.ts, src/commands/agents.ts, src/commands/workstream.ts, src/bbPlugin.ts,
-  src/bbPluginSource.ts, src/extensions/pi.ts, integrations/bb/turns.ts]
+sources: [integrations/bb/, src/commands/agents.ts, src/commands/workstream.ts, src/bbPlugin.ts,
+  src/bbPluginSource.ts, src/extensions/pi.ts]
 ---
 # Cortex in bb
 
-Cortex keeps tasks and shared knowledge available while you work in bb threads. Its page brings together changes
-that need your review, workstreams and saved knowledge. The thread's Cortex and Memory tabs keep task actions and
-context close without requiring one long-lived coordinator conversation.
+Cortex gives each connected bb section a shared brief: accepted takeaways that new threads can start with.
+Its page follows your real sections; workstreams keep the knowledge independent of section names and lifetimes.
+The thread's Cortex and Memory tabs retain task actions and detailed context controls.
 
 ## Install and upgrade
 
@@ -19,9 +15,8 @@ context close without requiring one long-lived coordinator conversation.
 its npm dependencies and registers it with bb. Repeating it changes only what differs; `cortex agents status`
 shows those differences. `cortex agents reset` removes and replaces the plugin, resetting its settings.
 
-Workstreams require a Cortex build with `cortex workstream` support and a daemon running that build. An older
-running daemon cannot serve the new commands; stop it with `cortex stop` when you intend to upgrade. Do not point a
-new plugin at a different production database merely to make an unavailable command appear to work.
+Workstreams need a Cortex build and daemon with `cortex workstream` support. When upgrading, stop an older daemon
+with `cortex stop`; never point the plugin at another production database to hide an unavailable command.
 
 Settings stay in bb's plugin settings. `cortexPath` selects an executable; an empty value searches PATH, `~/bin`
 and `~/.local/bin`. Reload the plugin after changing it. `memory` controls automatic lookup and saving;
@@ -30,23 +25,40 @@ is shown beside conversations by default. Appearance settings do not grant shari
 
 ## Connect a section to a workstream
 
-Create a workstream, then use Bindings to connect a bb section to it. The workstream can span repositories.
-An unsectioned child inherits its starting thread's connection; a deliberate thread-specific connection takes
-precedence. Changing sections changes future context, not the ownership of saved knowledge or text in a running
-agent's conversation. A section is a convenient association, not a security boundary or the memory database.
+Open Cortex, choose a section and share context there. Confirm a new workstream or reuse an existing one;
+a matching name alone connects nothing. Several sections can use the same brief, including across repositories.
+Connecting imports no conversations and does not update running sessions. New threads in that section receive
+eligible context automatically, without a separate Attach step. A preview is not proof of provider delivery.
+
+Cortex uses its existing Brain SVG in its section list and composer. Native bb section names are left unchanged;
+Cortex does not add an emoji prefix or decorate native section headers.
+An unsectioned child inherits its starting thread's connection; a deliberate thread-specific connection wins.
+Moving or disconnecting a section does not delete the workstream or erase text already in a running conversation.
 
 A blank topic includes the workstream's shared basics. Choosing a topic adds approved knowledge saved under that
 exact topic. Choose a target environment and, where relevant, a target host or cluster explicitly: your development
 checkout and the machine running the agent are not deployment targets. An unknown target is not a wildcard.
 
+## Draft from a thread
+
+Choose the model in Cortex's Drafting settings, then Save. The default follows the source thread's model;
+changes affect future drafts only. Choose a thread in the connected section and inspect its completed-message
+excerpts and requested model before Start. The preview is not the whole conversation or proof of provider use.
+Suggestions keep their sources and await your individual review; no Rule or approval is adopted automatically.
+After reload, check the original request. Stop requested is not stopped; partial saved results remain linked.
+Save recovery uses the original result without another model turn. The helper omits Cortex tools and memory;
+provider-native tools and other plugins are not a security sandbox.
+
 ## Review saved knowledge
 
-New shared knowledge starts as a suggestion, not an approved instruction. Review its wording, applicability and
-sources before approving it. A human-message quote is evidence, not approval. Source authorship and reachability
-are reported metadata; neither a source pointer nor unchanged files proves that a claim is true now.
+Save a message or selected passage as a takeaway, or write one from the thread's context controls. Message capture
+checks the source; a rendered selection that cannot be matched offers whole-message or manual recovery instead.
+Review wording, scope and sources before acceptance. Saving for review keeps the suggestion's identity and choices
+without approval; unknown scope still blocks acceptance. A human can explicitly adopt a Rule, never by quote alone.
+Source authorship and reachability are reported metadata, not authentication or proof that a claim is true now.
 
-Agents can attempt up to ten new suggestions during an active thread run. No-save results and failures count;
-the limit resets when the thread becomes idle. It does not limit your review actions or explicit task updates.
+Agents have a bounded suggestion allowance per active run, including no-save results and failures. Your review
+actions and explicit task updates are separate.
 
 Keep one accepted source of knowledge rather than saving another summary for each thread. Repeated evidence can
 be attached to existing knowledge. Exact duplicates can produce a no-save result; related suggestions help compare
@@ -58,9 +70,8 @@ it carries a notice and source references instead. Superseding knowledge is an e
 Agent evidence cannot silently cancel a human prohibition. Expired observations also need review: a new observation
 becomes a suggestion and does not put a new timestamp on the old claim.
 
-Archive keeps knowledge available as history but out of future context. Forget removes its content from the current
-entry and stored revisions while preserving a tombstone. Neither action erases prior exports, backups or text already
-sent to an agent. Forget is not an undoable archive; read the confirmation before using it.
+Archive keeps knowledge as history, out of future context. Forget removes current and revision text but keeps a tombstone.
+Neither erases exports, backups or already-sent text. Forget cannot be undone; read its confirmation first.
 
 ## Inspect or change a thread's context
 
@@ -78,18 +89,16 @@ Prepare context inserts a visible draft for you to inspect and send. Preparing a
 adds information; it cannot replace a running session's earlier text. Start a fresh thread when a clean context is
 needed. Context history preserves returned recall text and accepted reference sends; it never recomputes old text
 from today's budget or knowledge and never claims that an agent used something merely because it was offered.
-Returning instructions from a configuration callback does not prove the provider received them.
 
-Bound lookup uses the workstream and explicit human grants, without an implicit fallback to legacy or other
-workstream content. Reading an older, unscoped task requires an explicit grant and is labeled historical context.
+Bound lookup has no implicit legacy or cross-workstream fallback; human grants are explicit and legacy reads labeled historical.
 Direct shell and Cortex CLI access remain outside this accidental-selection control.
 
 ## Keep conversations clear
 
-Collapse context when you want a short summary. Close it when you want it completely out of the conversation;
-the per-thread preference survives reloads. Bring it back from the Cortex thread action or the Memory tab. The
-global default can keep it hidden in new threads without disabling memory. A restored thread can override that
-default, or return to following it. Closing the widget changes presentation only, not the knowledge-sharing policy.
+The composer summary shrinks with available space, down to one icon that still opens its details. Collapse it
+for a short summary, or close it completely; the per-thread preference survives reloads. Restore it from the thread
+action or Memory tab. The global default can hide it without disabling memory; each thread can override or follow
+that default. Closing the widget changes presentation only, not knowledge sharing.
 
 ## Work with tasks
 
@@ -97,10 +106,9 @@ Open the Cortex tab from the thread panel, task shortcut or a `::cortex{id="529"
 tasks the thread updated and any manually linked by search or ID. Pin a focus task or follow the most active one.
 A task the thread posted to cannot be unlinked; removing a manual link does not delete the task.
 
-Overview folds the body at headings; Activity shows updates and their source threads. Change status or take the
-next step with Undo, and post a note with an optional status change. These writes use your Cortex author. The More
-menu copies the body or a command to open the desktop task, and includes task-wide automatic-memory exclusion.
-The plan progress and source-file checks remain available; Files unchanged is not a factual verification badge.
+Overview folds the body at headings; Activity shows updates and source threads. Change status with Undo or post
+a note with optional status, using your Cortex author. More copies the body or desktop command and controls
+task-wide memory exclusion. Plan progress and source checks remain; Files unchanged is not factual verification.
 
 ## What agents receive
 
@@ -120,21 +128,22 @@ installed skills. The pi extension steps aside in a bb thread so memory is not i
 
 The independent npm package is `integrations/bb/`; it uses only the public SDK, Node and declared dependencies.
 It reads canonical tasks and workstream knowledge through the Cortex CLI, never through Cortex's database.
-`src/bbPluginSource.ts` embeds the source at build time; its tests compare the embedded files with that source.
-Run the final root build and tests only after plugin writers stop, so that comparison is meaningful.
+`src/bbPluginSource.ts` embeds the plugin at build time; tests compare its bundled files with the source.
 
 - `workstream-contract.ts` validates RPC and CLI boundaries. `workstream-cli.ts` uses the current-entry command for
   canonical knowledge, not the oldest history revision. JSON mutations use stdin and `--input=-`.
-- `workstream-store.ts` stores bb-specific bindings, preferences, grants and frozen context history. It does not
-  duplicate the canonical knowledge database. `workstreams.ts` composes eligible context and thread-only changes.
+- `workstream-store.ts` stores bindings, preferences, grants and frozen context history; `workstreams.ts` composes
+  eligible context. `sections.ts` and `section-store.ts` keep resumable connection/capture intent and legacy title-mark ownership,
+  not another canonical knowledge database. Intended IDs are persisted before cross-store writes.
 - `workstream-agents.ts` prepares scope at dispatch, uses a synchronous configuration cache and registers read/propose
   tools. Session construction and provider delivery are distinct; the plugin does not claim hot system-prompt updates.
-- `cli.ts` runs argument arrays with timeouts and cancellation, validates JSON and throws on every tool failure.
-  `state.ts` retains task links, source checks and the ordinary project primer cache; `watch.ts` invalidates reads.
+- `cli.ts` runs argument arrays with timeouts/cancellation, validates JSON and throws on tool failure. `state.ts`
+  retains task links, source checks and the project primer cache; `watch.ts` invalidates reads.
+- `draft-service.ts` owns durable helper intent and recovery; `draft-validation.ts` verifies sources and suggestions.
 - `turns.ts` retains cued/first-user lookup, the narrower starting-thread path for children, and at most one save turn
   per eligible request. Workstream routing does not rewrite generic Cortex memory ranking.
-- `app.tsx`, `ui/` and `panel/` use host tabs, navigation and context surfaces. Their RPC invalidations distinguish
-  task, memory and workstream changes. All user-facing styling follows the host theme.
+- `app.tsx`, `ui/` and `panel/` use host UI and theme. Shared reads use public host identity, not per-hook RPC clients;
+  only affected views refresh, preserving successful content and in-progress edits.
 
 ## Rules to keep
 
@@ -145,6 +154,7 @@ Run the final root build and tests only after plugin writers stop, so that compa
 - Preserve current-state reads, source-role distinctions, approval/CAS and applicability guards:
   `test/unit/workstreams.test.ts`, `test/unit/workstreams-api.test.ts`, `test/integration/cli/workstreams.test.ts`.
 - Test the CLI boundary, scope, context refusal, historical receipts and persistent visibility:
-  `integrations/bb/workstreams.test.ts`, `integrations/bb/cli.test.ts`, `integrations/bb/app.test.tsx`.
+  `integrations/bb/workstreams.test.ts`, `integrations/bb/sections.test.ts`, `integrations/bb/cli.test.ts`,
+  `integrations/bb/app.test.tsx`, `integrations/bb/section-ui.test.tsx`.
 - `pnpm run test:bb` runs the plugin tests and typecheck after its npm dependencies are installed. The root suite
   does not substitute for the independent plugin tests, and neither proves live provider lifecycle behavior.

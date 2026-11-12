@@ -146,7 +146,7 @@ export function Bindings() {
   const writes = useWorkstreamWrites();
   const navigate = useBbNavigate();
   const [editing, setEditing] = useState<string | null>(null);
-  if (bindings.error) return <div className="p-4 md:p-5"><FailureNotice failure={bindings.error} onRetry={bindings.refetch} /></div>;
+  if (bindings.error && bindings.data === undefined) return <div className="p-4 md:p-5"><FailureNotice failure={bindings.error} onRetry={bindings.refetch} /></div>;
   if (bindings.data === undefined || sidebar.status === "loading") return <div className="p-4 md:p-5"><LoadingRows label="Loading bindings" /></div>;
   const rows = new Map(bindings.data.bindings.map(row => [row.key, row]));
   const names = new Map((workstreams.data?.workstreams ?? []).map(ws => [ws.id, ws.name]));
@@ -155,6 +155,7 @@ export function Bindings() {
   const editingRow = editing ? rows.get(editing) : undefined;
   return (
     <div className="h-full overflow-y-auto p-4 md:p-5">
+      {bindings.error ? <FailureNotice failure={bindings.error} onRetry={bindings.refetch} /> : null}
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">
         <div className="flex flex-col gap-0.5 text-[12.5px] text-muted-foreground">
           <p>Threads in a connected section get its approved knowledge from their next session.</p>

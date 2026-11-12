@@ -149,17 +149,17 @@ the next command or daemon takes over and cleans up after it. For you, this mean
 
 ### Tables and migrations
 
-- Canonical workstreams and saved knowledge use additive source tables, not legacy tasks. `cortex workstream --help`
-  and `cortex schema --json` describe the JSON interface. `src/workstreams.ts#WorkstreamMutation` requires actor
-  attribution and expected revisions; approval and supersession require explicit human intent, not a source quote.
-  Source author labels are reported metadata, not verified human truth. This is provenance, not authentication.
-  `src/store.ts#mutateWorkstream` commits history with each write.
+- Canonical workstreams and knowledge use source tables, not tasks. `cortex schema --json` describes the interface;
+  `src/workstreams.ts#WorkstreamMutation` carries actor attribution, not authentication. Quotes never grant approval.
+  Caller-supplied creation IDs support crash recovery: persist intent first, then reread and verify after a lost response.
+  Occupied IDs refuse without revealing rows. Normalized no-save still returns the existing canonical ID, not an alias.
+  Human draft edits retain kind and even unknown scope without approval; acceptance requires known scope and keeps the ID and original sources.
+  Replacement explicitly guards both revisions and final applicability. Human writing can create one approved revision,
+  with an explicit source; duplicates never silently adopt candidates. `src/store.ts#mutateWorkstream` commits each job and its history atomically.
 - `src/store.ts#readWorkstream` selects approved, applicable, unexpired orientation and exact-topic knowledge;
   disputed or expired findings become claim-free notices. It never searches legacy tasks or another workstream.
-  Human-review hints use an indexed recent-neighbor sample bounded by `src/workstreams.ts#REVIEW_HINT_LIMITS`;
-  No-save requires matching normalized text and subject, facet, kind, applicability and expiry with no new evidence; hints alone never discard proposals.
-- Backups include canonical history. `src/store.ts#restoreWorkstreamRows` refuses changed-ID collisions rather than
-  overwriting approvals. Forget scrubs current and historical claim content, not old exports or delivered context.
+  Hints use `src/workstreams.ts#REVIEW_HINT_LIMITS`; only matching normalized text/subject, facet, kind, applicability, expiry and no new evidence yield no-save.
+- Backups include history. `src/store.ts#restoreWorkstreamRows` refuses changed-ID collisions. Forget scrubs stored content, not old exports or deliveries.
 - Source tables are exactly `src/backup.ts#TABLES`. The rest are private `_*` tables: database identity, resource
   revisions, mutation receipts, applied migration names, body-edit records, the derived memory index. Concurrency
   metadata lives there, never in source-table columns, so row selects stay clean, whole-row rebuilds keep working

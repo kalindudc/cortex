@@ -1,0 +1,7 @@
+.cortex-section { container-type: inline-size; }
+@container (min-width: 850px) { .cortex-section .cortex-section-columns { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); } }
+@container (max-width: 480px) { .cortex-section button, .cortex-section summary { min-height: 44px; } .cortex-section input { font-size: 16px; } }
+@media (max-width: 480px), (pointer: coarse) { [data-cortex-takeaway] button, [data-cortex-takeaway] summary { min-height: 44px; } [data-cortex-takeaway] input, [data-cortex-takeaway] textarea { font-size: 16px; } }
+.cortex-review-item { color: var(--foreground); }
+@media (prefers-reduced-motion: reduce) { .cortex-section *, [data-cortex-takeaway] *, [data-cortex-summary] { transition: none !important; animation: none !important; } }
+.cortex-review-item .text-muted-foreground, [data-cortex-takeaway] .text-muted-foreground { color: color-mix(in oklab, var(--muted-foreground) 55%, var(--foreground)); }

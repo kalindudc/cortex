@@ -9,6 +9,173 @@ afterEach(async () => {
 });
 const actor = { id: "reviewer", type: "human" as const };
 for (const daemon of [false, true]) {
+  test(`workstream compiled CLI ${daemon ? "daemon" : "offline"}: stable IDs and atomic human acceptance`, async () => {
+    const sandbox = mkTmpEnv("workstream-finalize");
+    cleanup.push(sandbox.cleanup);
+    if (daemon) await startForeground(sandbox.env);
+    const schemaResult = await runCli({ args: ["schema", "--json"], env: sandbox.env });
+    expect(schemaResult.code).toBe(0);
+    const schema = JSON.parse(schemaResult.stdout).workstream;
+    expect(schema.mutations.create.optional).toContain("id");
+    expect(schema.mutations.propose.optional).toContain("id");
+    expect(schema.mutations.accept.required).toEqual(["id", "expectedRevision", "reason", "applicability"]);
+    expect(schema.mutations.accept.optional).toContain("supersede");
+    expect(schema.mutations.edit.optional).toContain("kind");
+    expect(schema.mutations.edit.optional).toContain("applicability");
+    expect(schema.mutations["save-approved"].required).toContain("sources");
+    expect(schema.stableIds).toContain("opaquely");
+    const call = (args: string[], input?: unknown) =>
+      runCli({
+        args: ["workstream", ...args, "--json"],
+        env: sandbox.env,
+        stdin: input === undefined ? undefined : JSON.stringify(input),
+      });
+    const mutate = async (input: unknown): Promise<MutationResult> => {
+      const result = await call(["mutate", "--input=-"], input);
+      expect(result.code).toBe(0);
+      return JSON.parse(result.stdout);
+    };
+    const workstreamId = `ws_${crypto.randomUUID()}`;
+    const creation = { op: "create", id: workstreamId, actor, name: "Retry-safe" };
+    expect((await mutate(creation)).workstream?.id).toBe(workstreamId);
+    const collision = await call(["mutate", "--input=-"], creation);
+    expect(collision.code).toBe(1);
+    expect(JSON.parse(collision.stdout).error.code).toBe("conflict");
+    expect(collision.stdout).not.toContain("Retry-safe");
+    const entryId = `kn_${crypto.randomUUID()}`;
+    const stable = { environment: { mode: "not-applicable" }, host: { mode: "not-applicable" } };
+    const input = {
+      op: "propose",
+      id: entryId,
+      actor: { id: "agent", type: "agent" },
+      workstreamId,
+      subject: "gateway",
+      title: "Draft",
+      text: "Draft guidance",
+      kind: "finding",
+      facet: "orientation",
+      applicability: { environment: { mode: "unknown" }, host: { mode: "unknown" } },
+      sources: [
+        { ref: "message:42", excerpt: "Original quote", authorType: "human", observedAt: "2026-01-01T00:00:00.000Z" },
+      ],
+    };
+    const proposed = (await mutate(input)).entry as Knowledge;
+    expect(proposed.id).toBe(entryId);
+    const retry = await call(["mutate", "--input=-"], input);
+    expect(retry.code).toBe(1);
+    expect(JSON.parse(retry.stdout).error.code).toBe("conflict");
+    expect(retry.stdout).not.toContain(input.text);
+    expect(retry.stdout).not.toContain(input.sources[0]?.excerpt);
+    const unused = `kn_${crypto.randomUUID()}`;
+    const duplicate = await mutate({ ...input, id: unused });
+    expect(duplicate.outcome).toBe("no-save");
+    expect(duplicate.entry?.id).toBe(entryId);
+    expect((await call(["entry", unused])).code).toBe(1);
+    const acceptance = {
+      op: "accept",
+      actor,
+      id: entryId,
+      expectedRevision: 1,
+      reason: "Reviewed",
+      applicability: stable,
+      kind: "directive",
+      text: "Final human rule",
+    };
+    for (const patch of [{ applicability: input.applicability }, { actor: input.actor }]) {
+      expect((await call(["mutate", "--input=-"], { ...acceptance, ...patch })).code).toBe(1);
+    }
+    const accepted = (await mutate(acceptance)).entry as Knowledge;
+    expect(accepted).toMatchObject({ id: entryId, revision: 2, state: "approved", sources: proposed.sources });
+    const stale = await call(["mutate", "--input=-"], acceptance);
+    expect(stale.code).toBe(1);
+    expect(JSON.parse(stale.stdout).error.code).toBe("conflict");
+    const replacement = (await mutate({ ...input, id: `kn_${crypto.randomUUID()}`, text: "Correction" }))
+      .entry as Knowledge;
+    expect((await call(["mutate", "--input=-"], { ...acceptance, id: replacement.id })).code).toBe(1);
+    expect(JSON.parse((await call(["entry", replacement.id])).stdout)).toMatchObject({
+      state: "candidate",
+      revision: 1,
+      text: "Correction",
+    });
+    expect(
+      (
+        await call(["mutate", "--input=-"], {
+          ...acceptance,
+          id: replacement.id,
+          supersede: { id: entryId, expectedRevision: 1 },
+        })
+      ).code,
+    ).toBe(1);
+    expect(JSON.parse((await call(["entry", replacement.id])).stdout)).toMatchObject({
+      state: "candidate",
+      revision: 1,
+    });
+    await mutate({ ...acceptance, id: replacement.id, supersede: { id: entryId, expectedRevision: 2 } });
+    expect(JSON.parse((await call(["entry", entryId])).stdout)).toMatchObject({ state: "superseded", revision: 3 });
+    const manualId = `kn_${crypto.randomUUID()}`;
+    const manual = {
+      ...input,
+      op: "save-approved",
+      id: manualId,
+      actor,
+      reason: "Written and reviewed",
+      subject: "manual",
+      applicability: stable,
+    };
+    expect((await mutate(manual)).entry).toMatchObject({ id: manualId, state: "approved", revision: 1 });
+    expect((await call(["mutate", "--input=-"], manual)).code).toBe(1);
+    expect(JSON.parse((await call(["show", workstreamId])).stdout).total).toBe(3);
+    expect(JSON.parse((await call(["history", manualId])).stdout).total).toBe(1);
+    const context = JSON.parse((await call(["read", workstreamId])).stdout);
+    expect(context.entries.map((e: Knowledge) => e.id).sort()).toEqual([replacement.id, manualId].sort());
+    const draft = (await mutate({ ...input, id: `kn_${crypto.randomUUID()}`, subject: "draft-edits" }))
+      .entry as Knowledge;
+    const edit = {
+      op: "edit",
+      actor,
+      id: draft.id,
+      expectedRevision: 1,
+      reason: "Save draft",
+      kind: "directive",
+      applicability: stable,
+      text: "Edited draft",
+    };
+    const saved = (await mutate(edit)).entry as Knowledge;
+    expect(saved).toMatchObject({
+      id: draft.id,
+      revision: 2,
+      state: "candidate",
+      kind: "directive",
+      applicability: stable,
+      sources: draft.sources,
+      approval: null,
+    });
+    expect(JSON.parse((await call(["entry", draft.id])).stdout)).toEqual(saved);
+    expect(JSON.parse((await call(["history", draft.id])).stdout).revisions.at(-1).snapshot).toEqual(saved);
+    const unchosen = (await mutate({ ...edit, expectedRevision: 2, applicability: input.applicability }))
+      .entry as Knowledge;
+    expect(unchosen.applicability).toEqual(draft.applicability);
+    expect(
+      (
+        await call(["mutate", "--input=-"], {
+          ...acceptance,
+          id: draft.id,
+          expectedRevision: 3,
+          applicability: unchosen.applicability,
+        })
+      ).code,
+    ).toBe(1);
+    expect((await call(["mutate", "--input=-"], { ...edit, expectedRevision: 3, actor: input.actor })).code).toBe(1);
+    const staleEdit = await call(["mutate", "--input=-"], edit);
+    expect(JSON.parse(staleEdit.stdout).error.code).toBe("conflict");
+    expect((await call(["mutate", "--input=-"], { ...edit, id: manualId })).code).toBe(1);
+    expect(JSON.parse((await call(["entry", draft.id])).stdout)).toEqual(unchosen);
+    expect(
+      JSON.parse((await call(["read", workstreamId])).stdout)
+        .entries.map((e: Knowledge) => e.id)
+        .sort(),
+    ).toEqual([replacement.id, manualId].sort());
+  }, 20_000);
   test(`workstream compiled CLI ${daemon ? "daemon" : "offline"}: JSON mutations, CAS, context, history and review query`, async () => {
     const sandbox = mkTmpEnv("workstreams");
     cleanup.push(sandbox.cleanup);

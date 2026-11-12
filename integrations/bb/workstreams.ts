@@ -26,6 +26,7 @@ type ResolutionFacts = {
   parentThreadId: string | null;
   sourceThreadId: string | null;
   expiresAt: number;
+  canonicalVersions: Map<string, number>;
 };
 export const MISSING_CONTEXT =
   "Cortex thread context is not resolved. No legacy context was substituted. Open the Memory tab and retry, or start a fresh session after resolving the binding.";
@@ -162,13 +163,16 @@ export function createWorkstreams(
   const store = createWorkstreamStore(bb),
     cli = createWorkstreamCli(runner);
   const resolved = new Map<string, ThreadContext>();
+  const scopes = new Map<string, { sectionId: string | null; workstreamId: string | null }>();
+  const parents = new Map<string, string | null>();
   let generation = 0;
   const threadGenerations = new Map<string, number>();
   const environmentGenerations = new Map<string, number>();
+  const canonicalGenerations = new Map<string, number>();
   const facts = new Map<string, ResolutionFacts>();
   const admissions = new Map<string, { context: ThreadContext; fact: ResolutionFacts }>();
   const coldStarts = new Map<string, { hostId: string; attachmentObserved: boolean }>();
-  function invalidate(threadId?: string) {
+  function invalidate(threadId?: string, notify = true) {
     if (threadId) {
       threadGenerations.set(threadId, (threadGenerations.get(threadId) ?? 0) + 1);
       resolved.delete(threadId);
@@ -184,7 +188,30 @@ export function createWorkstreams(
       admissions.clear();
       coldStarts.clear();
     }
-    bb.realtime.publish("workstreams", threadId ? { threadId } : null);
+    if (notify) bb.realtime.publish("workstreams", threadId ? { threadId } : null);
+  }
+  function invalidateThreadTree(threadId: string) {
+    const affected = new Set([threadId]);
+    for (let size = -1; size !== affected.size; ) {
+      size = affected.size;
+      for (const [child, parent] of parents) if (parent && affected.has(parent)) affected.add(child);
+    }
+    for (const id of affected) invalidate(id);
+  }
+  function invalidateScope(scope: { sectionId?: string; workstreamId?: string }, notify = true) {
+    if (scope.workstreamId)
+      canonicalGenerations.set(scope.workstreamId, (canonicalGenerations.get(scope.workstreamId) ?? 0) + 1);
+    for (const [threadId, known] of scopes) {
+      if (
+        (scope.sectionId && known.sectionId === scope.sectionId) ||
+        (scope.workstreamId &&
+          (known.workstreamId === scope.workstreamId ||
+            facts.get(threadId)?.canonicalVersions.has(scope.workstreamId) ||
+            admissions.get(threadId)?.fact.canonicalVersions.has(scope.workstreamId)))
+      )
+        invalidate(threadId);
+    }
+    if (notify) bb.realtime.publish("workstreams", scope);
   }
   function environmentAttached(threadId?: string) {
     const cold = threadId ? coldStarts.get(threadId) : undefined;
@@ -220,11 +247,15 @@ export function createWorkstreams(
     if (seen.has(threadId) || seen.size >= 32) throw new Error("Cortex binding parent cycle or depth limit");
     seen.add(threadId);
     const thread = await bb.sdk.threads.get({ threadId });
+    parents.set(threadId, thread.parentThreadId ?? thread.lifecycleOwnerThreadId);
     const prefs = store.thread(threadId);
-    if (prefs.binding)
+    if (prefs.binding) {
+      scopes.set(threadId, { sectionId: null, workstreamId: prefs.binding.workstreamId });
       return { binding: prefs.binding, bindingRevision: prefs.revision, bindingSource: "manual", inheritedFrom: null };
+    }
     if (thread.sectionId) {
       const section = store.section(thread.sectionId);
+      scopes.set(threadId, { sectionId: thread.sectionId, workstreamId: section.binding?.workstreamId ?? null });
       return {
         binding: section.binding,
         bindingRevision: section.revision,
@@ -235,17 +266,22 @@ export function createWorkstreams(
     const parent = thread.parentThreadId ?? thread.lifecycleOwnerThreadId;
     if (parent) {
       const inherited = await resolveBinding(parent, seen);
+      scopes.set(threadId, scopes.get(parent) ?? { sectionId: null, workstreamId: null });
       return {
         ...inherited,
         bindingSource: inherited.binding ? "parent" : "none",
         inheritedFrom: inherited.binding ? parent : null,
       };
     }
+    scopes.set(threadId, { sectionId: null, workstreamId: null });
     return { binding: null, bindingRevision: 0, bindingSource: "none", inheritedFrom: null };
   }
   async function context(threadId: string, signal?: AbortSignal): Promise<ThreadContext> {
     const version = generation,
       threadVersion = threadGenerations.get(threadId) ?? 0;
+    // A grant's workstream is unknown until its read returns; snapshot before any asynchronous resolution.
+    const canonicalSnapshot = new Map(canonicalGenerations);
+    const dependencies = new Set<string>();
     const prefs = store.thread(threadId),
       lastReceipt = store.receipts(threadId, 1, 0).receipts[0] ?? null;
     const thread = await bb.sdk.threads.get({ threadId });
@@ -281,15 +317,21 @@ export function createWorkstreams(
     };
     let result: ThreadContext = threadContextSchema.parse(base);
     if (binding.binding) {
+      dependencies.add(binding.binding.workstreamId);
       try {
         const out = await cli.read(binding.binding.workstreamId, binding.binding.topic, applicability, signal);
         if (out.workstream.id !== binding.binding.workstreamId)
           throw new Error("Cortex returned a different workstream than requested");
         const entries = [...out.entries];
+        for (const entry of entries) dependencies.add(entry.workstreamId);
         for (const grant of prefs.grants.filter(
           g => g.kind === "knowledge" && g.revokedAt === null && g.actor.type === "human",
         )) {
-          if (!entries.some(e => e.id === grant.id)) entries.push(await cli.knowledge(grant.id, signal));
+          if (!entries.some(e => e.id === grant.id)) {
+            const entry = await cli.knowledge(grant.id, signal);
+            dependencies.add(entry.workstreamId);
+            entries.push(entry);
+          }
         }
         const composed = composeThreadContext({
           binding: binding.binding,
@@ -312,6 +354,8 @@ export function createWorkstreams(
     if (
       version === generation &&
       threadVersion === (threadGenerations.get(threadId) ?? 0) &&
+      prefs.revision === store.thread(threadId).revision &&
+      [...dependencies].every(id => (canonicalSnapshot.get(id) ?? 0) === (canonicalGenerations.get(id) ?? 0)) &&
       (!thread.environmentId || environmentVersion === (environmentGenerations.get(thread.environmentId) ?? 0))
     ) {
       resolved.set(threadId, result);
@@ -321,7 +365,11 @@ export function createWorkstreams(
         projectId: thread.projectId,
         parentThreadId: thread.parentThreadId,
         sourceThreadId: thread.sourceThreadId,
-        expiresAt: Date.now() + PREPARATION_MAX_AGE_MS,
+        expiresAt: Math.min(
+          Date.now() + PREPARATION_MAX_AGE_MS,
+          ...result.entries.flatMap(e => (e.knowledge.expiresAt === null ? [] : [Date.parse(e.knowledge.expiresAt)])),
+        ),
+        canonicalVersions: new Map([...dependencies].map(id => [id, canonicalSnapshot.get(id) ?? 0])),
       });
     }
     return result;
@@ -334,6 +382,8 @@ export function createWorkstreams(
       !value ||
       !fact ||
       fact.expiresAt <= Date.now() ||
+      value.revision !== store.thread(ctx.thread.id).revision ||
+      [...fact.canonicalVersions].some(([id, version]) => version !== (canonicalGenerations.get(id) ?? 0)) ||
       fact.projectId !== ctx.project.id ||
       fact.parentThreadId !== ctx.thread.parentThreadId ||
       fact.sourceThreadId !== ctx.thread.sourceThreadId
@@ -439,6 +489,8 @@ export function createWorkstreams(
     resolveBinding,
     prepared,
     invalidate,
+    invalidateScope,
+    invalidateThreadTree,
     invalidateEnvironment,
     environmentAttached,
     human,

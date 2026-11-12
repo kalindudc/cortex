@@ -5,11 +5,11 @@
   "type": "module",
   "engines": {
     "bb": ">=0.49",
-    "bbPluginSdk": ">=0.6.116"
+    "bbPluginSdk": ">=0.6.132"
   },
   "bb": {
     "name": "Cortex",
-    "description": "Follow each thread's Cortex task in a side-panel tab and header chip, and give every provider Cortex memory.",
+    "description": "Shared briefs and reviewed takeaways for bb sections, with Cortex task and memory controls.",
     "branding": {
       "icon": "Brain"
     },
@@ -31,7 +31,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@get-bb/plugin-sdk": "0.6.116",
+    "@get-bb/plugin-sdk": "0.6.132",
     "@pierre/diffs": "~1.2.12",
     "@radix-ui/react-alert-dialog": "^1.2.1",
     "@radix-ui/react-context-menu": "^2.4.1",

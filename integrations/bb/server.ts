@@ -29,9 +29,18 @@ import {
 import { type MemoryTurns, registerMemoryTurns, STEER_PROVIDERS } from "./turns";
 import { registerCortexWatch } from "./watch";
 import { workstreamRpcMethods } from "./workstream-contract";
+import { sectionRpcMethods } from "./section-contract";
+import { createSections } from "./sections";
+import { sectionHandlers, unavailableSectionHandlers } from "./section-rpc";
 import { createWorkstreams, type Workstreams } from "./workstreams";
 import { workstreamHandlers, unavailableWorkstreamHandlers } from "./workstream-rpc";
 import { registerWorkstreamAgents, workstreamConfiguration } from "./workstream-agents";
+import { createWorkstreamStore } from "./workstream-store";
+import { draftRpcMethods } from "./draft-contract";
+import { draftConsentMethods, draftRetryConsent } from "./draft-policy";
+import { createDraftService } from "./draft-service";
+import { draftHandlers, unavailableDraftHandlers } from "./draft-rpc";
+import { registerDraftEvents } from "./draft-events";
 
 const THREAD_ID = /^thr_[0-9a-z]{6,40}$/;
 const threadIdInputSchema = z.object({ threadId: z.string().regex(THREAD_ID) });
@@ -53,6 +62,9 @@ const setMemoryModeInputSchema = threadIdInputSchema.extend({ mode: z.enum(MEMOR
 
 export const rpcContract = defineRpcContract({
   ...workstreamRpcMethods,
+  ...sectionRpcMethods,
+  ...draftRpcMethods,
+  ...draftConsentMethods,
   threadState: { input: threadIdInputSchema, output: threadStateSchema },
   task: { input: threadTaskInputSchema, output: taskDetailSchema },
   pin: { input: pinInputSchema, output: threadStateSchema },
@@ -117,12 +129,19 @@ export const SETTINGS = {
       off: "Off",
     },
   },
-  contextWidget: { type: "select", label: "Thread context widget", options: ["shown", "hidden"], default: "shown", description: "Default appearance of the Cortex thread context widget. Each thread can dismiss or restore it independently. Hiding it does not stop sharing context or erase an agent's existing session.", experimental_optionLabels: { shown: "Shown by default", hidden: "Hidden by default" } },
+  contextWidget: {
+    type: "select",
+    label: "Thread context widget",
+    options: ["shown", "hidden"],
+    default: "shown",
+    description:
+      "Default appearance of the Cortex thread context widget. Each thread can dismiss or restore it independently. Hiding it does not stop sharing context or erase an agent's existing session.",
+    experimental_optionLabels: { shown: "Shown by default", hidden: "Hidden by default" },
+  },
   memoryChip: {
     type: "boolean",
     label: "Memory icon",
-    description:
-      "Shows memory status in the Cortex context row and card. Open the Memory tab for details.",
+    description: "Shows memory status in the Cortex context row and card. Open the Memory tab for details.",
     default: true,
   },
   taskChip: { type: "boolean", label: "Current task button in the thread header", default: true },
@@ -226,6 +245,8 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
     bb.realtime.publish("memory", null);
   });
   const { cortexPath } = current;
+  const privateStore = createWorkstreamStore(bb);
+  const consent = ({ threadId }: { threadId: string }) => draftRetryConsent(privateStore.drafts, threadId);
 
   let runner: CortexRunner;
   try {
@@ -241,6 +262,9 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
     };
     bb.rpc.register(rpcContract, {
       ...unavailableWorkstreamHandlers(reason),
+      ...unavailableSectionHandlers(reason),
+      ...unavailableDraftHandlers(reason),
+      "provider-retry.v1.consent": consent,
       threadState: unavailable,
       task: unavailable,
       pin: unavailable,
@@ -268,8 +292,14 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
     bb.log.warn(`cortex doctor failed, so the Cortex tab is read-only: ${message(err)}`);
   }
   const state = createCortexState(bb, runner, { userAuthor });
-  const workstreams = createWorkstreams(bb, runner, { userAuthor, widgetDefault: () => current.contextWidget === "shown" });
-  registerWorkstreamAgents(bb, workstreams);
+  const workstreams = createWorkstreams(bb, runner, {
+    userAuthor,
+    widgetDefault: () => current.contextWidget === "shown",
+  });
+  const sections = createSections(bb, workstreams);
+  const drafts = createDraftService(bb, workstreams);
+  registerWorkstreamAgents(bb, workstreams, drafts);
+  registerDraftEvents(bb, drafts);
   const tracker = createMemoryTracker(RECALL_BUDGET);
   const publish = (channel: CortexRealtimeChannel, payload: unknown): void => bb.realtime.publish(channel, payload);
   const turns = registerMemoryTurns(bb, {
@@ -278,8 +308,12 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
     tracker,
     publish,
     workstreams,
-    modeOf: async thread =>
-      effectiveMode(memorySetting(current.memory), await state.memoryOverride(thread.id), thread.parentThreadId !== null),
+    restricted: thread => drafts.restricted(thread.id, undefined, thread),
+    modeOf: async thread => {
+      const metadata = await bb.sdk.threads.getPluginMetadata({ threadId: thread.id });
+      if (drafts.restricted(thread.id, metadata, thread)) return "off";
+      return effectiveMode(memorySetting(current.memory), overrideFrom(metadata), thread.parentThreadId !== null);
+    },
   });
   registerCortexTools(bb, runner, state, tracker, publish, turns, workstreams);
 
@@ -295,11 +329,14 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
     .catch(err => bb.log.warn(`reading the plugin's skills failed, so no thread gets them: ${message(err)}`));
 
   bb.agents.configure(context => {
+    const restricted = drafts.configuration(context);
+    if (restricted !== null) return restricted;
     const child = context.thread.parentThreadId !== null;
     const mode = effectiveMode(memorySetting(current.memory), overrideFrom(context.pluginMetadata), child);
     const scoped = workstreamConfiguration(workstreams, context, mode);
     if (scoped !== null) {
-      if (tracker.configured(context.thread.id, { mode, lane: null, summary: [], chars: 0 })) publish("memory", { threadId: context.thread.id });
+      if (tracker.configured(context.thread.id, { mode, lane: null, summary: [], chars: 0 }))
+        publish("memory", { threadId: context.thread.id });
       return { ...scoped, skills: skillsFor(context.provider.id, shippedSkills) };
     }
     // As in the pi extension, only writers get the summary; off also drops recall.
@@ -324,7 +361,10 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
     return result;
   }
   bb.rpc.register(rpcContract, {
-    ...workstreamHandlers(workstreams),
+    ...workstreamHandlers(workstreams, sections),
+    ...sectionHandlers(sections, drafts),
+    ...draftHandlers(drafts),
+    "provider-retry.v1.consent": consent,
     threadState: ({ threadId }) => state.threadState(threadId),
     task: ({ threadId, taskId }) => state.task(threadId, taskId),
     pin: ({ threadId, taskId }) => written(threadId, state.pin(threadId, taskId)),
@@ -364,6 +404,7 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
   }
 
   bb.events.on("thread.active", ({ thread }) => {
+    if (drafts.restricted(thread.id, undefined, thread)) return;
     if (tracker.nextRequest(thread.id)) publish("memory", { threadId: thread.id });
   });
   const forgetMemory = ({ thread }: { thread: { id: string } }): void => {
@@ -373,9 +414,13 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
   bb.events.on("thread.deleted", forgetMemory);
 
   const warm = (threadId: string): void => {
-    state.warmProject(threadId).catch(err => bb.log.warn(`primer warmup for ${threadId} failed: ${message(err)}`));
+    if (drafts.restricted(threadId)) return;
+    bb.sdk.threads.getPluginMetadata({ threadId }).then(metadata => {
+      if (!drafts.restricted(threadId, metadata)) return state.warmProject(threadId);
+    }).catch(err => bb.log.warn(`primer warmup for ${threadId} failed: ${message(err)}`));
   };
   const warmIfCold = ({ thread }: { thread: { id: string; projectId: string } }): void => {
+    if (drafts.restricted(thread.id, undefined, thread)) return;
     if (state.primerFor(thread.projectId) === null) warm(thread.id);
   };
   bb.events.on("thread.created", warmIfCold);
@@ -387,7 +432,7 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
     err => bb.log.warn(`listing running threads failed: ${message(err)}`),
   );
 
-  registerCortexWatch(bb, runner, state);
+  registerCortexWatch(bb, runner, state, workstreams);
 }
 
 /** The two native tools every provider gets. */

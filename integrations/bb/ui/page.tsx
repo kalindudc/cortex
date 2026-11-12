@@ -15,9 +15,11 @@ import { FailureNotice } from "./parts";
 import { NeedsYou } from "./review";
 import { CORTEX_PAGE_PATH, ThreadContextPage } from "./thread-context";
 import { WorkstreamDialog, WorkstreamPage } from "./workstreams";
+import { SectionPage } from "./sections";
 
 type Route =
   | { kind: "needs" }
+  | { kind: "section"; id: string }
   | { kind: "workstream"; id: string; entryId: string | null }
   | { kind: "library" }
   | { kind: "bindings" }
@@ -36,6 +38,7 @@ export function parseRoute(subPath: string): Route {
       return "";
     }
   });
+  if (parts[0] === "sections" && parts[1] && /^sec_[a-zA-Z0-9_-]+$/.test(parts[1])) return { kind: "section", id: parts[1] };
   if (parts[0] === "workstreams" && parts[1] && WS_ID.test(parts[1])) {
     return { kind: "workstream", id: parts[1], entryId: parts[2] && KN_ID.test(parts[2]) ? parts[2] : null };
   }
@@ -49,6 +52,7 @@ export function CortexPage({ subPath }: PluginNavPanelProps) {
   const route = parseRoute(subPath);
   return (
     <div className="h-full min-h-0 text-foreground" data-cortex-page="">
+      {route.kind === "section" ? <SectionPage key={route.id} id={route.id} /> : null}
       {route.kind === "needs" ? <NeedsYou /> : null}
       {route.kind === "workstream" ? <WorkstreamPage key={route.id} id={route.id} selectedId={route.entryId} /> : null}
       {route.kind === "library" ? <Library /> : null}
@@ -126,12 +130,15 @@ export function CortexSidebar({ subPath }: PluginNavPanelProps) {
   const waiting = new Map<string, number>();
   for (const item of queue.data?.items ?? []) waiting.set(item.workstream.id, (waiting.get(item.workstream.id) ?? 0) + 1);
   const bound = new Set((bindings.data?.bindings ?? []).filter(row => row.binding !== null).map(row => row.key));
-  const connected = sidebar.threads
-    .filter(thread => thread.sectionId !== null && bound.has(thread.sectionId) && !thread.isArchived && thread.parentThreadId === null)
-    .slice(0, 8);
+  const sections = sidebar.sections;
   return (
     <nav aria-label="Cortex" className="flex h-full flex-col overflow-y-auto px-2 py-2">
       <NavRow icon="BellDot" label="Needs you" current={route.kind === "needs"} count={queue.data?.total} attention onClick={() => go("")} />
+      <Group label="Your bb sections">
+        {sections.map(section => <NavRow key={section.id} icon={bound.has(section.id) ? "Brain" : "Folder"} label={section.name} current={route.kind === "section" && route.id === section.id} onClick={() => go(`sections/${section.id}`)} />)}
+        {sections.length === 0 ? <p role="status" className="px-2 text-[13px]">No bb sections yet.</p> : null}
+      </Group>
+      <details className="mt-4"><summary className="cursor-pointer px-2 py-1 text-[13px]">Advanced workstreams</summary>
       <Group
         label="Workstreams"
         trailing={
@@ -160,23 +167,11 @@ export function CortexSidebar({ subPath }: PluginNavPanelProps) {
           />
         ))}
       </Group>
-      <Group label="Knowledge">
+      </details>
+      <Group label="More">
         <NavRow icon="Search" label="Library" current={route.kind === "library"} onClick={() => go("library")} />
-        <NavRow icon="SectionMove" label="Bindings" current={route.kind === "bindings"} onClick={() => go("bindings")} />
+        <NavRow icon="SectionMove" label="Connections" current={route.kind === "bindings"} onClick={() => go("bindings")} />
       </Group>
-      {connected.length > 0 ? (
-        <Group label="Connected threads">
-          {connected.map(thread => (
-            <NavRow
-              key={thread.id}
-              icon="MessageSquare"
-              label={thread.displayTitle}
-              current={route.kind === "thread" && route.threadId === thread.id}
-              onClick={() => go(`threads/${thread.id}`)}
-            />
-          ))}
-        </Group>
-      ) : null}
       <WorkstreamDialog workstream={null} open={creating} onOpenChange={setCreating} />
     </nav>
   );
@@ -193,8 +188,10 @@ export function useNeedsYouBadge(): ExperimentalBadge | null {
 export function useCortexPageTitle({ subPath }: PluginNavPanelProps): ExperimentalPageTitle | null {
   const route = parseRoute(subPath);
   const workstreams = useWorkstreams();
-  const { threads } = experimental_useSidebarThreads();
+  const { threads, sections } = experimental_useSidebarThreads();
   switch (route.kind) {
+    case "section":
+      return { title: sections.find(section => section.id === route.id)?.name ?? "Section context" };
     case "needs":
       return { title: "Needs you" };
     case "library":

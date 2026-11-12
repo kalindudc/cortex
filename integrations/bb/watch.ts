@@ -3,6 +3,8 @@ import { StringDecoder } from "node:string_decoder";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import type { CortexRunner } from "./cli";
 import type { CortexRealtimeChannel, CortexState } from "./state";
+import type { Workstreams } from "./workstreams";
+import { workstreamIdSchema } from "./workstream-contract";
 
 const BB_AUTHOR = /^bb-(thr_[0-9a-z]{6,40})$/;
 const STDERR_CHARS = 4_000;
@@ -26,7 +28,12 @@ const laneOf = (task: Record<string, unknown> | null): string | undefined =>
  * reads a cached copy. Unknown or malformed frames are ignored; duplicates
  * only cause a refetch.
  */
-export function routeCortexEvent(line: unknown, publish: Publish, scheduleRefresh: ScheduleRefresh): void {
+export function routeCortexEvent(
+  line: unknown,
+  publish: Publish,
+  scheduleRefresh: ScheduleRefresh,
+  invalidateShared?: (workstreamId?: string) => void,
+): void {
   const event = record(line);
   if (event === null || typeof event.kind !== "string") return;
   const payload = record(event.payload);
@@ -34,8 +41,18 @@ export function routeCortexEvent(line: unknown, publish: Publish, scheduleRefres
     case "ready":
     case "resync":
       scheduleRefresh(null);
+      invalidateShared?.(undefined);
       publish("all", null);
       return;
+    case "workstream.changed": {
+      if (payload?.outcome !== "created" && payload?.outcome !== "updated") return;
+      const candidate = record(payload.entry)?.workstreamId ?? record(payload.workstream)?.id;
+      const id = workstreamIdSchema.safeParse(candidate);
+      if (!id.success) return;
+      invalidateShared?.(id.data);
+      publish("workstreams", { workstreamId: id.data });
+      return;
+    }
     case "update.posted": {
       const id = positiveId(payload?.task_id);
       if (id === null) return;
@@ -66,7 +83,12 @@ export function routeCortexEvent(line: unknown, publish: Publish, scheduleRefres
 }
 
 /** Follows `cortex watch --json` for the plugin's lifetime; the host restarts it with backoff when it exits. */
-export function registerCortexWatch(bb: BbPluginApi, runner: CortexRunner, state: CortexState): void {
+export function registerCortexWatch(
+  bb: BbPluginApi,
+  runner: CortexRunner,
+  state: CortexState,
+  workstreams?: Workstreams,
+): void {
   const publish: Publish = (channel, payload) => bb.realtime.publish(channel, payload);
   const scheduleRefresh: ScheduleRefresh = (taskId, lane) => {
     const work = taskId === null ? state.refreshAll() : state.refreshTask(taskId, lane);
@@ -96,7 +118,10 @@ export function registerCortexWatch(bb: BbPluginApi, runner: CortexRunner, state
             bb.log.warn(`ignored a malformed cortex watch line: ${line.slice(0, 200)}`);
             return;
           }
-          routeCortexEvent(parsed, publish, scheduleRefresh);
+          routeCortexEvent(parsed, publish, scheduleRefresh, workstreamId => {
+            if (workstreamId) workstreams?.invalidateScope({ workstreamId }, false);
+            else workstreams?.invalidate(undefined, false);
+          });
         };
         const onAbort = (): void => {
           child.kill("SIGTERM");

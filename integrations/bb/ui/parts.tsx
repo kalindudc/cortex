@@ -211,9 +211,9 @@ export function FailureNotice({ failure, onRetry, title }: { failure: RpcFailure
   return (
     <div
       role="alert"
-      className="flex items-start gap-2 rounded-md border border-destructive/40 bg-surface-destructive px-3 py-2 text-[12.5px] text-destructive-text"
+      className="flex items-start gap-2 rounded-md border border-destructive/40 bg-surface-destructive px-3 py-2 text-[12.5px] text-foreground"
     >
-      <Icon name={conflict ? "GitBranch" : "AlertCircle"} className="mt-0.5 size-4 shrink-0" aria-hidden />
+      <Icon name={conflict ? "GitBranch" : "AlertCircle"} className="mt-0.5 size-4 shrink-0 text-destructive-text" aria-hidden />
       <span className="min-w-0 flex-1 break-words">
         {title ?? (conflict ? "Changed since you opened it." : null)} {failure.message}
       </span>
@@ -288,7 +288,7 @@ export function Segmented<T extends string>({
           type="button"
           role="radio"
           aria-checked={option.value === value}
-          tabIndex={option.value === value ? 0 : -1}
+          tabIndex={option.value === value || (index === 0 && !options.some(option => option.value === value)) ? 0 : -1}
           onClick={() => onChange(option.value)}
           className={cn(
             "min-h-7 rounded-sm px-2.5 text-[12px] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",

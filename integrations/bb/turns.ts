@@ -255,6 +255,7 @@ export function registerMemoryTurns(
     state: CortexState;
     tracker: MemoryTracker;
     workstreams?: Workstreams;
+    restricted?: (thread: TurnThread) => boolean;
     publish: (channel: CortexRealtimeChannel, payload: unknown) => void;
     modeOf(thread: TurnThread): Promise<MemoryMode>;
   },
@@ -461,6 +462,7 @@ export function registerMemoryTurns(
   }
 
   bb.events.on("thread.active", async ({ thread }) => {
+    if (deps.restricted?.(thread)) return;
     try {
       const entry = turnOf(thread.id);
       if (entry.marked) return;
@@ -481,6 +483,7 @@ export function registerMemoryTurns(
   });
 
   bb.events.on("thread.idle", async ({ thread }) => {
+    if (deps.restricted?.(thread)) return;
     try {
       const entry = threads.get(thread.id);
       if (!entry) return;

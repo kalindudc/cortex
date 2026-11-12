@@ -314,14 +314,17 @@ test("registers the Cortex and Memory tabs, header action, context segment and c
   expect(app.tabs.map(tab => [tab.id, tab.layout])).toEqual([
     ["cortex", "flush"],
     ["cortex-memory", "flush"],
+    ["cortex-takeaway", undefined],
   ]);
   expect(app.tabs.map(tab => [tab.context, tab.availability])).toEqual([
+    [{ kind: "thread" }, "action"],
     [{ kind: "thread" }, "action"],
     [{ kind: "thread" }, "action"],
   ]);
   expect(app.threadActions.map(action => [action.id, action.placement])).toEqual([
     ["cortex-task", "header"],
     ["cortex-context", undefined],
+    ["cortex-save-takeaway", undefined],
   ]);
   expect(app.threadContextSegments.map(segment => segment.id)).toEqual(["cortex-context"]);
   expect(app.threadContextCardSections.map(section => section.id)).toEqual(["cortex-context"]);
@@ -889,7 +892,7 @@ describe("memory context marker", () => {
 
   test("expands in the public context row and opens the Memory tab from its details", async () => {
     const slot = contextSurface(withMemory(memoryState({ view: null })));
-    const trigger = await slot.findByRole("button", { name: "Cortex memory. Show details" });
+    const trigger = await slot.findByRole("button", { name: "Cortex memory. Not connected to a workstream. Memory: no agent session since the Cortex plugin loaded. Task #1: First task, Open. Show details" });
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
     expect(slot.queryByRole("button", { name: "Open Memory tab" })).toBeNull();
     fireEvent.click(trigger);
@@ -1072,7 +1075,7 @@ describe("public context placement and lifecycle", () => {
       const slot = contextSurface();
       await slot.findByText("Memory: nothing loaded yet");
       expect(document.querySelectorAll("[title='Memory: nothing loaded yet']")).toHaveLength(1);
-      fireEvent.click(slot.getByRole("button", { name: "Cortex memory. Show details" }));
+      fireEvent.click(slot.getByRole("button", { name: "Cortex memory. Not connected to a workstream. Memory: nothing loaded yet. Task #1: First task, Open. Show details" }));
       await slot.findByRole("button", { name: "Open Memory tab" });
       expect(document.querySelectorAll("[title='Memory: nothing loaded yet']")).toHaveLength(1);
       expect(neighbor.parentElement).toBe(document.body);
@@ -1089,7 +1092,7 @@ describe("public context placement and lifecycle", () => {
 
   test("collapse and re-expansion keep one summary, without dismissing or moving it", async () => {
     const slot = contextSurface();
-    const summary = await slot.findByRole("button", { name: "Cortex memory. Show details" });
+    const summary = await slot.findByRole("button", { name: "Cortex memory. Not connected to a workstream. Memory: nothing loaded yet. Task #1: First task, Open. Show details" });
     const parent = summary.parentElement;
     for (let i = 0; i < 2; i++) {
       fireEvent.click(summary);

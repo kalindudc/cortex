@@ -447,7 +447,10 @@ function getDrawerFocusableElements(panel: HTMLElement): HTMLElement[] {
   return Array.from(
     panel.querySelectorAll<HTMLElement>(PERSISTENT_DRAWER_FOCUSABLE_SELECTOR),
   ).filter(
-    (element) => element.closest('[aria-hidden="true"], [inert]') === null,
+    (element) =>
+      element.tabIndex >= 0 &&
+      !element.matches(":disabled") &&
+      element.closest('[aria-hidden="true"], [inert]') === null,
   );
 }
 
@@ -459,6 +462,25 @@ function activeElementIsInAnotherOverlay(
     "[data-bb-portaled-overlay]",
   );
   return overlay !== null && overlay !== undefined && overlay !== panel;
+}
+
+function focusDrawerControl(target: HTMLElement | undefined, panel: HTMLElement): void {
+  target?.focus({ preventScroll: true });
+  const focused = panel.ownerDocument.activeElement;
+  if (!(focused instanceof HTMLElement) || !panel.contains(focused)) return;
+  let pane = focused.parentElement;
+  while (pane && panel.contains(pane)) {
+    const overflow = getComputedStyle(pane).overflowY;
+    if ((overflow === "auto" || overflow === "scroll") && pane.scrollHeight > pane.clientHeight) {
+      const top = pane.getBoundingClientRect().top + pane.clientTop;
+      const bottom = top + pane.clientHeight;
+      const rect = focused.getBoundingClientRect();
+      if (rect.top < top) pane.scrollTop += rect.top - top;
+      else if (rect.bottom > bottom) pane.scrollTop += rect.bottom - bottom;
+      return;
+    }
+    pane = pane.parentElement;
+  }
 }
 
 function handleDrawerTab(event: KeyboardEvent, panel: HTMLElement): void {
@@ -485,11 +507,11 @@ function handleDrawerTab(event: KeyboardEvent, panel: HTMLElement): void {
       activeElement === panel ||
       activeElement === first
     ) {
-      last?.focus({ preventScroll: true });
+      focusDrawerControl(last, panel);
       return;
     }
     const index = focusable.indexOf(activeElement as HTMLElement);
-    focusable[Math.max(0, index - 1)]?.focus({ preventScroll: true });
+    focusDrawerControl(focusable[Math.max(0, index - 1)], panel);
     return;
   }
 
@@ -498,13 +520,20 @@ function handleDrawerTab(event: KeyboardEvent, panel: HTMLElement): void {
     activeElement === panel ||
     activeElement === last
   ) {
-    first?.focus({ preventScroll: true });
+    focusDrawerControl(first, panel);
     return;
   }
   const index = focusable.indexOf(activeElement as HTMLElement);
-  focusable[Math.min(focusable.length - 1, index + 1)]?.focus({
-    preventScroll: true,
-  });
+  focusDrawerControl(focusable[Math.min(focusable.length - 1, index + 1)], panel);
+}
+
+function handleOwnedDrawerKeyDown(event: React.KeyboardEvent<HTMLElement>): void {
+  if (event.key !== "Tab" || event.defaultPrevented || event.nativeEvent.defaultPrevented) return;
+  const panel = event.currentTarget;
+  const stack = readPersistentDrawerStack(panel.ownerDocument);
+  if (stack?.entries[stack.entries.length - 1]?.panel() !== panel) return;
+  handleDrawerTab(event.nativeEvent, panel);
+  if (event.nativeEvent.defaultPrevented) event.preventDefault();
 }
 
 function registerOpenDrawer(
@@ -586,13 +615,14 @@ export function usePersistentOverlayFocus({
       previousFocus !== ownerDocument.body
         ? previousFocus
         : null;
-    const unregister = registerOpenDrawer(ownerDocument, {
+    const entry: PersistentDrawerStackEntry = {
       panel: () => panelRef.current,
       dismissOnEscape: (event) => {
         onEscapeKeyDownRef.current?.(event);
         if (!event.defaultPrevented) requestClose();
       },
-    });
+    };
+    const unregister = registerOpenDrawer(ownerDocument, entry);
     panel.focus({ preventScroll: true });
     return unregister;
   }, [open, panelRef, requestClose]);
@@ -854,6 +884,7 @@ export function PersistentResponsiveDrawerShell({
         inert={!open}
         role="dialog"
         tabIndex={-1}
+        onKeyDown={handleOwnedDrawerKeyDown}
         className={cn(
           "fixed inset-x-0 bottom-0 z-50 mt-24 flex max-h-[calc(92dvh-var(--bb-drawer-keyboard-inset,0px))] flex-col rounded-t-xl border bg-background pb-[var(--bb-safe-area-bottom,env(safe-area-inset-bottom))] outline-none",
           contentClassName,

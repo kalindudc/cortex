@@ -1,4 +1,4 @@
-import { defineRpcContract } from "@get-bb/plugin-sdk";
+import type { PluginRpcContract } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 
 export const workstreamIdSchema = z
@@ -21,10 +21,13 @@ export const dimensionSchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("unknown") }).strict(),
 ]);
 export const applicabilitySchema = z.object({ environment: dimensionSchema, host: dimensionSchema }).strict();
+export const KNOWLEDGE_SOURCE_EXCERPT_MAX = 8192;
+export const SOURCE_EXCERPT_LIMIT_MESSAGE =
+  "Source excerpts can contain at most 8192 characters. Select a shorter verified quote, or explicitly write/copy a manual takeaway. No evidence is clipped; an earlier pending write may still have succeeded.";
 export const knowledgeSourceSchema = z
   .object({
     ref: z.string().min(1).max(2000),
-    excerpt: z.string().max(16000).optional(),
+    excerpt: z.string().max(KNOWLEDGE_SOURCE_EXCERPT_MAX, SOURCE_EXCERPT_LIMIT_MESSAGE).optional(),
     authorType: z.enum(["human", "agent", "system", "unknown"]),
     observedAt: timestamp,
     status: z.enum(["available", "archived", "unreachable"]).optional(),
@@ -444,7 +447,7 @@ export const workstreamRpcMethods = {
       .strict(),
   },
 };
-export const workstreamRpcContract = defineRpcContract(workstreamRpcMethods);
+export const workstreamRpcContract = workstreamRpcMethods satisfies PluginRpcContract;
 export type Workstream = z.infer<typeof workstreamSchema>;
 export type Knowledge = z.infer<typeof knowledgeSchema>;
 export type Applicability = z.infer<typeof applicabilitySchema>;

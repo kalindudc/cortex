@@ -152,7 +152,7 @@ export function EditKnowledgeDialog({
 }) {
   const writes = useWorkstreamWrites();
   const [reloading, setReloading] = useState(false);
-  const current = useKnowledgeEntries(open && reloading ? [entry.id] : [])[0];
+  const current = useKnowledgeEntries(open ? [entry.id] : [])[0];
   const [title, setTitle] = useState(entry.title);
   const [text, setText] = useState(entry.text);
   const [note, setNote] = useState("");
@@ -172,8 +172,8 @@ export function EditKnowledgeDialog({
   const latest = current?.data && current.data.entry.revision > entry.revision ? current.data.entry : entry;
   const newer = latest.revision > base.revision ? latest : null;
   const reload = () => {
-    if (reloading) current?.refetch();
-    else setReloading(true);
+    setReloading(true);
+    current?.refetch();
   };
   const save = async (approve: boolean) => {
     setBusy(true);
@@ -242,7 +242,9 @@ export function EditKnowledgeDialog({
         {newer ? (
           <div className="flex flex-col gap-1.5">
             <p className="text-[12px] text-muted-foreground">Revision {newer.revision} now says:</p>
+            <p data-content className="text-[13px] whitespace-pre-wrap break-words">{newer.text}</p>
             <DiffText ops={wordDiff(newer.text, text)} label="Your text compared with the newer revision" />
+            <p className="text-[13px]">Your next save will replace the newer version with your draft text. It does not merge them.</p>
             <Button
               variant="outline"
               size="sm"
@@ -252,7 +254,7 @@ export function EditKnowledgeDialog({
                 setFailure(null);
               }}
             >
-              Keep my text over revision {newer.revision}
+              Keep my draft copy
             </Button>
           </div>
         ) : null}
