@@ -1,0 +1,44 @@
+.cortex-text-dialog, textarea.cortex-growing-textarea {
+  --cortex-knowledge-text-max: max(12rem, calc(100dvh - 22rem));
+}
+
+.cortex-text-dialog {
+  container-type: inline-size;
+  container-name: cortex-knowledge-dialog;
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+}
+
+.cortex-knowledge-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 16px;
+  min-width: 0;
+}
+
+.cortex-knowledge-editor > * {
+  min-width: 0;
+}
+
+textarea.cortex-growing-textarea, .cortex-knowledge-preview {
+  box-sizing: border-box;
+  min-height: calc(9em + 1rem + 2px);
+  max-height: var(--cortex-knowledge-text-max);
+  overflow-y: auto;
+  line-height: 1.5;
+}
+
+textarea.cortex-growing-textarea {
+  resize: none;
+}
+
+.cortex-knowledge-preview {
+  scrollbar-gutter: stable;
+}
+
+@container cortex-knowledge-dialog (min-width: 720px) {
+  .cortex-knowledge-editor:not([data-compact="true"]) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

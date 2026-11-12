@@ -18,10 +18,10 @@ shows those differences. `cortex agents reset` removes and replaces the plugin, 
 Workstreams need a Cortex build and daemon with `cortex workstream` support. When upgrading, stop an older daemon
 with `cortex stop`; never point the plugin at another production database to hide an unavailable command.
 
-Settings stay in bb's plugin settings. `cortexPath` selects an executable; an empty value searches PATH, `~/bin`
-and `~/.local/bin`. Reload the plugin after changing it. `memory` controls automatic lookup and saving;
-`taskChip` controls the task shortcut and `memoryChip` the memory status. `contextWidget` chooses whether context
-is shown beside conversations by default. Appearance settings do not grant sharing or erase existing context.
+Settings stay in bb's plugin settings. `cortexPath` selects an executable (empty searches PATH, `~/bin` and
+`~/.local/bin`); reload the plugin after changing it. `memory` controls automatic lookup and saving, `taskChip` the task
+shortcut, `memoryChip` the memory status and `contextWidget` whether context shows beside conversations by default.
+Appearance settings do not grant sharing or erase existing context.
 
 ## Connect a section to a workstream
 
@@ -30,10 +30,9 @@ a matching name alone connects nothing. Several sections can use the same brief,
 Connecting imports no conversations and does not update running sessions. New threads in that section receive
 eligible context automatically, without a separate Attach step. A preview is not proof of provider delivery.
 
-Cortex uses its existing Brain SVG in its section list and composer. Native bb section names are left unchanged;
-Cortex does not add an emoji prefix or decorate native section headers.
-An unsectioned child inherits its starting thread's connection; a deliberate thread-specific connection wins.
-Moving or disconnecting a section does not delete the workstream or erase text already in a running conversation.
+Cortex marks sections only with its Brain SVG in its own list and composer; bb section names stay unchanged, with no
+emoji prefix. An unsectioned child inherits its starting thread's connection; a deliberate thread-specific connection
+wins. Moving or disconnecting a section does not delete the workstream or erase text already in a running conversation.
 
 A blank topic includes the workstream's shared basics. Choosing a topic adds approved knowledge saved under that
 exact topic. Choose a target environment and, where relevant, a target host or cluster explicitly: your development
@@ -57,33 +56,34 @@ Review wording, scope and sources before acceptance. Saving for review keeps the
 without approval; unknown scope still blocks acceptance. A human can explicitly adopt a Rule, never by quote alone.
 Source authorship and reachability are reported metadata, not authentication or proof that a claim is true now.
 
-Agents have a bounded suggestion allowance per active run, including no-save results and failures. Your review
-actions and explicit task updates are separate.
+Agents' bounded suggestion allowance per active run counts no-save results and failures, not your reviews or updates.
 
-Keep one accepted source of knowledge rather than saving another summary for each thread. Repeated evidence can
-be attached to existing knowledge. Exact duplicates can produce a no-save result; related suggestions help compare
-and consolidate. They are bounded hints, not a semantic duplicate detector or a confidence score. Different subject
-keys and superficially different sources still need human judgment.
+Keep one accepted source rather than saving another summary for each thread. Attach repeated evidence to existing knowledge.
+Exact duplicates can produce a no-save result; related suggestions help compare and consolidate. These are bounded hints,
+not a semantic duplicate detector or confidence score. Different subject keys and superficially different sources still need human judgment.
 
-Report competing factual claims as a conflict. Automatic context withholds their actionable wording until review;
-it carries a notice and source references instead. Superseding knowledge is an explicit, revision-checked decision.
-Agent evidence cannot silently cancel a human prohibition. Expired observations also need review: a new observation
-becomes a suggestion and does not put a new timestamp on the old claim.
+Report competing factual claims as a conflict. Automatic context withholds their actionable wording until review, carrying
+only notices and source references. Supersession is explicit and revision-checked; agent evidence cannot cancel a human prohibition.
+Expired observations need review: a new observation becomes a suggestion without changing the old claim's timestamp.
 
-Archive keeps knowledge as history, out of future context. Forget removes current and revision text but keeps a tombstone.
-Neither erases exports, backups or already-sent text. Forget cannot be undone; read its confirmation first.
+Archive keeps knowledge as history, out of future context. Archived or rejected entries can Restore to review; previously
+approved archived entries without live conflicts can Restore and approve. Archive and Reject offer Undo; disputed entries return to review.
+Forget removes current and revision text but keeps a tombstone. It cannot be undone; superseded entries need a separate replacement decision.
+Neither erases exports, backups or already-sent text. Read the Forget confirmation first.
 
 ## Inspect or change a thread's context
 
-The Memory tab shows the workstream, topic and targets, what is selected, what stays out and why, and the exact
-text prepared for the thread. The estimate is approximate; if required knowledge is missing or context exceeds its
-budget or the SDK's startup character limit, the preview explains the refusal before sending. Constraints are never
-silently truncated.
+The Memory tab shows the workstream, topic and targets, what is selected, what stays out and why, and the exact text
+prepared for the thread. The estimate is approximate; when required knowledge is missing or context exceeds its budget
+or the SDK's startup limit, the preview explains the refusal before sending, never silently truncating constraints.
 
-Change wording or leave something out for this thread only without modifying the shared knowledge. A shared edit
-is a separate action with a revision check; if someone changed it first, your input stays available for review.
-The existing task action Exclude from automatic memory is task-wide, not a thread-only choice. Direct task reads
-by ID remain possible, and exclusion does not remove text already in a session.
+On bb's New thread screen, Cortex's expandable row previews the picked section's brief and ordinary memory; a
+remembered pick is marked, not verified placement. Its menu files the draft in a section, unpinned, or clears it. Edit
+or leave entries out for this thread; removing the pill restores normal context, and Put back restores its section and
+changes. A send with changes is refused if the section or knowledge changed; the row offers recovery. Shared edits are
+separate and revision-checked; if someone changed it first, your input stays available for review. The existing task
+action Exclude from automatic memory is task-wide, not a thread-only choice. Direct task reads by ID remain possible,
+and exclusion does not remove text already in a session.
 
 Prepare context inserts a visible draft for you to inspect and send. Preparing a draft is not delivery. A reference
 adds information; it cannot replace a running session's earlier text. Start a fresh thread when a clean context is
@@ -96,9 +96,8 @@ Direct shell and Cortex CLI access remain outside this accidental-selection cont
 ## Keep conversations clear
 
 The composer summary shrinks with available space, down to one icon that opens its details, and stays in wide panes
-beside bb's context card. Collapse it, or close it; the per-thread preference survives reloads. Restore it from the
-thread action or Memory tab. The global default can hide it without disabling memory; each thread can override or
-follow that default. Closing the widget changes presentation only, not knowledge sharing.
+beside bb's context card. Collapse or close it per thread (it survives reloads) and restore it from the thread action or
+Memory tab; the global default hides it without disabling memory. Closing it changes presentation, not sharing.
 
 ## Work with tasks
 
@@ -156,5 +155,6 @@ It reads canonical tasks and workstream knowledge through the Cortex CLI, never 
 - Test the CLI boundary, scope, context refusal, historical receipts and persistent visibility:
   `integrations/bb/workstreams.test.ts`, `integrations/bb/sections.test.ts`, `integrations/bb/cli.test.ts`,
   `integrations/bb/app.test.tsx`, `integrations/bb/section-ui.test.tsx`.
+- The Cortex pill grants nothing by text; only its recorded selection applies, once: `integrations/bb/pending-context.test.ts`.
 - `pnpm run test:bb` runs the plugin tests and typecheck after its npm dependencies are installed. The root suite
   does not substitute for the independent plugin tests, and neither proves live provider lifecycle behavior.

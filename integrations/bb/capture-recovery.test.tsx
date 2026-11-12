@@ -7,7 +7,7 @@ import { sectionRpcContract, type CaptureInput, type CaptureJob, type Section } 
 import { SOURCE_EXCERPT_LIMIT_MESSAGE } from "./workstream-contract";
 import { failureOf } from "./ui/data";
 import { CompactViewportOverrideProvider } from "./components/ui/hooks/use-compact-viewport";
-import { CaptureDialog, type CaptureSeed } from "./ui/takeaway";
+import { CandidateDialog, CaptureDialog, type CaptureSeed } from "./ui/takeaway";
 import type { Knowledge } from "./ui/types";
 
 vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { error: vi.fn() }) }));
@@ -34,6 +34,39 @@ function editDraft(dialog: HTMLElement) {
   fireEvent.change(within(dialog).getByRole("textbox", { name: "Title" }), { target: { value: "My edited title" } });
   fireEvent.change(within(dialog).getByRole("textbox", { name: "Text" }), { target: { value: "My edited takeaway stays here." } });
 }
+
+test.each(["candidate", "capture"] as const)("%s takeaway text grows while keeping its original field", async mode => {
+  let contentHeight = 300;
+  vi.spyOn(HTMLTextAreaElement.prototype, "scrollHeight", "get").mockImplementation(() => contentHeight);
+  const slot = mode === "capture"
+    ? renderCapture({ source: messageSource, text: "Original message evidence" }).slot
+    : renderSlot({ component: CandidateDialog }, { entry, section, onClose: vi.fn() }, { rpc: { knowledgeShow: () => ({ entry, workstream: { id: entry.workstreamId, name: "Envoy", description: "", revision: 1, archived: false, actor: entry.actor, createdAt: now, updatedAt: now } }) }, experimental_rpcContract: sectionRpcContract });
+  const field = await slot.findByRole("textbox", { name: "Text" }) as HTMLTextAreaElement;
+  expect(field.style.height).toBe("300px");
+  expect(field.rows).toBe(6);
+  contentHeight = 420;
+  fireEvent.change(field, { target: { value: "A longer takeaway" } });
+  expect(field.style.height).toBe("420px");
+  expect(slot.getByRole("textbox", { name: "Text" })).toBe(field);
+});
+
+test("exact-quote recovery uses a growing field without changing the original source", async () => {
+  let contentHeight = 300;
+  vi.spyOn(HTMLTextAreaElement.prototype, "scrollHeight", "get").mockImplementation(() => contentHeight);
+  const original = "An exact source passage.";
+  const { slot } = renderCapture({ source: messageSource, text: original }, { sectionCapture: () => { throw refusal("invalid", ["source", "quote"]); } });
+  const dialog = await slot.findByRole("dialog");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Save for review" }));
+  await within(dialog).findByText(SOURCE_EXCERPT_LIMIT_MESSAGE);
+  contentHeight = 410;
+  fireEvent.click(within(dialog).getByRole("button", { name: "Use a shorter exact quote" }));
+  const quote = within(dialog).getByRole("textbox", { name: "Exact source quote" }) as HTMLTextAreaElement;
+  expect(quote.style.height).toBe("410px");
+  expect(quote.rows).toBe(6);
+  expect(document.activeElement).toBe(quote);
+  expect(quote.value).toBe(original);
+  expect(dialog.querySelector("blockquote")!.textContent).toBe(original);
+});
 
 test("invalid_input shows and retains typed actionable issues without rewriting conflicts", () => {
   const out = failureOf(refusal("invalid_input", ["source", "quote"]));

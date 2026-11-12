@@ -1,11 +1,12 @@
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useId, useState } from "react";
 import { experimental_copyToClipboard, useComposer } from "@get-bb/plugin-sdk/app";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Icon } from "@/components/ui/icon";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
+import { useIsCompactViewport } from "@/components/ui/hooks/use-compact-viewport";
+import { GrowingTextarea } from "./growing-textarea";
 import { cn } from "@/lib/utils";
 import { dimensionWord, ORIENTATION, STATUS_LOOK, tokens } from "./copy";
 import { isConflict, type RpcFailure, useKnowledgeEntries, useWorkstreamWrites } from "./data";
@@ -47,6 +48,27 @@ export function DiffText({ ops, label }: { ops: DiffOp[]; label: string }) {
       )}
     </p>
   );
+}
+
+function KnowledgeEditor({ id, label, saved, text, setText, open }: { id: string; label: string; saved: string; text: string; setText: (value: string) => void; open: boolean }) {
+  const compact = useIsCompactViewport();
+  const previewId = useId();
+  const ops = wordDiff(saved, text);
+  const changed = ops.some(op => op.op !== "same");
+  return <div className="cortex-knowledge-editor" data-compact={compact}>
+    <Field label={label} htmlFor={id}>
+      <GrowingTextarea id={id} value={text} open={open} onChange={event => setText(event.target.value)} className="text-[13px]" />
+    </Field>
+    <section aria-labelledby={previewId} className="flex min-w-0 flex-col gap-1">
+      <h3 id={previewId} className={FIELD_LABEL}>Change from the saved text</h3>
+      <div className="cortex-knowledge-preview rounded-md bg-muted/50 text-[12.5px]" tabIndex={0} role="group" aria-labelledby={previewId}>
+        {changed ? <DiffText ops={ops} label="Change from the saved text" /> : <div className="px-2.5 py-2">
+          <p role="status" className="mb-2 text-[12px] text-muted-foreground">No change yet.</p>
+          <p data-content className="whitespace-pre-wrap break-words">{saved}</p>
+        </div>}
+      </div>
+    </section>
+  </div>;
 }
 
 function ScopeNote({ icon, children }: { icon: string; children: ReactNode }) {
@@ -105,7 +127,7 @@ export function ChangeForThreadDialog({
   const unchanged = text.trim() === "" || text.trim() === entry.text.trim();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl">
+      <DialogContent data-cortex data-part="ChangeForThreadDialog" className="cortex-knowledge-dialog cortex-text-dialog max-w-5xl">
         <DialogHeader>
           <DialogTitle>Change for this thread only</DialogTitle>
           <DialogDescription>{entry.knowledge.title}</DialogDescription>
@@ -113,10 +135,7 @@ export function ChangeForThreadDialog({
         <ScopeNote icon="SideChat">
           Only this thread's next context changes. Other threads keep the saved text. It shows as changed by you, not by the original sources.
         </ScopeNote>
-        <Field label="Text for this thread" htmlFor="cortex-thread-text">
-          <Textarea id="cortex-thread-text" value={text} onChange={event => setText(event.target.value)} rows={5} className="text-[13px]" />
-        </Field>
-        <DiffText ops={wordDiff(saved, text)} label="Change from the saved text" />
+        <KnowledgeEditor id="cortex-thread-text" label="Text for this thread" saved={saved} text={text} setText={setText} open={open} />
         {failure ? <FailureNotice failure={failure} /> : null}
         <DialogFooter>
           {entry.origin === "thread-only" ? (
@@ -209,7 +228,7 @@ export function EditKnowledgeDialog({
   const unchanged = title.trim() === base.title && text.trim() === base.text;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent data-cortex data-part="EditKnowledgeDialog" className="cortex-knowledge-dialog max-w-xl">
+      <DialogContent data-cortex data-part="EditKnowledgeDialog" className="cortex-knowledge-dialog cortex-text-dialog max-w-5xl">
         <DialogHeader>
           <DialogTitle>Edit saved knowledge</DialogTitle>
           <DialogDescription>
@@ -224,10 +243,7 @@ export function EditKnowledgeDialog({
         <Field label="Title" htmlFor="cortex-edit-title">
           <Input id="cortex-edit-title" value={title} onChange={event => setTitle(event.target.value)} className="text-[13px]" />
         </Field>
-        <Field label="Text" htmlFor="cortex-edit-text">
-          <Textarea id="cortex-edit-text" value={text} onChange={event => setText(event.target.value)} rows={6} className="text-[13px]" />
-        </Field>
-        <DiffText ops={wordDiff(base.text, text)} label="Change from the saved text" />
+        <KnowledgeEditor id="cortex-edit-text" label="Text" saved={base.text} text={text} setText={setText} open={open} />
         <Field label="Why (kept in history)" htmlFor="cortex-edit-note">
           <Input id="cortex-edit-note" value={note} onChange={event => setNote(event.target.value)} placeholder="Optional" className="text-[13px]" />
         </Field>
@@ -311,7 +327,7 @@ export function PrepareDraftDialog({
   };
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent data-cortex className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>Prepare a draft in the composer</DialogTitle>
           <DialogDescription>You choose whether to send it. The running session keeps what it already has.</DialogDescription>
@@ -493,7 +509,7 @@ export function BindingDialog({
   };
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl">
+      <DialogContent data-cortex className="max-w-xl">
         <DialogHeader>
           <DialogTitle>{target === "section" ? `Connect section ${name}` : "Connect this thread"}</DialogTitle>
           <DialogDescription>
@@ -629,7 +645,7 @@ export function ProposeDialog({
   const ready = title.trim() !== "" && text.trim() !== "";
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent data-cortex data-part="ProposeDialog" className="cortex-knowledge-dialog max-w-xl">
+      <DialogContent data-cortex data-part="ProposeDialog" className="cortex-knowledge-dialog cortex-text-dialog max-w-xl">
         <DialogHeader>
           <DialogTitle>Add knowledge to {workstream.name}</DialogTitle>
           <DialogDescription>Threads get it only after it is approved.</DialogDescription>
@@ -650,7 +666,7 @@ export function ProposeDialog({
           <Input id="cortex-new-title" value={title} onChange={event => setTitle(event.target.value)} className="text-[13px]" />
         </Field>
         <Field label="Text" htmlFor="cortex-new-text">
-          <Textarea id="cortex-new-text" value={text} onChange={event => setText(event.target.value)} rows={4} className="text-[13px]" />
+          <GrowingTextarea id="cortex-new-text" value={text} open={open} onChange={event => setText(event.target.value)} className="text-[13px]" />
         </Field>
         <div className="flex flex-col gap-1">
           <span className={FIELD_LABEL}>Goes to</span>
@@ -765,7 +781,7 @@ export function ObserveDialog({
   const ready = ref.trim() !== "" && (mode === "evidence" || value.trim() !== "");
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent data-cortex data-part="ObserveDialog" className="cortex-knowledge-dialog max-w-xl">
+      <DialogContent data-cortex data-part="ObserveDialog" className="cortex-knowledge-dialog cortex-text-dialog max-w-xl">
         <DialogHeader>
           <DialogTitle>{mode === "evidence" ? "Add a source" : "Record what you see now"}</DialogTitle>
           <DialogDescription>{entry.title}</DialogDescription>
@@ -777,14 +793,14 @@ export function ObserveDialog({
         </div>
         {mode === "observe" ? (
           <Field label="What you observed" htmlFor="cortex-observe-value">
-            <Textarea id="cortex-observe-value" value={value} onChange={event => setValue(event.target.value)} rows={3} className="text-[13px]" />
+            <GrowingTextarea id="cortex-observe-value" value={value} open={open} onChange={event => setValue(event.target.value)} className="text-[13px]" />
           </Field>
         ) : null}
         <Field label="Source" htmlFor="cortex-observe-ref" hint="A command output, link or thread message.">
           <Input id="cortex-observe-ref" value={ref} onChange={event => setRef(event.target.value)} className="text-[13px]" />
         </Field>
         <Field label="Excerpt" htmlFor="cortex-observe-excerpt">
-          <Textarea id="cortex-observe-excerpt" value={excerpt} onChange={event => setExcerpt(event.target.value)} rows={2} className="text-[13px]" />
+          <GrowingTextarea id="cortex-observe-excerpt" value={excerpt} open={open} onChange={event => setExcerpt(event.target.value)} className="text-[13px]" />
         </Field>
         {failure ? <FailureNotice failure={failure} /> : null}
         <DialogFooter>

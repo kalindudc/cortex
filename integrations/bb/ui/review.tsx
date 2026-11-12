@@ -1,6 +1,5 @@
 import { type KeyboardEvent, type RefObject, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { useBbNavigate } from "@get-bb/plugin-sdk/app";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
@@ -8,10 +7,12 @@ import { BRIEF_STATE_LOOK, plural, STATE_LOOK } from "./copy";
 import { type RpcFailure, useKnowledgeEntries, useReviewQueue, useWorkstreamWrites, type Writes } from "./data";
 import { DiffText, EditKnowledgeDialog, ObserveDialog, Side } from "./dialogs";
 import { KnowledgeDetail } from "./knowledge";
+import { isHistorical, KnowledgeDecisionFailure, knowledgeDecisionToast } from "./knowledge-decisions";
 import { displayState, oldestFirst, waitAge, wordDiff } from "./model";
 import { EmptyNote, FailureNotice, Hint, LoadingRows, TONE_TEXT } from "./parts";
 import { CORTEX_PAGE_PATH } from "./thread-context";
 import type { AdmissionHint, Knowledge, ReviewItem } from "./types";
+import { isFlag, isNullableText, isText, usePlaceState } from "./place";
 import "./review.css";
 
 const HINT_WORD: Record<AdmissionHint["reason"], string> = {
@@ -22,15 +23,18 @@ const HINT_WORD: Record<AdmissionHint["reason"], string> = {
 
 const RELATED_STEP = 3;
 
-type Option = { id: string; label: string; effect: string; run: () => Promise<void>; opens?: "observe" };
+type Option = { id: string; label: string; effect: string; run: () => Promise<Knowledge | void>; opens?: "observe" };
 
 function optionsFor(item: ReviewItem, others: Knowledge[], writes: Writes, now: number): Option[] {
   const { entry, workstream } = item;
   const state = displayState(entry, now);
   const reason = (text: string) => `${text} in Cortex review`;
   const options: Option[] = [];
+  const livePartners = others.filter(other => !isHistorical(other));
+  const conflictsKnown = entry.conflicts.every(id => others.some(other => other.id === id));
+  const liveConflicts = livePartners.filter(other => entry.conflicts.includes(other.id));
   if (entry.state === "candidate") {
-    options.push({
+    if (conflictsKnown && liveConflicts.length === 0) options.push({
       id: "approve",
       label: "Approve",
       effect: `Threads in ${workstream.name} get it from their next session.`,
@@ -38,7 +42,7 @@ function optionsFor(item: ReviewItem, others: Knowledge[], writes: Writes, now: 
         await writes.transition({ id: entry.id, expectedRevision: entry.revision, state: "approved", reason: reason("Approved") });
       },
     });
-    for (const other of others.filter(o => o.state === "approved" || o.state === "recheck")) {
+    for (const other of livePartners.filter(o => o.state === "approved" || o.state === "recheck" || entry.conflicts.includes(o.id))) {
       options.push({
         id: `replace-${other.id}`,
         label: `Approve and replace ${other.title}`,
@@ -54,7 +58,7 @@ function optionsFor(item: ReviewItem, others: Knowledge[], writes: Writes, now: 
           effect: "One entry stays. The new wording is rejected; its sources are kept as evidence.",
           run: async () => {
             await writes.evidence({ id: other.id, expectedRevision: other.revision, sources: entry.sources, reason: reason(`Evidence from ${entry.id}`) });
-            await writes.transition({ id: entry.id, expectedRevision: entry.revision, state: "rejected", reason: reason(`Merged as evidence into ${other.id}`) });
+            return (await writes.transition({ id: entry.id, expectedRevision: entry.revision, state: "rejected", reason: reason(`Merged as evidence into ${other.id}`) })).entry;
           },
         });
       }
@@ -64,11 +68,19 @@ function optionsFor(item: ReviewItem, others: Knowledge[], writes: Writes, now: 
       label: "Reject",
       effect: "Kept in history. Threads never get it.",
       run: async () => {
-        await writes.transition({ id: entry.id, expectedRevision: entry.revision, state: "rejected", reason: reason("Rejected") });
+        return (await writes.transition({ id: entry.id, expectedRevision: entry.revision, state: "rejected", reason: reason("Rejected") })).entry;
       },
     });
   } else if (entry.state === "disputed") {
-    for (const other of others) {
+    if (conflictsKnown && liveConflicts.length === 0) options.push({
+      id: "approve",
+      label: "Approve this",
+      effect: `${others.filter(other => entry.conflicts.includes(other.id)).map(other => `${other.title} is ${other.state}`).join("; ") || "No live conflict remains"}, so nothing disputes this any more. Threads get it from their next session.`,
+      run: async () => {
+        await writes.transition({ id: entry.id, expectedRevision: entry.revision, state: "approved", reason: reason("Approved after historical conflicts") });
+      },
+    });
+    for (const other of livePartners) {
       options.push({
         id: `keep-${entry.id}-${other.id}`,
         label: `Keep this, replace ${other.title}`,
@@ -91,7 +103,7 @@ function optionsFor(item: ReviewItem, others: Knowledge[], writes: Writes, now: 
       label: "Archive this",
       effect: "Out of every thread's next context; kept for history.",
       run: async () => {
-        await writes.transition({ id: entry.id, expectedRevision: entry.revision, state: "archived", reason: reason("Archived") });
+        return (await writes.transition({ id: entry.id, expectedRevision: entry.revision, state: "archived", reason: reason("Archived") })).entry;
       },
     });
   } else if (state === "expired" || entry.state === "recheck") {
@@ -107,7 +119,7 @@ function optionsFor(item: ReviewItem, others: Knowledge[], writes: Writes, now: 
       label: "Archive this",
       effect: "Out of every thread's next context; kept for history.",
       run: async () => {
-        await writes.transition({ id: entry.id, expectedRevision: entry.revision, state: "archived", reason: reason("Archived") });
+        return (await writes.transition({ id: entry.id, expectedRevision: entry.revision, state: "archived", reason: reason("Archived") })).entry;
       },
     });
   }
@@ -132,7 +144,7 @@ function QueueRow({ item, selected, onSelect, now }: { item: ReviewItem; selecte
         onClick={onSelect}
         className={cn(
           "flex w-full min-w-0 items-start gap-2.5 border-l-2 px-4 py-3 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset",
-          selected ? "border-primary bg-surface-selected" : "border-transparent hover:bg-state-hover",
+          selected ? "border-primary bg-surface-selected hover:bg-surface-selected/80" : "border-transparent hover:bg-state-hover",
         )}
       >
         <Icon name={look.icon} className={cn("mt-0.5 size-4 shrink-0", TONE_TEXT[look.tone])} aria-label={look.word} />
@@ -172,7 +184,7 @@ function Decision({ item, onDone, onOpen, now, keysRef }: {
     [item],
   );
   const [loadCount, setLoadCount] = useState(RELATED_STEP);
-  const loadedIds = relatedIds.slice(0, loadCount);
+  const loadedIds = [...new Set([...item.entry.conflicts, ...relatedIds.filter(id => !item.entry.conflicts.includes(id)).slice(0, loadCount)])];
   const reads = useKnowledgeEntries(loadedIds);
   const relatedEntries = reads.flatMap(read => (read.data ? [read.data.entry] : []));
   const unreadable = loadedIds.flatMap((id, index) => (reads[index]?.error ? [{ id, failure: reads[index]!.error! }] : []));
@@ -194,11 +206,13 @@ function Decision({ item, onDone, onOpen, now, keysRef }: {
     setBusy(true);
     setFailure(null);
     try {
-      await chosen.run();
-      toast(`${chosen.label}: done`);
+      const updated = await chosen.run();
+      knowledgeDecisionToast(`${chosen.label}: done`, item.entry, updated || undefined, writes);
       onDone();
     } catch (cause) {
       setFailure(cause as RpcFailure);
+      setChoice(null);
+      writes.refreshKnowledge();
     } finally {
       running.current = false;
       setBusy(false);
@@ -225,7 +239,7 @@ function Decision({ item, onDone, onOpen, now, keysRef }: {
               const hint = item.hints.find(h => h.id === other.id);
               return (
                 <div key={other.id} className="cortex-compare" data-part="Compare">
-                  <Side entry={other} label={hint ? HINT_WORD[hint.reason] : "Disputes this"} />
+                  <Side entry={other} label={isHistorical(other) ? `${STATE_LOOK[other.state].word}, ${item.entry.conflicts.includes(other.id) ? "disputed this" : hint ? HINT_WORD[hint.reason].toLowerCase() : "related entry"}` : hint ? HINT_WORD[hint.reason] : "Disputes this"} />
                   <div className="flex min-w-0 flex-col gap-1.5 rounded-md border border-border-seam p-3">
                     <span className="text-[12px] font-semibold text-foreground">Wording change</span>
                     <DiffText ops={wordDiff(other.text, item.entry.text)} label={`Words changed from ${other.title}`} />
@@ -276,7 +290,7 @@ function Decision({ item, onDone, onOpen, now, keysRef }: {
               }}
               className={cn(
                 "cortex-choice flex min-w-0 items-start gap-2.5 rounded-md border px-3 py-2.5 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50",
-                option.id === choice ? "border-primary bg-surface-selected" : "border-border-seam hover:bg-state-hover",
+                option.id === choice ? "border-primary bg-surface-selected enabled:hover:bg-surface-selected/80" : "border-border-seam hover:bg-state-hover",
               )}
             >
               {index < 9 ? <kbd aria-hidden className="shrink-0 rounded-sm border border-border-seam px-1 font-mono text-[11px] text-muted-foreground">{index + 1}</kbd> : null}
@@ -288,7 +302,7 @@ function Decision({ item, onDone, onOpen, now, keysRef }: {
             </button>
           ))}
         </div>
-        {failure ? <FailureNotice failure={failure} /> : null}
+        {failure ? <KnowledgeDecisionFailure failure={failure} /> : null}
         <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
           <Button className="cortex-choice h-auto min-h-8 bg-primary px-3 py-2 text-primary-foreground hover:bg-primary/90" aria-label={chosen ? `Confirm: ${chosen.label}` : loadingRelated ? "Loading options" : "Choose an option"} disabled={chosen === null || busy} onClick={() => void confirm()}>
             {chosen ? `Confirm: ${chosen.label}` : loadingRelated ? "Loading options" : "Choose an option"}
@@ -307,9 +321,9 @@ export function NeedsYou() {
   const read = useReviewQueue();
   const navigate = useBbNavigate();
   const now = Date.now();
-  const [filter, setFilter] = useState("all");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [showDetail, setShowDetail] = useState(false);
+  const [filter, setFilter] = usePlaceState("workstream-filter", "all", isText);
+  const [selectedId, setSelectedId] = usePlaceState<string | null>("selected-entry", null, isNullableText);
+  const [showDetail, setShowDetail] = usePlaceState("show-detail", false, isFlag);
   const keysRef = useRef<DecisionKeys | null>(null);
   const items = useMemo(() => oldestFirst(read.data?.items ?? []), [read.data]);
   const workstreams = useMemo(() => [...new Map(items.map(item => [item.workstream.id, item.workstream])).values()], [items]);
@@ -347,7 +361,7 @@ export function NeedsYou() {
     <div data-cortex data-part="ReviewQueue" role="region" aria-label="Review queue" tabIndex={0} className="cortex-review flex h-full min-h-0 flex-col focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" onKeyDown={keys}>
       {read.error ? <FailureNotice failure={read.error} onRetry={read.refetch} /> : null}
       <div className="cortex-master-detail" data-show-detail={showDetail || undefined}>
-        <div className="cortex-master border-r border-border-seam">
+        <div data-cortex-scroll="list" className="cortex-master border-r border-border-seam">
           <header className="flex items-center gap-3 border-b border-border-seam px-4 py-3">
             <span className="text-[24px] leading-none font-semibold text-foreground tabular-nums">{filter === "all" ? read.data.total : visible.length}</span>
             <div className="min-w-0 flex-1"><h2 className="text-[13px] font-semibold">to review</h2>{oldest ? <p className="text-[12px] text-muted-foreground">oldest {waitAge(oldest.entry.updatedAt, now)}</p> : null}</div>
@@ -364,7 +378,7 @@ export function NeedsYou() {
           </>}
           {read.data.total > items.length ? <p className="px-4 py-3 text-[12px] text-muted-foreground">{plural(read.data.total - items.length, "older item")} after these</p> : null}
         </div>
-        {selected ? <div className="cortex-detail">
+        {selected ? <div data-cortex-scroll="detail" className="cortex-detail">
           <Button variant="ghost" size="sm" className="cortex-back mb-3" onClick={() => setShowDetail(false)}><Icon name="ChevronLeft" aria-hidden />Queue</Button>
           <Decision key={selected.entry.id} item={selected} now={now} keysRef={keysRef} onOpen={open} onDone={() => { setSelectedId(null); }} />
         </div> : null}

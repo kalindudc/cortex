@@ -2,6 +2,25 @@
 
 Cortex follows [semantic versioning](https://semver.org). Each release has a section below, newest first.
 
+## 0.107.0 - 2026-11-12
+
+- **See what a new thread starts with before you send.** On bb's New thread screen, a Cortex row above the message
+  box names the section and sums up its brief, for example "1 entry · ~313/400 tokens · + memory · 1 held". Open it
+  for every entry, what is held back and why, and the memory that goes in too. Leave entries out or edit them for this
+  thread only; a Cortex pill in your message carries the changes, and the send is refused if the section or the
+  knowledge changed meanwhile. The section menu files the thread in another section, or clears it.
+- **A dispute with an archived entry no longer blocks approval.** A conflict only counts while the other entry is
+  still active, so Review offers Approve this instead of choices that could never succeed, and a refused choice says
+  in plain words what to do next.
+- **Bring archived knowledge back.** Archived and rejected entries offer Restore to review, and entries that were
+  approved before also offer Restore and approve. Archive and Reject come with an Undo.
+- **The Cortex page keeps your place.** Coming back from another thread returns to the same section, tab, entry and
+  scroll position, and Review, Library and the thread's side tabs remember what you had selected.
+- **Edit dialogs fit their text.** The text box grows with its content, up to the height of the window, and sits
+  beside the change preview instead of above it.
+- **Tabs and buttons look clickable.** Every tab strip shares one style with a hover change and a visible active tab,
+  and everything clickable shows a pointer.
+
 ## 0.106.0 - 2026-11-12
 
 - **The Cortex page in bb is redesigned.** It opens on an Overview of every section and its brief, instead of a

@@ -34,6 +34,8 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  sessionStorage.clear();
+  localStorage.clear();
   selectTask(THREAD, null);
   vi.useRealTimers();
 });
@@ -329,8 +331,11 @@ test("registers the Cortex and Memory tabs, header action, context segment and c
   expect(app.threadContextSegments.map(segment => segment.id)).toEqual(["cortex-context"]);
   expect(app.threadContextCardSections.map(section => section.id)).toEqual(["cortex-context"]);
   expect(app.threadHeaderActions).toEqual([]);
-  // Not a prompt-box action: bb mounts only the three most-used plugins' actions there.
-  expect(app.composerCustomizations).toEqual([]);
+  // Not a prompt-box action: bb mounts only the three most-used plugins' actions there. The only composer
+  // customization is the New thread banner and its keyboard path in the + menu.
+  expect(app.composerCustomizations.map(c => [c.id, c.scopes, c.banners?.map(b => b.id), c.actions, c.plusMenu?.map(item => item.id), c.sendMenu])).toEqual([
+    ["cortex-new-thread", ["new-thread"], ["context"], undefined, ["context"], undefined],
+  ]);
   expect(app.messageDirectives.map(directive => directive.id)).toEqual(["cortex"]);
 });
 
@@ -1103,6 +1108,29 @@ describe("public context placement and lifecycle", () => {
       expect(slot.container.querySelectorAll("[data-tone]")).toHaveLength(1);
     }
     expect(calls(slot, "setContextDismissed")).toEqual([]);
+  });
+});
+
+describe("per-thread inner tab memory", () => {
+  test("task Activity survives leaving the thread and does not leak to another thread", async () => {
+    const previous = panel();
+    fireEvent.mouseDown(await previous.findByRole("tab", { name: /Activity/ }));
+    previous.unmount();
+    const other = renderSlot(taskTab(), { ...tabProps, threadId: "thr_bbbbbbbb" }, { rpc: handlers() });
+    expect((await other.findByRole("tab", { name: "Overview" })).getAttribute("aria-selected")).toBe("true");
+    other.unmount();
+    const again = panel();
+    expect((await again.findByRole("tab", { name: /Activity/ })).getAttribute("aria-selected")).toBe("true");
+  });
+  test("Memory History survives leaving the thread and does not leak to another thread", async () => {
+    const previous = renderSlot(memoryTab(), tabProps, { rpc: handlers() });
+    fireEvent.mouseDown(await previous.findByRole("tab", { name: "History" }));
+    previous.unmount();
+    const other = renderSlot(memoryTab(), { ...tabProps, threadId: "thr_bbbbbbbb" }, { rpc: handlers() });
+    expect((await other.findByRole("tab", { name: "Task memory" })).getAttribute("aria-selected")).toBe("true");
+    other.unmount();
+    const again = renderSlot(memoryTab(), tabProps, { rpc: handlers() });
+    expect((await again.findByRole("tab", { name: "History" })).getAttribute("aria-selected")).toBe("true");
   });
 });
 

@@ -1,0 +1,164 @@
+/* Cortex's row on bb's New thread screen. It sits inside bb's composer banner card, which draws the border and
+   surface, so this only lays out the row and the expanded brief. */
+[data-cortex].cortex-nt {
+  --nt-muted: color-mix(in oklab, var(--muted-foreground) 70%, var(--foreground));
+  --nt-in: var(--primary);
+  container-type: inline-size;
+  min-width: 0;
+  border-radius: inherit;
+  color: var(--foreground);
+  font-size: 12.5px;
+  line-height: 18px;
+}
+[data-cortex].cortex-nt.nt-refused {
+  background: color-mix(in oklab, var(--destructive) 9%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--destructive) 45%, transparent);
+}
+.cortex-nt .nt-ic { width: 14px; height: 14px; flex: none; }
+.cortex-nt .nt-muted { color: var(--nt-muted); }
+.cortex-nt .nt-pri { color: var(--primary); }
+.cortex-nt .nt-bad { color: var(--destructive-text); }
+.cortex-nt .nt-att { color: var(--attention); }
+.cortex-nt .nt-ok { color: var(--success); }
+.cortex-nt .nt-num { font-variant-numeric: tabular-nums; }
+.cortex-nt .nt-grow { flex: 1 1 auto; min-width: 0; }
+.cortex-nt .nt-sp { flex: 1 1 0; }
+.cortex-nt :where(.nt-btn, .nt-sec, .nt-tog, .nt-ttl, .nt-quick button) { font: inherit; color: inherit; background: transparent; border: 0; padding: 0; margin: 0; text-align: left; }
+.cortex-nt :where(.nt-btn, .nt-sec, .nt-tog, .nt-ttl, .nt-quick button):focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+
+/* The section menu is portaled outside the row. Long names wrap instead of stretching it past the window. */
+[data-cortex].cortex-nt-menu { max-width: min(32rem, calc(100vw - 2rem)); }
+.cortex-nt-menu .nt-mi-name { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.cortex-nt-menu .nt-mi-meta { flex: none; margin-left: 12px; font-size: 12px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* The collapsed row */
+.cortex-nt .nt-row { display: flex; align-items: center; gap: 4px; min-width: 0; min-height: 34px; padding: 1px 4px 1px 10px; }
+.cortex-nt .nt-lead { display: inline-flex; align-items: center; gap: 6px; flex: none; white-space: nowrap; }
+.cortex-nt .nt-lead .nt-w { color: var(--nt-muted); }
+.cortex-nt .nt-sec { display: inline-flex; align-items: center; gap: 4px; flex: 0 1 auto; min-width: 0; max-width: 46%; height: 26px; padding: 0 6px; border: 1px solid transparent; font-weight: 600; white-space: nowrap; }
+.cortex-nt .nt-sec:hover, .cortex-nt .nt-sec[data-state="open"] { background: var(--state-hover); border-color: var(--border-seam); }
+.cortex-nt .nt-sec .nt-nm { min-width: 6ch; overflow: hidden; text-overflow: ellipsis; }
+.cortex-nt .nt-sec.nt-unknown { border: 1px dashed color-mix(in oklab, var(--warning) 60%, transparent); color: var(--warning-text); }
+.cortex-nt .nt-sec.nt-unverified { border: 1px dashed color-mix(in oklab, var(--attention) 65%, transparent); }
+.cortex-nt .nt-sec .nt-src { font-weight: 400; font-size: 12px; color: var(--nt-muted); }
+.cortex-nt .nt-sec .nt-src-ic { color: var(--attention); }
+.cortex-nt .nt-tog { display: flex; align-items: center; gap: 6px; flex: 1 0 auto; min-width: 0; height: 28px; padding: 0 6px; white-space: nowrap; }
+.cortex-nt .nt-tog:hover { background: var(--state-hover); }
+.cortex-nt .nt-facts { min-width: 0; flex: none; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.cortex-nt .nt-memfact { flex: none; color: var(--nt-muted); }
+.cortex-nt .nt-mini { flex: none; width: 72px; }
+.cortex-nt .nt-chev { width: 12px; height: 12px; flex: none; color: var(--nt-muted); transition: transform 200ms; }
+.cortex-nt .nt-tog[aria-expanded="true"] .nt-chev { transform: rotate(180deg); }
+.cortex-nt .nt-mark { display: inline-flex; align-items: center; gap: 4px; flex: none; font-size: 12px; white-space: nowrap; }
+.cortex-nt .nt-mark b { font-weight: 600; }
+.cortex-nt .nt-mark.nt-bad { color: var(--destructive-text); }
+.cortex-nt .nt-mark.nt-att .nt-ic { color: var(--attention); }
+.cortex-nt .nt-mark.nt-pri .nt-ic { color: var(--primary); }
+
+/* Buttons */
+.cortex-nt .nt-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: none; height: 26px; padding: 0 8px; border: 1px solid var(--border-seam); font-size: 12px; white-space: nowrap; }
+.cortex-nt .nt-btn:hover { background: var(--state-hover); }
+.cortex-nt .nt-btn.nt-ghost { border-color: transparent; }
+.cortex-nt .nt-btn.nt-icon { width: 26px; padding: 0; }
+.cortex-nt .nt-btn.nt-solid { background: var(--primary); border-color: var(--primary); color: var(--primary-foreground); font-weight: 600; }
+.cortex-nt .nt-btn.nt-solid:hover { background: color-mix(in oklab, var(--primary) 86%, var(--foreground)); }
+.cortex-nt .nt-btn[aria-disabled="true"], .cortex-nt .nt-btn:disabled { opacity: .55; cursor: not-allowed; }
+.cortex-nt .nt-lbl { display: none; }
+.cortex-nt kbd { padding: 0 5px; border: 1px solid var(--border-seam); background: var(--card); color: var(--foreground); font: inherit; font-size: 12px; }
+
+/* Notes under the row and callouts in the body */
+.cortex-nt .nt-notes { display: grid; gap: 6px; padding: 0 10px 8px; }
+.cortex-nt .nt-callout { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0 0; padding: 6px 8px; }
+.cortex-nt .nt-notes .nt-callout { margin: 0; }
+.cortex-nt .nt-callout .nt-grow { flex: 1 1 180px; }
+.cortex-nt .nt-body > .nt-callout + .nt-brief { margin-top: 8px; }
+.cortex-nt .nt-c-bad { background: color-mix(in oklab, var(--destructive) 10%, transparent); box-shadow: inset 3px 0 0 var(--destructive); }
+.cortex-nt .nt-c-att { background: var(--surface-attention); box-shadow: inset 3px 0 0 var(--attention); }
+.cortex-nt .nt-c-ok { background: color-mix(in oklab, var(--success) 10%, transparent); box-shadow: inset 3px 0 0 var(--success); }
+
+/* The expanded body */
+.cortex-nt .nt-body { padding: 10px 12px 8px; border-top: 1px solid var(--border-seam); max-height: min(60vh, 560px); overflow-y: auto; }
+.cortex-nt .nt-grp { margin: 12px 0 2px; font-size: 12px; font-weight: 600; color: var(--nt-muted); }
+.cortex-nt .nt-body > .nt-grp:first-child, .cortex-nt .nt-body > .nt-callout:first-child { margin-top: 0; }
+.cortex-nt .nt-brief .cortex-strip-legend { margin-top: 6px; }
+.cortex-nt .nt-dimmed { opacity: .7; }
+.cortex-nt .nt-empty { padding: 8px 4px; color: var(--nt-muted); }
+.cortex-nt .nt-ents { margin: 0; padding: 0; list-style: none; }
+.cortex-nt .nt-ent { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto auto; align-items: start; gap: 0 8px; padding: 6px 2px 6px 4px; border-bottom: 1px solid color-mix(in oklab, var(--border-seam) 55%, transparent); }
+.cortex-nt .nt-ent:last-child { border-bottom: 0; }
+.cortex-nt .nt-ent.nt-edited { box-shadow: inset 2px 0 0 var(--primary); }
+.cortex-nt .nt-ent.nt-editing .nt-main { grid-column: 2 / -1; }
+.cortex-nt .nt-k { padding-top: 2px; color: var(--nt-muted); }
+.cortex-nt .nt-main { min-width: 0; }
+.cortex-nt .nt-ttl-line { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.cortex-nt .nt-ttl { display: block; min-width: 0; font-weight: 600; line-height: 20px; overflow-wrap: anywhere; }
+.cortex-nt button.nt-ttl:hover { text-decoration: underline; text-underline-offset: 2px; }
+.cortex-nt .nt-lock { display: inline-flex; color: var(--nt-muted); }
+.cortex-nt .nt-txt { margin-top: 1px; color: var(--nt-muted); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; white-space: pre-wrap; overflow-wrap: anywhere; }
+.cortex-nt .nt-ent.nt-open .nt-txt { display: block; color: var(--foreground); -webkit-line-clamp: unset; }
+.cortex-nt .nt-ent.nt-out .nt-ttl { color: var(--nt-muted); font-weight: 500; text-decoration: line-through; }
+.cortex-nt .nt-ent.nt-out .nt-k { opacity: .7; }
+.cortex-nt .nt-ent.nt-dim .nt-ttl, .cortex-nt .nt-ent.nt-dim .nt-k { font-weight: 500; }
+.cortex-nt .nt-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 3px; font-size: 12px; }
+.cortex-nt .nt-chip { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 6px; border: 1px solid var(--border-seam); font-size: 12px; white-space: nowrap; }
+.cortex-nt .nt-chip-pri { border-color: color-mix(in oklab, var(--primary) 50%, transparent); }
+.cortex-nt .nt-chip-pri .nt-ic { color: var(--primary); }
+.cortex-nt .nt-tok { padding-top: 2px; min-width: 34px; font-size: 12px; color: var(--nt-muted); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.cortex-nt .nt-acts { display: flex; gap: 2px; }
+
+/* Inline editor */
+.cortex-nt .nt-edit { margin-top: 4px; }
+[data-cortex].cortex-nt .nt-edit textarea { display: block; width: 100%; min-height: 54px; max-height: 40vh; padding: 6px 8px; border: 1px solid var(--primary); border-radius: 0; background: var(--card); color: var(--foreground); font: inherit; font-size: 12.5px; line-height: 18px; resize: none; }
+[data-cortex].cortex-nt .nt-edit textarea:focus-visible { outline: 2px solid var(--ring); outline-offset: 0; box-shadow: none; }
+.cortex-nt .nt-keys { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 4px; font-size: 12px; color: var(--nt-muted); }
+
+/* Sections to file in, when Cortex does not know the section */
+.cortex-nt .nt-quick { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.cortex-nt .nt-quick button { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; min-height: 30px; padding: 2px 10px; border: 1px solid var(--border-seam); background: var(--card); }
+.cortex-nt .nt-quick button:hover { background: var(--state-hover); }
+.cortex-nt .nt-quick .nt-nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.cortex-nt .nt-gauge { position: relative; flex: none; width: 48px; height: 7px; background: color-mix(in oklab, var(--foreground) 9%, transparent); }
+.cortex-nt .nt-gauge > span { display: block; height: 100%; background: var(--nt-in); }
+
+/* What else goes in */
+.cortex-nt .nt-mem { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 0 8px; min-height: 28px; padding: 2px 2px 2px 4px; }
+.cortex-nt .nt-mem-text { min-width: 0; }
+.cortex-nt .nt-ids { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
+.cortex-nt .nt-id { display: inline-flex; align-items: center; min-height: 22px; padding: 0 5px; border: 1px solid var(--border-seam); font-size: 12px; }
+.cortex-nt .nt-later { display: inline-flex; align-items: center; height: 20px; padding: 0 6px; border: 1px dashed var(--nt-muted); font-size: 12px; white-space: nowrap; }
+.cortex-nt .nt-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; padding-top: 8px; border-top: 1px solid color-mix(in oklab, var(--border-seam) 55%, transparent); font-size: 12px; }
+.cortex-nt .nt-foot .nt-grow { min-width: 160px; color: var(--nt-muted); }
+
+/* Narrow composers: the strip and the long words yield first, then the section name; the facts never truncate.
+   Rows with a fix wrap. */
+@container (max-width: 959px) {
+  .cortex-nt .nt-mini, .cortex-nt .nt-long, .cortex-nt .nt-src { display: none; }
+}
+@container (max-width: 680px) {
+  .cortex-nt .nt-row.nt-wrap { flex-wrap: wrap; padding-bottom: 4px; }
+  .cortex-nt .nt-row.nt-wrap .nt-tog { flex-basis: calc(100% - 40px); }
+}
+@container (max-width: 520px) {
+  .cortex-nt .nt-sec { max-width: 70%; }
+  .cortex-nt .nt-row { flex-wrap: wrap; }
+  .cortex-nt .nt-tog { flex: 1 1 100%; order: 3; }
+  .cortex-nt .nt-facts { flex: 0 1 auto; }
+  .cortex-nt .nt-tog { gap: 4px; padding: 0 2px; }
+  .cortex-nt .nt-dot { display: none; }
+  .cortex-nt .nt-memfact { margin-left: 2px; }
+  .cortex-nt .nt-lbl { display: inline; }
+  .cortex-nt .nt-btn.nt-icon { width: auto; padding: 0 8px; }
+  .cortex-nt .nt-ent { grid-template-columns: 18px minmax(0, 1fr) auto; }
+  .cortex-nt .nt-acts { grid-column: 2 / -1; flex-wrap: wrap; margin-top: 4px; }
+}
+/* Touch and phone: 44 px targets */
+@media (max-width: 767px), (pointer: coarse) {
+  .cortex-nt .nt-btn, .cortex-nt .nt-sec, .cortex-nt .nt-tog { min-height: 44px; }
+  .cortex-nt .nt-btn.nt-icon { min-width: 44px; }
+  .cortex-nt .nt-row { min-height: 46px; }
+  .cortex-nt button.nt-ttl, .cortex-nt .nt-quick button { min-height: 44px; }
+  [data-cortex].cortex-nt .nt-edit textarea { font-size: 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cortex-nt .nt-chev { transition: none; }
+}

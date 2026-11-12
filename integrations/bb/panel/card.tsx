@@ -15,7 +15,7 @@ export function CortexCard({ attributes, message }: PluginMessageDirectiveProps)
   const [declined, setDeclined] = useState(false);
   if (taskId === null) {
     return (
-      <div role="alert" className="my-2 rounded-lg border border-dashed border-border px-3 py-2 text-sm text-destructive-text">
+      <div data-cortex role="alert" className="my-2 rounded-lg border border-dashed border-border px-3 py-2 text-sm text-destructive-text">
         Cortex card: the id must be a task number, as in ::cortex{'{id="529"}'}.
       </div>
     );
@@ -24,7 +24,7 @@ export function CortexCard({ attributes, message }: PluginMessageDirectiveProps)
     setDeclined(!openTaskTab(panel, message.threadId, taskId));
   };
   return (
-    <Card className="my-2 flex items-center gap-3 px-3 py-2 text-sm">
+    <Card data-cortex className="my-2 flex items-center gap-3 px-3 py-2 text-sm">
       {detail ? (
         <StatusDot status={detail.task.status} className="size-2.5" />
       ) : (

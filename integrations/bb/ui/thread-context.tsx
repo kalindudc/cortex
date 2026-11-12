@@ -1,3 +1,4 @@
+import { isFlag, isPageCount, oneOf, usePlaceState } from "./place";
 import { type ReactNode, useState } from "react";
 import {
   experimental_copyToClipboard,
@@ -47,7 +48,7 @@ import {
 } from "./data";
 import { BindingDialog, ChangeForThreadDialog, EditKnowledgeDialog, PrepareDraftDialog } from "./dialogs";
 import { activeGrants, changedLineCount, dismissedFor, shortTime, unifiedPatch, type Visibility, visibilityOf } from "./model";
-import { Applicability, EmptyNote, FailureNotice, Heading, Hint, IconButton, LoadingRows, PagedFooter, StateMark, TONE_TEXT } from "./parts";
+import { Applicability, CORTEX_TAB_LIST, CORTEX_TAB_TRIGGER, EmptyNote, FailureNotice, Heading, Hint, IconButton, LoadingRows, PagedFooter, StateMark, TONE_TEXT } from "./parts";
 import { BriefStrip } from "./brief-strip";
 import { heldReason, ReasonChip } from "./marks";
 import type { ContextEntry, DeliveryReceipt, Knowledge, ThreadContext } from "./types";
@@ -93,7 +94,7 @@ export function VisibilityControl({ context }: { context: ThreadContext }) {
   const detail = visibilityDetail(context, defaultShown);
   return (
     <div className="flex shrink-0 items-center gap-1">
-      <button type="button" role="switch" aria-checked={!context.dismissed} aria-label="Above composer" onClick={() => void choose(context.dismissed ? "shown" : "hidden")} className="flex items-center gap-1.5 rounded-sm text-[11.5px] text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
+      <button type="button" role="switch" aria-checked={!context.dismissed} aria-label="Above composer" onClick={() => void choose(context.dismissed ? "shown" : "hidden")} className="flex items-center gap-1.5 rounded-sm text-[11.5px] text-muted-foreground hover:bg-state-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
         <span aria-hidden className={cn("inline-flex h-4 w-7 items-center rounded-sm border border-border-seam p-0.5", context.dismissed ? "bg-surface-recessed" : "bg-primary")}>
           <span className={cn("size-2.5 rounded-sm bg-primary-foreground", !context.dismissed && "ml-auto")} />
         </span>
@@ -105,7 +106,7 @@ export function VisibilityControl({ context }: { context: ThreadContext }) {
           <Icon name="ChevronDown" className="size-3.5" aria-hidden />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" mobileTitle="Above the composer" className="w-72">
+      <DropdownMenuContent data-cortex align="start" mobileTitle="Above the composer" className="w-72">
         {options.map(([choice, label]) => (
           <DropdownMenuItem key={choice} onSelect={() => void choose(choice)} aria-checked={choice === current}>
             <span className="flex-1">{label}</span>
@@ -180,7 +181,7 @@ function EntryMenu({
           <Icon name="MoreHorizontal" className="size-4" aria-hidden />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" mobileTitle={entry.knowledge.title} className="w-72">
+      <DropdownMenuContent data-cortex align="end" mobileTitle={entry.knowledge.title} className="w-72">
         <p className="px-2 pt-1.5 pb-1 text-[11px] font-semibold text-muted-foreground">This thread only</p>
         {onChange ? <DropdownMenuItem onSelect={onChange}>
           <Icon name="Edit" aria-hidden />
@@ -526,7 +527,7 @@ export function NextContext({ context, compact = false }: { context: ThreadConte
 }
 
 function ReceiptRow({ receipt }: { receipt: DeliveryReceipt }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = usePlaceState(`receipt:${receipt.id}`, false, isFlag, `thread:${receipt.threadId}`);
   return (
     <li className="border-t border-border-seam py-2 first:border-t-0">
       <button
@@ -555,7 +556,7 @@ function ReceiptRow({ receipt }: { receipt: DeliveryReceipt }) {
 }
 
 export function ContextHistory({ threadId }: { threadId: string }) {
-  const [pages, setPages] = useState(1);
+  const [pages, setPages] = usePlaceState("context-history-pages", 1, isPageCount, `thread:${threadId}`);
   const read = useDeliveryReceipts(threadId, pages);
   if (read.error) return <FailureNotice failure={read.error} onRetry={read.refetch} />;
   if (read.data === undefined) return <LoadingRows label="Loading context history" />;
@@ -670,7 +671,7 @@ export function ContextActions({ context, canPrepare }: { context: ThreadContext
   return canPrepare ? <>
     <TooltipProvider><Tooltip><TooltipTrigger asChild>
       <Button size="sm" disabled={context.status !== "ready"} onClick={() => setOpen(true)}><Icon name="FileText" className="size-3.5" aria-hidden />Prepare draft…</Button>
-    </TooltipTrigger><TooltipContent>Put the next context in the composer to read before sending.</TooltipContent></Tooltip></TooltipProvider>
+    </TooltipTrigger><TooltipContent data-cortex>Put the next context in the composer to read before sending.</TooltipContent></Tooltip></TooltipProvider>
     <PrepareDraftDialog threadId={context.threadId} open={open} onOpenChange={setOpen} />
   </> : <Button size="sm" variant="outline" onClick={() => navigate.toThread(context.threadId)}>Open thread to prepare a draft</Button>;
 }
@@ -727,18 +728,16 @@ function ContextReadable({ text }: { text: string }) {
   </section>;
 }
 
-export const CONTEXT_TAB_TRIGGER = "shrink-0 rounded-none border-b-2 border-transparent bg-transparent px-2.5 py-2 text-[12.5px] font-normal text-muted-foreground data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:font-semibold data-[state=active]:text-foreground data-[state=active]:shadow-none";
-export const CONTEXT_TAB_LIST = "cortex-context-tabs h-auto max-w-full justify-start gap-0.5 overflow-x-auto rounded-none border-b border-border-seam bg-transparent p-0";
-
 function ContextPreview({ context }: { context: ThreadContext }) {
-  const [exact, setExact] = useState(false);
+  const [exact, setExact] = usePlaceState("exact-text", false, isFlag);
+  const [tab, setTab] = usePlaceState<string>("context-view", "next", oneOf("next", "changes", "history"));
   const changes = context.lastReceipt ? changedLineCount(context.lastReceipt.text, context.exactText) : 0;
-  return <Tabs defaultValue="next" className="min-w-0">
+  return <Tabs value={tab} onValueChange={setTab} className="min-w-0">
     <div className="flex min-w-0 items-center gap-1">
-      <TabsList aria-label="Thread context views" className={CONTEXT_TAB_LIST}>
-        <TabsTrigger value="next" className={CONTEXT_TAB_TRIGGER}>Next context</TabsTrigger>
-        <TabsTrigger value="changes" className={CONTEXT_TAB_TRIGGER}>Changes{changes > 0 ? ` ${changes}` : ""}</TabsTrigger>
-        <TabsTrigger value="history" className={CONTEXT_TAB_TRIGGER}>History</TabsTrigger>
+      <TabsList aria-label="Thread context views" className={CORTEX_TAB_LIST}>
+        <TabsTrigger value="next" className={CORTEX_TAB_TRIGGER}>Next context</TabsTrigger>
+        <TabsTrigger value="changes" className={CORTEX_TAB_TRIGGER}>Changes{changes > 0 ? ` ${changes}` : ""}</TabsTrigger>
+        <TabsTrigger value="history" className={CORTEX_TAB_TRIGGER}>History</TabsTrigger>
       </TabsList>
       <IconButton label="Copy exact text" icon="Copy" onClick={() => void copyContextText(context.exactText)} />
     </div>
@@ -771,7 +770,7 @@ export function ThreadContextPage({ threadId }: { threadId: string }) {
       <header className="flex flex-wrap items-center gap-2">
         <ThreadStatusGlyph indicator={thread?.indicator ?? "none"} size="compact" />
         <h2 className="min-w-0 flex-1 break-words text-[15px] font-semibold text-foreground" title={title}>{title}</h2>
-        <TooltipProvider><Tooltip><TooltipTrigger asChild><button type="button" aria-label="Copy thread id" onClick={() => void copyContextText(threadId)} className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-state-hover focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"><Icon name="Copy" className="size-3.5" aria-hidden /></button></TooltipTrigger><TooltipContent>{threadId}</TooltipContent></Tooltip></TooltipProvider>
+        <TooltipProvider><Tooltip><TooltipTrigger asChild><button type="button" aria-label="Copy thread id" onClick={() => void copyContextText(threadId)} className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-state-hover focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"><Icon name="Copy" className="size-3.5" aria-hidden /></button></TooltipTrigger><TooltipContent data-cortex>{threadId}</TooltipContent></Tooltip></TooltipProvider>
         <Button variant="outline" size="sm" onClick={() => navigate.toThread(threadId)}><Icon name="ArrowUpRight" className="size-3.5" aria-hidden />Open thread</Button>
         <ContextActions context={context} canPrepare={false} />
       </header>

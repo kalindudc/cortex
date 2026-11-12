@@ -2,9 +2,15 @@
   --cortex-muted: color-mix(in oklab, var(--muted-foreground) 78%, var(--foreground));
 }
 
-[data-cortex].text-muted-foreground,
-[data-cortex] .text-muted-foreground {
-  color: var(--cortex-muted);
+@layer utilities {
+  :where([data-cortex]).text-muted-foreground,
+  :where([data-cortex]) .text-muted-foreground {
+    color: var(--cortex-muted);
+  }
+}
+
+:is([data-cortex], [data-cortex] *):is(button, [role="button"], [role="tab"], [role="switch"], [role="radio"], [role="checkbox"], [role="option"], summary, a[href], input[type="radio"], input[type="checkbox"], label:has(input:is([type="radio"], [type="checkbox"]):enabled, [role="radio"]:not(:disabled, [aria-disabled="true"], [data-disabled]), [role="checkbox"]:not(:disabled, [aria-disabled="true"], [data-disabled]))):not(:disabled, [aria-disabled="true"], [data-disabled], [role^="menuitem"]) {
+  cursor: pointer;
 }
 
 [data-cortex] .cortex-strip-segment {
@@ -17,6 +23,10 @@
 
 [data-cortex] .cortex-strip-directive {
   background-color: color-mix(in oklab, var(--primary) 70%, var(--foreground));
+}
+
+[data-cortex] .cortex-strip-edited {
+  background-image: repeating-linear-gradient(135deg, transparent 0 3px, color-mix(in oklab, var(--foreground) 35%, transparent) 3px 5px);
 }
 
 [data-cortex] .cortex-hatch-notice {

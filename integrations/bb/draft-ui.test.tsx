@@ -27,7 +27,9 @@ const preview: DraftPreview = { snapshotId: "4b9b669e-4a38-4c87-b8f5-43b9bdb409f
 const job = (overrides: Partial<DraftJob> = {}): DraftJob => ({ requestId, revision: 1, sectionId: section.id, sourceThreadId: threadId, sourceSnapshotId: preview.snapshotId, bindingRevision: 1, workstreamId: ws.id, workstreamRevision: 7, requestedAt: now, updatedAt: now, deadlineAt: new Date(Date.parse(now) + 300_000).toISOString(), status: "running", execution: preview.execution, worker: { threadId: "thr_workerxx", state: "known" }, cancellation: { state: "none", requestedAt: null, confirmedAt: null }, candidateResults: [0, 1, 2].map(index => ({ intendedId: `kn_suggestion${index}`, canonicalId: null, status: "pending", error: null })), progress: null, error: null, retry: "none", ...overrides });
 let app: Awaited<ReturnType<typeof loadPluginApp>>;
 beforeAll(async () => { app = await loadPluginApp(() => import("./app")); });
-beforeEach(() => { localStorage.clear(); });
+beforeEach(() => { localStorage.clear(); sessionStorage.clear(); });
+const pendingDraftKeys = () => Object.keys(localStorage).filter(key => key.startsWith("cortex:pending-draft:"));
+const pendingDraftKey = () => pendingDraftKeys()[0]!;
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 const servers = (id = "server_primary", origin = "https://bb.example"): ExperimentalServers => ({ status: "ready", servers: [{ id, origin, name: "Private fake server", active: true, kind: "custom" }], switchTo: () => {} });
 
@@ -436,8 +438,8 @@ describe("bounded drafting client corrections", () => {
   }
   test("restores only the original request after a full SDK/client remount, until explicit Prepare another", async () => {
     const { backend, slot, accepted, original } = await uncertain();
-    expect(localStorage.length).toBe(1);
-    const stored = localStorage.getItem(localStorage.key(0)!)!;
+    expect(pendingDraftKeys().length).toBe(1);
+    const stored = localStorage.getItem(pendingDraftKey())!;
     expect(stored).toContain(original.requestId);
     for (const secret of [preview.messages[0]!.quote, "messages", "quote", "candidateResults", "workerNonce", "historySnapshot"]) expect(stored).not.toContain(secret);
     slot.unmount();
@@ -452,7 +454,7 @@ describe("bounded drafting client corrections", () => {
     expect(calls(second, "draftJob")[0]!.input).toEqual({ sectionId: section.id, requestId: original.requestId });
     expect(accepted).toHaveLength(1); expect(calls(second, "draftStart")).toHaveLength(0);
     fireEvent.click(within(dialog).getByRole("button", { name: "Prepare another draft" }));
-    expect(localStorage.length).toBe(0);
+    expect(pendingDraftKeys().length).toBe(0);
     fireEvent.click(within(dialog).getByRole("button", { name: "Investigate the staging bootstrap" }));
     fireEvent.click(within(dialog).getByRole("button", { name: "Preview completed excerpts" }));
     await within(dialog).findByText(preview.messages[0]!.quote);
@@ -461,7 +463,7 @@ describe("bounded drafting client corrections", () => {
   });
   test.each(["server", "origin", "plugin", "section"])("recovery never reads or clears another %s scope", async kind => {
     const { backend, slot } = await uncertain(); slot.unmount();
-    const key = localStorage.key(0)!; const value = localStorage.getItem(key);
+    const key = pendingDraftKey(); const value = localStorage.getItem(key);
     if (kind === "server") backend.options.servers = servers("server_other");
     if (kind === "origin") backend.options.servers = servers("server_primary", "https://another.example");
     if (kind === "plugin") backend.options.pluginId = "cortex-other";
@@ -483,7 +485,7 @@ describe("bounded drafting client corrections", () => {
     if (kind === "write") vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("Storage full"); });
     if (kind === "corrupt") {
       const original = await uncertain(); original.slot.unmount();
-      localStorage.setItem(localStorage.key(0)!, '{"version":1,"input":{}}');
+      localStorage.setItem(pendingDraftKey(), '{"version":1,"input":{}}');
     }
     const { slot } = sectionPage(backend); const dialog = await openPreview(slot);
     fireEvent.click(within(dialog).getByRole("button", { name: "Start drafting" }));
@@ -492,7 +494,7 @@ describe("bounded drafting client corrections", () => {
   });
   test("corrupt recovery requires explicit consequence-confirmed discard and preserves other keys", async () => {
     const { backend, slot } = await uncertain(); slot.unmount();
-    const key = localStorage.key(0)!; localStorage.setItem(key, "invalid"); localStorage.setItem("unrelated", "keep");
+    const key = pendingDraftKey(); localStorage.setItem(key, "invalid"); localStorage.setItem("unrelated", "keep");
     const second = sectionPage(backend).slot;
     fireEvent.click(await second.findByRole("button", { name: "Draft from a thread" })); const dialog = await second.findByRole("dialog");
     await within(dialog).findByText(/Drafting recovery is blocked/);
@@ -514,7 +516,7 @@ describe("bounded drafting client corrections", () => {
     backend.rpc.draftStart = input => { backend.jobs([job({ requestId: input.requestId })]); throw new Error("Browser response lost"); };
     const slot = sectionPage(backend).slot; const dialog = await openPreview(slot);
     fireEvent.click(within(dialog).getByRole("button", { name: "Start drafting" })); await within(dialog).findByText("Browser response lost");
-    expect(localStorage.key(0)).toContain(window.location.origin); slot.unmount();
+    expect(pendingDraftKey()).toContain(window.location.origin); slot.unmount();
     const second = sectionPage(backend).slot; fireEvent.click(await second.findByRole("button", { name: "Draft from a thread" }));
     const restored = await second.findByRole("dialog"); expect(within(restored).getByRole("button", { name: "Check drafting request" })).toBeTruthy();
     expect(calls(second, "draftStart")).toHaveLength(0);
@@ -523,7 +525,7 @@ describe("bounded drafting client corrections", () => {
     const { backend, slot } = await uncertain();
     const dialog = slot.getByRole("dialog"); fireEvent.click(within(dialog).getByRole("button", { name: "Check drafting request" }));
     await within(dialog).findByText("Nothing to save");
-    const key = localStorage.key(0)!;
+    const key = pendingDraftKey();
     vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => { throw new Error("Storage removal denied"); });
     fireEvent.click(within(dialog).getByRole("button", { name: "Prepare another draft" }));
     await within(dialog).findByText(/Drafting recovery is blocked/); expect(localStorage.getItem(key)).not.toBeNull();
@@ -612,7 +614,7 @@ describe("bounded drafting client corrections", () => {
   });
   test.each(["source", "execution"])("history-first remount rejects conflicting %s pins while closed, then the same client recovers the authentic job", async kind => {
     const { backend, slot, original, accepted } = await uncertain();
-    const key = localStorage.key(0)!; const raw = localStorage.getItem(key);
+    const key = pendingDraftKey(); const raw = localStorage.getItem(key);
     slot.unmount();
     backend.jobs([job({ requestId: original.requestId, revision: 2, status: "nothing-to-save", candidateResults: [], progress: "Uncorrelated history after remount", ...(kind === "source" ? { sourceThreadId: "thr_foreignx" } : { execution: { ...preview.execution, model: "foreign-model" } }) })]);
     const second = sectionDrafts(backend).slot;
@@ -669,7 +671,7 @@ describe("bounded drafting client corrections", () => {
   });
   test.each(["corrupt", "unavailable"])("%s recovery blocks closed-dialog history until storage is recovered", async kind => {
     const { backend, slot, original } = await uncertain(); slot.unmount();
-    const key = localStorage.key(0)!; const raw = localStorage.getItem(key)!;
+    const key = pendingDraftKey(); const raw = localStorage.getItem(key)!;
     if (kind === "corrupt") localStorage.setItem(key, "invalid");
     const denied = kind === "unavailable" ? vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("Storage denied"); }) : null;
     backend.jobs([job({ requestId: original.requestId, sourceThreadId: "thr_foreignx", progress: "Untrusted history" })]);
@@ -682,7 +684,7 @@ describe("bounded drafting client corrections", () => {
   });
   test.each(["server", "plugin", "section"])("history pins do not cross a different %s scope", async kind => {
     const { backend, slot, original } = await uncertain(); slot.unmount();
-    const key = localStorage.key(0)!; const raw = localStorage.getItem(key);
+    const key = pendingDraftKey(); const raw = localStorage.getItem(key);
     if (kind === "server") backend.options.servers = servers("other-server");
     if (kind === "plugin") backend.options.pluginId = "other-plugin";
     const otherSection = kind === "section" ? { ...section, id: "sec_other" } : section;
@@ -780,7 +782,7 @@ describe("known Stop without recovery storage", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Start drafting" })); await within(dialog).findByText("Drafting suggestions");
     await waitFor(() => expect(calls(slot, "draftJob")).toHaveLength(1)); await act(async () => {});
     const original = calls(slot, "draftStart")[0]!.input as { requestId: string };
-    const key = localStorage.key(0)!; const raw = localStorage.getItem(key)!; const scope = JSON.stringify(backend.options.servers);
+    const key = pendingDraftKey(); const raw = localStorage.getItem(key)!; const scope = JSON.stringify(backend.options.servers);
     const denied = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("Recovery storage became unavailable after successful Start"); });
     fireEvent.click(within(dialog).getByRole("button", { name: "Stop drafting" }));
     await waitFor(() => expect(calls(slot, "draftCancel")).toHaveLength(1));

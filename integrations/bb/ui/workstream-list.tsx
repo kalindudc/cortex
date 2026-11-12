@@ -1,3 +1,4 @@
+import { isFlag, usePlaceState } from "./place";
 import { useState } from "react";
 import { useBbNavigate } from "@get-bb/plugin-sdk/app";
 import { toast } from "sonner";
@@ -72,11 +73,11 @@ function WorkstreamListRow({ workstream, sections }: { workstream: Workstream; s
 }
 
 export function WorkstreamList() {
-  const [showArchived, setShowArchived] = useState(false);
+  const [showArchived, setShowArchived] = usePlaceState("show-archived", false, isFlag);
   const [creating, setCreating] = useState(false);
   const workstreams = useWorkstreams(showArchived);
   const sections = useSections();
-  return <div data-cortex data-part="WorkstreamList" className="@container h-full min-w-0 overflow-y-auto p-4 @min-[900px]:px-5">
+  return <div data-cortex data-cortex-scroll="main" data-part="WorkstreamList" className="@container h-full min-w-0 overflow-y-auto p-4 @min-[900px]:px-5">
     <div className="mb-3 flex flex-wrap items-center gap-3">
       <p className="min-w-0 flex-1 text-[12px] text-muted-foreground">A workstream is the knowledge one or more sections share.</p>
       <Button size="sm" variant="outline" aria-pressed={showArchived} onClick={() => setShowArchived(value => !value)} className="aria-pressed:bg-surface-selected">Show archived</Button>

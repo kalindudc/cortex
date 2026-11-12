@@ -176,6 +176,7 @@ export function ContextSegmentSummary({ threadId, isExpanded, onToggle }: Experi
       title={label}
       onClick={onToggle}
       style={{ flex: "1 1 0%", minWidth: ICON_ONLY_WIDTH }}
+      data-cortex
       data-cortex-summary=""
       data-cortex-fit={fit}
       className="inline-flex h-7 max-w-full items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-md px-1.5 text-[12px] text-muted-foreground hover:bg-state-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -240,7 +241,7 @@ export function ContextSegmentDetails({ threadId, isExpanded }: ExperimentalThre
   const context = widget.context;
   if (context === undefined) {
     return (
-      <div role="alert" className="flex items-center gap-2 px-2 py-1.5 text-[12.5px] text-destructive-text">
+      <div data-cortex role="alert" className="flex items-center gap-2 px-2 py-1.5 text-[12.5px] text-destructive-text">
         <span className="flex-1">{widget.failure?.message ?? "Cortex did not answer."}</span>
         <Button variant="outline" size="sm" className="h-7 px-2" onClick={widget.retry}>
           Retry
@@ -251,7 +252,7 @@ export function ContextSegmentDetails({ threadId, isExpanded }: ExperimentalThre
   }
   const bound = context.status !== "unbound";
   return (
-    <div className="flex flex-col gap-2 px-2 py-2 text-[12.5px]">
+    <div data-cortex className="flex flex-col gap-2 px-2 py-2 text-[12.5px]">
       {bound ? (
         <ul className="flex flex-col gap-1">
           {context.entries.slice(0, 3).map(entry => (
@@ -326,7 +327,7 @@ export function ContextCardSection({ threadId }: ExperimentalThreadContextCardPr
           <Icon name="MoreHorizontal" className="size-4" aria-hidden />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" mobileTitle="Cortex context" className="w-60">
+      <DropdownMenuContent data-cortex align="end" mobileTitle="Cortex context" className="w-60">
         <DropdownMenuItem onSelect={() => openMemoryTab(panel)}>
           <Icon name="Eye" aria-hidden />
           Preview context
@@ -349,7 +350,7 @@ export function ContextCardSection({ threadId }: ExperimentalThreadContextCardPr
   // The Hide menu rides on the first row shown, so every visible card can be hidden.
   const menuOn = context === undefined || bound ? "context" : showTaskRow ? "task" : "memory";
   return (
-    <>
+    <div data-cortex className="contents">
       {context === undefined ? (
         <ThreadContextCardRow icon="AlertCircle" label="Cortex unavailable" title={widget.failure?.message} onClick={widget.retry} trailing="Retry" action={menu} />
       ) : bound ? (
@@ -383,6 +384,6 @@ export function ContextCardSection({ threadId }: ExperimentalThreadContextCardPr
         />
       ) : null}
       {bound ? <PrepareDraftDialog threadId={threadId} open={preparing} onOpenChange={setPreparing} /> : null}
-    </>
+    </div>
   );
 }

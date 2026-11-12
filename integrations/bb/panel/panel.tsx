@@ -1,3 +1,4 @@
+import { oneOf, usePlaceState } from "../ui/place";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import type { ExperimentalThreadActionTabProps } from "@get-bb/plugin-sdk/app";
 import { toast } from "sonner";
@@ -11,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { CortexStatus } from "../detail";
+import { CORTEX_TAB_LIST, CORTEX_TAB_TRIGGER } from "../ui/parts";
 import type { CortexTaskDetail, CortexTaskRow, CortexThreadState } from "../state";
 import { ActivityTimeline, Composer } from "./activity";
 import { errorText, panelTaskId, useCortexRpc, useTaskDetail, useThreadState } from "./hooks";
@@ -74,7 +76,7 @@ function FreshnessPill({ detail, onClick }: { detail: CortexTaskDetail; onClick:
             onClick={onClick}
             title={hint}
             className={cn(
-              "inline-flex min-h-6 items-center gap-1 rounded-md border px-2 text-[11.5px] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+              "inline-flex min-h-6 items-center gap-1 rounded-md border px-2 text-[11.5px] hover:bg-state-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
               verdict === "stale" ? "border-warning/45 bg-warning/10 text-warning-text" : verdict === "fresh" ? "border-success/35 text-success" : "border-border-seam text-muted-foreground",
             )}
           >
@@ -82,7 +84,7 @@ function FreshnessPill({ detail, onClick }: { detail: CortexTaskDetail; onClick:
             {verdict === "stale" ? (files > 0 ? `Stale · ${files} ${files === 1 ? "file" : "files"}` : "Stale") : verdict === "fresh" ? "Files unchanged" : "Freshness not checked"}
           </button>
         </TooltipTrigger>
-        <TooltipContent>{hint}</TooltipContent>
+        <TooltipContent data-cortex>{hint}</TooltipContent>
       </Tooltip>
     </TooltipProvider>
   );
@@ -131,7 +133,7 @@ function TaskView({
   onDetail: (next: CortexTaskDetail) => void;
 }) {
   const rpc = useCortexRpc();
-  const [tab, setTab] = useState("overview");
+  const [tab, setTab] = usePlaceState("task-tab", "overview", oneOf("overview", "activity"), `thread:${threadId}`);
   const [flash, setFlash] = useState(false);
   const pendingStatus = useRef(false);
   const { task } = detail;
@@ -208,7 +210,7 @@ function TaskView({
   };
 
   return (
-    <Tabs value={tab} onValueChange={setTab} className="flex h-full min-h-0 min-w-0 flex-col">
+    <Tabs value={tab} onValueChange={value => { if (oneOf("overview", "activity")(value)) setTab(value); }} className="flex h-full min-h-0 min-w-0 flex-col">
       <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
       <header className="shrink-0 border-b border-border px-4 pt-3">
         <div className="flex items-center gap-2">
@@ -230,7 +232,7 @@ function TaskView({
             <Icon name="Pin" className="size-4" aria-hidden />
           </button>
               </TooltipTrigger>
-              <TooltipContent>{pinned ? "Pinned as this thread's focus. Unpin" : "Pin as focus"}</TooltipContent>
+              <TooltipContent data-cortex>{pinned ? "Pinned as this thread's focus. Unpin" : "Pin as focus"}</TooltipContent>
             </Tooltip>
           </TooltipProvider>
           <MoreMenu
@@ -287,7 +289,7 @@ function TaskView({
         )}
         {detail.progress ? <ProgressBar progress={detail.progress} /> : null}
         <div className="mt-2 flex min-w-0 items-center gap-1 overflow-x-auto">
-        <TabsList className="h-auto shrink-0 justify-start gap-0.5 rounded-none bg-transparent p-0">
+        <TabsList className={CORTEX_TAB_LIST}>
           {[
             ["overview", "Overview"],
             ["activity", "Activity"],
@@ -295,7 +297,7 @@ function TaskView({
             <TabsTrigger
               key={value}
               value={value as string}
-              className="-mb-px rounded-none border-b-2 border-transparent bg-transparent px-2.5 py-2 text-[12.5px] font-normal text-muted-foreground data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:font-semibold data-[state=active]:text-foreground data-[state=active]:shadow-none"
+              className={CORTEX_TAB_TRIGGER}
             >
               {label}
               {value === "activity" ? (

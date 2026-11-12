@@ -1,17 +1,18 @@
-import { useRef, useState } from "react";
+import { useRef } from "react";
 import { experimental_useSidebarThreads, useBbNavigate } from "@get-bb/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Icon } from "@/components/ui/icon";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { BRIEF_STATE_LOOK, facetWord, plural } from "./copy";
+import { BRIEF_STATE_LOOK, type DisplayState, facetWord, plural } from "./copy";
 import { useBindings, useKnowledgeEntries, useKnowledgeSearch, useReviewQueue } from "./data";
 import { KnowledgeActions, KnowledgeDetail } from "./knowledge";
 import { displayState } from "./model";
 import { EmptyNote, FailureNotice, Hint, LoadingRows, Segmented, TONE_TEXT } from "./parts";
 import { CORTEX_PAGE_PATH } from "./thread-context";
 import type { Knowledge, Workstream } from "./types";
+import { isFlag, isNullableText, isText, oneOf, usePlaceState } from "./place";
 import "./review.css";
 
 function ResultRow({ entry, workstream, selected, onSelect }: { entry: Knowledge; workstream: Workstream; selected: boolean; onSelect: () => void }) {
@@ -24,7 +25,7 @@ function ResultRow({ entry, workstream, selected, onSelect }: { entry: Knowledge
         onClick={onSelect}
         className={cn(
           "flex w-full min-w-0 items-start gap-2 border-l-2 px-4 py-3 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset",
-          selected ? "border-primary bg-surface-selected" : "border-transparent hover:bg-state-hover",
+          selected ? "border-primary bg-surface-selected hover:bg-surface-selected/80" : "border-transparent hover:bg-state-hover",
         )}
       >
         <Icon name={look.icon} className={cn("mt-0.5 size-4 shrink-0", TONE_TEXT[look.tone])} aria-label={look.word} />
@@ -40,12 +41,12 @@ function ResultRow({ entry, workstream, selected, onSelect }: { entry: Knowledge
 
 /** Search every workstream's saved knowledge, and see entries Cortex found similar to others. */
 export function Library() {
-  const [query, setQuery] = useState("");
-  const [view, setView] = useState<"search" | "similar">("search");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [showDetail, setShowDetail] = useState(false);
-  const [workstreamFilter, setWorkstreamFilter] = useState("all");
-  const [stateFilter, setStateFilter] = useState("all");
+  const [query, setQuery] = usePlaceState("query", "", isText);
+  const [view, setView] = usePlaceState("view", "search", oneOf("search", "similar"));
+  const [selectedId, setSelectedId] = usePlaceState<string | null>("selected-entry", null, isNullableText);
+  const [showDetail, setShowDetail] = usePlaceState("show-detail", false, isFlag);
+  const [workstreamFilter, setWorkstreamFilter] = usePlaceState("workstream-filter", "all", isText);
+  const [stateFilter, setStateFilter] = usePlaceState<"all" | DisplayState>("state-filter", "all", (value): value is "all" | DisplayState => value === "all" || (isText(value) && Object.hasOwn(BRIEF_STATE_LOOK, value)));
   const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useBbNavigate();
   const sidebar = experimental_useSidebarThreads();
@@ -76,7 +77,7 @@ export function Library() {
       requestAnimationFrame(() => inputRef.current?.focus());
     }}>
       <div className="cortex-master-detail" data-show-detail={showDetail || undefined}>
-        <div className="cortex-master border-r border-border-seam">
+        <div data-cortex-scroll="list" className="cortex-master border-r border-border-seam">
           <header className="flex min-w-0 flex-col gap-2 border-b border-border-seam p-4">
             {view === "search" ? <div className="relative min-w-0">
               <Icon name="Search" className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
@@ -110,7 +111,7 @@ export function Library() {
               <ul aria-label="Results">{visible.map(item => <ResultRow key={item.entry.id} entry={item.entry} workstream={item.workstream} selected={item.entry.id === selected?.entry.id} onSelect={() => open(item.entry.id)} />)}</ul>
             </>}
         </div>
-        <div className="cortex-detail">
+        <div data-cortex-scroll="detail" className="cortex-detail">
           <Button variant="ghost" size="sm" className="cortex-back mb-3" onClick={() => setShowDetail(false)}><Icon name="ChevronLeft" aria-hidden />Results</Button>
           {extra?.error ? <FailureNotice failure={extra.error} onRetry={extra.refetch} /> : extra?.isLoading ? <LoadingRows label="Loading knowledge" /> : selected ? (
             <KnowledgeDetail key={selected.entry.id} entry={selected.entry} workstream={selected.workstream} onOpen={open} actions={<KnowledgeActions entry={selected.entry} workstream={selected.workstream} />}>

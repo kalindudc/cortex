@@ -15,6 +15,7 @@ export type BriefSegment = {
   tokens: number;
   title: string;
   cut: boolean;
+  edited?: boolean;
 };
 export type BriefData = {
   segments: BriefSegment[];
@@ -36,6 +37,7 @@ export function briefSegments(input: BriefInput): BriefData {
       key: entry.knowledge.id,
       kind: "entry" as const,
       knowledgeKind: entry.knowledge.kind,
+      ...(entry.origin === "thread-only" ? { edited: true } : {}),
       tokens: entry.estimatedTokens,
       title: entry.knowledge.title,
       cut: false,
@@ -62,9 +64,10 @@ export type BriefStripProps = {
   highlightKey?: string | null;
   onHover?: (key: string | null) => void;
   heldCount?: number;
+  hypothetical?: boolean;
 };
 
-export function BriefStrip({ data, compact = false, highlightKey, onHover, heldCount }: BriefStripProps): JSX.Element {
+export function BriefStrip({ data, compact = false, highlightKey, onHover, heldCount, hypothetical = false }: BriefStripProps): JSX.Element {
   const brief = "segments" in data ? data : briefSegments(data);
   const entryCount = brief.segments.filter(segment => segment.kind === "entry").length;
   const noticeCount = brief.segments.filter(segment => segment.kind === "notice").length;
@@ -75,7 +78,7 @@ export function BriefStrip({ data, compact = false, highlightKey, onHover, heldC
       data-cortex
       className={cn("cortex-strip min-w-0 w-full", compact && "cortex-strip-compact")}
       role="img"
-      aria-label={`${tokens(brief.used)} of ${brief.budget} tokens. ${entryCount} entries ${ready ? "go in" : "selected"}, ${noticeCount} notices, ${deliverySummary(status, "Within budget.")}`}
+      aria-label={`${tokens(brief.used)} of ${brief.budget} tokens. ${entryCount} entries ${hypothetical ? "would go in" : ready ? "go in" : "selected"}, ${noticeCount} notices, ${hypothetical ? "Memory is off; nothing goes in." : deliverySummary(status, "Within budget.")}`}
     >
       <div className={cn("relative flex bg-surface-recessed", compact ? "h-2" : "h-3.5")}>
           {brief.segments.map(segment => {
@@ -91,6 +94,7 @@ export function BriefStrip({ data, compact = false, highlightKey, onHover, heldC
                       segment.kind === "entry" && "bg-primary",
                       segment.kind === "overhead" && "bg-muted-foreground/40",
                       segment.knowledgeKind === "directive" && "cortex-strip-directive",
+                      segment.edited && "cortex-strip-edited",
                       (segment.kind === "notice" || (!ready && segment.kind === "entry")) && "cortex-hatch-notice",
                       segment.cut && "cortex-hatch-cut",
                       highlightKey === segment.key && "cortex-strip-highlight",
@@ -109,7 +113,7 @@ export function BriefStrip({ data, compact = false, highlightKey, onHover, heldC
       {!compact ? (
         <div className="cortex-strip-legend mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-muted-foreground tabular-nums">
           <span><b className="font-semibold text-foreground">{tokens(brief.used)}</b> / {brief.budget} tokens</span>
-          <span className="inline-flex items-center gap-1"><span aria-hidden className="size-2.5 bg-primary" /><b className="font-semibold text-foreground">{entryCount}</b> {ready ? "go in" : "selected"}</span>
+          <span className="inline-flex items-center gap-1"><span aria-hidden className="size-2.5 bg-primary" /><b className="font-semibold text-foreground">{entryCount}</b> {hypothetical ? "would go in" : ready ? "go in" : "selected"}</span>
           <span className="inline-flex items-center gap-1"><span aria-hidden className="cortex-hatch-notice size-2.5" /><b className="font-semibold text-foreground">{noticeCount}</b> {ready ? "notice only" : "notices selected"}</span>
           {heldCount === undefined ? null : <span className="inline-flex items-center gap-1"><span aria-hidden className="size-2.5 border border-dashed border-border-seam" /><b className="font-semibold text-foreground">{heldCount}</b> held back</span>}
           {!ready ? <span className="text-destructive-text">{deliverySummary(status, "")}</span> : null}

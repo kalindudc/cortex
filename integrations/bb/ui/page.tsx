@@ -5,6 +5,8 @@ import {
   experimental_useSidebarThreads,
   type PluginNavPanelProps,
   useBbNavigate,
+  useSdk,
+  experimental_usePluginId,
 } from "@get-bb/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
@@ -12,7 +14,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { cn } from "@/lib/utils";
 import { deliverySummary, plural } from "./copy";
 import { BriefStrip } from "./brief-strip";
-import { useBindings, useReviewQueue, useSectionDetail, useWorkstreams } from "./data";
+import { useBindings, useCortexRpc, useReviewQueue, useSectionDetail, useWorkstreams } from "./data";
+import { PlaceScope, readPlace, usePageScroll, writePlace } from "./place";
 import { Library } from "./library";
 import { OverviewPage } from "./overview";
 import { FailureNotice, LoadingRows } from "./parts";
@@ -59,6 +62,7 @@ export function parseRoute(subPath: string): Route {
     if (parts.length === 1) return { kind: "workstreams" };
     if (parts[1] && WS_ID.test(parts[1]) && parts.length <= 3 && (!parts[2] || KN_ID.test(parts[2]))) return { kind: "workstream", id: parts[1], entryId: parts[2] ?? null };
   }
+  if (parts.length === 1 && parts[0] === "overview") return { kind: "overview" };
   if (parts.length === 1 && parts[0] === "review") return { kind: "review" };
   if (parts.length === 1 && parts[0] === "library") return { kind: "library" };
   if (parts.length === 1 && parts[0] === "bindings") return { kind: "bindings" };
@@ -80,19 +84,82 @@ function WorkstreamRoute({ route }: { route: Extract<Route, { kind: "workstream"
   return <WorkstreamPage key={route.id} id={route.id} selectedId={route.entryId} />;
 }
 
+function routePath(route: Route): string {
+  if (route.kind === "section") return `sections/${route.id}/${route.tab}${route.entryId ? `/${route.entryId}` : ""}`;
+  if (route.kind === "workstream") return `workstreams/${route.id}${route.entryId ? `/${route.entryId}` : ""}`;
+  if (route.kind === "thread") return `threads/${route.threadId}`;
+  return route.kind === "bindings" ? "overview" : route.kind;
+}
+
+function RestoreResult({ path, exists }: { path: string; exists: boolean | undefined }) {
+  const pluginId = experimental_usePluginId();
+  const target = exists ? path : "overview";
+  useEffect(() => {
+    if (exists !== undefined) writePlace("localStorage", `${pluginId}.cortex.last-route`, target);
+  }, [exists, target, pluginId]);
+  return exists === undefined ? <LoadingRows label="Opening previous page" /> : <Redirect subPath={target} />;
+}
+
+function RestoreTarget({ route, path }: { route: Extract<Route, { kind: "section" | "workstream" | "thread" }>; path: string }) {
+  const sdk = useSdk();
+  const rpc = useCortexRpc();
+  const [exists, setExists] = useState<boolean>();
+  useEffect(() => {
+    let active = true;
+    // A cached successful read could outlive a deleted target while this page was unmounted.
+    const check = async () => {
+      if (route.kind === "section") {
+        const out = await rpc.call("sectionList", null);
+        if (!out.sections.some(section => section.id === route.id)) return false;
+      } else if (route.kind === "workstream") {
+        await rpc.call("workstreamShow", { id: route.id, limit: 1, offset: 0 });
+      } else {
+        await sdk.threads.get({ threadId: route.threadId });
+      }
+      if (route.kind !== "thread" && route.entryId) await rpc.call("knowledgeShow", { id: route.entryId });
+      return true;
+    };
+    void check().then(value => { if (active) setExists(value); }, () => { if (active) setExists(false); });
+    return () => { active = false; };
+  }, [sdk, rpc, path]);
+  return <RestoreResult path={path} exists={exists} />;
+}
+
+function RestorePage() {
+  const pluginId = experimental_usePluginId();
+  const [saved] = useState(() => readPlace("localStorage", `${pluginId}.cortex.last-route`));
+  if (saved === undefined || saved === "overview") return <PageLocation route={{ kind: "overview" }} />;
+  const route = typeof saved === "string" ? parseRoute(saved) : { kind: "overview" } as const;
+  const path = routePath(route);
+  if (route.kind === "section" || route.kind === "workstream" || route.kind === "thread") return <RestoreTarget key={path} path={path} route={route} />;
+  return <RestoreResult path={path} exists={route.kind !== "overview" && route.kind !== "bindings"} />;
+}
+
 export function CortexPage({ subPath }: PluginNavPanelProps) {
-  const route = parseRoute(subPath);
+  return subPath === "" ? <RestorePage /> : <PageLocation route={parseRoute(subPath)} />;
+}
+
+function PageLocation({ route }: { route: Route }) {
+  const pluginId = experimental_usePluginId();
+  const path = routePath(route);
+  const scope = route.kind === "section" ? `sections/${route.id}/${route.tab}` : route.kind === "workstream" ? `workstreams/${route.id}` : path;
+  const scrollRoot = usePageScroll(path);
+  useEffect(() => {
+    if (route.kind !== "bindings") writePlace("localStorage", `${pluginId}.cortex.last-route`, path);
+  }, [pluginId, path, route.kind]);
   return (
-    <div data-cortex data-cortex-page="" className="@container h-full min-h-0 min-w-0 text-foreground [@media(pointer:coarse)]:[&_button]:min-h-11 max-[480px]:[&_button]:min-h-11">
+    <PlaceScope.Provider value={scope}>
+    <div ref={scrollRoot} data-cortex data-cortex-page="" className="@container h-full min-h-0 min-w-0 text-foreground [@media(pointer:coarse)]:[&_button]:min-h-11 max-[480px]:[&_button]:min-h-11">
       {route.kind === "overview" ? <OverviewPage /> : null}
       {route.kind === "section" ? <SectionPage key={route.id} {...route} /> : null}
       {route.kind === "review" ? <NeedsYou /> : null}
       {route.kind === "workstreams" ? <WorkstreamList /> : null}
       {route.kind === "workstream" ? <WorkstreamRoute route={route} /> : null}
       {route.kind === "library" ? <Library /> : null}
-      {route.kind === "bindings" ? <Redirect subPath="" /> : null}
-      {route.kind === "thread" ? <div className="h-full min-w-0 overflow-y-auto p-4"><ThreadContextPage threadId={route.threadId} /></div> : null}
+      {route.kind === "bindings" ? <Redirect subPath="overview" /> : null}
+      {route.kind === "thread" ? <div data-cortex-scroll="main" className="h-full min-w-0 overflow-y-auto p-4"><ThreadContextPage threadId={route.threadId} /></div> : null}
     </div>
+    </PlaceScope.Provider>
   );
 }
 
@@ -109,7 +176,7 @@ function NavRow({ icon, label, current, count, attention = false, bound = false,
       "relative grid min-h-8 w-full min-w-0 grid-cols-[1rem_minmax(0,1fr)_auto] items-center gap-x-2 rounded-md py-1.5 pr-2 text-left text-[13px] leading-tight focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
       TOUCH,
       nested ? "pl-6" : "pl-2",
-      current ? "bg-surface-selected font-semibold text-foreground before:absolute before:inset-y-1 before:left-0 before:w-0.5 before:rounded-full before:bg-primary" : muted ? "text-muted-foreground hover:bg-state-hover hover:text-foreground" : "text-foreground hover:bg-state-hover",
+      current ? "bg-surface-selected font-semibold text-foreground before:absolute before:inset-y-1 before:left-0 before:w-0.5 before:rounded-full before:bg-primary hover:bg-surface-selected/80" : muted ? "text-muted-foreground hover:bg-state-hover hover:text-foreground" : "text-foreground hover:bg-state-hover",
     )}>
       <Icon name={icon} className={cn("size-4 shrink-0", bound ? "text-primary" : attention ? "text-attention" : "text-muted-foreground")} aria-hidden />
       <span className="min-w-0 truncate" title={label}>{label}</span>
@@ -165,8 +232,8 @@ export function CortexSidebar({ subPath }: PluginNavPanelProps) {
   return (
     <nav data-cortex aria-label="Cortex" className="flex h-full min-w-0 flex-col gap-px overflow-y-auto p-2">
       <NavRow icon="BellDot" label="Review" current={route.kind === "review"} count={queue.data?.total} attention onClick={() => go("review")} />
-      <NavRow icon="GridView" label="Overview" current={route.kind === "overview" || route.kind === "bindings"} onClick={() => go("")} />
-      <Heading label="Sections" trailing={<TooltipProvider><Tooltip><TooltipTrigger asChild><Button size="icon" variant="ghost" aria-label="About sections" className={cn("size-6", "max-[576px]:size-11 [@media(pointer:coarse)]:size-11")}><Icon name="Info" className="size-3.5 text-muted-foreground" aria-hidden /></Button></TooltipTrigger><TooltipContent>Sections come from bb. Connect one to share a brief.</TooltipContent></Tooltip></TooltipProvider>} />
+      <NavRow icon="GridView" label="Overview" current={route.kind === "overview" || route.kind === "bindings"} onClick={() => go("overview")} />
+      <Heading label="Sections" trailing={<TooltipProvider><Tooltip><TooltipTrigger asChild><Button size="icon" variant="ghost" aria-label="About sections" className={cn("size-6", "max-[576px]:size-11 [@media(pointer:coarse)]:size-11")}><Icon name="Info" className="size-3.5 text-muted-foreground" aria-hidden /></Button></TooltipTrigger><TooltipContent data-cortex>Sections come from bb. Connect one to share a brief.</TooltipContent></Tooltip></TooltipProvider>} />
       {bindings.error ? <FailureNotice failure={bindings.error} onRetry={bindings.refetch} /> : null}
       {shared.map(section => sectionRow(section))}
       {fold && unshared.length > 0 ? <NavRow icon={unsharedOpen ? "ChevronDown" : "ChevronRight"} muted label="Not shared" countWord={unshared.length === 1 ? "section" : "sections"} count={unshared.length} current={false} onClick={() => setUnsharedOpen(!unsharedOpen)} /> : null}

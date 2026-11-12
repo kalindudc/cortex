@@ -234,7 +234,7 @@ export function Composer({
               <Icon name="ChevronDown" className="size-3.5" aria-hidden />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" mobileTitle="Status for this note" className="pointer-coarse:[&_[role=menuitem]]:min-h-11 max-[480px]:[&_[role=menuitem]]:min-h-11">
+          <DropdownMenuContent data-cortex align="start" mobileTitle="Status for this note" className="pointer-coarse:[&_[role=menuitem]]:min-h-11 max-[480px]:[&_[role=menuitem]]:min-h-11">
             <DropdownMenuItem onSelect={() => setStatus(null)}>Keep status</DropdownMenuItem>
             {STATUSES.map(option => (
               <DropdownMenuItem key={option} onSelect={() => setStatus(option)}>

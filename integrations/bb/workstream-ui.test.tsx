@@ -42,6 +42,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  sessionStorage.clear();
   vi.useRealTimers();
 });
 
@@ -497,13 +498,15 @@ describe("sources are evidence, approval is separate", () => {
     expect(within(approvedDetail).getByText(/Approved by You/)).toBeTruthy();
   });
 
-  test("a refused approval shows the backend's reason", async () => {
+  test("a refused approval explains the next step and preserves the backend's reason", async () => {
     const backend = makeBackend({ transitionFailure: { code: "forbidden", message: "Only a person can approve." } });
     const page = renderSlot(app.navPanels[0]!, { subPath: "review" }, options(backend));
     await page.findByRole("region", { name: candidate.title });
     fireEvent.click(within(page.getByRole("radiogroup", { name: "Your call" })).getByRole("radio", { name: /^Approve/ }));
     fireEvent.click(within(page.container).getByRole("button", { name: "Confirm: Approve" }));
-    expect((await page.findByRole("alert")).textContent).toMatch(/Only a person can approve/);
+    expect((await page.findByRole("alert")).textContent).toMatch(/Review the entry and try again/);
+    fireEvent.click(page.getByText("Technical details"));
+    expect(page.getByText("Only a person can approve.")).toBeTruthy();
   });
 });
 

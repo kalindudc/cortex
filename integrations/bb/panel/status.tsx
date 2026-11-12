@@ -107,13 +107,14 @@ export function StatusPill({
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
-        <button type="button" className={className} aria-current={track ? "step" : undefined} aria-label={`Status: ${STATUS_LABEL[status]}. Change status`}>
+        <button type="button" className={cn(className, track ? "hover:bg-primary/90" : "hover:bg-state-hover")} aria-current={track ? "step" : undefined} aria-label={`Status: ${STATUS_LABEL[status]}. Change status`}>
           {track ? null : <StatusDot status={status} />}
           {STATUS_LABEL[status]}
           <Icon name="ChevronDown" className="size-3.5 opacity-80" aria-hidden />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
+        data-cortex
         align="start"
         mobileTitle="Status"
         className="w-64 pointer-coarse:[&_[role=menuitem]]:min-h-11 max-[480px]:[&_[role=menuitem]]:min-h-11"
@@ -171,7 +172,7 @@ export function StatusTrack({ status, canWrite, onChoose }: {
         })}
       </div>
       {canWrite ? (
-        <button type="button" className={blockClass} aria-pressed={blocked} aria-label={blocked ? "Unblock task" : "Block task"} title={blocked ? "Unblock task" : "Blocked"} onClick={() => onChoose(blocked ? "open" : "blocked")}>
+        <button type="button" className={cn(blockClass, blocked && "hover:bg-state-hover")} aria-pressed={blocked} aria-label={blocked ? "Unblock task" : "Block task"} title={blocked ? "Unblock task" : "Blocked"} onClick={() => onChoose(blocked ? "open" : "blocked")}>
           <Icon name="AlertTriangle" className="size-3.5" aria-hidden />
           {blocked ? "Blocked" : null}
         </button>

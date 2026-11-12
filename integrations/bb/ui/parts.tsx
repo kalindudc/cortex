@@ -23,6 +23,9 @@ import type { RpcFailure } from "./data";
 import { shortTime } from "./model";
 import type { ContextEntry, ContextNotice, Knowledge, KnowledgeSource, ThreadContext } from "./types";
 
+export const CORTEX_TAB_TRIGGER = "cursor-pointer shrink-0 rounded-none border-b-2 border-transparent bg-transparent px-2.5 py-2 text-[12.5px] font-normal text-muted-foreground data-[state=inactive]:hover:border-border data-[state=inactive]:hover:bg-state-hover data-[state=inactive]:hover:text-foreground data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:font-semibold data-[state=active]:text-foreground data-[state=active]:shadow-none";
+export const CORTEX_TAB_LIST = "cortex-context-tabs h-auto max-w-full justify-start gap-0.5 overflow-x-auto rounded-none border-b border-border-seam bg-transparent p-0";
+
 export const TONE_TEXT: Record<Tone, string> = {
   success: "text-success",
   attention: "text-attention",
@@ -93,7 +96,7 @@ export function Hint({ text, children }: { text: string; children: ReactNode }) 
             {children}
           </span>
         </TooltipTrigger>
-        <TooltipContent className="max-w-64 text-[12px]">{text}</TooltipContent>
+        <TooltipContent data-cortex className="max-w-64 text-[12px]">{text}</TooltipContent>
       </Tooltip>
     </TooltipProvider>
   );
@@ -292,7 +295,7 @@ export function Segmented<T extends string>({
           onClick={() => onChange(option.value)}
           className={cn(
             "min-h-7 rounded-sm px-2.5 text-[12px] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-            option.value === value ? "bg-surface-selected font-semibold text-foreground" : "text-muted-foreground hover:bg-state-hover hover:text-foreground",
+            option.value === value ? "bg-surface-selected font-semibold text-foreground hover:bg-surface-selected/80" : "text-muted-foreground hover:bg-state-hover hover:text-foreground",
           )}
         >
           {option.label}
@@ -350,7 +353,7 @@ export function PagedFooter({
       {changedWhileReading ? (
         <p role="status" className="flex flex-wrap items-center gap-x-2 text-[11.5px] text-warning-text">
           Changed while loading, so pages may overlap or skip a row.
-          <button type="button" onClick={onRetry} className="rounded-sm underline underline-offset-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
+          <button type="button" onClick={onRetry} className="rounded-sm underline underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
             Reload
           </button>
         </p>

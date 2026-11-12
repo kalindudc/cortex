@@ -4,6 +4,7 @@ import { contextThreadIdSchema, knowledgeIdSchema, proposalInputSchema } from ".
 import type { Workstreams } from "./workstreams";
 import { MISSING_CONTEXT } from "./workstreams";
 import type { DraftService } from "./draft-service";
+import type { PendingContext } from "./pending-context";
 
 import { CONFIGURE_CONTEXT_MAX, WORKSTREAM_INSTRUCTIONS as boundedInstructions } from "./workstream-policy";
 export { CONFIGURE_CONTEXT_MAX } from "./workstream-policy";
@@ -72,7 +73,12 @@ export function workstreamConfiguration(
   };
 }
 
-export function registerWorkstreamAgents(bb: BbPluginApi, service: Workstreams, drafts?: DraftService) {
+export function registerWorkstreamAgents(
+  bb: BbPluginApi,
+  service: Workstreams,
+  drafts?: DraftService,
+  pending?: Pick<PendingContext, "admit">,
+) {
   const proposalAttempts = new Map<string, number>();
   const resetProposals = ({ thread }: { thread: { id: string } }): void => {
     proposalAttempts.delete(thread.id);
@@ -83,6 +89,9 @@ export function registerWorkstreamAgents(bb: BbPluginApi, service: Workstreams, 
     try {
       const worker = drafts?.guard(ctx);
       if (worker) return worker;
+      // A New thread card's changes become this thread's overrides before its context is prepared.
+      const refused = await pending?.admit(ctx);
+      if (refused) return refused;
       const decision = await service.predispatch(ctx);
       const view = service.peek(ctx.thread.id);
       if (view?.binding && view.exactText.length > CONFIGURE_CONTEXT_MAX)

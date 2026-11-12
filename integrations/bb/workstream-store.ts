@@ -15,6 +15,7 @@ import {
 } from "./workstream-contract";
 
 import { createSectionJobStore, type JobRecord } from "./section-store";
+import { createPendingStore, PENDING_CONTEXT_MIGRATIONS } from "./pending-context-store";
 
 const prefsSchema = z
   .object({
@@ -42,6 +43,7 @@ export function createWorkstreamStore(bb: BbPluginApi) {
     `CREATE TABLE IF NOT EXISTS workstream_title_marks (section_id TEXT PRIMARY KEY, payload TEXT NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS workstream_binding_history (section_id TEXT NOT NULL, revision INTEGER NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(section_id, revision))`,
     ...DRAFT_MIGRATIONS,
+    ...PENDING_CONTEXT_MIGRATIONS,
   ]);
   function thread(threadId: string): Prefs {
     contextThreadIdSchema.parse(threadId);
@@ -73,7 +75,7 @@ export function createWorkstreamStore(bb: BbPluginApi) {
     return row ? bindingRowSchema.parse(JSON.parse(row.payload)) : { key, revision: 0, binding: null };
   }
   const jobs = createSectionJobStore(db);
-  return {
+  const store = {
     jobs,
     drafts: createDraftStore(db),
     connectJob(record: Extract<JobRecord, { kind: "connect" }>, binding: WorkstreamBinding) {
@@ -225,4 +227,5 @@ export function createWorkstreamStore(bb: BbPluginApi) {
       return { receipts: rows.map(row => deliveryReceiptSchema.parse(JSON.parse(row.payload))), total, limit, offset };
     },
   };
+  return { ...store, pending: createPendingStore(db, store) };
 }

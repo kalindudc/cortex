@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { isPageCount, isText, oneOf, usePlaceState } from "./place";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useBbNavigate } from "@get-bb/plugin-sdk/app";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -66,7 +67,7 @@ export function WorkstreamDialog({
   };
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent data-cortex className="max-w-lg">
         <DialogHeader>
           <DialogTitle>{workstream === null ? "New workstream" : `Edit ${workstream.name}`}</DialogTitle>
           <DialogDescription>A workstream holds knowledge shared by the threads you connect to it, across projects.</DialogDescription>
@@ -112,7 +113,7 @@ function EntryRow({ entry, selected, onSelect }: { entry: Knowledge; selected: b
 }
 
 export function WorkstreamEdits({ id }: { id: string }) {
-  const [pages, setPages] = useState(1);
+  const [pages, setPages] = usePlaceState(`edits-pages:${id}`, 1, isPageCount);
   const read = useHistory(id, pages);
   if (read.error && !read.data) return <FailureNotice failure={read.error} onRetry={read.refetch} />;
   if (read.data === undefined) return <LoadingRows label="Loading history" />;
@@ -133,7 +134,7 @@ export function WorkstreamEdits({ id }: { id: string }) {
 export function WorkstreamKnowledge({ id, selectedId = null, onSelect, onClose }: { id: string; selectedId?: string | null; onSelect?: (id: string) => void; onClose?: () => void }) {
   const read = useWorkstream(id);
   const navigate = useBbNavigate();
-  const [facet, setFacet] = useState("all");
+  const [facet, setFacet] = usePlaceState(`topic:${id}`, "all", isText);
   const [adding, setAdding] = useState(false);
   const [showDetail, setShowDetail] = useState(selectedId !== null);
   useEffect(() => setShowDetail(selectedId !== null), [selectedId]);
@@ -175,13 +176,18 @@ export function WorkstreamKnowledge({ id, selectedId = null, onSelect, onClose }
 
 export function WorkstreamPage({ id, selectedId }: { id: string; selectedId: string | null }) {
   const read = useWorkstream(id);
-  const [tab, setTab] = useState<"knowledge" | "history">("knowledge");
+  const [tab, setTab] = usePlaceState("view", "knowledge", oneOf("knowledge", "history"));
+  const previousEntry = useRef(selectedId);
+  useEffect(() => {
+    if (selectedId && previousEntry.current !== selectedId) setTab("knowledge");
+    previousEntry.current = selectedId;
+  }, [selectedId]);
   const [dialog, setDialog] = useState<"edit" | "archive" | null>(null);
   const writes = useWorkstreamWrites();
   if (read.error && !read.data) return <div className="p-4"><FailureNotice failure={read.error} onRetry={read.refetch} /></div>;
   if (!read.data) return <LoadingRows label="Loading workstream" />;
   const { workstream } = read.data;
-  return <div data-cortex className="cortex-section h-full min-h-0 overflow-y-auto text-foreground">
+  return <div data-cortex data-cortex-scroll="main" className="cortex-section h-full min-h-0 overflow-y-auto text-foreground">
     <header className="border-b border-border-seam px-4 py-3">
       <div className="flex flex-wrap items-center gap-2"><h2 className="min-w-0 flex-1 break-words text-[17px] font-semibold">{workstream.name}</h2>
         {workstream.archived ? <span className="text-muted-foreground">Archived</span> : null}

@@ -1,3 +1,4 @@
+import { isNullableOffset, usePlaceState } from "./place";
 import { useEffect, useRef, useState, type JSX } from "react";
 import { useBbNavigate } from "@get-bb/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
@@ -53,11 +54,12 @@ export function DraftRailCard({ section }: { section: Section }): JSX.Element | 
 }
 
 export function DraftsTab({ section }: { section: Section }): JSX.Element | null {
-  const [chosenPage, setPage] = useState<{ sectionId: string; offset: number } | null>(null);
+  const [chosenPage, setPage] = usePlaceState<number | null>(`draft-page:${section.id}`, null, isNullableOffset);
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const first = useDraftJobs(section.id);
-  const offset = chosenPage?.sectionId === section.id ? chosenPage.offset : Math.floor(Math.max(0, (first.data?.total ?? 0) - 1) / 20) * 20;
+  const lastPage = Math.floor(Math.max(0, (first.data?.total ?? 0) - 1) / 20) * 20;
+  const offset = Math.min(chosenPage ?? lastPage, lastPage);
   const page = useDraftJobs(section.id, offset, offset !== 0);
   const read = offset === 0 ? first : page;
   const detail = useSectionDetail(section.id);
@@ -70,7 +72,7 @@ export function DraftsTab({ section }: { section: Section }): JSX.Element | null
     {read.isLoading ? <LoadingRows label="Loading drafting jobs" /> : null}
     {read.data?.total === 0 ? <p className="rounded-lg border border-dashed border-border-seam p-4 text-muted-foreground">No drafts yet.</p> : null}
     {read.data ? [...read.data.jobs].reverse().map(job => <DraftJobView key={job.requestId} job={job} section={section} />) : null}
-    {first.data && first.data.total > 20 ? <nav aria-label="Draft history pages" className="flex flex-wrap items-center gap-2 text-muted-foreground"><span className="grow">{offset} earlier drafts · {offset + 1}–{Math.min(offset + 20, first.data.total)} of {first.data.total}</span><Button variant="outline" disabled={offset === 0} onClick={() => setPage({ sectionId: section.id, offset: Math.max(0, offset - 20) })}>Earlier drafts</Button><Button variant="outline" disabled={offset + 20 >= first.data.total} onClick={() => setPage({ sectionId: section.id, offset: offset + 20 })}>More drafts</Button></nav> : null}
+    {first.data && first.data.total > 20 ? <nav aria-label="Draft history pages" className="flex flex-wrap items-center gap-2 text-muted-foreground"><span className="grow">{offset} earlier drafts · {offset + 1}–{Math.min(offset + 20, first.data.total)} of {first.data.total}</span><Button variant="outline" disabled={offset === 0} onClick={() => setPage(Math.max(0, offset - 20))}>Earlier drafts</Button><Button variant="outline" disabled={offset + 20 >= first.data.total} onClick={() => setPage(offset + 20)}>More drafts</Button></nav> : null}
     <DraftDialog key={section.id} section={section} threads={detail.data?.threads ?? []} open={open} onClose={() => setOpen(false)} onReturnFocus={() => trigger.current?.focus()} />
   </section>;
 }

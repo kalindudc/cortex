@@ -1,14 +1,18 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
+import { readFileSync } from "node:fs";
+import { CompactViewportOverrideProvider } from "./components/ui/hooks/use-compact-viewport";
+import { ChangeForThreadDialog, EditKnowledgeDialog, ObserveDialog, ProposeDialog } from "./ui/dialogs";
 import { renderSlot, type PluginRpcTestHandlers } from "@get-bb/plugin-sdk/testing/app";
 import { afterEach, expect, test, vi } from "vitest";
 import { workstreamRpcContract } from "./workstream-contract";
 import { KnowledgeActions, KnowledgeDetail } from "./ui/knowledge";
 import { Library } from "./ui/library";
-import type { Knowledge, Workstream } from "./ui/types";
+import type { ContextEntry, Knowledge, ThreadContext, Workstream } from "./ui/types";
 
 vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { error: vi.fn() }) }));
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 const at = "2026-11-11T12:00:00.000Z";
 const actor = { id: "person", type: "human" } as const;
 const ws: Workstream = { id: "ws_envoy", name: "Envoy", description: "", revision: 1, archived: false, actor, createdAt: at, updatedAt: at };
@@ -45,6 +49,149 @@ test("Knowledge sheet shows readable pointers, source thread, optional reason an
   await waitFor(() => expect(clipboard).toHaveBeenCalledWith(entry.id));
   fireEvent.click(slot.getByRole("button", { name: "Close" }));
   expect(onClose).toHaveBeenCalledOnce();
+});
+
+function stubTextareaSize() {
+  const size = { content: 300, cap: 448 };
+  vi.spyOn(HTMLTextAreaElement.prototype, "scrollHeight", "get").mockImplementation(() => size.content);
+  const getStyle = window.getComputedStyle.bind(window);
+  vi.spyOn(window, "getComputedStyle").mockImplementation((element, pseudo) => {
+    const style = getStyle(element, pseudo);
+    if (element instanceof HTMLTextAreaElement) Object.defineProperties(style, {
+      minHeight: { value: "135px" }, maxHeight: { value: `${size.cap}px` },
+      borderTopWidth: { value: "1px" }, borderBottomWidth: { value: "1px" },
+    });
+    return style;
+  });
+  return size;
+}
+
+test("knowledge text grows on mount and edits, shrinks, and scrolls only beyond the viewport cap", async () => {
+  const size = stubTextareaSize();
+  const slot = setup(() => <EditKnowledgeDialog entry={entry} workstream={ws} open onOpenChange={() => {}} />);
+  const field = await slot.findByRole("textbox", { name: "Text" }) as HTMLTextAreaElement;
+  expect(field.style.height).toBe("302px");
+  expect(field.rows).toBe(6);
+  size.content = 1200;
+  fireEvent.change(field, { target: { value: "A much longer draft" } });
+  expect(field.style.height).toBe("448px");
+  size.content = 10;
+  fireEvent.change(field, { target: { value: "Short" } });
+  expect(field.style.height).toBe("135px");
+  size.content = 500;
+  size.cap = 240;
+  fireEvent(window, new Event("resize"));
+  expect(field.style.height).toBe("240px");
+});
+
+test("width changes remeasure wrapping, but height-only changes do not loop and observers are disposed", async () => {
+  const size = stubTextareaSize();
+  const observers: Array<{ callback: ResizeObserverCallback; target: Element | null; disconnect: ReturnType<typeof vi.fn> }> = [];
+  vi.stubGlobal("ResizeObserver", class {
+    target: Element | null = null;
+    disconnect = vi.fn();
+    constructor(public callback: ResizeObserverCallback) { observers.push(this); }
+    observe(target: Element) { this.target = target; }
+    unobserve() {}
+  });
+  const slot = setup(() => <EditKnowledgeDialog entry={entry} workstream={ws} open onOpenChange={() => {}} />);
+  const field = await slot.findByRole("textbox", { name: "Text" }) as HTMLTextAreaElement;
+  const observer = observers.find(item => item.target === field)!;
+  const resize = (width: number) => observer.callback([{ contentRect: { width } } as ResizeObserverEntry], observer as unknown as ResizeObserver);
+  size.content = 400;
+  await act(() => resize(320));
+  expect(field.style.height).toBe("402px");
+  size.content = 600;
+  await act(() => resize(320));
+  expect(field.style.height).toBe("402px");
+  await act(() => resize(240));
+  expect(field.style.height).toBe("448px");
+  slot.lifecycle.unmount();
+  expect(observer.disconnect).toHaveBeenCalledOnce();
+  size.content = 150;
+  fireEvent(window, new Event("resize"));
+  expect(field.style.height).toBe("448px");
+});
+
+test("opening the same retained dialog remeasures its text even when the saved value is unchanged", async () => {
+  const size = stubTextareaSize();
+  const slot = setup(() => {
+    const [open, setOpen] = useState(false);
+    return <><button onClick={() => setOpen(true)}>Open editor</button><EditKnowledgeDialog entry={entry} workstream={ws} open={open} onOpenChange={setOpen} /></>;
+  });
+  fireEvent.click(slot.getByRole("button", { name: "Open editor" }));
+  expect((await slot.findByRole("textbox", { name: "Text" }) as HTMLTextAreaElement).style.height).toBe("302px");
+  fireEvent.click(slot.getByRole("button", { name: "Cancel" }));
+  size.content = 410;
+  fireEvent.click(slot.getByRole("button", { name: "Open editor" }));
+  expect((await slot.findByRole("textbox", { name: "Text" }) as HTMLTextAreaElement).style.height).toBe("412px");
+});
+
+test.each([false, true])("edit dialog keeps editor and saved-text preview in the responsive columns (compact=%s)", async compact => {
+  const slot = setup(() => <CompactViewportOverrideProvider isCompactViewport={compact}><EditKnowledgeDialog entry={entry} workstream={ws} open onOpenChange={() => {}} /></CompactViewportOverrideProvider>);
+  const field = await slot.findByRole("textbox", { name: "Text" });
+  const columns = field.closest(".cortex-knowledge-editor");
+  expect(columns).not.toBeNull();
+  expect(columns!.getAttribute("data-compact")).toBe(String(compact));
+  const preview = within(columns as HTMLElement).getByRole("region", { name: "Change from the saved text" });
+  expect(preview.textContent).toContain(entry.text);
+  expect(within(preview).getByRole("status").textContent).toBe("No change yet.");
+  const previewPane = preview.querySelector(".cortex-knowledge-preview");
+  expect(previewPane).not.toBeNull();
+  fireEvent.change(field, { target: { value: "A revised finding" } });
+  expect(preview.querySelector(".cortex-knowledge-preview")).toBe(previewPane);
+  expect(preview.querySelector("ins")?.textContent).toContain("revised");
+  expect(preview.querySelector("del")?.textContent).toContain("saved");
+  expect(within(preview).queryByRole("status")).toBeNull();
+  expect(columns!.contains(slot.getByRole("textbox", { name: "Title" }))).toBe(false);
+  expect(columns!.contains(slot.getByRole("textbox", { name: "Why (kept in history)" }))).toBe(false);
+  expect(columns!.contains(slot.getByRole("button", { name: "Save for all threads" }))).toBe(false);
+  expect(field.closest(".cortex-text-dialog")).not.toBeNull();
+});
+
+test("thread-only change uses the same editor and stable canonical preview without changing scope", async () => {
+  const item: ContextEntry = { knowledge: entry, text: entry.text, origin: "canonical", overrideActor: null, estimatedTokens: 10 };
+  const context: ThreadContext = {
+    threadId: "thr_source", revision: 1, binding: null, bindingRevision: 0, bindingSource: "none", inheritedFrom: null,
+    workstream: ws, applicability: entry.applicability, entries: [item], notices: [], exclusions: [], overrides: [], grants: [],
+    exactText: entry.text, estimatedTokens: 10, budgetTokens: 400, status: "ready", error: null, dismissed: false,
+    dismissedPreference: null, bindingChanged: false, lastReceipt: null,
+  };
+  const slot = setup(() => <ChangeForThreadDialog context={context} entry={item} open onOpenChange={() => {}} />);
+  const field = await slot.findByRole("textbox", { name: "Text for this thread" });
+  const columns = field.closest(".cortex-knowledge-editor");
+  expect(columns).not.toBeNull();
+  const preview = within(columns as HTMLElement).getByRole("region", { name: "Change from the saved text" });
+  expect(preview.textContent).toContain(entry.text);
+  expect(within(preview).getByRole("status")).toBeTruthy();
+  expect(slot.getByText(/Only this thread's next context changes/).closest(".cortex-knowledge-editor")).toBeNull();
+});
+
+test.each(["propose", "observe", "evidence"] as const)("%s knowledge fields use the growing textarea", async mode => {
+  stubTextareaSize();
+  const slot = setup(() => mode === "propose"
+    ? <ProposeDialog workstream={ws} facets={[]} open onOpenChange={() => {}} />
+    : <ObserveDialog entry={entry} mode={mode} open onOpenChange={() => {}} />);
+  const labels = mode === "propose" ? ["Text"] : mode === "observe" ? ["What you observed", "Excerpt"] : ["Excerpt"];
+  for (const label of labels) {
+    const field = await slot.findByRole("textbox", { name: label }) as HTMLTextAreaElement;
+    expect(field.style.height).toBe("302px");
+    expect(field.rows).toBe(6);
+    expect(field.closest(".cortex-text-dialog")).not.toBeNull();
+  }
+});
+
+test("knowledge editor CSS caps both panes and the dialog, with a dialog-width breakpoint and compact override", () => {
+  const css = readFileSync("ui/knowledge-editor.css", "utf8");
+  expect(css).toContain("container-type: inline-size");
+  expect(css).toContain("container-name: cortex-knowledge-dialog");
+  expect(css).toContain("@container cortex-knowledge-dialog (min-width: 720px)");
+  expect(css).toContain('.cortex-knowledge-editor:not([data-compact="true"])');
+  expect(css).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))");
+  expect(css).toContain("max-height: calc(100dvh - 2rem)");
+  expect(css).toContain("max(12rem, calc(100dvh - 22rem))");
+  expect(css).toContain("max-height: var(--cortex-knowledge-text-max)");
+  expect(css).toContain("overflow-y: auto");
 });
 
 test("History toggle includes its visible label in the accessible name", async () => {

@@ -1,4 +1,5 @@
-import { type ReactNode, useState } from "react";
+import { oneOf, usePlaceState } from "../ui/place";
+import { type ReactNode } from "react";
 import { type ExperimentalThreadActionTabProps, experimental_useAppPanel, useBbNavigate } from "@get-bb/plugin-sdk/app";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -18,8 +19,8 @@ import {
 import type { CortexTaskRow } from "../state";
 import { useThreadContext } from "../ui/data";
 import { openTaskTab } from "../ui/panel-tabs";
-import { FailureNotice, LoadingRows, Segmented } from "../ui/parts";
-import { CORTEX_PAGE_PATH, CONTEXT_TAB_LIST, CONTEXT_TAB_TRIGGER, ContextActions, ContextHistory, ContextOverview, copyContextText, NextContext, VisibilityControl } from "../ui/thread-context";
+import { CORTEX_TAB_LIST, CORTEX_TAB_TRIGGER, FailureNotice, LoadingRows, Segmented } from "../ui/parts";
+import { CORTEX_PAGE_PATH, ContextActions, ContextHistory, ContextOverview, copyContextText, NextContext, VisibilityControl } from "../ui/thread-context";
 import { errorText, useCortexRpc, useMemory, useTaskRows } from "./hooks";
 import { ErrorNotice } from "./panel";
 import { STATUS_LABEL, StatusDot } from "./status";
@@ -317,7 +318,7 @@ export function MemoryPanel({ threadId }: ExperimentalThreadActionTabProps): Rea
   const context = useThreadContext(threadId);
   const panel = experimental_useAppPanel();
   const navigate = useBbNavigate();
-  const [chosen, setChosen] = useState<string | null>(null);
+  const [chosen, setChosen] = usePlaceState<string | null>("memory-tab", null, (value): value is string | null => value === null || oneOf("context", "tasks", "history")(value), `thread:${threadId}`);
   const view = memory?.view ?? null;
   const focus = view?.role === "writer" ? view.focus : [];
   const ids = [...new Set([...focus, ...(view?.inContext ?? []).map(entry => entry.id)])];
@@ -354,10 +355,10 @@ export function MemoryPanel({ threadId }: ExperimentalThreadActionTabProps): Rea
         {context.data ? <VisibilityControl context={context.data} /> : null}
       </div>
       <Tabs value={tab} onValueChange={setChosen} className="mt-2">
-        <TabsList className={CONTEXT_TAB_LIST}>
-          <TabsTrigger value="context" className={CONTEXT_TAB_TRIGGER}>Section brief</TabsTrigger>
-          <TabsTrigger value="tasks" className={CONTEXT_TAB_TRIGGER}>Task memory</TabsTrigger>
-          <TabsTrigger value="history" className={CONTEXT_TAB_TRIGGER}>History</TabsTrigger>
+        <TabsList className={CORTEX_TAB_LIST}>
+          <TabsTrigger value="context" className={CORTEX_TAB_TRIGGER}>Section brief</TabsTrigger>
+          <TabsTrigger value="tasks" className={CORTEX_TAB_TRIGGER}>Task memory</TabsTrigger>
+          <TabsTrigger value="history" className={CORTEX_TAB_TRIGGER}>History</TabsTrigger>
         </TabsList>
         <TabsContent value="context" className="mt-3">
           {context.error ? <FailureNotice failure={context.error} onRetry={context.refetch} /> : null}

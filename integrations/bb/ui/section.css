@@ -74,7 +74,9 @@
 }
 [data-cortex].cortex-review-item { color: var(--foreground); }
 [data-cortex-takeaway] { --cortex-dialog-muted: color-mix(in oklab, var(--muted-foreground) 78%, var(--foreground)); }
-[data-cortex-takeaway] .text-muted-foreground { color: var(--cortex-dialog-muted); }
+@layer utilities {
+  :where([data-cortex-takeaway]) .text-muted-foreground { color: var(--cortex-dialog-muted); }
+}
 @media (prefers-reduced-motion: reduce) {
   [data-cortex].cortex-section .cortex-suggestion-leaving { grid-template-rows: 0fr; opacity: 0; }
   [data-cortex].cortex-section *, [data-cortex-takeaway] *, [data-cortex-summary] { transition: none !important; animation: none !important; }

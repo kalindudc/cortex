@@ -10,7 +10,7 @@ import type { Knowledge, ThreadContext } from "./ui/types";
 
 const toast = vi.hoisted(() => Object.assign(vi.fn(), { error: vi.fn() }));
 vi.mock("sonner", () => ({ toast }));
-afterEach(() => { cleanup(); vi.clearAllMocks(); });
+afterEach(() => { cleanup(); sessionStorage.clear(); vi.clearAllMocks(); });
 
 const threadId = "thr_context";
 const at = "2026-11-12T12:00:00Z";

@@ -303,6 +303,7 @@ function useRead<M extends Method>(method: M, input: InputOf<M> | null): Read<Ou
 export const useSections = () => useReadMany("sectionList", [null])[0]!;
 export const useSectionCaptureJobs = (sectionId: string, offset = 0) => useRead("sectionCaptureJobs", { sectionId, limit: 20, offset });
 export const useSectionDetail = (sectionId: string | null) => useRead("sectionDetail", sectionId === null ? null : { sectionId, limit: 50, offset: 0 });
+export const useNewThreadContext = (input: InputOf<"newThreadContext"> | null) => useRead("newThreadContext", input);
 
 export const useThreadContext = (threadId: string | null) =>
   useRead("threadContext", threadId === null ? null : { threadId });
@@ -463,6 +464,7 @@ export function useWorkstreamWrites() {
       return out;
     };
     return {
+      refreshKnowledge: () => store.invalidate(() => true),
       connectSection: (input: InputOf<"sectionConnect">) => section("sectionConnect", input),
       retrySection: (requestId: string) => section("sectionConnectRetry", { requestId }),
       markSection: (input: InputOf<"sectionTitleMark">) => section("sectionTitleMark", input),

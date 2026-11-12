@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
+import { GrowingTextarea } from "./growing-textarea";
 import { useIsCompactViewport } from "@/components/ui/hooks/use-compact-viewport";
 import { captureSourceSchema, type CaptureInput, type CaptureJob, type Section } from "../section-contract";
 import { failureOf, type RpcFailure, useKnowledgeEntries, useSectionDetail, useWorkstreamWrites } from "./data";
@@ -14,6 +14,7 @@ import { Icon } from "@/components/ui/icon";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { DimensionEditor } from "./dialogs";
 import { KindMark } from "./marks";
+import { knowledgeDecisionToast } from "./knowledge-decisions";
 import { tokens } from "./copy";
 import { useBbNavigate } from "@get-bb/plugin-sdk/app";
 import type { Knowledge, ReviewItem } from "./types";
@@ -29,7 +30,7 @@ export function WhereChoice({ value, onChange, compact = false }: { value: Knowl
   if (compact) return <div className="cortex-candidate-targets flex min-w-0 flex-wrap items-center gap-2 text-[12px]">
     <span>Applies to</span>
     {(["environment", "host"] as const).map(name => <details key={name} className="min-w-0">
-      <summary className={`cursor-pointer rounded-sm border px-2 py-1 focus-visible:ring-1 focus-visible:ring-ring ${value[name].mode === "unknown" ? "border-dashed border-warning/60 text-warning-text" : "border-border-seam"}`}>
+      <summary className={`rounded-sm border px-2 py-1 hover:bg-state-hover hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring ${value[name].mode === "unknown" ? "border-dashed border-warning/60 text-warning-text" : "border-border-seam"}`}>
         {name === "environment" ? "Environment" : "Host"} {value[name].mode === "unknown" ? "?" : value[name].mode === "value" ? value[name].value : "· any"}
       </summary>
       <div className="py-2"><DimensionEditor name={name} label={name === "environment" ? "Environment" : "Host or cluster"} value={value[name]} onChange={next => onChange({ ...value, [name]: next })} /></div>
@@ -40,7 +41,7 @@ export function WhereChoice({ value, onChange, compact = false }: { value: Knowl
     <span className="text-[13px] font-semibold">Where it applies</span>
     <Segmented label="Where it applies" value={choice} options={[{ value: "unknown", label: "Not chosen" }, { value: "all", label: "Everywhere" }, { value: "named", label: "Environment or host" }]} onChange={next => { setNaming(next === "named"); onChange(next === "all" ? { environment: { mode: "not-applicable" }, host: { mode: "not-applicable" } } : unknownWhere()); }} />
     {choice === "named" || !knownWhere(value) ? <details open={naming || undefined} className="text-[13px]">
-      <summary className="cursor-pointer py-1">Choose an environment or host</summary>
+      <summary className="rounded-sm py-1 hover:bg-state-hover hover:text-foreground">Choose an environment or host</summary>
       <div className="mt-2 grid gap-2">
         {(["environment", "host"] as const).map(name => <label key={name} htmlFor={`${id}-${name}`} className="grid gap-1">
           {name === "environment" ? "Environment" : "Host or cluster"}
@@ -75,8 +76,8 @@ export function SuggestionCard({ item, section, onEdit, editRef, onAccepted, acc
         if (out.entry) onAccepted(out.entry);
         toast("Accepted for new sessions. Running sessions keep their context.");
       } else {
-        await writes.transition({ id: item.entry.id, expectedRevision: item.entry.revision, state: "rejected", reason: "Rejected by the person in Cortex" });
-        toast("Rejected. Threads never get it.");
+        const out = await writes.transition({ id: item.entry.id, expectedRevision: item.entry.revision, state: "rejected", reason: "Rejected by the person in Cortex" });
+        knowledgeDecisionToast("Rejected. Threads never get it.", item.entry, out.entry, writes);
       }
     } catch (cause) { setFailure({ revision: item.entry.revision, value: failureOf(cause) }); }
     finally { setBusy(false); }
@@ -93,7 +94,7 @@ export function SuggestionCard({ item, section, onEdit, editRef, onAccepted, acc
     {failure ? <FailureNotice failure={failure} /> : null}
     {!knownWhere(where) ? <p id={hintId} className="text-[12px] text-warning-text">Choose environment and host first</p> : null}
     <div className="flex min-w-0 flex-wrap items-center gap-2"><WhereChoice compact value={where} onChange={value => setWhereDraft({ revision: item.entry.revision, value })} />
-      <TooltipProvider><Tooltip><TooltipTrigger asChild><span><Button aria-describedby={!knownWhere(where) ? hintId : undefined} disabled={busy || accepted || !knownWhere(where)} onClick={() => void act(true)}>{item.entry.kind === "directive" ? "Adopt rule" : "Accept"}</Button></span></TooltipTrigger><TooltipContent>{knownWhere(where) ? "New sessions only" : "Choose environment and host first"}</TooltipContent></Tooltip></TooltipProvider>
+      <TooltipProvider><Tooltip><TooltipTrigger asChild><span><Button aria-describedby={!knownWhere(where) ? hintId : undefined} disabled={busy || accepted || !knownWhere(where)} onClick={() => void act(true)}>{item.entry.kind === "directive" ? "Adopt rule" : "Accept"}</Button></span></TooltipTrigger><TooltipContent data-cortex>{knownWhere(where) ? "New sessions only" : "Choose environment and host first"}</TooltipContent></Tooltip></TooltipProvider>
       <Button ref={editRef} variant="outline" disabled={busy || accepted} onClick={event => onEdit(event.currentTarget)}>Edit</Button><Button variant="ghost" disabled={busy || accepted} onClick={() => void act(false)}>Reject</Button>
     </div>
   </section>;
@@ -103,7 +104,7 @@ function TextFields({ title, text, setTitle, setText, textRef }: { title: string
   const id = useId();
   return <>
     <label htmlFor={`${id}-title`} className="grid gap-1 text-[13px] font-semibold">Title<Input id={`${id}-title`} value={title} onChange={event => setTitle(event.target.value)} className="text-[16px] sm:text-[13px] font-normal" /></label>
-    <label htmlFor={`${id}-text`} className="grid gap-1 text-[13px] font-semibold">Text<Textarea ref={textRef} id={`${id}-text`} value={text} onChange={event => setText(event.target.value)} rows={5} className="text-[16px] sm:text-[13px] font-normal" /></label>
+    <label htmlFor={`${id}-text`} className="grid gap-1 text-[13px] font-semibold">Text<GrowingTextarea ref={textRef} id={`${id}-text`} value={text} onChange={event => setText(event.target.value)} className="text-[16px] sm:text-[13px] font-normal" /></label>
   </>;
 }
 
@@ -137,7 +138,7 @@ export function CandidateDialog({ entry, section, onClose, onReturnFocus }: { en
     finally { setBusy(false); }
   };
   return <Dialog open={open} onOpenChange={next => { if (!next && !busy) setOpen(false); }}>
-    <DialogContent className="max-w-xl" data-cortex-takeaway="" onEscapeKeyDown={event => event.stopPropagation()} onCloseAutoFocus={event => event.preventDefault()} onAfterCloseAutoFocus={() => { onClose(); queueMicrotask(() => onReturnFocus?.(accepted.current)); }}>
+    <DialogContent data-cortex className="cortex-text-dialog max-w-xl" data-cortex-takeaway="" onEscapeKeyDown={event => event.stopPropagation()} onCloseAutoFocus={event => event.preventDefault()} onAfterCloseAutoFocus={() => { onClose(); queueMicrotask(() => onReturnFocus?.(accepted.current)); }}>
       <DialogHeader><DialogTitle>Edit takeaway</DialogTitle><DialogDescription>Revision {base.revision} · original source kept</DialogDescription></DialogHeader>
       <fieldset disabled={busy} className="grid gap-4">
         <TextFields title={title} text={text} setTitle={setTitle} setText={setText} />
@@ -217,7 +218,7 @@ export function CaptureDialog({ section, seed, onClose }: { section: Section; se
     finally { setBusy(false); }
   };
   return <Dialog open onOpenChange={open => { if (!open && !busy) onClose(); }}>
-    <DialogContent className={compact ? "max-w-xl" : "max-w-xl flex flex-col"} style={compact ? undefined : { maxHeight: "calc(100dvh - 2rem)" }} data-cortex-takeaway="">
+    <DialogContent data-cortex className={compact ? "cortex-text-dialog max-w-xl" : "cortex-text-dialog max-w-xl flex flex-col"} style={compact ? undefined : { maxHeight: "calc(100dvh - 2rem)" }} data-cortex-takeaway="">
       <DialogHeader className="shrink-0"><DialogTitle>Save as takeaway</DialogTitle><DialogDescription>{section.canonicalName} · new sessions only</DialogDescription></DialogHeader>
       <div data-cortex-capture-scroll="" className={compact ? "contents" : "grid min-h-0 gap-4 overflow-y-auto"} onFocus={event => {
         if (compact) return;
@@ -233,7 +234,7 @@ export function CaptureDialog({ section, seed, onClose }: { section: Section; se
         <TextFields title={title} text={text} setTitle={setTitle} setText={setText} textRef={textRef} />
         <WhereChoice value={where} onChange={setWhere} />
         <Segmented label="Kind" value={kind} options={[{ value: "finding", label: "Takeaway" }, { value: "directive", label: "Rule to follow" }]} onChange={setKind} />
-        {source.kind === "message" && quoteEditing ? <div className="grid gap-1 text-[13px]"><label htmlFor={quoteId}>Exact source quote</label><Textarea autoFocus id={quoteId} value={quote} rows={3} aria-describedby={`${quoteId}-hint`} onChange={event => setQuote(event.target.value)} /><p id={`${quoteId}-hint`}>Use an exact passage from the original source, at most {KNOWLEDGE_SOURCE_EXCERPT_MAX.toLocaleString()} characters. It is verified when saved.</p></div> : null}
+        {source.kind === "message" && quoteEditing ? <div className="grid gap-1 text-[13px]"><label htmlFor={quoteId}>Exact source quote</label><GrowingTextarea autoFocus id={quoteId} value={quote} aria-describedby={`${quoteId}-hint`} onChange={event => setQuote(event.target.value)} /><p id={`${quoteId}-hint`}>Use an exact passage from the original source, at most {KNOWLEDGE_SOURCE_EXCERPT_MAX.toLocaleString()} characters. It is verified when saved.</p></div> : null}
       </fieldset>
       <div className="border-l-2 border-border-seam pl-3 text-[13px]" data-content>
         {source.kind === "message" ? <><p>Original source: {source.threadId} · message {source.messageSeq}</p><blockquote className="max-h-24 overflow-y-auto whitespace-pre-wrap break-words">{originalQuote}</blockquote><p>The source and selected quote are verified when saved.</p></> : <p>Written by you · no message source</p>}
@@ -278,7 +279,7 @@ export function TakeawayPanel({ threadId, params }: ExperimentalThreadActionTabP
   const seed: CaptureSeed = valid ? { source: parsed.data, text } : { source: { kind: "manual", threadId }, text: "" };
   const invalidSource = sourceValue !== null && sourceValue !== undefined && !valid;
   useEffect(() => setOpen(true), [params]);
-  return <div className="grid gap-3 p-4 text-foreground">
+  return <div data-cortex className="grid gap-3 p-4 text-foreground">
     {read.error ? <FailureNotice failure={read.error} onRetry={read.refetch} /> : null}
     {invalidSource ? <p role="alert">The saved message source is invalid or belongs to another thread. Save from the original message again.</p> : sectionId === null ? <p role="status">This thread is not in a section. Choose a section in bb before saving shared context.</p> : read.data === undefined ? <LoadingRows label="Loading section context" /> : read.data.section.binding.binding === null ? <p role="status">Connect this section from the Cortex page before saving a shared takeaway.</p> : <><Button onClick={() => setOpen(true)}>Save as takeaway</Button>{open ? <CaptureDialog section={read.data.section} seed={seed} onClose={() => setOpen(false)} /> : null}</>}
   </div>;

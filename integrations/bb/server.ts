@@ -26,7 +26,7 @@ import {
   taskRowSchema,
   threadStateSchema,
 } from "./state";
-import { type MemoryTurns, registerMemoryTurns, STEER_PROVIDERS } from "./turns";
+import { type MemoryTurns, registerMemoryTurns, STEER_PROVIDERS, TURN_LIMITS } from "./turns";
 import { registerCortexWatch } from "./watch";
 import { workstreamRpcMethods } from "./workstream-contract";
 import { sectionRpcMethods } from "./section-contract";
@@ -41,6 +41,8 @@ import { draftConsentMethods, draftRetryConsent } from "./draft-policy";
 import { createDraftService } from "./draft-service";
 import { draftHandlers, unavailableDraftHandlers } from "./draft-rpc";
 import { registerDraftEvents } from "./draft-events";
+import { type NewThreadMemory, pendingContextRpcMethods } from "./pending-context-contract";
+import { createPendingContext, pendingHandlers, unavailablePendingHandlers } from "./pending-context";
 
 const THREAD_ID = /^thr_[0-9a-z]{6,40}$/;
 const threadIdInputSchema = z.object({ threadId: z.string().regex(THREAD_ID) });
@@ -65,6 +67,7 @@ export const rpcContract = defineRpcContract({
   ...sectionRpcMethods,
   ...draftRpcMethods,
   ...draftConsentMethods,
+  ...pendingContextRpcMethods,
   threadState: { input: threadIdInputSchema, output: threadStateSchema },
   task: { input: threadTaskInputSchema, output: taskDetailSchema },
   pin: { input: pinInputSchema, output: threadStateSchema },
@@ -287,6 +290,7 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
       ...unavailableWorkstreamHandlers(reason),
       ...unavailableSectionHandlers(reason),
       ...unavailableDraftHandlers(reason),
+      ...unavailablePendingHandlers(reason),
       "provider-retry.v1.consent": consent,
       threadState: unavailable,
       task: unavailable,
@@ -321,7 +325,29 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
   });
   const sections = createSections(bb, workstreams);
   const drafts = createDraftService(bb, workstreams);
-  registerWorkstreamAgents(bb, workstreams, drafts);
+  // What a new thread a person starts gets from ordinary memory, as configure below gives it.
+  const newThreadMemory = (projectId: string | null, scoped: string | null): NewThreadMemory => {
+    const mode = effectiveMode(memorySetting(current.memory), null, false);
+    const primer = mode === "write" && projectId !== null ? state.primerFor(projectId) : null;
+    // The longer usage text, so a summary that fits here fits for every provider.
+    const usage = { recall: mode !== "off", hits: true };
+    const text = scoped === null ? instructionsFor(primer, usage) : boundInstructionsFor(scoped, primer, usage);
+    return {
+      mode,
+      summary: {
+        cached: primer !== null,
+        ids: primer === null || projectId === null ? [] : state.primerIdsFor(projectId),
+        chars: primer?.length ?? 0,
+        shortened: primer !== null && !text.includes(primer),
+      },
+      lookup:
+        mode === "off"
+          ? null
+          : { maxTasks: mode === "write" ? TURN_LIMITS.firstHits : TURN_LIMITS.laterHits, providers: [...STEER_PROVIDERS] },
+    };
+  };
+  const pendingContext = createPendingContext(bb, workstreams, sections, { memory: newThreadMemory });
+  registerWorkstreamAgents(bb, workstreams, drafts, pendingContext);
   registerDraftEvents(bb, drafts);
   const tracker = createMemoryTracker(RECALL_BUDGET);
   const publish = (channel: CortexRealtimeChannel, payload: unknown): void => bb.realtime.publish(channel, payload);
@@ -387,6 +413,7 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
     ...workstreamHandlers(workstreams, sections),
     ...sectionHandlers(sections, drafts),
     ...draftHandlers(drafts),
+    ...pendingHandlers(pendingContext),
     "provider-retry.v1.consent": consent,
     threadState: ({ threadId }) => state.threadState(threadId),
     task: ({ threadId, taskId }) => state.task(threadId, taskId),

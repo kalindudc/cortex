@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, waitFor, within } from "@testing-library/react";
+import { makeThreadResponse } from "@get-bb/plugin-sdk/testing";
 import type { PluginSidebarThread } from "@get-bb/plugin-sdk/app";
 import { loadPluginApp, renderSlot, type PluginRpcTestHandlers } from "@get-bb/plugin-sdk/testing/app";
 import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
@@ -23,13 +24,14 @@ const shared = section("sec_envoy", "Envoy cluster-service", true);
 const unshared = section("sec_local", "local-dev", false);
 let app: Awaited<ReturnType<typeof loadPluginApp>>;
 beforeAll(async () => { app = await loadPluginApp(() => import("./app")); });
-afterEach(cleanup);
+afterEach(() => { cleanup(); localStorage.clear(); sessionStorage.clear(); });
 
 function fixture(sections = [unshared, shared]) {
   let fail = false;
   let items = [{ entry, workstream: ws, hints: [] }, { entry: { ...entry, id: "kn_disputed", state: "disputed" as const }, workstream: ws, hints: [] }];
   const eligibility: SectionEligibility = { computedAt: now, status: "ready", error: null, entries: [{ knowledge: { ...entry, state: "approved", approval: { actor, at: now } }, text: entry.text, estimatedTokens: 100, overrideActor: null, origin: "canonical" }], notices: [], exclusions: [{ id: "kn_held", reason: "candidate" }], exactText: entry.text, estimatedTokens: 100, budgetTokens: 1000 };
   const rpc: Partial<PluginRpcTestHandlers<typeof contract>> = {
+    knowledgeShow: () => ({ entry, workstream: ws }),
     sectionList: () => { if (fail) throw new Error("Refresh unavailable"); return { sections }; },
     sectionBindings: () => ({ bindings: sections.map(s => s.binding) }),
     sectionDetail: ({ sectionId }) => ({ section: sections.find(s => s.id === sectionId)!, threads: [], eligibility, review: { items, total: items.length, limit: 50, offset: 0 } }),
@@ -57,6 +59,7 @@ test.each(["over-budget", "missing-required", "unavailable", "unbound"] as const
 describe("page route contract", () => {
   test.each([
     ["", { kind: "overview" }],
+    ["overview", { kind: "overview" }],
     ["review", { kind: "review" }],
     ["workstreams", { kind: "workstreams" }],
     ["library", { kind: "library" }],
@@ -96,7 +99,110 @@ describe("page route contract", () => {
   });
   test("bindings redirects to Overview with replace", async () => {
     const slot = renderSlot(app.navPanels[0]!, { subPath: "bindings" }, fixture().options);
-    await waitFor(() => expect(lastNavigation(slot)).toEqual({ method: "toPluginPanel", path: "cortex", options: { subPath: "", replace: true } }));
+    await waitFor(() => expect(lastNavigation(slot)).toEqual({ method: "toPluginPanel", path: "cortex", options: { subPath: "overview", replace: true } }));
+  });
+});
+
+describe("place restoration", () => {
+  const lastRouteKey = "test-plugin.cortex.last-route";
+  test("root returns to the remembered page with replace", async () => {
+    const previous = renderSlot(app.navPanels[0]!, { subPath: "review" }, fixture().options);
+    await previous.findByRole("region", { name: "Review queue" });
+    previous.unmount();
+    const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, fixture().options);
+    await waitFor(() => expect(lastNavigation(slot)).toMatchObject({ options: { subPath: "review", replace: true } }));
+    expect(slot.queryByRole("region", { name: "Review queue" })).toBeNull();
+  });
+  test.each(["sections/sec_envoy/knowledge/kn_bootstrap", "workstreams/ws_envoy/kn_bootstrap", "threads/thr_aaaaaaaa"])("root validates and restores %s before rendering its target", async subPath => {
+    localStorage.setItem(lastRouteKey, JSON.stringify(subPath));
+    const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, { ...fixture().options, sdk: { threads: { get: async () => makeThreadResponse({ id: sidebarThread.id }) } } });
+    await waitFor(() => expect(lastNavigation(slot)).toMatchObject({ options: { subPath, replace: true } }));
+    expect(slot.queryByRole("alert")).toBeNull();
+  });
+  test.each(["nonsense", "sections/sec_deleted", "workstreams/ws_deleted", "threads/thr_deleted1"])("stale remembered route %s falls back without rendering an error", async subPath => {
+    localStorage.setItem(lastRouteKey, JSON.stringify(subPath));
+    const backend = fixture();
+    backend.options.rpc.workstreamShow = () => { throw new Error("Workstream not found"); };
+    const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, { ...backend.options, sdk: { threads: { get: async () => { throw new Error("Thread not found"); } } } });
+    await waitFor(() => expect(lastNavigation(slot)).toMatchObject({ options: { subPath: "overview", replace: true } }));
+    expect(slot.queryByRole("alert")).toBeNull();
+    expect(JSON.parse(localStorage.getItem(lastRouteKey)!)).toBe("overview");
+    slot.unmount();
+    const again = renderSlot(app.navPanels[0]!, { subPath: "" }, fixture().options);
+    expect(await again.findByRole("heading", { name: "Sections" })).toBeTruthy();
+    expect(again.inspection.navigateCalls).toHaveLength(0);
+  });
+  test.each(["sections/sec_envoy/knowledge/kn_deleted", "workstreams/ws_envoy/kn_deleted"])("a deleted remembered entry in %s never mounts an error view", async subPath => {
+    localStorage.setItem(lastRouteKey, JSON.stringify(subPath));
+    const backend = fixture();
+    backend.options.rpc.knowledgeShow = () => { throw new Error("Knowledge not found"); };
+    const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, backend.options);
+    await waitFor(() => expect(lastNavigation(slot)).toMatchObject({ options: { subPath: "overview", replace: true } }));
+    expect(slot.queryByRole("alert")).toBeNull();
+  });
+  test("explicit Overview overrides the remembered route", async () => {
+    localStorage.setItem(lastRouteKey, JSON.stringify("review"));
+    const slot = renderSlot(app.navPanels[0]!, { subPath: "overview" }, fixture().options);
+    expect(await slot.findByRole("heading", { name: "Sections" })).toBeTruthy();
+    expect(slot.inspection.navigateCalls).toHaveLength(0);
+    expect(JSON.parse(localStorage.getItem(lastRouteKey)!)).toBe("overview");
+  });
+  test("Review restores its filter, selected entry and detail view", async () => {
+    const backend = fixture();
+    backend.options.rpc.reviewQueue = () => ({ items: [
+      { entry, workstream: ws, hints: [] },
+      { entry: { ...entry, id: "kn_second", title: "Second takeaway" }, workstream: ws, hints: [] },
+      { entry: { ...entry, id: "kn_other", title: "Other takeaway" }, workstream: { ...ws, id: "ws_other", name: "Other workstream" }, hints: [] },
+    ], total: 3, limit: 100, offset: 0 });
+    const previous = renderSlot(app.navPanels[0]!, { subPath: "review" }, backend.options);
+    fireEvent.click(await previous.findByRole("button", { name: ws.name }));
+    fireEvent.click(within(previous.getByRole("list", { name: "Waiting for your review" })).getByRole("button", { name: /Second takeaway/ }));
+    const master = previous.container.querySelector<HTMLElement>(".cortex-master")!;
+    const detail = previous.container.querySelector<HTMLElement>(".cortex-detail")!;
+    master.scrollTop = 50; fireEvent.scroll(master);
+    detail.scrollTop = 100; fireEvent.scroll(detail);
+    previous.unmount();
+    const again = renderSlot(app.navPanels[0]!, { subPath: "review" }, backend.options);
+    expect((await again.findByRole("button", { name: ws.name })).getAttribute("aria-pressed")).toBe("true");
+    expect(within(again.getByRole("list", { name: "Waiting for your review" })).getByRole("button", { name: /Second takeaway/ }).getAttribute("aria-current")).toBe("true");
+    expect(again.container.querySelector("[data-show-detail]")).toBeTruthy();
+    await waitFor(() => expect(again.container.querySelector<HTMLElement>(".cortex-detail")!.scrollTop).toBe(100));
+    expect(again.container.querySelector<HTMLElement>(".cortex-master")!.scrollTop).toBe(50);
+  });
+  test("Library restores its query, selected entry and detail view", async () => {
+    const backend = fixture();
+    backend.options.rpc.knowledgeSearch = () => ({ items: [
+      { entry, workstream: ws, hints: [] },
+      { entry: { ...entry, id: "kn_second", title: "Second takeaway" }, workstream: ws, hints: [] },
+    ], total: 2, limit: 50, offset: 0 });
+    const previous = renderSlot(app.navPanels[0]!, { subPath: "library" }, backend.options);
+    fireEvent.change(await previous.findByRole("textbox", { name: "Search saved knowledge" }), { target: { value: "bootstrap" } });
+    fireEvent.click(await previous.findByRole("button", { name: /Second takeaway/ }));
+    previous.unmount();
+    const again = renderSlot(app.navPanels[0]!, { subPath: "library" }, backend.options);
+    expect((await again.findByRole("textbox", { name: "Search saved knowledge" }) as HTMLInputElement).value).toBe("bootstrap");
+    await again.findByRole("list", { name: "Results" });
+    expect(within(again.getByRole("list", { name: "Results" })).getByRole("button", { name: /Second takeaway/ }).getAttribute("aria-current")).toBe("true");
+    expect(again.container.querySelector("[data-show-detail]")).toBeTruthy();
+  });
+  test("section knowledge restores its topic when the entry route changes", async () => {
+    const backend = fixture();
+    const previous = renderSlot(app.navPanels[0]!, { subPath: "sections/sec_envoy/knowledge" }, backend.options);
+    fireEvent.click(within(await previous.findByRole("radiogroup", { name: "Topic" })).getByRole("radio", { name: "Shared basics" }));
+    previous.unmount();
+    const again = renderSlot(app.navPanels[0]!, { subPath: "sections/sec_envoy/knowledge/kn_bootstrap" }, backend.options);
+    expect(within(await again.findByRole("radiogroup", { name: "Topic" })).getByRole("radio", { name: "Shared basics" }).getAttribute("aria-checked")).toBe("true");
+  });
+  test("restores the real Overview scrollport after remount", async () => {
+    const previous = renderSlot(app.navPanels[0]!, { subPath: "overview" }, fixture().options);
+    await previous.findByRole("heading", { name: "Sections" });
+    const port = previous.container.querySelector<HTMLElement>('[data-part="OverviewPage"]')!;
+    port.scrollTop = 240;
+    fireEvent.scroll(port);
+    previous.unmount();
+    const again = renderSlot(app.navPanels[0]!, { subPath: "overview" }, fixture().options);
+    await again.findByRole("heading", { name: "Sections" });
+    await waitFor(() => expect(again.container.querySelector<HTMLElement>('[data-part="OverviewPage"]')!.scrollTop).toBe(240));
   });
 });
 
@@ -112,12 +218,14 @@ describe("sidebar", () => {
     expect(slot.getByRole("button", { name: "Workstreams 1 workstream" })).toBeTruthy();
     expect(slot.queryByText("Advanced workstreams")).toBeNull();
     expect(slot.queryByRole("button", { name: "Connections" })).toBeNull();
+    fireEvent.click(slot.getByRole("button", { name: "Overview" }));
+    expect(lastNavigation(slot)).toMatchObject({ options: { subPath: "overview" } });
     fireEvent.click(review);
     expect(lastNavigation(slot)).toMatchObject({ options: { subPath: "review" } });
     fireEvent.click(slot.getByRole("button", { name: "Workstreams 1 workstream" }));
     expect(lastNavigation(slot)).toMatchObject({ options: { subPath: "workstreams" } });
   });
-  test.each([["review", "Review 2 waiting"], ["library", "Library"], ["workstreams", "Workstreams 1 workstream"]])("%s marks its navigation row current", async (subPath, name) => {
+  test.each([["overview", "Overview"], ["review", "Review 2 waiting"], ["library", "Library"], ["workstreams", "Workstreams 1 workstream"]])("%s marks its navigation row current", async (subPath, name) => {
     const slot = renderSlot({ component: CortexSidebar }, { subPath }, fixture().options);
     expect((await slot.findByRole("button", { name })).getAttribute("aria-current")).toBe("page");
     fireEvent.click(slot.getByRole("button", { name: "Not shared 1 section" }));
@@ -305,7 +413,7 @@ describe("Workstreams list", () => {
 });
 
 function PageTitle({ subPath }: { subPath: string }) { return <span>{useCortexPageTitle({ subPath })?.title}</span>; }
-test.each([["", "Overview"], ["review", "Review"], ["bindings", "Overview"], ["workstreams", "Workstreams"], ["library", "Library"], ["sections/sec_envoy/knowledge", ws.name], ["workstreams/ws_envoy", ws.name], ["threads/thr_aaaaaaaa", "Inspect staging"]])("page title for %s is %s", async (subPath, title) => {
+test.each([["", "Overview"], ["overview", "Overview"], ["review", "Review"], ["bindings", "Overview"], ["workstreams", "Workstreams"], ["library", "Library"], ["sections/sec_envoy/knowledge", ws.name], ["workstreams/ws_envoy", ws.name], ["threads/thr_aaaaaaaa", "Inspect staging"]])("page title for %s is %s", async (subPath, title) => {
   const slot = renderSlot({ component: PageTitle }, { subPath }, fixture().options);
   expect(await slot.findByText(title)).toBeTruthy();
 });

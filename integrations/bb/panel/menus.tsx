@@ -135,7 +135,7 @@ export function SwitcherMenu({
           <Icon name="ChevronDown" className="size-3.5 shrink-0" aria-hidden />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" mobileTitle="Thread tasks" className="w-[min(26rem,calc(100vw-2rem))] pointer-coarse:[&_[role=menuitem]]:min-h-11 max-[480px]:[&_[role=menuitem]]:min-h-11">
+      <DropdownMenuContent data-cortex align="start" mobileTitle="Thread tasks" className="w-[min(26rem,calc(100vw-2rem))] pointer-coarse:[&_[role=menuitem]]:min-h-11 max-[480px]:[&_[role=menuitem]]:min-h-11">
         <div className="p-1">
           <TaskSearchField value={query} onChange={setQuery} autoFocus={open} />
         </div>
@@ -219,7 +219,7 @@ export function MoreMenu({
           <Icon name="MoreHorizontal" className="size-4" aria-hidden />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" mobileTitle={`Task #${taskId}`} className="w-60 pointer-coarse:[&_[role=menuitem]]:min-h-11 max-[480px]:[&_[role=menuitem]]:min-h-11">
+      <DropdownMenuContent data-cortex align="end" mobileTitle={`Task #${taskId}`} className="w-60 pointer-coarse:[&_[role=menuitem]]:min-h-11 max-[480px]:[&_[role=menuitem]]:min-h-11">
         <DropdownMenuItem onSelect={onPin}>
           <Icon name={pinned ? "PinOff" : "Pin"} aria-hidden />
           {pinned ? "Unpin" : "Pin as focus"}

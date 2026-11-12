@@ -1,3 +1,4 @@
+import { isFlag, isPageCount, usePlaceState } from "./place";
 import { type ReactNode, useState } from "react";
 import { experimental_useSidebarThreads, useBbNavigate } from "@get-bb/plugin-sdk/app";
 import { toast } from "sonner";
@@ -12,9 +13,10 @@ import {
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
 import { actorWord, AUTHOR_WORD, facetWord, SOURCE_STATUS_WORD } from "./copy";
-import { type RpcFailure, useHistory, useKnowledgeEntries, useWorkstreamWrites } from "./data";
+import { failureOf, type RpcFailure, useHistory, useKnowledgeEntries, useWorkstreamWrites } from "./data";
 import { ConfirmDialog, EditKnowledgeDialog, ObserveDialog } from "./dialogs";
 import { displayState, isExpired, relativeAge, shortTime } from "./model";
+import { isHistorical, KnowledgeDecisionFailure, knowledgeDecisionMessage, knowledgeDecisionToast } from "./knowledge-decisions";
 import { Applicability, FailureNotice, Hint, KnowledgeText, LoadingRows, PagedFooter } from "./parts";
 import { type HeldReason, KindMark, KnowledgeStateMark, ReasonChip } from "./marks";
 import { CORTEX_PAGE_PATH } from "./thread-context";
@@ -66,7 +68,7 @@ function ExpiryLine({ entry, now }: { entry: Knowledge; now: number }) {
 }
 
 export function KnowledgeHistory({ id }: { id: string }) {
-  const [pages, setPages] = useState(1);
+  const [pages, setPages] = usePlaceState(`knowledge-history-pages:${id}`, 1, isPageCount);
   const read = useHistory(id, pages);
   if (read.error) return <FailureNotice failure={read.error} onRetry={read.refetch} />;
   if (read.data === undefined) return <LoadingRows rows={2} label="Loading history" />;
@@ -100,11 +102,13 @@ export function KnowledgeHistory({ id }: { id: string }) {
   );
 }
 
-type Dialog = "edit" | "observe" | "evidence" | "archive" | "forget" | null;
+type Dialog = "edit" | "observe" | "evidence" | "archive" | "forget" | "restore-review" | "restore-approve" | null;
 
 /** The actions a person can take on one entry, by state; approval is always its own explicit step. */
 export function KnowledgeActions({ entry, workstream }: { entry: Knowledge; workstream: Workstream | null }) {
   const writes = useWorkstreamWrites();
+  const conflicts = useKnowledgeEntries(entry.conflicts);
+  const noLiveConflicts = conflicts.every(read => read.data !== undefined && !read.error && isHistorical(read.data.entry));
   const [dialog, setDialog] = useState<Dialog>(null);
   const [failure, setFailure] = useState<RpcFailure | null>(null);
   const now = Date.now();
@@ -112,11 +116,23 @@ export function KnowledgeActions({ entry, workstream }: { entry: Knowledge; work
   const transition = async (to: "approved" | "recheck" | "archived" | "rejected" | "forgotten", reason: string, done: string) => {
     setFailure(null);
     try {
-      await writes.transition({ id: entry.id, expectedRevision: entry.revision, state: to, reason });
-      toast(done);
+      const out = await writes.transition({ id: entry.id, expectedRevision: entry.revision, state: to, reason });
+      knowledgeDecisionToast(done, entry, out.entry, writes);
     } catch (cause) {
-      setFailure(cause as RpcFailure);
-      throw cause;
+      setFailure(failureOf(cause));
+      writes.refreshKnowledge();
+      throw { ...failureOf(cause), message: knowledgeDecisionMessage(cause) };
+    }
+  };
+  const restoreReview = async () => {
+    setFailure(null);
+    try {
+      await writes.edit({ id: entry.id, expectedRevision: entry.revision, reason: "Restored to review in Cortex" });
+      toast("Restored to review. Not approved; threads will not receive it yet.");
+    } catch (cause) {
+      setFailure(failureOf(cause));
+      writes.refreshKnowledge();
+      throw { ...failureOf(cause), message: knowledgeDecisionMessage(cause) };
     }
   };
   const quiet = (run: () => Promise<void>) => () => void run().catch(() => {});
@@ -128,7 +144,7 @@ export function KnowledgeActions({ entry, workstream }: { entry: Knowledge; work
   return (
     <div data-cortex className="cortex-knowledge flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-1.5">
-        {entry.state === "candidate" ? (
+        {entry.state === "candidate" && noLiveConflicts ? (
           <Button size="sm" onClick={quiet(() => transition("approved", "Approved in Cortex", `Approved. Threads in ${workstream?.name ?? "the workstream"} get it from their next session.`))}>
             Approve
           </Button>
@@ -156,6 +172,16 @@ export function KnowledgeActions({ entry, workstream }: { entry: Knowledge; work
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent data-cortex className="cortex-knowledge w-60" align="end" mobileTitle={entry.title}>
+              {entry.state === "archived" || entry.state === "rejected" ? (
+                <DropdownMenuItem onSelect={open("restore-review")}>
+                  <Icon name="RotateCcw" aria-hidden />Restore to review
+                </DropdownMenuItem>
+              ) : null}
+              {entry.state === "archived" && entry.approval !== null && noLiveConflicts ? (
+                <DropdownMenuItem onSelect={open("restore-approve")}>
+                  <Icon name="Check" aria-hidden />Restore and approve
+                </DropdownMenuItem>
+              ) : null}
               {entry.state === "approved" ? (
                 <DropdownMenuItem onSelect={quiet(() => transition("recheck", "Sent for re-check in Cortex", "Held back until someone re-checks it"))}>
                   <Icon name="Clock" aria-hidden />
@@ -168,7 +194,7 @@ export function KnowledgeActions({ entry, workstream }: { entry: Knowledge; work
                   Reject
                 </DropdownMenuItem>
               ) : null}
-              {entry.state !== "archived" ? (
+              {entry.state !== "archived" && entry.state !== "superseded" ? (
                 <DropdownMenuItem onSelect={open("archive")}>
                   <Icon name="Archive" aria-hidden />
                   Archive…
@@ -185,7 +211,31 @@ export function KnowledgeActions({ entry, workstream }: { entry: Knowledge; work
           </DropdownMenu>
         ) : null}
       </div>
-      {failure ? <FailureNotice failure={failure} /> : null}
+      {entry.state === "forgotten" ? <p className="text-[12px] text-muted-foreground">Forgotten text is gone and cannot be restored.</p> : null}
+      {entry.state === "superseded" ? <p className="text-[12px] text-muted-foreground">Superseded knowledge needs a separate replacement decision, not restore.</p> : null}
+      {failure ? <KnowledgeDecisionFailure failure={failure} /> : null}
+      <ConfirmDialog
+        title={`Restore ${entry.title} to review?`}
+        facts={[
+          { icon: "RotateCcw", text: "Returns as a candidate with its wording and sources unchanged." },
+          { icon: "Clock", text: "Not approved. Threads will not receive it until you approve it." },
+        ]}
+        confirm="Restore to review"
+        open={dialog === "restore-review"}
+        onOpenChange={close}
+        onConfirm={restoreReview}
+      />
+      <ConfirmDialog
+        title={`Restore and approve ${entry.title}?`}
+        facts={[
+          { icon: "Check", text: "Previously approved, with no live conflicts. Threads get it from their next session if its scope and expiry allow it." },
+          { icon: "SideChat", text: "Sessions already running keep what they received." },
+        ]}
+        confirm="Restore and approve"
+        open={dialog === "restore-approve"}
+        onOpenChange={close}
+        onConfirm={() => transition("approved", "Restored and approved in Cortex", "Restored and approved for future sessions")}
+      />
       <EditKnowledgeDialog entry={entry} workstream={workstream} open={dialog === "edit"} onOpenChange={close} />
       <ObserveDialog entry={entry} mode="observe" open={dialog === "observe"} onOpenChange={close} />
       <ObserveDialog entry={entry} mode="evidence" open={dialog === "evidence"} onOpenChange={close} />
@@ -229,10 +279,10 @@ async function copyKnowledgeId(id: string) {
   }
 }
 
-function KnowledgeSourceQuote({ source }: { source: KnowledgeSource }) {
+function KnowledgeSourceQuote({ source, entryId }: { source: KnowledgeSource; entryId: string }) {
   const navigate = useBbNavigate();
   const sidebar = experimental_useSidebarThreads();
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = usePlaceState(`source-expanded:${entryId}:${source.ref}`, false, isFlag);
   const thread = /^@thread:([^#]+)#msg=(\d+)$/.exec(source.ref);
   const web = /^https?:\/\/\S+$/.test(source.ref);
   const long = !!source.excerpt && (source.excerpt.length > 280 || source.excerpt.split("\n").length > 3);
@@ -241,7 +291,7 @@ function KnowledgeSourceQuote({ source }: { source: KnowledgeSource }) {
     <li className="min-w-0 border-l-2 border-border-seam bg-surface-recessed px-3 py-2" data-part="SourceExcerpt">
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-muted-foreground">
         <span className="inline-flex items-center gap-1"><Icon name={source.authorType === "agent" ? "Bot" : source.authorType === "human" ? "UserRound" : "Info"} className="size-3.5 shrink-0" aria-hidden />{AUTHOR_WORD[source.authorType]}</span>
-        {thread || web ? <button type="button" title={source.ref} aria-label={label} className="min-w-0 break-words rounded-sm text-left underline decoration-border underline-offset-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" onClick={() => {
+        {thread || web ? <button type="button" title={source.ref} aria-label={label} className="min-w-0 break-words rounded-sm text-left underline decoration-border underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" onClick={() => {
           if (thread) navigate.toThread(thread[1]!);
           else if (!navigate.openUrl(source.ref)) toast.error("bb could not open this link here.");
         }}>{label}</button> : <span title={source.ref}>{label}</span>}
@@ -281,7 +331,7 @@ export function KnowledgeDetail({
     const thread = sidebar.threads.find(row => `bb-${row.id}` === actor.id);
     return thread ? `Agent in ${thread.displayTitle}` : "Agent";
   };
-  const [showHistory, setShowHistory] = useState(false);
+  const [showHistory, setShowHistory] = usePlaceState(`knowledge-history:${entry.id}`, false, isFlag);
   return (
     <section data-cortex data-part="KnowledgeSheet" aria-label={entry.title} className="cortex-knowledge flex min-w-0 flex-col gap-3">
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
@@ -309,7 +359,7 @@ export function KnowledgeDetail({
       <Pointers entry={entry} onOpen={onOpen} />
       <div className="flex flex-col gap-2">
         <h3 className="flex items-center gap-2 text-[13px] font-semibold">Sources <span className="text-[11.5px] font-normal text-muted-foreground">{entry.sources.length}</span></h3>
-        {entry.sources.length === 0 ? <p className="text-[12px] text-muted-foreground">No sources.</p> : <ul className="flex min-w-0 flex-col gap-2">{entry.sources.map((source, index) => <KnowledgeSourceQuote key={`${entry.id}-${index}-${source.ref}`} source={source} />)}</ul>}
+        {entry.sources.length === 0 ? <p className="text-[12px] text-muted-foreground">No sources.</p> : <ul className="flex min-w-0 flex-col gap-2">{entry.sources.map((source, index) => <KnowledgeSourceQuote key={`${entry.id}-${index}-${source.ref}`} source={source} entryId={entry.id} />)}</ul>}
       </div>
       {children}
       <div className="flex flex-wrap items-start gap-2">

@@ -13,6 +13,7 @@ import { CORTEX_PAGE_PATH } from "./ui/thread-context";
 import { TAKEAWAY_TAB_ID, TakeawayPanel, saveMessageAction } from "./ui/takeaway";
 import { saveTakeawayAction } from "./ui/thread-actions";
 import { DraftingSettings } from "./ui/draft-settings";
+import { NEW_THREAD_OPEN, NewThreadContextBanner } from "./ui/new-thread";
 import "./ui/section.css";
 import "./ui/cortex.css";
 
@@ -69,4 +70,11 @@ export default definePluginApp(app => {
   app.slots.experimental_tab({ context: { kind: "thread" }, availability: "action", id: TAKEAWAY_TAB_ID, title: "Save takeaway", icon: "Star", component: TakeawayPanel });
   app.slots.messageAction(saveMessageAction);
   app.slots.messageDirective({ id: "cortex", component: CortexCard });
+  // bb renders composer banners on its root New thread composer; this card follows that composer's draft.
+  app.composer.customize({
+    id: "cortex-new-thread",
+    scopes: ["new-thread"],
+    banners: [{ id: "context", chrome: "card", component: NewThreadContextBanner }],
+    plusMenu: [{ id: "context", label: "What this thread starts with", icon: "Brain", run: ({ composer }) => { window.dispatchEvent(new CustomEvent(NEW_THREAD_OPEN, { detail: composer.key })); } }],
+  });
 });

@@ -1,3 +1,4 @@
+import { isFlag, isOffset, usePlaceState } from "./place";
 import { type ReactNode, type Ref, useEffect, useRef, useState } from "react";
 import { experimental_ThreadStatusGlyph as ThreadStatusGlyph, experimental_useSidebarThreads, useBbNavigate } from "@get-bb/plugin-sdk/app";
 import { toast } from "sonner";
@@ -12,7 +13,7 @@ import { cn } from "@/lib/utils";
 import type { ConnectionJob, ConnectInput, Section } from "../section-contract";
 import { failureOf, type OutputOf, useDraftJobs, useKnowledgeEntries, useSectionCaptureJobs, useSectionDetail, useSections, useWorkstream, useWorkstreams, useWorkstreamWrites } from "./data";
 import { BindingDialog, ConfirmDialog } from "./dialogs";
-import { Applicability, FailureNotice, LoadingRows, SourceList } from "./parts";
+import { Applicability, CORTEX_TAB_LIST, CORTEX_TAB_TRIGGER, FailureNotice, LoadingRows, SourceList } from "./parts";
 import { actorWord, deliverySummary, dimensionWord, facetWord, plural, tokens } from "./copy";
 import { CandidateDialog, CaptureDialog, SuggestionCard } from "./takeaway";
 import { CORTEX_PAGE_PATH } from "./thread-context";
@@ -23,6 +24,7 @@ import { heldReason, KindMark, ReasonChip } from "./marks";
 import { KnowledgeActions, KnowledgeDetail } from "./knowledge";
 import { relativeAge } from "./model";
 import { WorkstreamKnowledge, WorkstreamEdits } from "./workstreams";
+import { rememberComposeSection } from "./new-thread-section";
 import type { Knowledge, ReviewItem, Workstream } from "./types";
 
 export function ConnectSectionDialog({ section, workstreams, connections, onClose }: { section: Section; workstreams: Workstream[]; connections: Section[]; onClose: () => void }) {
@@ -57,11 +59,11 @@ export function ConnectSectionDialog({ section, workstreams, connections, onClos
     catch (cause) { setFailure(failureOf(cause)); }
     finally { setBusy(false); }
   };
-  return <Dialog open onOpenChange={open => { if (!open && !busy) onClose(); }}><DialogContent className="max-w-xl" data-cortex-takeaway="">
+  return <Dialog open onOpenChange={open => { if (!open && !busy) onClose(); }}><DialogContent data-cortex className="max-w-xl" data-cortex-takeaway="">
     <DialogHeader><DialogTitle className="flex items-center gap-2"><Icon name="Brain" className="size-4 text-primary" aria-hidden />Share context in {section.canonicalName}</DialogTitle><DialogDescription>Old conversations are not imported. Running sessions are not changed.</DialogDescription></DialogHeader>
     <fieldset disabled={busy || intent !== null} className="grid min-w-0 gap-2">
       <legend className="sr-only">Workstream</legend>
-      <label className={cn("flex cursor-pointer items-center gap-2 rounded-md border border-border-seam bg-card p-3 text-[13px]", choice === "create" && "bg-surface-selected border-surface-selected-border")}><input type="radio" name="cortex-connect-choice" aria-label="New workstream" checked={choice === "create"} onChange={() => setChoice("create")} /><span className="font-semibold">New workstream</span></label>
+      <label className={cn("flex items-center gap-2 rounded-md border border-border-seam bg-card p-3 text-[13px] has-[:enabled]:hover:bg-state-hover", choice === "create" && "bg-surface-selected border-surface-selected-border")}><input type="radio" name="cortex-connect-choice" aria-label="New workstream" checked={choice === "create"} onChange={() => setChoice("create")} /><span className="font-semibold">New workstream</span></label>
       {choice === "create" ? <label className="grid gap-1 px-3 pb-2 text-[13px]">Workstream name<Input value={name} onChange={event => setName(event.target.value)} className="text-[16px] sm:text-[13px]" /></label> : null}
       {workstreams.filter(workstream => !workstream.archived).map(workstream => <ConnectionWorkstreamChoice key={workstream.id} workstream={workstream} connections={connections} selected={choice === "reuse" && selected === workstream.id} onSelect={() => { setChoice("reuse"); setSelected(workstream.id); }} />)}
     </fieldset>
@@ -76,7 +78,7 @@ export function ConnectSectionDialog({ section, workstreams, connections, onClos
 
 function ConnectionWorkstreamChoice({ workstream, connections, selected, onSelect }: { workstream: Workstream; connections: Section[]; selected: boolean; onSelect: () => void }) {
   const names = connections.filter(row => row.binding.binding?.workstreamId === workstream.id).map(row => row.canonicalName);
-  return <label className={cn("flex min-w-0 cursor-pointer items-start gap-2 rounded-md border border-border-seam bg-card p-3 text-[13px]", selected && "bg-surface-selected border-surface-selected-border")}>
+  return <label className={cn("flex min-w-0 items-start gap-2 rounded-md border border-border-seam bg-card p-3 text-[13px] has-[:enabled]:hover:bg-state-hover", selected && "bg-surface-selected border-surface-selected-border")}>
     <input type="radio" name="cortex-connect-choice" aria-label={`Use ${workstream.name}`} checked={selected} onChange={onSelect} className="mt-1 shrink-0" />
     <span className="grid min-w-0 gap-1"><span className="font-semibold break-words">Use {workstream.name}</span><span className="break-words text-[12px] text-muted-foreground">{names.length ? `also shared by ${names.join(", ")}` : "Not connected to another section"}</span></span>
   </label>;
@@ -107,7 +109,7 @@ export function SectionView({ data, sections, workstreams, onConnect, onCapture,
   const [highlightKey, setHighlightKey] = useState<string | null>(null);
   const [landed, setLanded] = useState<string[]>([]);
   const [accepted, setAccepted] = useState<string[]>([]);
-  const [allThreads, setAllThreads] = useState(false);
+  const [allThreads, setAllThreads] = usePlaceState("all-threads", false, isFlag);
   const draftMenuOpener = useRef<HTMLButtonElement>(null);
   const entryOpener = useRef<HTMLButtonElement | null>(null);
   const detailClose = useRef<HTMLButtonElement>(null);
@@ -153,8 +155,8 @@ export function SectionView({ data, sections, workstreams, onConnect, onCapture,
   };
   const editBinding = onBinding ?? onConnect;
   const library = () => navigate.toPluginPanel("cortex", { subPath: "library" });
-  const newThread = <TooltipProvider><Tooltip><TooltipTrigger asChild><Button variant="outline" aria-label={`New thread in ${section.canonicalName}`} onClick={() => navigate.toCompose({ placement: { sectionId: section.id, pinned: false }, focusPrompt: true })}><Icon name="Plus" className="size-3.5" aria-hidden />New thread</Button></TooltipTrigger><TooltipContent>Opens the native composer in this section without replacing your draft.</TooltipContent></Tooltip></TooltipProvider>;
-  const actions = <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Advanced section actions"><Icon name="MoreHorizontal" className="size-4" aria-hidden /></Button></DropdownMenuTrigger><DropdownMenuContent align="end" mobileTitle="Section actions">
+  const newThread = <TooltipProvider><Tooltip><TooltipTrigger asChild><Button variant="outline" aria-label={`New thread in ${section.canonicalName}`} onClick={() => { rememberComposeSection(section.id); navigate.toCompose({ placement: { sectionId: section.id, pinned: false }, focusPrompt: true }); }}><Icon name="Plus" className="size-3.5" aria-hidden />New thread</Button></TooltipTrigger><TooltipContent data-cortex>Opens the native composer in this section without replacing your draft.</TooltipContent></Tooltip></TooltipProvider>;
+  const actions = <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Advanced section actions"><Icon name="MoreHorizontal" className="size-4" aria-hidden /></Button></DropdownMenuTrigger><DropdownMenuContent data-cortex align="end" mobileTitle="Section actions">
     <DropdownMenuItem onSelect={library}>Search the library</DropdownMenuItem>
     {binding ? <DropdownMenuItem onSelect={() => route("edits")}>Edits</DropdownMenuItem> : null}
     {section.marker.status === "owned" ? <DropdownMenuItem onSelect={() => onMark("remove")}>Remove title mark</DropdownMenuItem> : null}
@@ -165,7 +167,7 @@ export function SectionView({ data, sections, workstreams, onConnect, onCapture,
     {section.marker.error ? <div role="alert" className="rounded-md border border-border-seam bg-surface-attention p-3 text-[13px]"><span>Sharing and section titles are separate. {section.marker.error}</span>{section.marker.originalTitle !== null && section.marker.decoratedTitle !== null ? <Button variant="ghost" onClick={() => onMark("remove")}>Retry title cleanup</Button> : null}</div> : null}
   </>;
   return <div ref={sectionRootRef} tabIndex={-1} aria-label={`Cortex section: ${section.canonicalName}`} data-cortex data-cortex-section="" data-part="SectionPage" className="cortex-section flex h-full min-h-0 min-w-0 flex-col text-foreground">
-    <div ref={scrollportRef} className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+    <div ref={scrollportRef} data-cortex-scroll="main" className="min-h-0 min-w-0 flex-1 overflow-y-auto">
     {!binding ? <div className="cortex-unbound mx-auto grid max-w-3xl gap-5 p-5">
       <div className="flex flex-wrap items-center gap-2"><Icon name="Folder" className="size-4 text-muted-foreground" aria-hidden /><span className="text-[13px] text-muted-foreground">{plural(section.threadCount, "thread")} · no shared brief</span><span className="flex-1" />{actions}</div>
       <div role="img" aria-label="No shared brief" className="h-3.5 w-full border border-dashed border-border-seam bg-surface-recessed" />
@@ -178,20 +180,20 @@ export function SectionView({ data, sections, workstreams, onConnect, onCapture,
       <header data-part="SectionHeader" className="cortex-section-header border-b border-border-seam bg-background px-4 pt-3">
         <div className="cortex-section-head flex min-w-0 flex-wrap items-center gap-2">
           <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" className="max-w-full min-w-0 bg-surface-selected" aria-label={`Sharing ${workstream?.name ?? "a workstream"}`}><Icon name="Brain" className="size-4 shrink-0 text-primary" aria-hidden /><span className="truncate">Sharing {workstream?.name ?? "a workstream"}</span><Icon name="ChevronDown" className="size-3.5 shrink-0" aria-hidden /></Button></DropdownMenuTrigger>
-            <DropdownMenuContent mobileTitle="Sharing" align="start"><DropdownMenuItem onSelect={() => route("knowledge")}>Open workstream knowledge</DropdownMenuItem><DropdownMenuItem onSelect={editBinding}>Topic, budget and targets…</DropdownMenuItem><DropdownMenuItem onSelect={onConnect}>Change workstream…</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem onSelect={onStop}>Stop sharing…</DropdownMenuItem></DropdownMenuContent>
+            <DropdownMenuContent data-cortex mobileTitle="Sharing" align="start"><DropdownMenuItem onSelect={() => route("knowledge")}>Open workstream knowledge</DropdownMenuItem><DropdownMenuItem onSelect={editBinding}>Topic, budget and targets…</DropdownMenuItem><DropdownMenuItem onSelect={onConnect}>Change workstream…</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem onSelect={onStop}>Stop sharing…</DropdownMenuItem></DropdownMenuContent>
           </DropdownMenu>
           <div className="cortex-section-facts flex min-w-0 flex-wrap gap-1">
             <Button size="sm" variant="outline" onClick={editBinding}>{facetWord(binding.topic ?? "orientation")}</Button>
-            {(["environment", "host"] as const).map(name => <TooltipProvider key={name}><Tooltip><TooltipTrigger asChild><Button size="sm" variant="outline" aria-label={targets[name].mode === "unknown" ? `${name === "environment" ? "Environment" : "Host"} ?` : dimensionWord(name, targets[name])} className={cn("max-w-full min-w-0", targets[name].mode === "unknown" && "border-dashed border-warning/60 text-warning-text")} onClick={editBinding}><Icon name={name === "environment" ? "Target" : "ComputerCloud"} className="size-3 shrink-0" aria-hidden />{targets[name].mode === "unknown" ? <><span className="truncate">{name === "environment" ? "Environment" : "Host"}</span><span className="shrink-0">?</span></> : <span className="truncate">{dimensionWord(name, targets[name])}</span>}</Button></TooltipTrigger><TooltipContent>{targets[name].mode === "unknown" ? "Unknown never counts as any environment, so entries that need one stay out." : "Change targets"}</TooltipContent></Tooltip></TooltipProvider>)}
+            {(["environment", "host"] as const).map(name => <TooltipProvider key={name}><Tooltip><TooltipTrigger asChild><Button size="sm" variant="outline" aria-label={targets[name].mode === "unknown" ? `${name === "environment" ? "Environment" : "Host"} ?` : dimensionWord(name, targets[name])} className={cn("max-w-full min-w-0", targets[name].mode === "unknown" && "border-dashed border-warning/60 text-warning-text")} onClick={editBinding}><Icon name={name === "environment" ? "Target" : "ComputerCloud"} className="size-3 shrink-0" aria-hidden />{targets[name].mode === "unknown" ? <><span className="truncate">{name === "environment" ? "Environment" : "Host"}</span><span className="shrink-0">?</span></> : <span className="truncate">{dimensionWord(name, targets[name])}</span>}</Button></TooltipTrigger><TooltipContent data-cortex>{targets[name].mode === "unknown" ? "Unknown never counts as any environment, so entries that need one stay out." : "Change targets"}</TooltipContent></Tooltip></TooltipProvider>)}
           </div>
           <span className="cortex-head-spacer flex-1" />
           <div className="cortex-section-actions flex flex-wrap items-center gap-1">{newThread}
-            <div className="flex"><Button className="rounded-r-none" onClick={onCapture}><Icon name="Edit" className="size-3.5" aria-hidden />Write takeaway</Button><DropdownMenu><DropdownMenuTrigger asChild><Button ref={draftMenuOpener} size="icon" className="rounded-l-none border-l border-primary-foreground/30" aria-label="More ways to add"><Icon name="ChevronDown" className="size-3.5" aria-hidden /></Button></DropdownMenuTrigger><DropdownMenuContent align="end" mobileTitle="Add to the brief"><DropdownMenuItem onSelect={onCapture}>Write takeaway</DropdownMenuItem>{onDraft ? <DropdownMenuItem onSelect={() => { if (draftMenuOpener.current) onDraft(draftMenuOpener.current); }}>Draft from a thread…</DropdownMenuItem> : null}</DropdownMenuContent></DropdownMenu></div>{actions}
+            <div className="flex"><Button className="rounded-r-none" onClick={onCapture}><Icon name="Edit" className="size-3.5" aria-hidden />Write takeaway</Button><DropdownMenu><DropdownMenuTrigger asChild><Button ref={draftMenuOpener} size="icon" className="rounded-l-none border-l border-primary-foreground/30" aria-label="More ways to add"><Icon name="ChevronDown" className="size-3.5" aria-hidden /></Button></DropdownMenuTrigger><DropdownMenuContent data-cortex align="end" mobileTitle="Add to the brief"><DropdownMenuItem onSelect={onCapture}>Write takeaway</DropdownMenuItem>{onDraft ? <DropdownMenuItem onSelect={() => { if (draftMenuOpener.current) onDraft(draftMenuOpener.current); }}>Draft from a thread…</DropdownMenuItem> : null}</DropdownMenuContent></DropdownMenu></div>{actions}
           </div>
         </div>
         <div className="my-3"><BriefStrip data={data.eligibility} heldCount={data.eligibility.exclusions.length + data.eligibility.notices.length} highlightKey={highlightKey} onHover={setHighlightKey} /></div>
-        <Tabs value={tab} onValueChange={value => route(value as SectionTab)}><TabsList aria-label="Section views" className="cortex-section-tabs w-full justify-start overflow-x-auto bg-transparent">
-          <TabsTrigger value="brief">Brief</TabsTrigger><TabsTrigger value="knowledge">All knowledge{workstreamRead.data ? ` · ${workstreamRead.data.total}` : ""}</TabsTrigger><TabsTrigger value="drafts">Drafts{drafts.data ? ` · ${drafts.data.total}` : ""}</TabsTrigger><TabsTrigger value="edits">Edits</TabsTrigger>
+        <Tabs value={tab} onValueChange={value => route(value as SectionTab)}><TabsList aria-label="Section views" className={cn(CORTEX_TAB_LIST, "cortex-section-tabs w-full")}>
+          <TabsTrigger value="brief" className={CORTEX_TAB_TRIGGER}>Brief</TabsTrigger><TabsTrigger value="knowledge" className={CORTEX_TAB_TRIGGER}>All knowledge{workstreamRead.data ? ` · ${workstreamRead.data.total}` : ""}</TabsTrigger><TabsTrigger value="drafts" className={CORTEX_TAB_TRIGGER}>Drafts{drafts.data ? ` · ${drafts.data.total}` : ""}</TabsTrigger><TabsTrigger value="edits" className={CORTEX_TAB_TRIGGER}>Edits</TabsTrigger>
         </TabsList></Tabs>
       </header>
       {tab === "knowledge" ? <div className="p-4"><p className="mb-3 text-[12px] text-muted-foreground">Workstream also used by {sharedWith.length ? sharedWith.map(row => row.canonicalName).join(", ") : "no other section"}.</p><WorkstreamKnowledge id={binding.workstreamId} selectedId={entryId} onSelect={id => route("knowledge", id)} onClose={() => route("knowledge")} /></div> : tab === "edits" ? <div className="p-4"><WorkstreamEdits id={binding.workstreamId} /></div> : tab === "drafts" ? <div className="p-4"><DraftsTab section={section} /></div> :
@@ -204,7 +206,7 @@ export function SectionView({ data, sections, workstreams, onConnect, onCapture,
             const leaving = accepted.includes(item.entry.id);
             return <div key={item.entry.id} className={cn("cortex-suggestion-wrap", leaving && "cortex-suggestion-leaving")} inert={leaving || undefined}><div className="min-h-0 overflow-hidden"><SuggestionCard item={item} section={section} accepted={leaving} editRef={element => onEditControl?.(item.entry.id, element)} onEdit={opener => onEdit(item.entry, opener)} onAccepted={() => accept(item)} /></div></div>;
           })}</div>
-          <div className={cn("mb-2 flex flex-wrap items-center gap-2", candidates.length ? "mt-5" : "mt-2")}><h2 className="text-[13px] font-semibold">{deliverySummary(data.eligibility.status, `Goes to new threads · ${data.eligibility.entries.length}`)}</h2><span className="flex-1" /><TooltipProvider><Tooltip><TooltipTrigger asChild><Button size="sm" variant="ghost"><Icon name="Info" className="size-3.5" aria-hidden />New sessions only</Button></TooltipTrigger><TooltipContent>Running sessions keep what they started with. A preview is not proof an agent used it.</TooltipContent></Tooltip></TooltipProvider></div>
+          <div className={cn("mb-2 flex flex-wrap items-center gap-2", candidates.length ? "mt-5" : "mt-2")}><h2 className="text-[13px] font-semibold">{deliverySummary(data.eligibility.status, `Goes to new threads · ${data.eligibility.entries.length}`)}</h2><span className="flex-1" /><TooltipProvider><Tooltip><TooltipTrigger asChild><Button size="sm" variant="ghost"><Icon name="Info" className="size-3.5" aria-hidden />New sessions only</Button></TooltipTrigger><TooltipContent data-cortex>Running sessions keep what they started with. A preview is not proof an agent used it.</TooltipContent></Tooltip></TooltipProvider></div>
           {data.eligibility.entries.length === 0 ? <div role="status" className="flex flex-wrap items-center gap-2 rounded-md border border-border-seam bg-card p-3 text-[13px]"><Icon name="Info" className="size-4 shrink-0" aria-hidden /><span className="min-w-0 flex-1">No entry reaches new threads yet.{approvedHeld ? ` ${plural(approvedHeld, "approved entry is", "approved entries are")} held back.` : ""}{heldFixes.has("open") && !heldFixes.has("targets") ? " Open each one to say where it applies." : ""}</span>{heldFixes.has("targets") ? <Button variant="outline" onClick={editBinding}>Set targets</Button> : null}</div> :
           <ol aria-label={data.eligibility.status === "ready" ? "Goes to new threads" : "Selected entries"}>{data.eligibility.entries.map((row, index) => <li key={row.knowledge.id}><button ref={element => { if (element) entryButtons.current.set(row.knowledge.id, element); else entryButtons.current.delete(row.knowledge.id); }} type="button" aria-label={`Open ${row.knowledge.title}`}  aria-current={entryId === row.knowledge.id ? "true" : undefined} className={cn("cortex-brief-row grid w-full min-w-0 gap-x-2 gap-y-1 border-b border-border-seam px-2 py-3 text-left text-[13px] hover:bg-state-hover focus-visible:ring-1 focus-visible:ring-ring", landed.includes(row.knowledge.id) && "cortex-landed", (highlightKey === row.knowledge.id || entryId === row.knowledge.id) && "bg-surface-selected")} onMouseEnter={() => setHighlightKey(row.knowledge.id)} onMouseLeave={() => setHighlightKey(null)} onFocus={() => setHighlightKey(row.knowledge.id)} onBlur={() => setHighlightKey(null)} onClick={() => open(row.knowledge.id)}>
             <span className="text-right text-muted-foreground tabular-nums">{index + 1}</span><span data-content className="min-w-0 break-words">{row.knowledge.title}</span><span className="text-right text-muted-foreground tabular-nums">{tokens(row.estimatedTokens)}</span>
@@ -237,7 +239,7 @@ export function SectionView({ data, sections, workstreams, onConnect, onCapture,
 }
 
 function CaptureRecovery({ section }: { section: Section }) {
-  const [offset, setOffset] = useState(0);
+  const [offset, setOffset] = usePlaceState(`capture-page:${section.id}`, 0, isOffset);
   const read = useSectionCaptureJobs(section.id, offset);
   const writes = useWorkstreamWrites();
   const navigate = useBbNavigate();
@@ -269,7 +271,7 @@ function CaptureRecovery({ section }: { section: Section }) {
       <Applicability value={job.intent.applicability} />
       {job.error ? <p role="alert">{job.error}</p> : null}
       {section.binding.revision !== job.expectedBindingRevision || section.binding.binding?.workstreamId !== job.workstreamId ? <p role="status">The section connection changed. Retry will not move this save to another workstream.</p> : null}
-      <details><summary className="cursor-pointer py-1">Original source</summary><SourceList sources={job.sources} /></details>
+      <details><summary className="rounded-sm py-1 hover:bg-state-hover hover:text-foreground">Original source</summary><SourceList sources={job.sources} /></details>
       <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={busy !== null} onClick={() => void retry(job.requestId)}>Retry save</Button><Button variant="ghost" disabled={busy !== null} onClick={() => void dismiss(job.requestId)}>Dismiss retry</Button>{job.knowledgeId ? <Button variant="ghost" onClick={() => navigate.toPluginPanel(CORTEX_PAGE_PATH, { subPath: `workstreams/${job.workstreamId}/${job.knowledgeId}` })}>Open saved result</Button> : null}</div>
     </div>)}
     {read.data && read.data.total > 20 ? <div className="flex items-center gap-2"><Button variant="outline" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - 20))}>Previous saves</Button><span>{offset + 1}–{Math.min(offset + 20, read.data.total)} of {read.data.total}</span><Button variant="outline" disabled={offset + 20 >= read.data.total} onClick={() => setOffset(offset + 20)}>More saves</Button></div> : null}

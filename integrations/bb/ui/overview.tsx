@@ -61,7 +61,7 @@ function SectionOverviewRow({ section, workstreamName, waiting }: { section: Sec
     </td>
     <td className="order-5 text-[12px] text-muted-foreground tabular-nums @min-[820px]:px-2 @min-[820px]:py-3 @min-[820px]:text-right"><span className="@min-[820px]:hidden">Threads · </span>{section.threadCount}</td>
     <td className="order-2 @min-[820px]:px-2 @min-[820px]:py-3 @min-[820px]:text-right">
-      {binding ? waiting > 0 ? <button type="button" onClick={() => navigate.toPluginPanel(CORTEX_PAGE_PATH, { subPath: "review" })} aria-label={`Review ${waiting} waiting in ${section.name}`} className="min-h-8 rounded-sm bg-surface-attention px-2 text-[11px] whitespace-nowrap tabular-nums focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">{waiting} waiting</button> : null : <Button size="sm" variant="ghost" aria-label={`Connect ${section.name}`} onClick={() => go(true)}>Connect</Button>}
+      {binding ? waiting > 0 ? <button type="button" onClick={() => navigate.toPluginPanel(CORTEX_PAGE_PATH, { subPath: "review" })} aria-label={`Review ${waiting} waiting in ${section.name}`} className="min-h-8 rounded-sm bg-surface-attention px-2 text-[11px] whitespace-nowrap tabular-nums hover:bg-state-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">{waiting} waiting</button> : null : <Button size="sm" variant="ghost" aria-label={`Connect ${section.name}`} onClick={() => go(true)}>Connect</Button>}
     </td>
   </tr>;
 }
@@ -75,7 +75,7 @@ export function OverviewPage() {
   const unbound = rows.filter(section => section.binding.binding === null);
   const waiting = new Map<string, number>();
   for (const item of queue.data?.items ?? []) if (item.entry.state === "candidate") waiting.set(item.workstream.id, (waiting.get(item.workstream.id) ?? 0) + 1);
-  return <div data-cortex data-part="OverviewPage" className="@container h-full min-w-0 overflow-y-auto px-4 py-4 @min-[900px]:px-5">
+  return <div data-cortex data-cortex-scroll="main" data-part="OverviewPage" className="@container h-full min-w-0 overflow-y-auto px-4 py-4 @min-[900px]:px-5">
     <div className="space-y-3">
       {sections.error ? <FailureNotice failure={sections.error} onRetry={sections.refetch} title={sections.data ? "Showing the last loaded sections." : undefined} /> : null}
       {queue.error ? <FailureNotice failure={queue.error} onRetry={queue.refetch} title={queue.data ? "Showing the last loaded review." : undefined} /> : null}

@@ -151,11 +151,11 @@ the next command or daemon takes over and cleans up after it. For you, this mean
 
 - Canonical workstreams and knowledge use source tables, not tasks. `cortex schema --json` describes the interface;
   `src/workstreams.ts#WorkstreamMutation` carries actor attribution, not authentication. Quotes never grant approval.
-  Caller-supplied creation IDs support crash recovery: persist intent first, then reread and verify after a lost response.
-  Occupied IDs refuse without revealing rows. Normalized no-save still returns the existing canonical ID, not an alias.
-  Human draft edits retain kind and even unknown scope without approval; acceptance requires known scope and keeps the ID and original sources.
-  Replacement explicitly guards both revisions and final applicability. Human writing can create one approved revision,
-  with an explicit source; duplicates never silently adopt candidates. `src/store.ts#mutateWorkstream` commits each job and its history atomically.
+  Creation IDs support crash recovery: persist intent, then reread after a lost response. Occupied IDs refuse without revealing rows.
+  Normalized no-save returns the existing ID. Human draft edits retain kind and unknown scope without approval;
+  acceptance requires known scope and keeps the ID and sources. Replacement guards both revisions and final applicability.
+  Only existing, non-historical conflict partners block approval; approval clears stale links without changing historical partners.
+  Human writing needs an explicit source; duplicates never adopt candidates. `src/store.ts#mutateWorkstream` commits each job and its history atomically.
 - `src/store.ts#readWorkstream` selects approved, applicable, unexpired orientation and exact-topic knowledge;
   disputed or expired findings become claim-free notices. It never searches legacy tasks or another workstream.
   Hints use `src/workstreams.ts#REVIEW_HINT_LIMITS`; only matching normalized text/subject, facet, kind, applicability, expiry and no new evidence yield no-save.

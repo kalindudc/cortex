@@ -296,15 +296,19 @@ describe("section ledger", () => {
     expect((within(card).getByRole("button", { name: "Accept" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
-  test("Reject remains immediate without an unsupported candidate transition", async () => {
+  test("Reject remains immediate and Undo returns to review through edit", async () => {
     const backend = fixture();
     backend.options.rpc.knowledgeTransition = input => ({ outcome: "updated", entry: { ...entry, state: input.state, revision: input.expectedRevision + 1 } });
+    backend.options.rpc.knowledgeEdit = () => ({ outcome: "updated", entry: { ...entry, revision: 3 } });
     const page = renderSlot({ component: SectionPage }, { id: "sec_envoy" }, backend.options);
     const card = await page.findByRole("region", { name: entry.title });
     fireEvent.click(within(card).getByRole("button", { name: "Reject" }));
-    await waitFor(() => expect(toast).toHaveBeenCalledWith("Rejected. Threads never get it."));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("Rejected. Threads never get it.", expect.objectContaining({ action: expect.anything() })));
     expect(calls(page, "knowledgeTransition")).toHaveLength(1);
     expect(calls(page, "knowledgeTransition")[0]!.input).toMatchObject({ id: entry.id, expectedRevision: 1, state: "rejected" });
+    const action = vi.mocked(toast).mock.calls.filter(call => call[0] === "Rejected. Threads never get it.").at(-1)![1]!.action as Action;
+    await act(async () => { await action.onClick({} as React.MouseEvent<HTMLButtonElement>); });
+    expect(calls(page, "knowledgeEdit")[0]!.input).toMatchObject({ id: entry.id, expectedRevision: 2 });
   });
 });
 

@@ -1190,6 +1190,16 @@ export class Store {
       );
   }
 
+  private liveConflicts(entry: Knowledge): string[] {
+    return entry.conflicts.filter(id => {
+      const row = this.db.query<{ data: string }, [string]>("SELECT data FROM knowledge WHERE id = ?").get(id);
+      return (
+        row !== null &&
+        !["forgotten", "archived", "rejected", "superseded"].includes((JSON.parse(row.data) as Knowledge).state)
+      );
+    });
+  }
+
   mutateWorkstream(input: unknown): MutationResult {
     const m = parseWorkstreamMutation(input);
     return this.atomically((): MutationResult => {
@@ -1350,7 +1360,10 @@ export class Store {
             );
           if (["forgotten", "archived", "rejected", "superseded"].includes(other.state))
             throw new WorkstreamError("Historical entries cannot acquire active relations", 409);
-          if (old.conflicts.some(id => id !== other.id) || other.conflicts.some(id => id !== old.id))
+          if (
+            this.liveConflicts(old).some(id => id !== other.id) ||
+            this.liveConflicts(other).some(id => id !== old.id)
+          )
             throw new WorkstreamError("Additional conflicts require separate resolution; no partial approval", 409);
           if (protectedDirective(other) && entry.kind !== "directive")
             throw new WorkstreamError("Only a human-approved directive can supersede an approved directive", 409);
@@ -1360,11 +1373,12 @@ export class Store {
           const revisedOther = { ...next(other), state: "superseded" as const, supersededBy: entry.id, conflicts: [] };
           this.saveWorkstreamEntity(revisedOther, m.op, m.reason);
         } else {
-          if (old.conflicts.length)
+          if (this.liveConflicts(old).length)
             throw new WorkstreamError("Resolve conflicts through explicit supersession before approving", 409);
           this.assertKnowledgeSubjectFree(entry);
         }
         entry.state = "approved";
+        entry.conflicts = [];
         entry.approval = { actor: m.actor, at };
       } else if (m.op === "edit") {
         if (m.kind !== undefined || m.applicability !== undefined) {
@@ -1394,8 +1408,9 @@ export class Store {
         if (m.state === "approved") {
           if (old.state === "superseded")
             throw new WorkstreamError("Use explicit supersession to replace a superseded entry", 409);
-          if (old.conflicts.length)
+          if (this.liveConflicts(old).length)
             throw new WorkstreamError("Resolve conflicts through explicit supersession before approving", 409);
+          entry.conflicts = [];
           const w = this.workstreamEntity<Workstream>("workstreams", old.workstreamId);
           if (w.archived) throw new WorkstreamError("workstream is archived", 409);
           this.assertKnowledgeSubjectFree(old);
@@ -1445,7 +1460,10 @@ export class Store {
           if (!protectedDirective(other) || m.actor.type === "human") revisedOther.state = "disputed";
         } else {
           human();
-          if (old.conflicts.some(id => id !== other.id) || other.conflicts.some(id => id !== old.id))
+          if (
+            this.liveConflicts(old).some(id => id !== other.id) ||
+            this.liveConflicts(other).some(id => id !== old.id)
+          )
             throw new WorkstreamError("Additional conflicts require separate resolution; no partial approval", 409);
           if (protectedDirective(other) && old.kind !== "directive")
             throw new WorkstreamError("Only a human-approved directive can supersede an approved directive", 409);

@@ -17,7 +17,7 @@ type Handlers = PluginRpcTestHandlers<typeof rpcContract>;
 let app: App;
 beforeAll(async () => { app = await loadPluginApp(() => import("./app")); });
 beforeEach(() => { toast.mockClear(); toast.error.mockClear(); });
-afterEach(() => { cleanup(); selectTask(THREAD, null); });
+afterEach(() => { cleanup(); sessionStorage.clear(); selectTask(THREAD, null); });
 
 function state(overrides: Partial<CortexThreadState> = {}): CortexThreadState {
   return {

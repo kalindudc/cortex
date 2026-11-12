@@ -67,7 +67,7 @@ export function DraftingSettings() {
     catch (cause) { setFailure(failureOf(cause)); }
     finally { pending.current = false; setBusy(false); }
   };
-  return <div data-cortex-drafting-settings="" className="grid max-w-2xl gap-3 text-[13px] text-foreground">
+  return <div data-cortex data-cortex-drafting-settings="" className="grid max-w-2xl gap-3 text-[13px] text-foreground">
     <p>Applies to future drafting jobs only. Existing jobs keep their requested model, and each draft can choose a different model for itself.</p>
     {read.error ? <FailureNotice failure={read.error} onRetry={read.refetch} /> : null}
     <div className="grid gap-2"><span className="font-semibold">Requested model</span>

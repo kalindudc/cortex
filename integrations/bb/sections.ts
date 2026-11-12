@@ -294,7 +294,11 @@ export function createSections(bb: BbPluginApi, service: Workstreams) {
       }),
     };
   }
-  async function eligibility(sectionId: string, signal?: AbortSignal): Promise<SectionEligibility> {
+  async function eligibility(
+    sectionId: string,
+    signal?: AbortSignal,
+    overrides: Parameters<typeof composeThreadContext>[0]["overrides"] = [],
+  ): Promise<SectionEligibility> {
     await native(sectionId, signal);
     const binding = store.section(sectionId).binding;
     const base = {
@@ -324,7 +328,7 @@ export function createSections(bb: BbPluginApi, service: Workstreams) {
           applicability,
           entries: out.entries,
           notices: out.notices,
-          overrides: [],
+          overrides,
           grants: [],
           now: Date.now(),
         }),
