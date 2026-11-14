@@ -16,6 +16,10 @@ files:
 extraResources:
   - from: ../../out/ui
     to: ui
+# Lets a page or another app open a task with cortex://app/task/<id>; the OS hands the link to the app.
+protocols:
+  - name: Cortex
+    schemes: [cortex]
 mac:
   identity: "-"
   hardenedRuntime: true

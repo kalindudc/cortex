@@ -135,7 +135,8 @@ It reads canonical tasks and workstream knowledge through the Cortex CLI, never 
   eligible context. `sections.ts` and `section-store.ts` keep resumable connection/capture intent and legacy title-mark ownership,
   not another canonical knowledge database. Intended IDs are persisted before cross-store writes.
 - `workstream-agents.ts` prepares scope at dispatch, uses a synchronous configuration cache and registers read/propose
-  tools. Session construction and provider delivery are distinct; the plugin does not claim hot system-prompt updates.
+  tools. Dispatch checks scope revisions, not preview-cache identity, so concurrent reads cannot reject valid context.
+  Session construction and provider delivery are distinct; the plugin does not claim hot system-prompt updates.
 - `cli.ts` runs argument arrays with timeouts/cancellation, validates JSON and throws on tool failure. `state.ts`
   retains task links, source checks and the project primer cache; `watch.ts` invalidates reads.
 - `draft-service.ts` owns durable helper intent and recovery; `draft-validation.ts` verifies sources and suggestions.
@@ -152,9 +153,8 @@ It reads canonical tasks and workstream knowledge through the Cortex CLI, never 
   `integrations/bb/server.test.ts`, `integrations/bb/turns.test.ts`, `integrations/bb/memory.test.ts`.
 - Preserve current-state reads, source-role distinctions, approval/CAS and applicability guards:
   `test/unit/workstreams.test.ts`, `test/unit/workstreams-api.test.ts`, `test/integration/cli/workstreams.test.ts`.
-- Test the CLI boundary, scope, context refusal, historical receipts and persistent visibility:
-  `integrations/bb/workstreams.test.ts`, `integrations/bb/sections.test.ts`, `integrations/bb/cli.test.ts`,
-  `integrations/bb/app.test.tsx`, `integrations/bb/section-ui.test.tsx`.
+- Test concurrent previews, real scope invalidation, CLI boundaries, context refusal, history and visibility:
+  `integrations/bb/workstream-agents.test.ts`, `integrations/bb/workstreams.test.ts`, `integrations/bb/sections.test.ts`,
+  `integrations/bb/cli.test.ts`, `integrations/bb/app.test.tsx`, `integrations/bb/section-ui.test.tsx`.
 - The Cortex pill grants nothing by text; only its recorded selection applies, once: `integrations/bb/pending-context.test.ts`.
-- `pnpm run test:bb` runs the plugin tests and typecheck after its npm dependencies are installed. The root suite
-  does not substitute for the independent plugin tests, and neither proves live provider lifecycle behavior.
+- `pnpm run test:bb` tests and typechecks the installed plugin package; root tests cannot replace it or prove live provider behavior.

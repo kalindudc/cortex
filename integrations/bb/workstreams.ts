@@ -276,7 +276,7 @@ export function createWorkstreams(
     scopes.set(threadId, { sectionId: null, workstreamId: null });
     return { binding: null, bindingRevision: 0, bindingSource: "none", inheritedFrom: null };
   }
-  async function context(threadId: string, signal?: AbortSignal): Promise<ThreadContext> {
+  async function resolveContext(threadId: string, signal?: AbortSignal) {
     const version = generation,
       threadVersion = threadGenerations.get(threadId) ?? 0;
     // A grant's workstream is unknown until its read returns; snapshot before any asynchronous resolution.
@@ -351,28 +351,32 @@ export function createWorkstreams(
         });
       }
     }
-    if (
+    const isCurrent = () =>
       version === generation &&
       threadVersion === (threadGenerations.get(threadId) ?? 0) &&
       prefs.revision === store.thread(threadId).revision &&
       [...dependencies].every(id => (canonicalSnapshot.get(id) ?? 0) === (canonicalGenerations.get(id) ?? 0)) &&
-      (!thread.environmentId || environmentVersion === (environmentGenerations.get(thread.environmentId) ?? 0))
-    ) {
+      (!thread.environmentId || environmentVersion === (environmentGenerations.get(thread.environmentId) ?? 0));
+    const fact: ResolutionFacts = {
+      environmentId: thread.environmentId,
+      hostId: environment?.hostId ?? null,
+      projectId: thread.projectId,
+      parentThreadId: thread.parentThreadId,
+      sourceThreadId: thread.sourceThreadId,
+      expiresAt: Math.min(
+        Date.now() + PREPARATION_MAX_AGE_MS,
+        ...result.entries.flatMap(e => (e.knowledge.expiresAt === null ? [] : [Date.parse(e.knowledge.expiresAt)])),
+      ),
+      canonicalVersions: new Map([...dependencies].map(id => [id, canonicalSnapshot.get(id) ?? 0])),
+    };
+    if (isCurrent()) {
       resolved.set(threadId, result);
-      facts.set(threadId, {
-        environmentId: thread.environmentId,
-        hostId: environment?.hostId ?? null,
-        projectId: thread.projectId,
-        parentThreadId: thread.parentThreadId,
-        sourceThreadId: thread.sourceThreadId,
-        expiresAt: Math.min(
-          Date.now() + PREPARATION_MAX_AGE_MS,
-          ...result.entries.flatMap(e => (e.knowledge.expiresAt === null ? [] : [Date.parse(e.knowledge.expiresAt)])),
-        ),
-        canonicalVersions: new Map([...dependencies].map(id => [id, canonicalSnapshot.get(id) ?? 0])),
-      });
+      facts.set(threadId, fact);
     }
-    return result;
+    return { value: result, fact, isCurrent };
+  }
+  async function context(threadId: string, signal?: AbortSignal): Promise<ThreadContext> {
+    return (await resolveContext(threadId, signal)).value;
   }
   function prepared(ctx: PluginAgentConfigurationContext): ThreadContext | null {
     const admission = admissions.get(ctx.thread.id),
@@ -465,9 +469,9 @@ export function createWorkstreams(
   }
   async function predispatch(ctx: MessageDispatchHookContext) {
     invalidate(ctx.thread.id);
-    const value = await context(ctx.thread.id),
-      fact = facts.get(ctx.thread.id);
-    if (resolved.get(ctx.thread.id) !== value || !fact) return { action: "reject" as const, message: MISSING_CONTEXT };
+    const { value, fact, isCurrent } = await resolveContext(ctx.thread.id);
+    // Preview reads may replace the cache without changing the scope this dispatch resolved.
+    if (!isCurrent()) return { action: "reject" as const, message: MISSING_CONTEXT };
     if (value.binding && value.status !== "ready")
       return { action: "reject" as const, message: value.error ?? MISSING_CONTEXT };
     admissions.set(ctx.thread.id, { context: value, fact: { ...fact } });

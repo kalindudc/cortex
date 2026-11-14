@@ -1,6 +1,6 @@
 {
   "name": "cortex",
-  "version": "0.107.1",
+  "version": "0.108.0",
   "type": "module",
   "private": true,
   "license": "MIT",

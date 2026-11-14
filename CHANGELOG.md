@@ -2,6 +2,15 @@
 
 Cortex follows [semantic versioning](https://semver.org). Each release has a section below, newest first.
 
+## 0.108.0 - 2026-11-14
+
+- **Queued answers no longer fail when Cortex refreshes their context.** A concurrent context preview no longer
+  causes the bb plugin to reject a valid message with “Cortex thread context is not resolved”. Changes to the
+  thread's actual scope still prevent stale context from being delivered.
+- **Open a task from a link.** The desktop app registers the `cortex` scheme, so a `cortex://app/task/42` link in a
+  web page, document or another program opens task 42 in the app, starting it when needed; `#<heading>` opens that
+  heading.
+
 ## 0.107.1 - 2026-11-12
 
 - **Cortex's row on bb's New thread screen folds out of the way.** It starts as a small Cortex chip at the left of the

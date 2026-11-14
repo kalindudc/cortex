@@ -1,7 +1,7 @@
 // desktop/deepLink.ts — launch links from the app's command line.
 
 import { describe, expect, test } from "bun:test";
-import { deepLinkPath, parseDeepLink } from "../../../src/desktop/deepLink.ts";
+import { deepLinkPath, parseDeepLink, parseDeepLinkUrl } from "../../../src/desktop/deepLink.ts";
 
 describe("parseDeepLink", () => {
   test("scans a reordered argv with Chromium's own switches", () => {
@@ -40,6 +40,49 @@ describe("parseDeepLink", () => {
 
   test("a heading alone is ignored", () => {
     expect(parseDeepLink(["--heading=intro"])).toBeNull();
+  });
+});
+
+describe("parseDeepLinkUrl", () => {
+  test("a task link, with or without a heading", () => {
+    expect(parseDeepLinkUrl("cortex://app/task/42")).toEqual({ taskId: 42, heading: null });
+    expect(parseDeepLinkUrl("cortex://app/task/42/")).toEqual({ taskId: 42, heading: null });
+    expect(parseDeepLinkUrl("cortex://app/task/42#intro-2")).toEqual({ taskId: 42, heading: "intro-2" });
+    expect(parseDeepLinkUrl("CORTEX://app/task/7?from=journal")).toEqual({ taskId: 7, heading: null });
+  });
+
+  test("other hosts, paths and schemes give no link", () => {
+    for (const bad of [
+      "cortex://app/",
+      "cortex://app/task/0",
+      "cortex://app/task/01",
+      "cortex://app/task/42/extra",
+      "cortex://other/task/42",
+      "cortex://user:pw@app/task/42",
+      "cortex://app:8080/task/42",
+      "https://app/task/42",
+      "not a url",
+    ]) {
+      expect(parseDeepLinkUrl(bad)).toBeNull();
+    }
+  });
+
+  test("a bad heading is dropped, the task kept", () => {
+    expect(parseDeepLinkUrl("cortex://app/task/3#a%20b")).toEqual({ taskId: 3, heading: null });
+  });
+});
+
+describe("parseDeepLink with a URL in argv", () => {
+  test("Linux and Windows pass an opened link as an argument", () => {
+    expect(parseDeepLink(["/opt/Cortex/cortex-desktop", "--no-sandbox", "cortex://app/task/9#plan"])).toEqual({
+      taskId: 9,
+      heading: "plan",
+    });
+  });
+
+  test("the last link wins, whether a flag or a URL", () => {
+    expect(parseDeepLink(["--task=1", "cortex://app/task/2"])).toEqual({ taskId: 2, heading: null });
+    expect(parseDeepLink(["cortex://app/task/2", "--task=3"])).toEqual({ taskId: 3, heading: null });
   });
 });
 

@@ -68,6 +68,42 @@ function secondLaunch(flags: string[]): Promise<number | null> {
 }
 
 describe("launch links", () => {
+  test("a task URL on cold launch opens its task and heading", async () => {
+    const id = await addDocument("URL document");
+    desktop = await desktop.relaunch({ args: [`cortex://app/task/${id}#task-${id}-details`] });
+    const { page } = desktop;
+    await waitForDashboard(page);
+    await waitForLive(page);
+    await page.locator(TITLE, { hasText: "URL document" }).waitFor();
+    expect(page.url()).toBe(`cortex://app/task/${id}#task-${id}-details`);
+    expect(await readPressed(page)).toBe("true");
+    await expect.poll(() => inReaderViewport(page, `task-${id}-details`), POLL).toBe(true);
+  });
+
+  test("a URL passed by a second instance opens in the existing window", async () => {
+    const id = await addDocument("second URL document");
+    await waitForRow(desktop.page, "second URL document");
+    expect(await secondLaunch([`cortex://app/task/${id}#last`])).toBe(0);
+    await desktop.page.locator(TITLE, { hasText: "second URL document" }).waitFor();
+    await expect.poll(() => inReaderViewport(desktop.page, `task-${id}-last`), POLL).toBe(true);
+    expect(desktop.app.windows()).toHaveLength(1);
+  });
+
+  test("an OS open-url event opens a valid task and ignores a foreign URL", async () => {
+    const id = await addDocument("OS URL document");
+    await waitForRow(desktop.page, "OS URL document");
+    const deliver = (url: string) => desktop.app.evaluate(({ app }, target) => {
+      const event = { defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } };
+      app.emit("open-url", event, target);
+      return event.defaultPrevented;
+    }, url);
+    expect(await deliver(`cortex://app/task/${id}#details`)).toBe(true);
+    await desktop.page.locator(TITLE, { hasText: "OS URL document" }).waitFor();
+    await expect.poll(() => inReaderViewport(desktop.page, `task-${id}-details`), POLL).toBe(true);
+    expect(await deliver("cortex://other/task/42")).toBe(true);
+    expect(desktop.page.url()).toBe(`cortex://app/task/${id}#details`);
+  });
+
   test("launch flags open that task in Read mode with the heading in view", async () => {
     await desktop.cortex(["add", "another task"]);
     const id = await addDocument("linked document");

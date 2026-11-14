@@ -193,6 +193,17 @@ const proposal = {
 };
 
 describe("workstream agent and user boundaries", () => {
+  test.each([false, true])("concurrent preview does not reject valid dispatch (bound: %s)", async bound => {
+    const s = setup();
+    if (!bound) s.service.store.setSection("sec_envoy", 1, null);
+    const dispatch = s.service.predispatch(makeMessageDispatchHookContext({ thread: { id: T } }));
+    const preview = s.service.context(T);
+    const [decision, context] = await Promise.all([dispatch, preview]);
+    expect(context.status).toBe(bound ? "ready" : "unbound");
+    expect(context.error).toBeNull();
+    expect(decision).toEqual({ action: "proceed" });
+    if (bound) expect(workstreamConfiguration(s.service, s.config(), "read")?.instructions).toContain(entry.text);
+  });
   test("cold normal dispatch survives initial environment attachment and advertises all four native tools", async () => {
     const s = setup();
     s.cold();

@@ -59,7 +59,7 @@ happened to each of its commands: where it went in the app, or why it was droppe
 
 | Terminal command | Desktop equivalent, or dropped with the replacement workflow |
 | --- | --- |
-| `open` (also `:<id>`) | Click a task in the list or the Search panel, search with the palette (Mod+K), or a `/task/<id>` address; other programs use the launch link |
+| `open` (also `:<id>`) | Click a task in the list or the Search panel, search with the palette (Mod+K), or a `/task/<id>` address; other programs use the launch link or a `cortex://app/task/<id>[#<heading>]` link |
 | `filter` | Sidebar status, lane and tag filters, including untagged |
 | `clear` | "Clear" in the task list's filters and "Clear filters" in the palette; show-done is kept |
 | `sort` (with `sort group`) | The task list's order line, palette "Sort and group…" and the Settings panel (Mod+, or the rail) |
@@ -139,8 +139,8 @@ removing a tag from a task never deletes the tag's definition. Close, reload and
 ### Pickers
 
 Lane and tag pickers search with `src/lib/catalogSearch.ts`, which never caps results or forces you to refine.
-References use the shared `@id` and `#tag` grammar in `src/lib/refGrammar.ts`, and heading anchors come from
-`src/lib/slug.ts`, the same slugs the launch link's `--heading` takes.
+References use `src/lib/refGrammar.ts` and headings use `src/lib/slug.ts`.
+The app registers `cortex` task links, validated by `src/desktop/deepLink.ts#parseDeepLinkUrl` and tested in `integrations/desktop/test/deep-link.test.ts`.
 
 ### Icon
 

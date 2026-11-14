@@ -25,7 +25,7 @@ import {
 import { createAgents, type CortexRun } from "../../src/desktop/agents.ts";
 import { startBridge } from "../../src/desktop/bridge.ts";
 import { connectDaemon, type DaemonConnection, resolveCortexBin } from "../../src/desktop/daemon.ts";
-import { deepLinkPath, parseDeepLink } from "../../src/desktop/deepLink.ts";
+import { type DeepLink, deepLinkPath, parseDeepLink, parseDeepLinkUrl } from "../../src/desktop/deepLink.ts";
 import {
   type DraftReport,
   needsGuard,
@@ -60,6 +60,8 @@ protocol.registerSchemesAsPrivileged([
 
 const packagedResourcesPath = app.isPackaged ? process.resourcesPath : undefined;
 let mainWindow: BrowserWindow | null = null;
+/** A cortex:// link macOS opened before the window existed; the first window loads it. */
+let pendingLink: DeepLink | null = null;
 let connection: Promise<DaemonConnection> | null = null;
 const attachments = new Map<number, AbortController>();
 const NO_DRAFTS: DraftReport = { dirty: 0, orphaned: 0 };
@@ -405,7 +407,8 @@ function createWindow(): void {
   win.on("closed", () => {
     if (mainWindow === win) mainWindow = null;
   });
-  void win.loadURL(`${APP_ORIGIN}${deepLinkPath(parseDeepLink(process.argv))}`);
+  void win.loadURL(`${APP_ORIGIN}${deepLinkPath(pendingLink ?? parseDeepLink(process.argv))}`);
+  pendingLink = null;
 }
 
 async function start(): Promise<void> {
@@ -424,17 +427,27 @@ async function start(): Promise<void> {
   createWindow();
 }
 
+/** Brings the window forward and opens `link` in it, if any. */
+function reveal(link: DeepLink | null): void {
+  const win = mainWindow;
+  if (!win) return;
+  if (win.isMinimized()) win.restore();
+  if (!hidden) win.show();
+  win.focus();
+  if (link) win.webContents.send(CHANNELS.open, link);
+}
+
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on("second-instance", (_event, argv) => {
-    const win = mainWindow;
-    if (!win) return;
-    if (win.isMinimized()) win.restore();
-    if (!hidden) win.show();
-    win.focus();
-    const link = parseDeepLink(argv);
-    if (link) win.webContents.send(CHANNELS.open, link);
+  app.on("second-instance", (_event, argv) => reveal(parseDeepLink(argv)));
+  // macOS hands a clicked cortex://app/task/<id> link to the running app, or to a cold launch
+  // before the window exists; Linux and Windows pass it in argv instead.
+  app.on("open-url", (event, url) => {
+    event.preventDefault();
+    const link = parseDeepLinkUrl(url);
+    if (mainWindow) reveal(link);
+    else if (link) pendingLink = link;
   });
   app.on("window-all-closed", () => app.quit());
   app.on("before-quit", guardQuit);
