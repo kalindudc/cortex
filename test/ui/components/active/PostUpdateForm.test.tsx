@@ -35,7 +35,7 @@ mock.module("../../../../src/ui/api/errors.ts", () => ({
   showError: () => {},
 }));
 
-import { render, fireEvent } from "@testing-library/preact";
+import { act, render, fireEvent } from "@testing-library/preact";
 import { PostUpdateForm, clearPostDrafts } from "../../../../src/ui/components/active/PostUpdateForm.tsx";
 import { meAuthor, updates, postUpdateFocusRequest } from "../../../../src/ui/state/signals.ts";
 import type { Task, Update } from "../../../../src/ui/api/types.ts";
@@ -215,11 +215,11 @@ describe("PostUpdateForm", () => {
     };
     try {
       const { container } = render(<PostUpdateForm task={task()} />);
-      postUpdateFocusRequest.value = postUpdateFocusRequest.value + 1;
-      // Signal-driven re-renders flush their effects on the rAF/timeout
-      // tick, not the microtask queue — give it a real settle.
-      await new Promise(r => setTimeout(r, 60));
-      expect(document.activeElement).toBe(textarea(container));
+      // act flushes the signal-driven re-render and its effects; a fixed sleep lost that race on slow CI runners.
+      await act(() => {
+        postUpdateFocusRequest.value = postUpdateFocusRequest.value + 1;
+      });
+      expect(document.activeElement === textarea(container)).toBe(true);
       expect(scrolls.length).toBeGreaterThan(0);
     } finally {
       Element.prototype.scrollIntoView = orig;

@@ -2,7 +2,7 @@
 
 Cortex follows [semantic versioning](https://semver.org). Each release has a section below, newest first.
 
-## 0.108.1 - 2026-11-16
+## 0.108.2 - 2026-11-16
 
 - **Queued messages no longer fail as a turn ends.** bb sends a queued message as soon as the thread's turn finishes,
   and Cortex's notice that the turn had ended could arrive mid-send. Cortex then rejected the message with "Cortex
@@ -11,6 +11,12 @@ Cortex follows [semantic versioning](https://semver.org). Each release has a sec
 - **A clearer message when context really changes mid-send.** If the thread's section, environment or shared knowledge
   changes while a message is being sent, Cortex says bb will send it again shortly with the new context, instead of
   pointing you to the Memory tab or a fresh session.
+- 0.108.1 was tagged but not published: a desktop test of the post-update box waited a fixed 60 ms for focus,
+  which a busy macOS runner missed. The test now flushes the update before checking; the app itself is unchanged.
+
+## 0.108.1 - 2026-11-16
+
+Tagged but not published; its changes ship in 0.108.2.
 
 ## 0.108.0 - 2026-11-14
 
