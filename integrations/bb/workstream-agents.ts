@@ -172,8 +172,9 @@ export function registerWorkstreamAgents(
   bb.events.on("thread.created", warm);
   bb.events.on("experimental_thread.parentChanged", ({ thread }) => service.invalidateThreadTree(thread.id));
   bb.events.on("thread.deleted", ({ thread }) => service.invalidateThreadTree(thread.id));
-  for (const event of ["thread.idle", "thread.failed", "thread.archived"] as const)
-    bb.events.on(event, ({ thread }) => service.invalidate(thread.id));
+  for (const event of ["thread.idle", "thread.failed"] as const)
+    bb.events.on(event, ({ thread }) => service.runEnded(thread.id, thread.updatedAt));
+  bb.events.on("thread.archived", ({ thread }) => service.invalidate(thread.id));
   const operationalThreadChanges = new Set([
     "thread-created",
     "status-changed",
@@ -207,7 +208,9 @@ export function registerWorkstreamAgents(
               change.id ? service.invalidateThreadTree(change.id) : service.invalidate();
             else if (change.changes.includes("environment-changed")) service.environmentAttached(change.id);
             else if (["idle", "error", "stopping"].includes(change.metadata?.statusChange?.status ?? ""))
-              service.invalidate(change.id);
+              change.id && change.metadata?.statusChange
+                ? service.runEnded(change.id, change.metadata.statusChange.updatedAt)
+                : service.invalidate(change.id);
           } else if (change.entity === "environment") {
             if (change.changes.some(kind => !operationalEnvironmentChanges.has(kind)))
               service.invalidateEnvironment(change.id);

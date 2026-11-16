@@ -7,7 +7,7 @@ import {
 } from "@get-bb/plugin-sdk/testing";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { CortexRunner } from "./cli";
-import { createWorkstreams, PREPARATION_MAX_AGE_MS } from "./workstreams";
+import { CONTEXT_CHANGED, createWorkstreams, PREPARATION_MAX_AGE_MS } from "./workstreams";
 import { registerWorkstreamAgents, workstreamConfiguration } from "./workstream-agents";
 import { workstreamHandlers } from "./workstream-rpc";
 import { workstreamRpcContract, type Knowledge, type WorkstreamBinding } from "./workstream-contract";
@@ -181,7 +181,56 @@ function setup() {
     move: () => {
       thread = makeThreadResponse({ id: T, sectionId: "sec_foreign", environmentId: "env_test" });
     },
+    rest: (updatedAt: number) => {
+      thread = makeThreadResponse({ ...thread, status: "idle", updatedAt });
+    },
+    runEnded: async (via: "event" | "subscription", updatedAt: number) => {
+      if (via === "event")
+        return host.harness.behavior.emitThreadEvent("thread.idle", {
+          thread: makeThreadResponse({ ...thread, status: "idle", updatedAt }),
+          lastAssistantText: null,
+        });
+      for (const subscription of subscriptions)
+        if (subscription.event === "thread:changed")
+          subscription.callback({
+            type: "changed",
+            entity: "thread",
+            id: T,
+            changes: ["status-changed"],
+            metadata: {
+              statusChange: {
+                activity: {
+                  activeBackgroundAgentCount: 0,
+                  activeBackgroundCommandCount: 0,
+                  activePlanModeCount: 0,
+                  activeWorkflowCount: 0,
+                },
+                latestAttentionAt: updatedAt,
+                runtime: { displayStatus: "idle" },
+                status: "idle",
+                updatedAt,
+              },
+            },
+          });
+    },
   };
+}
+/** Holds the workstream read open so a test can act while dispatch is preparing. */
+function holdRead(s: ReturnType<typeof setup>) {
+  const read = s.service.cli.read;
+  let started!: () => void, release!: () => void;
+  const entered = new Promise<void>(resolve => {
+    started = resolve;
+  });
+  const gate = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  vi.spyOn(s.service.cli, "read").mockImplementation(async (...args) => {
+    started();
+    await gate;
+    return read(...args);
+  });
+  return { entered, release: () => release() };
 }
 const proposal = {
   subject: "new",
@@ -305,15 +354,42 @@ describe("workstream agent and user boundaries", () => {
     const moved = makePluginAgentConfigurationContext({ ...s.config(), environment: { id: "env_moved" } });
     expect(workstreamConfiguration(s.service, moved, "read")?.instructions).not.toContain(entry.text);
   });
-  test("idle ends preparation so an unhooked later start cannot reuse it", async () => {
-    const s = setup();
-    await s.dispatch();
-    await s.harness.behavior.emitThreadEvent("thread.idle", {
-      thread: makeThreadResponse({ id: T }),
-      lastAssistantText: null,
-    });
-    expect(workstreamConfiguration(s.service, s.config(), "read")?.instructions).not.toContain(entry.text);
-  });
+  test.each(["event", "subscription"] as const)(
+    "idle (%s) ends preparation so an unhooked later start cannot reuse it",
+    async via => {
+      const s = setup();
+      s.rest(100);
+      await s.dispatch();
+      // The run the message started moves the thread on, so its end is newer than the dispatched snapshot.
+      await s.runEnded(via, 101);
+      expect(workstreamConfiguration(s.service, s.config(), "read")?.instructions).not.toContain(entry.text);
+    },
+  );
+  test.each(["event", "subscription"] as const)(
+    "the previous run's idle (%s) arriving during preparation neither rejects the queued message nor loses its brief",
+    async via => {
+      const s = setup();
+      s.rest(100);
+      const held = holdRead(s);
+      const dispatch = s.dispatch();
+      await held.entered;
+      await s.runEnded(via, 100);
+      held.release();
+      expect(await dispatch).toEqual({ action: "proceed" });
+      expect(workstreamConfiguration(s.service, s.config(), "read")?.instructions).toContain(entry.text);
+    },
+  );
+  test.each(["event", "subscription"] as const)(
+    "the previous run's idle (%s) arriving after admission keeps the next run's brief",
+    async via => {
+      const s = setup();
+      s.rest(100);
+      expect(await s.dispatch()).toEqual({ action: "proceed" });
+      await s.runEnded(via, 99);
+      await s.runEnded(via, 100);
+      expect(workstreamConfiguration(s.service, s.config(), "read")?.instructions).toContain(entry.text);
+    },
+  );
   test("startup admission expires even if UI previews keep refreshing the same thread", async () => {
     const s = setup();
     const now = Date.now();
@@ -364,7 +440,9 @@ describe("workstream agent and user boundaries", () => {
     await entered;
     s.notifyThread({ type: "changed", entity: "thread", id: T, changes: [change] });
     release();
-    expect(await dispatch).toMatchObject({ action: change === "status-changed" ? "proceed" : "reject" });
+    expect(await dispatch).toEqual(
+      change === "status-changed" ? { action: "proceed" } : { action: "reject", message: CONTEXT_CHANGED },
+    );
     const text = workstreamConfiguration(s.service, s.config(), "read")?.instructions;
     if (change === "title-changed") expect(text).not.toContain(entry.text);
     else expect(text).toContain(entry.text);

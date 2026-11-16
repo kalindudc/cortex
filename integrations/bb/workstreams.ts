@@ -30,6 +30,8 @@ type ResolutionFacts = {
 };
 export const MISSING_CONTEXT =
   "Cortex thread context is not resolved. No legacy context was substituted. Open the Memory tab and retry, or start a fresh session after resolving the binding.";
+export const CONTEXT_CHANGED =
+  "Cortex held this message back because the thread's section, environment or shared knowledge changed while it was being sent. bb sends it again shortly with the new context; nothing needs fixing.";
 export const NO_SCOPE_MATCH =
   "no workstream memory matches; nothing read from other workstreams or unscoped legacy memory";
 type Notice = z.infer<typeof contextNoticeSchema>;
@@ -172,6 +174,9 @@ export function createWorkstreams(
   const facts = new Map<string, ResolutionFacts>();
   const admissions = new Map<string, { context: ThreadContext; fact: ResolutionFacts }>();
   const coldStarts = new Map<string, { hostId: string; attachmentObserved: boolean }>();
+  // The newest thread snapshot a dispatch was decided on. bb drains the queue as a run ends, so that run's idle
+  // notice can arrive after the next message's dispatch began; it is about the earlier run and must not revoke it.
+  const dispatchedAt = new Map<string, number>();
   function invalidate(threadId?: string, notify = true) {
     if (threadId) {
       threadGenerations.set(threadId, (threadGenerations.get(threadId) ?? 0) + 1);
@@ -220,6 +225,11 @@ export function createWorkstreams(
       cold.attachmentObserved = true;
       return;
     }
+    invalidate(threadId);
+  }
+  /** A run ended at the thread's `updatedAt`: discard its preparation unless a later dispatch already replaced it. */
+  function runEnded(threadId: string, endedAt: number) {
+    if (endedAt <= (dispatchedAt.get(threadId) ?? Number.NEGATIVE_INFINITY)) return;
     invalidate(threadId);
   }
   function invalidateEnvironment(environmentId?: string) {
@@ -468,10 +478,11 @@ export function createWorkstreams(
     });
   }
   async function predispatch(ctx: MessageDispatchHookContext) {
+    dispatchedAt.set(ctx.thread.id, Math.max(dispatchedAt.get(ctx.thread.id) ?? 0, ctx.thread.updatedAt));
     invalidate(ctx.thread.id);
     const { value, fact, isCurrent } = await resolveContext(ctx.thread.id);
     // Preview reads may replace the cache without changing the scope this dispatch resolved.
-    if (!isCurrent()) return { action: "reject" as const, message: MISSING_CONTEXT };
+    if (!isCurrent()) return { action: "reject" as const, message: CONTEXT_CHANGED };
     if (value.binding && value.status !== "ready")
       return { action: "reject" as const, message: value.error ?? MISSING_CONTEXT };
     admissions.set(ctx.thread.id, { context: value, fact: { ...fact } });
@@ -497,6 +508,7 @@ export function createWorkstreams(
     invalidateThreadTree,
     invalidateEnvironment,
     environmentAttached,
+    runEnded,
     human,
     recall,
     record,

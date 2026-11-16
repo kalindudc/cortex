@@ -134,9 +134,9 @@ It reads canonical tasks and workstream knowledge through the Cortex CLI, never 
 - `workstream-store.ts` stores bindings, preferences, grants and frozen context history; `workstreams.ts` composes
   eligible context. `sections.ts` and `section-store.ts` keep resumable connection/capture intent and legacy title-mark ownership,
   not another canonical knowledge database. Intended IDs are persisted before cross-store writes.
-- `workstream-agents.ts` prepares scope at dispatch, uses a synchronous configuration cache and registers read/propose
-  tools. Dispatch checks scope revisions, not preview-cache identity, so concurrent reads cannot reject valid context.
-  Session construction and provider delivery are distinct; the plugin does not claim hot system-prompt updates.
+- `workstream-agents.ts` prepares scope at dispatch, caches configuration and registers read/propose tools. Dispatch
+  checks scope revisions, not cache identity; a run's late idle notice ends only older preparation, so no preview or
+  previous run rejects a queued message. Building a session is not delivery; no hot system-prompt update is claimed.
 - `cli.ts` runs argument arrays with timeouts/cancellation, validates JSON and throws on tool failure. `state.ts`
   retains task links, source checks and the project primer cache; `watch.ts` invalidates reads.
 - `draft-service.ts` owns durable helper intent and recovery; `draft-validation.ts` verifies sources and suggestions.

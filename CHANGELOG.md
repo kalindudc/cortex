@@ -2,6 +2,16 @@
 
 Cortex follows [semantic versioning](https://semver.org). Each release has a section below, newest first.
 
+## 0.108.1 - 2026-11-16
+
+- **Queued messages no longer fail as a turn ends.** bb sends a queued message as soon as the thread's turn finishes,
+  and Cortex's notice that the turn had ended could arrive mid-send. Cortex then rejected the message with "Cortex
+  thread context is not resolved" until bb retried it, or, a moment later, sent the next run without its section's
+  brief. A turn's end now only clears context prepared before it.
+- **A clearer message when context really changes mid-send.** If the thread's section, environment or shared knowledge
+  changes while a message is being sent, Cortex says bb will send it again shortly with the new context, instead of
+  pointing you to the Memory tab or a fresh session.
+
 ## 0.108.0 - 2026-11-14
 
 - **Queued answers no longer fail when Cortex refreshes their context.** A concurrent context preview no longer
