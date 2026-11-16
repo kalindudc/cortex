@@ -67,8 +67,11 @@ export function createProblems(sections: Sections, workstreams: Workstreams, dra
       // A section whose brief could not be read says so itself; its missing entries are not unreached.
       if (rows.some(row => !row.preview || row.preview.status === "unavailable")) continue;
       try {
-        const problem = unreachedProblem(rows, await catalog(workstreamId));
-        if (problem) unreached.push(problem);
+        const knowledge = await catalog(workstreamId);
+        for (const row of rows) {
+          const problem = unreachedProblem([row, ...rows.filter(other => other !== row)], knowledge, workstreams.store.problemDismissed);
+          if (problem) unreached.push(problem);
+        }
       } catch {
         // The per-section catalog problem already reports a failed knowledge read.
       }

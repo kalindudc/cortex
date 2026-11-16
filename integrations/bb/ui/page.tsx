@@ -1,4 +1,5 @@
 import { useProblems } from "./data";
+import { problemRows } from "./problem-card";
 import { type ReactNode, useEffect, useState } from "react";
 import {
   type ExperimentalBadge,
@@ -251,7 +252,7 @@ export function CortexSidebar({ subPath }: PluginNavPanelProps) {
 export function useNeedsYouBadge(): ExperimentalBadge | null {
   const queue = useReviewQueue();
   const problems = useProblems();
-  const total = (queue.data?.total ?? 0) + (problems.data?.problems.length ?? 0);
+  const total = (queue.data?.total ?? 0) + problemRows(problems.data?.problems ?? []).length;
   if (total <= 0) return null;
   return { count: total, tone: "warning", label: `${total} problems and suggestions need you` };
 }

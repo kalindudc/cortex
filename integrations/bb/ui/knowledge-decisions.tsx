@@ -7,6 +7,8 @@ export const isHistorical = (entry: Knowledge) => ["archived", "rejected", "supe
 
 export function knowledgeDecisionMessage(cause: unknown): string {
   const { message } = failureOf(cause);
+  if (message.includes("An approved entry already owns this subject/applicability"))
+    return "Another approved entry already covers this subject and target. Compare them in Review before deciding which to keep.";
   if (message.includes("Historical entries cannot acquire active relations"))
     return "The other entry is already in history and cannot be replaced. Review the refreshed choices; choose Approve this if no live conflicts remain.";
   if (message.includes("Resolve conflicts through explicit supersession"))

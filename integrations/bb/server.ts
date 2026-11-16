@@ -293,6 +293,9 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
     bb.rpc.register(rpcContract, {
       problems: unavailable,
       knowledgeSetApplicability: unavailable,
+      knowledgeMoveToBasics: unavailable,
+      problemEntryDismiss: unavailable,
+      problemEntryUndo: unavailable,
       ...unavailableWorkstreamHandlers(reason),
       ...unavailableSectionHandlers(reason),
       ...unavailableDraftHandlers(reason),

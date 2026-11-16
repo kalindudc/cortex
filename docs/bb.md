@@ -54,11 +54,11 @@ checks the source; a rendered selection that cannot be matched offers whole-mess
 wording, scope and sources before acceptance. Saving for review keeps the suggestion's identity and choices without
 approval; unknown scope still blocks acceptance. A human can explicitly adopt a Rule, never by quote alone. Source
 authorship and reachability are reported metadata, not authentication or proof that a claim is true now. Needs you lists
-lasting problems as cards (what is wrong, what it stops, the fix) above suggestions; the same card shows in place. Set
-where it applies replaces an approved entry's unknown scope with a corrected copy.
+lasting problems as review rows before suggestions, one per unreached entry, with reasons and fixes also in All
+knowledge and entry detail: archive duplicates, move unshared topics to shared basics, or Ignore here, with Undo. Set where it
+applies replaces an approved entry's unknown scope with a corrected copy.
 
 Agents' bounded suggestion allowance per active run counts no-save results and failures, not your reviews or updates.
-
 Keep one accepted source rather than saving another summary for each thread. Attach repeated evidence to existing knowledge.
 Exact duplicates can produce a no-save result; related suggestions help compare and consolidate. These are bounded hints,
 not a semantic duplicate detector or confidence score. Different subject keys and superficially different sources still need human judgment.

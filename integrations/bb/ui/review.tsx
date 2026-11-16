@@ -1,4 +1,5 @@
-import { ProblemCard } from "./problem-card";
+import { ProblemCard, type ProblemRow, problemRows } from "./problem-card";
+import { ProblemEntryRow, reasonWord } from "./problem-entry";
 import { useProblems } from "./data";
 import { type KeyboardEvent, type RefObject, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { useBbNavigate } from "@get-bb/plugin-sdk/app";
@@ -319,15 +320,56 @@ function Decision({ item, onDone, onOpen, now, keysRef }: {
   );
 }
 
-function ProblemList({ read, suggestions }: { read: ReturnType<typeof useProblems>; suggestions?: number }) {
-  return <section aria-label="Problems" className="max-h-[45%] shrink-0 overflow-y-auto px-4 py-3">
-    <p className="text-[13px]">{plural(read.data?.problems.length ?? 0, "problem")} · {suggestions === undefined ? "suggestions not loaded" : plural(suggestions, "suggestion")}</p>
-    {read.error ? <FailureNotice failure={read.error} onRetry={read.refetch} /> : null}
-    {[true, false].map(blocking => {
-      const rows = read.data?.problems.filter(problem => problem.blocking === blocking) ?? [];
-      return rows.length ? <div key={String(blocking)}><h2 className="mt-2 text-[13px] font-semibold">{blocking ? "Blocking work" : "Getting in the way"}</h2>{rows.map(problem => <ProblemCard key={problem.id} problem={problem} />)}</div> : null;
-    })}
-  </section>;
+function ProblemQueueRow({ row, selected, onSelect }: { row: ProblemRow; selected: boolean; onSelect: () => void }) {
+  const { problem, entry } = row;
+  const where = problem.sectionName ?? "Cortex";
+  return (
+    <li className="border-b border-border-seam">
+      <button type="button" aria-current={selected ? "true" : undefined} onClick={onSelect} className={cn(
+        "flex w-full min-w-0 items-start gap-2.5 border-l-2 px-4 py-3 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset",
+        selected ? "border-primary bg-surface-selected hover:bg-surface-selected/80" : "border-transparent hover:bg-state-hover",
+      )}>
+        <Icon name="AlertTriangle" className={cn("mt-0.5 size-4 shrink-0", TONE_TEXT[problem.blocking ? "destructive" : "warning"])} aria-label={problem.severity} />
+        <span className="min-w-0 flex-1">
+          <span className="line-clamp-2 text-[13px] font-semibold text-foreground" title={entry?.title ?? problem.title}>{entry ? entry.title : problem.title.replace(` in ${where}`, "")}</span>
+          <span className="mt-1 block text-[12px] text-muted-foreground">{entry ? `Never reaches a thread · ${reasonWord(entry)}` : problem.severity} · {where}</span>
+        </span>
+      </button>
+    </li>
+  );
+}
+
+/** An unreached entry, decided like a suggestion: the entry, the brief's copy when only the titles match, then the fix. */
+function UnreachedDecision({ row, onOpen }: { row: Required<ProblemRow>; onOpen: (id: string) => void }) {
+  const { entry, problem } = row;
+  const reads = useKnowledgeEntries(entry.match === "title" && entry.duplicateOf ? [entry.id, entry.duplicateOf] : [entry.id]);
+  const own = reads[0]?.data;
+  const other = reads[1]?.data;
+  if (reads[0]?.error) return <FailureNotice failure={reads[0].error} onRetry={reads[0].refetch} />;
+  if (!own) return <LoadingRows label="Loading the entry" />;
+  return (
+    <div className="flex min-w-0 flex-col gap-4" data-part="DecisionPane">
+      <KnowledgeDetail entry={own.entry} workstream={own.workstream} onOpen={onOpen} sectionId={problem.sectionId!} problemNotice={false}>
+        {other ? (
+          <section aria-label="Compare" className="flex flex-col gap-2">
+            <h3 className="text-[13px] font-semibold">Already in the brief</h3>
+            <div className="cortex-compare" data-part="Compare">
+              <Side entry={other.entry} label="In the brief" />
+              <div className="flex min-w-0 flex-col gap-1.5 rounded-md border border-border-seam p-3">
+                <span className="text-[12px] font-semibold text-foreground">Wording change</span>
+                <DiffText ops={wordDiff(other.entry.text, own.entry.text)} label={`Words changed from ${other.entry.title}`} />
+              </div>
+            </div>
+          </section>
+        ) : null}
+      </KnowledgeDetail>
+      <section aria-label="Decision" className="flex flex-col gap-2">
+        <h3 className="text-[13px] font-semibold">Your call</h3>
+        <p className="text-[13px]">No thread in {problem.sectionName} gets this entry.</p>
+        <ProblemEntryRow entry={entry} sectionId={problem.sectionId!} showTitle={false} />
+      </section>
+    </div>
+  );
 }
 
 export function NeedsYou() {
@@ -342,7 +384,12 @@ export function NeedsYou() {
   const items = useMemo(() => oldestFirst(read.data?.items ?? []), [read.data]);
   const workstreams = useMemo(() => [...new Map(items.map(item => [item.workstream.id, item.workstream])).values()], [items]);
   const visible = filter === "all" ? items : items.filter(item => item.workstream.id === filter);
-  const selected = visible.find(item => item.entry.id === selectedId) ?? visible[0] ?? null;
+  const problemList = useMemo(() => problemRows(problems.data?.problems ?? []), [problems.data]);
+  const shownProblems = filter === "all" ? problemList : [];
+  const keyOrder = [...shownProblems.map(row => row.key), ...visible.map(item => item.entry.id)];
+  const selectedKey = selectedId && keyOrder.includes(selectedId) ? selectedId : keyOrder[0] ?? null;
+  const selectedProblem = shownProblems.find(row => row.key === selectedKey) ?? null;
+  const selected = selectedProblem ? null : visible.find(item => item.entry.id === selectedKey) ?? null;
   const open = (id: string) => {
     if (visible.some(item => item.entry.id === id)) {
       setSelectedId(id);
@@ -355,11 +402,13 @@ export function NeedsYou() {
     const target = event.target as HTMLElement;
     if (event.ctrlKey || event.metaKey || event.altKey || event.nativeEvent.isComposing ||
       target.closest("input, textarea, select, [contenteditable]:not([contenteditable=false]), [role=textbox], [role=combobox], [role=dialog], [role=alertdialog], [role=menu]")) return;
-    if ((event.key.toLowerCase() === "j" || event.key.toLowerCase() === "k") && visible.length > 0) {
+    if ((event.key.toLowerCase() === "j" || event.key.toLowerCase() === "k") && keyOrder.length > 0) {
       event.preventDefault();
-      const index = Math.max(0, visible.findIndex(item => item.entry.id === selected?.entry.id));
+      const index = Math.max(0, keyOrder.indexOf(selectedKey ?? ""));
       const delta = event.key.toLowerCase() === "j" ? 1 : -1;
-      setSelectedId(visible[Math.min(visible.length - 1, Math.max(0, index + delta))]!.entry.id);
+      setSelectedId(keyOrder[Math.min(keyOrder.length - 1, Math.max(0, index + delta))]!);
+    } else if (!selected) {
+      return;
     } else if (/^[1-9]$/.test(event.key)) {
       event.preventDefault();
       keysRef.current?.choose(Number(event.key) - 1);
@@ -368,34 +417,42 @@ export function NeedsYou() {
       keysRef.current?.confirm();
     }
   };
-  if (read.error && read.data === undefined) return <div className="p-4"><ProblemList read={problems} /><FailureNotice failure={read.error} onRetry={read.refetch} /></div>;
-  if (read.data === undefined) return <div className="p-4"><ProblemList read={problems} /><LoadingRows label="Loading what needs you" /></div>;
   const oldest = visible[0];
+  const total = shownProblems.length + (read.data ? filter === "all" ? read.data.total : visible.length : 0);
+  const select = (key: string) => { setSelectedId(key); setShowDetail(true); };
   return (
     <div data-cortex data-part="ReviewQueue" role="region" aria-label="Review queue" tabIndex={0} className="cortex-review flex h-full min-h-0 flex-col focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" onKeyDown={keys}>
-      <ProblemList read={problems} suggestions={read.data.total} />
-      {read.error ? <FailureNotice failure={read.error} onRetry={read.refetch} /> : null}
+      {problems.error ? <FailureNotice failure={problems.error} onRetry={problems.refetch} /> : null}
+      {read.error && read.data ? <FailureNotice failure={read.error} onRetry={read.refetch} /> : null}
       <div className="cortex-master-detail" data-show-detail={showDetail || undefined}>
         <div data-cortex-scroll="list" className="cortex-master border-r border-border-seam">
           <header className="flex items-center gap-3 border-b border-border-seam px-4 py-3">
-            <span className="text-[24px] leading-none font-semibold text-foreground tabular-nums">{filter === "all" ? read.data.total : visible.length}</span>
-            <div className="min-w-0 flex-1"><h2 className="text-[13px] font-semibold">to review</h2>{oldest ? <p className="text-[12px] text-muted-foreground">oldest {waitAge(oldest.entry.updatedAt, now)}</p> : null}</div>
+            <span className="text-[24px] leading-none font-semibold text-foreground tabular-nums">{total}</span>
+            <div className="min-w-0 flex-1"><h2 className="text-[13px] font-semibold">to review</h2><p className="text-[12px] text-muted-foreground">{[shownProblems.length ? plural(shownProblems.length, "problem") : "", read.data ? oldest ? `oldest suggestion ${waitAge(oldest.entry.updatedAt, now)}` : "" : "suggestions not loaded"].filter(Boolean).join(" · ")}</p></div>
             <span title="J and K move through the queue" className="flex gap-1 text-[11px] text-muted-foreground"><kbd className="border border-border-seam px-1">J</kbd><kbd className="border border-border-seam px-1">K</kbd></span>
           </header>
           {workstreams.length > 1 ? <div role="group" aria-label="Workstream" className="flex flex-wrap gap-1.5 border-b border-border-seam p-3">
             {[{ id: "all", name: "All" }, ...workstreams].map(ws => <Button key={ws.id} variant="outline" size="sm" aria-pressed={filter === ws.id} className={cn("cortex-filter h-auto min-h-7 px-2 py-1 text-[12px]", filter === ws.id && "border-surface-selected-border bg-surface-selected")} onClick={() => { setFilter(ws.id); setSelectedId(null); setShowDetail(false); }}>{ws.name}</Button>)}
           </div> : null}
-          {visible.length === 0 ? <div className="p-4"><EmptyNote icon="CircleCheck">Nothing waits for your review.</EmptyNote></div> : <>
-            <p className="border-b border-border-seam px-4 py-2 text-[11.5px] text-muted-foreground">Oldest first</p>
+          {shownProblems.length ? <>
+            <p className="border-b border-border-seam px-4 py-2 text-[11.5px] text-muted-foreground">Problems, blocking first</p>
+            <ul aria-label="Problems">{shownProblems.map(row => <ProblemQueueRow key={row.key} row={row} selected={row.key === selectedKey} onSelect={() => select(row.key)} />)}</ul>
+          </> : null}
+          {read.error && !read.data ? <div className="p-4"><FailureNotice failure={read.error} onRetry={read.refetch} /></div>
+            : !read.data ? <div className="p-4"><LoadingRows label="Loading what needs you" /></div>
+            : visible.length === 0 ? shownProblems.length ? null : <div className="p-4"><EmptyNote icon="CircleCheck">Nothing waits for your review.</EmptyNote></div> : <>
+            <p className="border-b border-border-seam px-4 py-2 text-[11.5px] text-muted-foreground">{shownProblems.length ? "Suggestions, oldest first" : "Oldest first"}</p>
             <ul aria-label="Waiting for your review">
-              {visible.map(item => <QueueRow key={item.entry.id} item={item} now={now} selected={item.entry.id === selected?.entry.id} onSelect={() => { setSelectedId(item.entry.id); setShowDetail(true); }} />)}
+              {visible.map(item => <QueueRow key={item.entry.id} item={item} now={now} selected={item.entry.id === selected?.entry.id} onSelect={() => select(item.entry.id)} />)}
             </ul>
           </>}
-          {read.data.total > items.length ? <p className="px-4 py-3 text-[12px] text-muted-foreground">{plural(read.data.total - items.length, "older item")} after these</p> : null}
+          {read.data && read.data.total > items.length ? <p className="px-4 py-3 text-[12px] text-muted-foreground">{plural(read.data.total - items.length, "older item")} after these</p> : null}
         </div>
-        {selected ? <div data-cortex-scroll="detail" className="cortex-detail">
+        {selected || selectedProblem ? <div data-cortex-scroll="detail" className="cortex-detail">
           <Button variant="ghost" size="sm" className="cortex-back mb-3" onClick={() => setShowDetail(false)}><Icon name="ChevronLeft" aria-hidden />Queue</Button>
-          <Decision key={selected.entry.id} item={selected} now={now} keysRef={keysRef} onOpen={open} onDone={() => { setSelectedId(null); }} />
+          {selected ? <Decision key={selected.entry.id} item={selected} now={now} keysRef={keysRef} onOpen={open} onDone={() => { setSelectedId(null); }} />
+            : selectedProblem?.entry ? <UnreachedDecision key={selectedProblem.key} row={selectedProblem as Required<ProblemRow>} onOpen={id => navigate.toPluginPanel(CORTEX_PAGE_PATH, { subPath: `sections/${selectedProblem.problem.sectionId}/knowledge/${id}` })} />
+            : selectedProblem ? <ProblemCard key={selectedProblem.key} problem={selectedProblem.problem} flat /> : null}
         </div> : null}
       </div>
     </div>

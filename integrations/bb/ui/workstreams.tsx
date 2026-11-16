@@ -1,3 +1,4 @@
+import { ProblemEntryBadge, useProblemEntry } from "./problem-entry";
 import { isPageCount, isText, oneOf, usePlaceState } from "./place";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useBbNavigate } from "@get-bb/plugin-sdk/app";
@@ -99,12 +100,13 @@ export function WorkstreamDialog({
 }
 
 
-function EntryRow({ entry, selected, onSelect }: { entry: Knowledge; selected: boolean; onSelect: () => void }) {
+function EntryRow({ entry, selected, onSelect, sectionId }: { entry: Knowledge; selected: boolean; onSelect: () => void; sectionId?: string }) {
+  const problem = useProblemEntry(entry.id, sectionId);
   return <li>
     <button type="button" aria-current={selected ? "true" : undefined} onClick={onSelect}
       className={cn("cortex-knowledge-row grid w-full gap-x-3 gap-y-1 border-b border-border-seam px-3 py-3 text-left hover:bg-state-hover focus-visible:ring-1 focus-visible:ring-ring", selected && "bg-surface-selected")}>
       <KnowledgeStateMark entry={entry} />
-      <span className="min-w-0 font-semibold break-words">{entry.title}</span>
+      <span className="min-w-0 font-semibold break-words">{entry.title}{problem ? <ProblemEntryBadge entry={problem.entry} /> : null}</span>
       <span className="text-muted-foreground">{facetWord(entry.facet)}</span>
       <span className="min-w-0 break-words text-muted-foreground">{dimensionWord("environment", entry.applicability.environment)} · {dimensionWord("host", entry.applicability.host)}</span>
       <span className="text-muted-foreground">{shortTime(entry.updatedAt)}</span>
@@ -131,7 +133,7 @@ export function WorkstreamEdits({ id }: { id: string }) {
   </section>;
 }
 
-export function WorkstreamKnowledge({ id, selectedId = null, onSelect, onClose }: { id: string; selectedId?: string | null; onSelect?: (id: string) => void; onClose?: () => void }) {
+export function WorkstreamKnowledge({ id, selectedId = null, onSelect, onClose, sectionId }: { sectionId?: string; id: string; selectedId?: string | null; onSelect?: (id: string) => void; onClose?: () => void }) {
   const read = useWorkstream(id);
   const navigate = useBbNavigate();
   const [facet, setFacet] = usePlaceState(`topic:${id}`, "all", isText);
@@ -160,14 +162,14 @@ export function WorkstreamKnowledge({ id, selectedId = null, onSelect, onClose }
       <div className={cn("cortex-knowledge-layout grid min-w-0 gap-4", showDetail && "cortex-detail-open")}>
         <div className="cortex-master min-w-0">
           <div aria-hidden className="cortex-knowledge-heading cortex-knowledge-row grid gap-3 border-b border-border-seam px-3 py-2 font-semibold text-muted-foreground"><span>State</span><span>Entry</span><span>Topic</span><span>Applies to</span><span>Updated</span></div>
-          <ul aria-label="All knowledge">{shown.map(entry => <EntryRow key={entry.id} entry={entry} selected={selectedId === entry.id} onSelect={() => select(entry.id)} />)}</ul>
+          <ul aria-label="All knowledge">{shown.map(entry => <EntryRow key={entry.id} sectionId={sectionId} entry={entry} selected={selectedId === entry.id} onSelect={() => select(entry.id)} />)}</ul>
           {shown.length === 0 ? <EmptyNote>No knowledge in this topic.</EmptyNote> : null}
           {total > entries.length ? <p className="px-3 py-2 text-muted-foreground">Showing {entries.length} of {total}. Search the library for the rest.</p> : null}
         </div>
         {selected && (showDetail || !onSelect) ? <div className={cn("cortex-detail min-w-0 rounded-md border border-border-seam bg-card p-4", !showDetail && "cortex-detail-idle")}>
           <Button variant="ghost" size="sm" className="cortex-detail-back mb-2" onClick={() => { setShowDetail(false); onClose?.(); }}><Icon name="ChevronLeft" className="size-4" aria-hidden />{workstream.name}</Button>
           {onClose ? <Button variant="ghost" size="icon" aria-label="Close entry" onClick={() => { setShowDetail(false); onClose(); }}><Icon name="X" className="size-4" aria-hidden /></Button> : null}
-          <KnowledgeDetail entry={selected} workstream={workstream} onOpen={select} actions={<KnowledgeActions entry={selected} workstream={workstream} />} />
+          <KnowledgeDetail sectionId={sectionId} entry={selected} workstream={workstream} onOpen={select} actions={<KnowledgeActions entry={selected} workstream={workstream} />} />
         </div> : null}
       </div>}
     <ProposeDialog workstream={workstream} facets={facets} open={adding} onOpenChange={setAdding} />

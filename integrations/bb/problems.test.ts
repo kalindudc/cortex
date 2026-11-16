@@ -43,15 +43,15 @@ test("a connection conflict opens its exact section instead of retrying", () => 
 });
 
 const any = { mode: "not-applicable" as const };
-const approved = (id: string, extra: Partial<Knowledge> = {}) => ({ id, workstreamId: "ws_one", subject: id, title: `Title ${id}`, text: "t", kind: "finding", state: "approved", facet: "orientation", applicability: { environment: any, host: any }, sources: [], revision: 1, actor: { id: "you", type: "human" }, createdAt: "", updatedAt: "", expiresAt: null, approval: null, supersedes: [], supersededBy: null, conflicts: [], ...extra }) as Knowledge;
+const approved = (id: string, extra: Partial<Knowledge> = {}) => ({ id, workstreamId: "ws_one", subject: id, title: `Title ${id}`, text: id, kind: "finding", state: "approved", facet: "orientation", applicability: { environment: any, host: any }, sources: [], revision: 1, actor: { id: "you", type: "human" }, createdAt: "", updatedAt: "", expiresAt: null, approval: null, supersedes: [], supersededBy: null, conflicts: [], ...extra }) as Knowledge;
 const anyTargets = { ...section, binding: { ...section.binding, binding: { ...section.binding.binding!, requiredKnowledgeIds: [], applicability: { environment: any, host: any } } } } as Section;
 test("approved entries no connected section receives get one card naming why", () => {
   const reached = approved("kn_in");
   const catalog = [reached, approved("kn_topic", { facet: "operating rule" }), approved("kn_host", { applicability: { environment: any, host: { mode: "value", value: "vault-staging" } } })];
   const row = unreachedProblem([{ section: anyTargets, preview: { ...preview, entries: [{ knowledge: reached, text: "t", origin: "canonical", overrideActor: null, estimatedTokens: 5 }] } as SectionEligibility }], catalog);
-  expect(row).toMatchObject({ id: "sec_one:unreached", severity: "Held back", title: "2 approved entries never reach a thread in Payments", actions: [{ kind: "open-section", label: "Open them", id: "kn_topic" }] });
-  expect(row?.details).toContain("Title kn_topic: filed under the topic \"operating rule\", which this section does not share");
-  expect(row?.details).toContain("Title kn_host: only for host vault-staging, which this section does not target");
+  expect(row).toMatchObject({ id: "sec_one:unreached", severity: "Held back", title: "2 approved entries never reach a thread in Payments", actions: [] });
+  expect(row?.entries?.[0]?.detail).toBe("Filed under the topic \"operating rule\", which this section doesn't share");
+  expect(row?.entries?.[1]?.detail).toBe("Only for host vault-staging, which this section doesn't target");
 });
 test("an entry another section of the same knowledge receives, or that already has a card, is not listed", () => {
   const host = approved("kn_host", { applicability: { environment: any, host: { mode: "value", value: "vault-staging" } } });

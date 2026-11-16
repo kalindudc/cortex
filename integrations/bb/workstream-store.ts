@@ -29,22 +29,26 @@ const prefsSchema = z
 type Prefs = z.infer<typeof prefsSchema>;
 const empty = (): Prefs => ({ revision: 0, binding: null, overrides: [], grants: [], dismissed: null });
 
+// bb records migrations by position and refuses a reload when a shipped one moves or changes: only ever append.
+export const WORKSTREAM_MIGRATIONS = [
+  `CREATE TABLE IF NOT EXISTS workstream_bindings (key TEXT PRIMARY KEY, revision INTEGER NOT NULL, payload TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS workstream_thread_prefs (thread_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, payload TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS workstream_receipts (id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, emitted_at TEXT NOT NULL, payload TEXT NOT NULL)`,
+  `CREATE INDEX IF NOT EXISTS workstream_receipts_thread ON workstream_receipts(thread_id, emitted_at DESC)`,
+  `CREATE TRIGGER IF NOT EXISTS workstream_receipts_immutable_update BEFORE UPDATE ON workstream_receipts BEGIN SELECT RAISE(ABORT, 'delivery receipts are immutable'); END`,
+  `CREATE TRIGGER IF NOT EXISTS workstream_receipts_immutable_delete BEFORE DELETE ON workstream_receipts BEGIN SELECT RAISE(ABORT, 'delivery receipts are immutable'); END`,
+  `CREATE TABLE IF NOT EXISTS workstream_prepared_bindings (thread_id TEXT PRIMARY KEY, payload TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS workstream_section_jobs (request_id TEXT PRIMARY KEY, section_id TEXT NOT NULL, payload TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS workstream_title_marks (section_id TEXT PRIMARY KEY, payload TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS workstream_binding_history (section_id TEXT NOT NULL, revision INTEGER NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(section_id, revision))`,
+  ...DRAFT_MIGRATIONS,
+  ...PENDING_CONTEXT_MIGRATIONS,
+  `CREATE TABLE IF NOT EXISTS workstream_problem_dismissals (section_id TEXT NOT NULL, entry_id TEXT NOT NULL, revision INTEGER NOT NULL, PRIMARY KEY(section_id, entry_id, revision))`,
+];
+
 export function createWorkstreamStore(bb: BbPluginApi) {
   const db = bb.storage.database();
-  bb.storage.migrate(db, [
-    `CREATE TABLE IF NOT EXISTS workstream_bindings (key TEXT PRIMARY KEY, revision INTEGER NOT NULL, payload TEXT NOT NULL)`,
-    `CREATE TABLE IF NOT EXISTS workstream_thread_prefs (thread_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, payload TEXT NOT NULL)`,
-    `CREATE TABLE IF NOT EXISTS workstream_receipts (id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, emitted_at TEXT NOT NULL, payload TEXT NOT NULL)`,
-    `CREATE INDEX IF NOT EXISTS workstream_receipts_thread ON workstream_receipts(thread_id, emitted_at DESC)`,
-    `CREATE TRIGGER IF NOT EXISTS workstream_receipts_immutable_update BEFORE UPDATE ON workstream_receipts BEGIN SELECT RAISE(ABORT, 'delivery receipts are immutable'); END`,
-    `CREATE TRIGGER IF NOT EXISTS workstream_receipts_immutable_delete BEFORE DELETE ON workstream_receipts BEGIN SELECT RAISE(ABORT, 'delivery receipts are immutable'); END`,
-    `CREATE TABLE IF NOT EXISTS workstream_prepared_bindings (thread_id TEXT PRIMARY KEY, payload TEXT NOT NULL)`,
-    `CREATE TABLE IF NOT EXISTS workstream_section_jobs (request_id TEXT PRIMARY KEY, section_id TEXT NOT NULL, payload TEXT NOT NULL)`,
-    `CREATE TABLE IF NOT EXISTS workstream_title_marks (section_id TEXT PRIMARY KEY, payload TEXT NOT NULL)`,
-    `CREATE TABLE IF NOT EXISTS workstream_binding_history (section_id TEXT NOT NULL, revision INTEGER NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(section_id, revision))`,
-    ...DRAFT_MIGRATIONS,
-    ...PENDING_CONTEXT_MIGRATIONS,
-  ]);
+  bb.storage.migrate(db, WORKSTREAM_MIGRATIONS);
   function thread(threadId: string): Prefs {
     contextThreadIdSchema.parse(threadId);
     const row = db.prepare("SELECT payload FROM workstream_thread_prefs WHERE thread_id = ?").get(threadId) as
@@ -77,6 +81,15 @@ export function createWorkstreamStore(bb: BbPluginApi) {
   const jobs = createSectionJobStore(db);
   const store = {
     jobs,
+    problemDismissed(sectionId: string, id: string, revision: number) {
+      return !!db.prepare("SELECT 1 FROM workstream_problem_dismissals WHERE section_id=? AND entry_id=? AND revision=?").get(sectionId, id, revision);
+    },
+    dismissProblem(sectionId: string, id: string, revision: number) {
+      db.prepare("INSERT OR IGNORE INTO workstream_problem_dismissals VALUES (?, ?, ?)").run(sectionId, id, revision);
+    },
+    undoProblem(sectionId: string, id: string, revision: number) {
+      db.prepare("DELETE FROM workstream_problem_dismissals WHERE section_id=? AND entry_id=? AND revision=?").run(sectionId, id, revision);
+    },
     drafts: createDraftStore(db),
     connectJob(record: Extract<JobRecord, { kind: "connect" }>, binding: WorkstreamBinding) {
       return db.transaction(() => {

@@ -2,6 +2,17 @@
 
 Cortex follows [semantic versioning](https://semver.org). Each release has a section below, newest first.
 
+## 0.109.1 - 2026-11-16
+
+- **Problems sit in the review list.** Needs you lists problems as rows in "to review", blocking ones first, before
+  suggestions, with one selection and J and K across both. Selecting one opens its fix in the detail pane, as a
+  suggestion does, instead of a separate block above the list.
+- **Each entry that never reaches a thread gets its own row and fix.** The row says why: a duplicate, a topic the
+  section doesn't share, or a target it doesn't have. Fix it with Archive duplicate, Move to shared basics, Ignore
+  here or Archive, each with Undo where it can be undone. When only the titles match, the detail pane shows the
+  copy already in the brief with the wording differences, so you can compare before archiving either.
+- **A "Never reaches a thread" badge** marks those entries in All knowledge and entry detail.
+
 ## 0.109.0 - 2026-11-16
 
 - **A brief problem never blocks a message.** A brief too big for bb's starting instructions refused every message

@@ -1,10 +1,38 @@
 import { experimental_PluginRpcRefusal, type ExperimentalPluginRpcHandlersWithContext } from "@get-bb/plugin-sdk";
+import { moveToBasics } from "./problem-move";
 import { problemRpcMethods } from "./problem-contract";
 import type { Workstreams } from "./workstreams";
 import type { createProblems } from "./problem-service";
 export function problemHandlers(read: ReturnType<typeof createProblems>, service: Workstreams): ExperimentalPluginRpcHandlersWithContext<typeof problemRpcMethods> {
   return {
     problems: (_input, ctx) => read(ctx.experimental_signal),
+    knowledgeMoveToBasics: async (input, ctx) => {
+      if (ctx.experimental_caller.kind !== "client") throw new experimental_PluginRpcRefusal({ code: "forbidden", message: "Only a human can move an entry to shared basics." });
+      try {
+        const actor = service.human();
+        const old = await service.cli.knowledge(input.id, ctx.experimental_signal);
+        if (service.store.section(input.sectionId).binding?.workstreamId !== old.workstreamId) throw new Error("This entry is not in the section's workstream.");
+        return await moveToBasics(service.cli, actor, input, ctx.experimental_signal).finally(() => service.invalidateScope({ workstreamId: old.workstreamId }));
+      } catch (cause) {
+        throw new experimental_PluginRpcRefusal({ code: /revision|conflict/i.test(String(cause)) ? "conflict" : "invalid", message: cause instanceof Error ? cause.message : String(cause) });
+      }
+    },
+    problemEntryDismiss: async (input, ctx) => {
+      if (ctx.experimental_caller.kind !== "client") throw new experimental_PluginRpcRefusal({ code: "forbidden", message: "Only a human can ignore an entry here." });
+      service.human();
+      const problem = (await read(ctx.experimental_signal)).problems.find(row => row.sectionId === input.sectionId && row.kind === "unreached");
+      if (!problem?.entries?.some(row => row.id === input.id && row.revision === input.expectedRevision)) throw new experimental_PluginRpcRefusal({ code: "conflict", message: "This entry changed. Review the refreshed warning before ignoring it." });
+      service.store.dismissProblem(input.sectionId, input.id, input.expectedRevision);
+      service.invalidateScope({ sectionId: input.sectionId });
+      return { dismissed: true };
+    },
+    problemEntryUndo: (input, ctx) => {
+      if (ctx.experimental_caller.kind !== "client") throw new experimental_PluginRpcRefusal({ code: "forbidden", message: "Only a human can undo ignoring an entry." });
+      service.human();
+      service.store.undoProblem(input.sectionId, input.id, input.expectedRevision);
+      service.invalidateScope({ sectionId: input.sectionId });
+      return { dismissed: false };
+    },
     knowledgeSetApplicability: async (input, ctx) => {
       if (ctx.experimental_caller.kind !== "client") throw new experimental_PluginRpcRefusal({ code: "forbidden", message: "Only a human can correct where an approved entry applies." });
       try {

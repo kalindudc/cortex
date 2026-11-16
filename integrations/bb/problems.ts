@@ -2,7 +2,7 @@ import type { Section, SectionEligibility } from "./section-contract";
 import type { Knowledge } from "./workstream-contract";
 import type { CaptureJob } from "./section-contract";
 import type { DraftJob } from "./draft-contract";
-import type { Problem, ProblemAction } from "./problem-contract";
+import type { Problem, ProblemAction, ProblemEntry } from "./problem-contract";
 const open: ProblemAction = { kind: "open-section", label: "Open the brief" };
 const briefConsequence = "New threads in this section start without the shared brief.";
 export function sectionProblems(section: Section, preview: SectionEligibility | null, knowledge: Knowledge[]): Problem[] {
@@ -85,7 +85,7 @@ export function authorProblem(): Problem {
     details: "The Cortex doctor read did not identify a human author. Configure your author in Cortex, then restart this plugin through bb.", actions: [] };
 }
 /** Approved entries of one shared knowledge set that no connected section sends or already has a card for. */
-export function unreachedProblem(sections: { section: Section; preview: SectionEligibility | null }[], catalog: Knowledge[]): Problem | null {
+export function unreachedProblem(sections: { section: Section; preview: SectionEligibility | null }[], catalog: Knowledge[], dismissed: (sectionId: string, id: string, revision: number) => boolean = () => false): Problem | null {
   const first = sections[0]?.section;
   if (!first) return null;
   const dims = ["environment", "host"] as const;
@@ -98,24 +98,34 @@ export function unreachedProblem(sections: { section: Section; preview: SectionE
   // A scoped entry in a section with no target chosen already has the "needs a target" card.
   const targetCard = (entry: Knowledge) =>
     bindings.some(binding => dims.some(name => entry.applicability[name].mode === "value" && (binding.applicability?.[name].mode ?? "unknown") === "unknown"));
-  const missed = catalog.filter(entry => entry.state === "approved" && !covered.has(entry.id) && !targetCard(entry));
+  const missed = catalog.filter(entry => entry.state === "approved" && !covered.has(entry.id) && !targetCard(entry) && !dismissed(first.id, entry.id, entry.revision));
   if (!missed.length) return null;
-  const why = (entry: Knowledge) => {
-    if (entry.facet !== "orientation" && !bindings.some(binding => binding.topic === entry.facet))
-      return `filed under the topic "${entry.facet}", which this section does not share`;
+  const normalize = (text: string) => text.trim().replace(/\s+/g, " ").toLowerCase();
+  const delivered = sections[0]?.preview?.entries.map(row => row.knowledge) ?? [];
+  const entries: ProblemEntry[] = missed.map(entry => {
+    const base = { id: entry.id, revision: entry.revision, title: entry.title };
+    const duplicate = delivered.find(other => normalize(other.text) === normalize(entry.text) || normalize(other.title) === normalize(entry.title));
+    if (duplicate) {
+      if (normalize(duplicate.text) === normalize(entry.text))
+        return { ...base, reason: "duplicate", duplicateOf: duplicate.id, match: "text", detail: `Same text as "${duplicate.title}", which is already in the brief` };
+      return { ...base, reason: "duplicate", duplicateOf: duplicate.id, match: "title", detail: "Same title as an entry in the brief, but worded differently. Read both before archiving either." };
+    }
+    if (entry.facet !== "orientation" && first.binding.binding?.topic !== entry.facet)
+      return { ...base, reason: "topic", detail: `Filed under the topic "${entry.facet}", which this section doesn't share` };
     for (const name of dims) {
       const dimension = entry.applicability[name];
-      if (dimension.mode === "value" && !bindings.some(binding => { const wanted = binding.applicability?.[name]; return wanted?.mode === "value" && wanted.value === dimension.value; }))
-        return `only for ${name} ${dimension.value}, which this section does not target`;
+      const wanted = first.binding.binding?.applicability?.[name];
+      if (dimension.mode === "value" && !(wanted?.mode === "value" && wanted.value === dimension.value))
+        return { ...base, reason: "scope", detail: `Only for ${name} ${dimension.value}, which this section doesn't target` };
     }
-    return "not selected for this section's brief";
-  };
+    return { ...base, reason: "scope", detail: "Not selected for this section's brief" };
+  });
   const count = missed.length === 1 ? "1 approved entry never reaches" : `${missed.length} approved entries never reach`;
   return {
     id: `${first.id}:unreached`, kind: "unreached", sectionId: first.id, sectionName: first.canonicalName, severity: "Held back", blocking: false,
     title: `${count} a thread in ${first.canonicalName}`,
-    consequence: "No thread gets them. Share their topic or target here, or change where they apply.",
-    details: missed.map(entry => `${entry.title}: ${why(entry)}`).join("\n"),
-    actions: [{ kind: "open-section", label: "Open them", id: missed[0]!.id }],
+    consequence: "No thread gets them. Fix each one below.",
+    details: entries.map(entry => `${entry.id} · revision ${entry.revision}${entry.duplicateOf ? ` · duplicate of ${entry.duplicateOf}` : ""}`).join("\n"),
+    entries, actions: [],
   };
 }

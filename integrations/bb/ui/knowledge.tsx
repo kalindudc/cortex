@@ -1,3 +1,4 @@
+import { ProblemEntryNotice } from "./problem-entry";
 import { ApplicabilityCorrectionDialog } from "./problem-dialog";
 import { isFlag, isPageCount, usePlaceState } from "./place";
 import { type ReactNode, useState } from "react";
@@ -317,6 +318,8 @@ export function KnowledgeDetail({
   onClose,
   reason,
   facts,
+  sectionId,
+  problemNotice = true,
 }: {
   entry: Knowledge;
   workstream: Workstream | null;
@@ -326,6 +329,9 @@ export function KnowledgeDetail({
   onClose?: () => void;
   reason?: HeldReason;
   facts?: ReactNode;
+  sectionId?: string;
+  /** The queue shows the fix under "Your call" instead. */
+  problemNotice?: boolean;
 }) {
   const now = Date.now();
   const sidebar = experimental_useSidebarThreads();
@@ -349,6 +355,7 @@ export function KnowledgeDetail({
         {onClose ? <Button variant="ghost" size="sm" className="size-7 p-0" aria-label="Close" onClick={onClose}><Icon name="X" className="size-3.5" aria-hidden /></Button> : null}
       </div>
       <h3 data-content className="text-[17px] leading-snug font-semibold text-foreground">{entry.title}</h3>
+      {problemNotice ? <ProblemEntryNotice id={entry.id} sectionId={sectionId} /> : null}
       {entry.state === "forgotten" ? (
         <p className="text-[12.5px] text-muted-foreground">Its text was forgotten. Who changed it and when stay in history.</p>
       ) : <KnowledgeText text={entry.text} />}
