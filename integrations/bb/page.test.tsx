@@ -48,11 +48,11 @@ test.each(["over-budget", "missing-required", "unavailable", "unbound"] as const
   const backend = fixture([shared]);
   backend.eligibility.status = status;
   const overview = renderSlot(app.navPanels[0]!, { subPath: "" }, backend.options);
-  await overview.findByText(/Sends nothing:/);
+  await overview.findByText(/Starts without a shared brief:/);
   expect(overview.container.textContent).not.toMatch(/1 in/);
   overview.unmount();
   const sidebar = renderSlot({ component: CortexSidebar }, { subPath: "" }, backend.options);
-  await sidebar.findByText(/Sends nothing:/);
+  await sidebar.findByText(/Starts without a shared brief:/);
   expect(sidebar.container.textContent).not.toMatch(/1 in/);
 });
 

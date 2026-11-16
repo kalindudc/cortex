@@ -257,7 +257,8 @@ test("over-budget row exposes Make it fit without another click to find it", asy
   rememberEnvoy(); const slot = render(backend({ status: "over-budget" }));
   fireEvent.click(await slot.findByRole("button", { name: "Make it fit" }));
   expect(await slot.findByRole("list", { name: "Goes in automatically when you send" })).toBeTruthy();
-  expect(slot.getByRole("alert").textContent).toMatch(/no brief goes in/);
+  expect(slot.getByText("New threads start without this brief.")).toBeTruthy();
+  expect(slot.getByRole("button", { name: "Open the problem" })).toBeTruthy();
 });
 
 test("over-budget entries are hypothetical until leaving one out makes the brief fit", async () => {

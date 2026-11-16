@@ -153,9 +153,9 @@ the next command or daemon takes over and cleans up after it. For you, this mean
   `src/workstreams.ts#WorkstreamMutation` carries actor attribution, not authentication. Quotes never grant approval.
   Creation IDs support crash recovery: persist intent, then reread after a lost response. Occupied IDs refuse without revealing rows.
   Normalized no-save returns the existing ID. Human draft edits retain kind and unknown scope without approval;
-  acceptance requires known scope and keeps the ID and sources. Replacement guards both revisions and final applicability.
-  Only existing, non-historical conflict partners block approval; approval clears stale links without changing historical partners.
-  Human writing needs an explicit source; duplicates never adopt candidates. `src/store.ts#mutateWorkstream` commits each job and its history atomically.
+  acceptance requires known scope and keeps the ID and sources. Replacement guards both revisions and final applicability
+  (a human replacement may fill an approved entry's unknown dimensions, never change a known one); approval clears stale conflicts.
+  Human writing needs an explicit source; duplicates never adopt candidates; `src/store.ts#mutateWorkstream` commits atomically.
 - `src/store.ts#readWorkstream` selects approved, applicable, unexpired orientation and exact-topic knowledge;
   disputed or expired findings become claim-free notices. It never searches legacy tasks or another workstream.
   Hints use `src/workstreams.ts#REVIEW_HINT_LIMITS`; only matching normalized text/subject, facet, kind, applicability, expiry and no new evidence yield no-save.

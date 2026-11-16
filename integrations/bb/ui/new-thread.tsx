@@ -32,6 +32,7 @@ import type { SectionEligibility } from "../section-contract";
 import { GrowingTextarea } from "./growing-textarea";
 import { BriefStrip } from "./brief-strip";
 import { BRIEF_KIND_LOOK, deliverySummary, plural, tokens } from "./copy";
+import { HOST_BUDGET_TOKENS } from "../workstream-policy";
 import {
   failureOf,
   type RpcFailure,
@@ -400,11 +401,7 @@ function NewThreadContext({ projectId }: { projectId: string | null }) {
         {!binding && picked !== null && data && !off && <div className="nt-callout nt-c-att"><Icon name="Info" className="nt-ic nt-att" aria-hidden /><span className="nt-grow">Nothing shared in {pickedName}, so no brief goes in.</span></div>}
         {binding && base && effective && <div className={cn("nt-brief", off && "nt-dimmed")}>
           <BriefStrip data={effective} hypothetical={off} heldCount={heldIds.length} />
-          {effective.status !== "ready" && <div role="alert" className="nt-callout nt-c-bad">
-            <Icon name="CircleX" className="nt-ic nt-bad" aria-hidden />
-            <span className="nt-grow">{effective.status === "over-budget" ? `Over by ${tokens(Math.max(0, effective.estimatedTokens - effective.budgetTokens))} · no brief goes in · leave out entries below` : deliverySummary(effective.status, "")}</span>
-            <button type="button" className="nt-btn" onClick={share}>{effective.status === "over-budget" ? "Raise budget" : "Fix in Cortex"}<Icon name="ArrowUpRight" className="nt-ic" aria-hidden /></button>
-          </div>}
+          {effective.status !== "ready" && <div className="nt-callout nt-c-att"><span>New threads start without this brief.</span><button type="button" className="nt-btn" onClick={share}>Open the problem<Icon name="ArrowUpRight" className="nt-ic" aria-hidden /></button></div>}
           {base.status === "over-budget" && effective.status === "ready" && <div role="status" className="nt-callout nt-c-ok"><Icon name="CircleCheck" className="nt-ic nt-ok" aria-hidden /><span className="nt-grow">Fits: {tokens(effective.estimatedTokens)} / {effective.budgetTokens}</span></div>}
           <h3 className="nt-grp">{off || !ready ? "Would go in" : "Goes in"} · {effective.entries.length}</h3>
           {base.entries.length === 0 && <p className="nt-empty">No approved knowledge in this brief yet.</p>}

@@ -1,3 +1,5 @@
+import { captureProblem, draftProblem } from "../problems";
+import { ProblemCard, SectionProblems } from "./problem-card";
 import { isFlag, isOffset, usePlaceState } from "./place";
 import { type ReactNode, type Ref, useEffect, useRef, useState } from "react";
 import { experimental_ThreadStatusGlyph as ThreadStatusGlyph, experimental_useSidebarThreads, useBbNavigate } from "@get-bb/plugin-sdk/app";
@@ -163,7 +165,7 @@ export function SectionView({ data, sections, workstreams, onConnect, onCapture,
     {section.marker.error && section.marker.originalTitle !== null && section.marker.decoratedTitle !== null ? <DropdownMenuItem onSelect={() => onMark("remove")}>Retry title cleanup</DropdownMenuItem> : null}
   </DropdownMenuContent></DropdownMenu>;
   const callouts = <>
-    {section.connectionJob && section.connectionJob.status !== "connected" ? <div role="alert" className="flex flex-wrap items-center gap-2 rounded-md border border-border-seam bg-surface-attention p-3 text-[13px]"><span className="min-w-0 flex-1 break-words">{section.connectionJob.error ?? "Connection pending. The workstream is retained."}</span><Button variant="outline" onClick={onRetry}>Retry connection</Button></div> : null}
+    {!binding ? <SectionProblems sectionId={section.id} section={section} /> : null}
     {section.marker.error ? <div role="alert" className="rounded-md border border-border-seam bg-surface-attention p-3 text-[13px]"><span>Sharing and section titles are separate. {section.marker.error}</span>{section.marker.originalTitle !== null && section.marker.decoratedTitle !== null ? <Button variant="ghost" onClick={() => onMark("remove")}>Retry title cleanup</Button> : null}</div> : null}
   </>;
   return <div ref={sectionRootRef} tabIndex={-1} aria-label={`Cortex section: ${section.canonicalName}`} data-cortex data-cortex-section="" data-part="SectionPage" className="cortex-section flex h-full min-h-0 min-w-0 flex-col text-foreground">
@@ -200,7 +202,7 @@ export function SectionView({ data, sections, workstreams, onConnect, onCapture,
       <div className={cn("cortex-section-columns grid min-w-0 gap-6 p-4", entryId && "cortex-detail-open")}>
         <main ref={briefList} tabIndex={-1} data-part="BriefList" className="cortex-master min-w-0">
           <div className="grid gap-2">{callouts}{recovery}{workstreamRead.error ? <FailureNotice failure={workstreamRead.error} onRetry={workstreamRead.refetch} /> : null}</div>
-          {data.eligibility.status !== "ready" && data.eligibility.status !== "over-budget" ? <p role="alert" className="my-3 break-words text-[13px] text-destructive-text">{data.eligibility.status === "missing-required" ? "Missing required knowledge" : data.eligibility.status === "unavailable" ? "Brief unavailable" : "Not connected"}{data.eligibility.error ? ` · ${data.eligibility.error}` : ""}</p> : null}
+          <SectionProblems sectionId={section.id} section={section} preview={data.eligibility} knowledge={[...knowledge.values()]} />
           <div className={candidates.length ? "mb-2 mt-2 flex flex-wrap items-center gap-2" : "flex flex-wrap items-center gap-2"}><h2 ref={reviewHeadingRef} tabIndex={-1} className={candidates.length ? "text-[13px] font-semibold" : "sr-only"}>{candidates.length ? `Suggested · ${candidates.length}` : "Takeaway review"}</h2>{drafts.data?.jobs.filter(job => job.candidateResults.some(result => candidates.some(item => item.entry.id === result.canonicalId))).map(job => <span key={job.requestId} className="flex min-w-0 items-center gap-1 text-[12px] text-muted-foreground">from a draft of <Button variant="link" className="min-w-0 truncate p-0 text-[12px]" onClick={() => navigate.toThread(job.sourceThreadId)}>{data.threads.find(thread => thread.id === job.sourceThreadId)?.name ?? "a section thread"}</Button> · {relativeAge(job.requestedAt, Date.now())}</span>)}{candidates.length ? <span className="flex-1" /> : null}{data.review.total > candidates.length ? <Button size="sm" variant="link" className={candidates.length ? undefined : "h-auto px-0 py-1"} onClick={() => navigate.toPluginPanel("cortex", { subPath: "review" })}>{candidates.length ? `${data.review.total - candidates.length} more in Review` : `${plural(data.review.total, "entry", "entries")} waiting in Review`}</Button> : null}</div>
           <div className="grid gap-3">{candidates.map(item => {
             const leaving = accepted.includes(item.entry.id);
@@ -212,8 +214,8 @@ export function SectionView({ data, sections, workstreams, onConnect, onCapture,
             <span className="text-right text-muted-foreground tabular-nums">{index + 1}</span><span data-content className="min-w-0 break-words">{row.knowledge.title}</span><span className="text-right text-muted-foreground tabular-nums">{tokens(row.estimatedTokens)}</span>
             <span className="col-start-2 col-end-4 flex flex-wrap items-center gap-1 text-[11.5px] text-muted-foreground"><KindMark kind={row.knowledge.kind} /><span>· approved by {row.knowledge.approval ? actorWord(row.knowledge.approval.actor) : "unknown"} · {landed.includes(row.knowledge.id) ? "just now" : relativeAge(row.knowledge.approval?.at ?? row.knowledge.updatedAt, Date.now())}</span></span>
           </button></li>)}</ol>}
-          <div className="my-3 flex items-center gap-2 text-[11.5px] text-muted-foreground"><span className="h-px flex-1 bg-border-seam" />budget · {data.eligibility.budgetTokens} tokens<span className="h-px flex-1 bg-border-seam" /></div>
-          {data.eligibility.status === "over-budget" ? <div role="alert" className="flex flex-wrap items-center gap-2 rounded-md border border-destructive/40 bg-surface-destructive p-3 text-[13px]"><Icon name="AlertTriangle" className="size-4 text-destructive-text" aria-hidden /><span className="min-w-0 flex-1"><b>Over budget.</b> New threads get no brief until it fits.</span><Button variant="outline" onClick={editBinding}>Raise budget</Button></div> : null}
+          <div className="my-3 flex items-center gap-2 text-[11.5px] text-muted-foreground"><span className="h-px flex-1 bg-border-seam" />section budget · {data.eligibility.budgetTokens.toLocaleString("en-US")} tokens<span className="h-px flex-1 bg-border-seam" /></div>
+
           {held.length ? <section aria-label="Held back"><h2 className="my-3 text-[13px] font-semibold text-muted-foreground">Held back · {held.length}</h2><ul>{held.map(row => {
             const entry = knowledge.get(row.id);
             const reason = heldReason(row, { entry, applicability: targets });
@@ -225,7 +227,7 @@ export function SectionView({ data, sections, workstreams, onConnect, onCapture,
           <div className="mb-2 flex items-center justify-between"><Button className="cortex-detail-back" size="sm" variant="ghost" onClick={() => route("brief")}><Icon name="ChevronLeft" className="size-4" aria-hidden />Back to brief</Button><Button ref={detailClose} size="icon" variant="ghost" aria-label="Close entry" onClick={() => route("brief")}><Icon name="X" className="size-4" aria-hidden /></Button></div>
           {entryRead?.error ? <FailureNotice failure={entryRead.error} onRetry={entryRead.refetch} /> : null}
           {selected && (entryRead?.data?.workstream ?? workstream) ? <KnowledgeDetail entry={selected} workstream={(entryRead?.data?.workstream ?? workstream)!} onOpen={open} actions={<KnowledgeActions entry={selected} workstream={(entryRead?.data?.workstream ?? workstream)!} />} /> : <LoadingRows label="Loading takeaway" />}
-        </aside> : <aside data-part="SectionRail" className="grid min-w-0 content-start gap-4"><DraftRailCard section={section} />
+        </aside> : <aside data-part="SectionRail" className="grid min-w-0 content-start gap-4">{!drafts.data?.jobs.some(job => draftProblem(section, job) !== null) ? <DraftRailCard section={section} /> : null}
           {onDraft ? <Button variant="outline" className="justify-self-start" onClick={event => onDraft(event.currentTarget)}><Icon name="AiContentGenerator01" className="size-4" aria-hidden />Draft from a thread</Button> : null}
           <section data-part="SectionThreads" aria-label="Section threads" className="min-w-0 rounded-md border border-border-seam bg-card"><h2 className="flex items-center justify-between border-b border-border-seam px-3 py-2 text-[13px] font-semibold">Threads<span className="text-muted-foreground tabular-nums">{section.threadCount}</span></h2><ul>{(allThreads ? data.threads : data.threads.slice(0, 7)).map(thread => {
             const native = sidebar.threads.find(row => row.id === thread.id);
@@ -241,41 +243,18 @@ export function SectionView({ data, sections, workstreams, onConnect, onCapture,
 function CaptureRecovery({ section }: { section: Section }) {
   const [offset, setOffset] = usePlaceState(`capture-page:${section.id}`, 0, isOffset);
   const read = useSectionCaptureJobs(section.id, offset);
-  const writes = useWorkstreamWrites();
   const navigate = useBbNavigate();
-  const [busy, setBusy] = useState<string | null>(null);
-  const [failure, setFailure] = useState<ReturnType<typeof failureOf> | null>(null);
-  const [saved, setSaved] = useState<Array<{ id: string; workstreamId: string; title: string }>>([]);
-  const retry = async (requestId: string) => {
-    setBusy(requestId); setFailure(null);
-    try {
-      const out = await writes.retryCapture(requestId);
-      if (out.status === "saved" && out.entry) setSaved(rows => [...rows.filter(row => row.id !== out.entry!.id), { id: out.entry!.id, workstreamId: out.entry!.workstreamId, title: out.entry!.title }]);
-      else if (out.error) throw new Error(out.error);
-    } catch (cause) { setFailure(failureOf(cause)); }
-    finally { setBusy(null); }
-  };
-  const dismiss = async (requestId: string) => {
-    setBusy(requestId); setFailure(null);
-    try { await writes.dismissCapture(section.id, requestId); }
-    catch (cause) { setFailure(failureOf(cause)); }
-    finally { setBusy(null); }
-  };
-  if (read.data?.total === 0 && !failure && !read.error && saved.length === 0) return null;
-  return <section aria-label="Unfinished takeaway saves" className="my-3 grid min-w-0 gap-2 text-[13px]">
+  const [saved, setSaved] = useState<Knowledge[]>([]);
+  if (read.data?.total === 0 && !read.error && saved.length === 0) return null;
+  return <section aria-label="Unfinished takeaway saves" className="my-3 grid gap-2">
     {read.error ? <FailureNotice failure={read.error} onRetry={read.refetch} /> : null}
-    {failure ? <FailureNotice failure={failure} /> : null}
-    {(read.data?.total ?? 0) > 0 ? <><h2 className="font-semibold">Unfinished saves ({read.data!.total})</h2><p className="text-muted-foreground">Original request and source kept. Dismiss removes the retry, not saved knowledge.</p></> : null}
-    {(read.data?.jobs ?? []).map(job => <div key={job.requestId} className="grid gap-2 border border-border-seam p-3">
-      <div className="flex flex-wrap items-center gap-2"><span className="min-w-0 flex-1 font-semibold break-words">{job.intent.title}</span><span>{job.status} · {job.intent.mode === "accept" ? "Save and accept requested" : "Save for review requested"}</span></div>
-      <Applicability value={job.intent.applicability} />
-      {job.error ? <p role="alert">{job.error}</p> : null}
-      {section.binding.revision !== job.expectedBindingRevision || section.binding.binding?.workstreamId !== job.workstreamId ? <p role="status">The section connection changed. Retry will not move this save to another workstream.</p> : null}
-      <details><summary className="rounded-sm py-1 hover:bg-state-hover hover:text-foreground">Original source</summary><SourceList sources={job.sources} /></details>
-      <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={busy !== null} onClick={() => void retry(job.requestId)}>Retry save</Button><Button variant="ghost" disabled={busy !== null} onClick={() => void dismiss(job.requestId)}>Dismiss retry</Button>{job.knowledgeId ? <Button variant="ghost" onClick={() => navigate.toPluginPanel(CORTEX_PAGE_PATH, { subPath: `workstreams/${job.workstreamId}/${job.knowledgeId}` })}>Open saved result</Button> : null}</div>
-    </div>)}
-    {read.data && read.data.total > 20 ? <div className="flex items-center gap-2"><Button variant="outline" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - 20))}>Previous saves</Button><span>{offset + 1}–{Math.min(offset + 20, read.data.total)} of {read.data.total}</span><Button variant="outline" disabled={offset + 20 >= read.data.total} onClick={() => setOffset(offset + 20)}>More saves</Button></div> : null}
-    {saved.map(row => <Button key={row.id} variant="outline" onClick={() => navigate.toPluginPanel(CORTEX_PAGE_PATH, { subPath: `workstreams/${row.workstreamId}/${row.id}` })}>Save confirmed: {row.title}. Open result</Button>)}
+    {(read.data?.jobs ?? []).map(job => <ProblemCard key={job.requestId} compact problem={{
+      ...captureProblem(section, job),
+      details: `${job.intent.title}\n${job.error ?? ""}\n${job.sources.map(source => source.ref).join("\n")}`,
+      actions: [...captureProblem(section, job).actions, ...(job.knowledgeId ? [{ kind: "open-entry" as const, label: "Open saved result", id: job.knowledgeId }] : [])],
+    }} onCaptured={entry => setSaved(rows => [...rows.filter(row => row.id !== entry.id), entry])} />)}
+    {read.data && read.data.total > 20 ? <div className="flex gap-2"><Button variant="outline" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - 20))}>Previous saves</Button><Button variant="outline" disabled={offset + 20 >= read.data.total} onClick={() => setOffset(offset + 20)}>More saves</Button></div> : null}
+    {saved.map(entry => <Button key={entry.id} variant="outline" onClick={() => navigate.toPluginPanel(CORTEX_PAGE_PATH, { subPath: `workstreams/${entry.workstreamId}/${entry.id}` })}>Save confirmed: {entry.title}. Open result</Button>)}
   </section>;
 }
 

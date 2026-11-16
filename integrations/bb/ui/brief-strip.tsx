@@ -7,7 +7,7 @@ import { heldReason } from "./marks";
 import type { Knowledge } from "./types";
 
 /** `estimatedTokens` is the whole exact text (preamble and scope included); when given, the gap is drawn as an overhead segment. */
-export type BriefInput = Pick<SectionEligibility, "entries" | "notices" | "budgetTokens"> & { estimatedTokens?: number; status?: SectionEligibility["status"] };
+export type BriefInput = Pick<SectionEligibility, "entries" | "notices" | "budgetTokens"> & { estimatedTokens?: number; startingChars?: number; startingEntries?: number; status?: SectionEligibility["status"] };
 export type BriefSegment = {
   key: string;
   kind: "overhead" | "entry" | "notice";
@@ -24,6 +24,7 @@ export type BriefData = {
   budget: number;
   scale: number;
   cutCount: number;
+  startingTokens?: number;
 };
 
 export function briefSegments(input: BriefInput): BriefData {
@@ -55,7 +56,7 @@ export function briefSegments(input: BriefInput): BriefData {
     segment.cut = used > input.budgetTokens;
     if (segment.cut) cutCount++;
   }
-  return { segments, used, budget: input.budgetTokens, scale: Math.max(input.budgetTokens, used), cutCount, ...(input.status ? { status: input.status } : {}) };
+  return { segments, used, budget: input.budgetTokens, scale: Math.max(input.budgetTokens, used), cutCount, ...(input.startingChars !== undefined ? { startingTokens: Math.ceil(input.startingChars / 4) } : {}), ...(input.status ? { status: input.status } : {}) };
 }
 
 export type BriefStripProps = {
@@ -81,6 +82,13 @@ export function BriefStrip({ data, compact = false, highlightKey, onHover, heldC
       aria-label={`${tokens(brief.used)} of ${brief.budget} tokens. ${entryCount} entries ${hypothetical ? "would go in" : ready ? "go in" : "selected"}, ${noticeCount} notices, ${hypothetical ? "Memory is off; nothing goes in." : deliverySummary(status, "Within budget.")}`}
     >
       <div className={cn("relative flex bg-surface-recessed", compact ? "h-2" : "h-3.5")}>
+        {brief.startingTokens !== undefined ? <span
+          data-starting-boundary
+          title="End of starting instructions; the rest goes with the first message on Pi, Claude Code and Codex, or is loaded by id."
+          aria-hidden
+          className="pointer-events-none absolute z-10 -top-1 -bottom-1 w-0.5 bg-primary"
+          style={{ left: `calc(${100 * Math.min(brief.startingTokens, brief.used) / brief.scale}% - 1px)` }}
+        /> : null}
           {brief.segments.map(segment => {
             const title = `${segment.title} · ${tokens(segment.tokens)} tokens${segment.cut ? " · past the budget" : ""}`;
             return (
@@ -112,7 +120,7 @@ export function BriefStrip({ data, compact = false, highlightKey, onHover, heldC
       </div>
       {!compact ? (
         <div className="cortex-strip-legend mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-muted-foreground tabular-nums">
-          <span><b className="font-semibold text-foreground">{tokens(brief.used)}</b> / {brief.budget} tokens</span>
+          {brief.startingTokens !== undefined ? <span>{tokens(brief.startingTokens)} in starting instructions · {tokens(brief.used)} with your first message · {brief.budget.toLocaleString("en-US")} budget</span> : <span><b className="font-semibold text-foreground">{tokens(brief.used)}</b> / {brief.budget} tokens</span>}
           <span className="inline-flex items-center gap-1"><span aria-hidden className="size-2.5 bg-primary" /><b className="font-semibold text-foreground">{entryCount}</b> {hypothetical ? "would go in" : ready ? "go in" : "selected"}</span>
           <span className="inline-flex items-center gap-1"><span aria-hidden className="cortex-hatch-notice size-2.5" /><b className="font-semibold text-foreground">{noticeCount}</b> {ready ? "notice only" : "notices selected"}</span>
           {heldCount === undefined ? null : <span className="inline-flex items-center gap-1"><span aria-hidden className="size-2.5 border border-dashed border-border-seam" /><b className="font-semibold text-foreground">{heldCount}</b> held back</span>}
@@ -120,7 +128,7 @@ export function BriefStrip({ data, compact = false, highlightKey, onHover, heldC
           {brief.used > brief.budget ? (
             <span className="inline-flex items-center gap-1 text-destructive-text">
               <Icon name="AlertTriangle" className="size-3.5 shrink-0" aria-hidden />
-              <span><b className="font-semibold">Over budget by {tokens(brief.used - brief.budget)}</b>: nothing is sent until it fits</span>
+              <span><b className="font-semibold">Over budget by {tokens(brief.used - brief.budget)}</b>: no brief is sent until it fits</span>
             </span>
           ) : null}
         </div>

@@ -1,3 +1,4 @@
+import { ApplicabilityCorrectionDialog } from "./problem-dialog";
 import { isFlag, isPageCount, usePlaceState } from "./place";
 import { type ReactNode, useState } from "react";
 import { experimental_useSidebarThreads, useBbNavigate } from "@get-bb/plugin-sdk/app";
@@ -102,7 +103,7 @@ export function KnowledgeHistory({ id }: { id: string }) {
   );
 }
 
-type Dialog = "edit" | "observe" | "evidence" | "archive" | "forget" | "restore-review" | "restore-approve" | null;
+type Dialog = "applicability" | "edit" | "observe" | "evidence" | "archive" | "forget" | "restore-review" | "restore-approve" | null;
 
 /** The actions a person can take on one entry, by state; approval is always its own explicit step. */
 export function KnowledgeActions({ entry, workstream }: { entry: Knowledge; workstream: Workstream | null }) {
@@ -213,6 +214,7 @@ export function KnowledgeActions({ entry, workstream }: { entry: Knowledge; work
       </div>
       {entry.state === "forgotten" ? <p className="text-[12px] text-muted-foreground">Forgotten text is gone and cannot be restored.</p> : null}
       {entry.state === "superseded" ? <p className="text-[12px] text-muted-foreground">Superseded knowledge needs a separate replacement decision, not restore.</p> : null}
+      {entry.state === "approved" && Object.values(entry.applicability).some(d => d.mode === "unknown") ? <Button size="sm" onClick={() => setDialog("applicability")}>Set where it applies</Button> : null}
       {failure ? <KnowledgeDecisionFailure failure={failure} /> : null}
       <ConfirmDialog
         title={`Restore ${entry.title} to review?`}
@@ -236,6 +238,7 @@ export function KnowledgeActions({ entry, workstream }: { entry: Knowledge; work
         onOpenChange={close}
         onConfirm={() => transition("approved", "Restored and approved in Cortex", "Restored and approved for future sessions")}
       />
+      <ApplicabilityCorrectionDialog key={entry.id} entry={entry} open={dialog === "applicability"} onOpenChange={close} />
       <EditKnowledgeDialog entry={entry} workstream={workstream} open={dialog === "edit"} onOpenChange={close} />
       <ObserveDialog entry={entry} mode="observe" open={dialog === "observe"} onOpenChange={close} />
       <ObserveDialog entry={entry} mode="evidence" open={dialog === "evidence"} onOpenChange={close} />

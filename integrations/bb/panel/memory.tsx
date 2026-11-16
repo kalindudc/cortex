@@ -1,3 +1,4 @@
+import { ProblemLink } from "../ui/problem-card";
 import { oneOf, usePlaceState } from "../ui/place";
 import { type ReactNode } from "react";
 import { type ExperimentalThreadActionTabProps, experimental_useAppPanel, useBbNavigate } from "@get-bb/plugin-sdk/app";
@@ -361,12 +362,12 @@ export function MemoryPanel({ threadId }: ExperimentalThreadActionTabProps): Rea
           <TabsTrigger value="history" className={CORTEX_TAB_TRIGGER}>History</TabsTrigger>
         </TabsList>
         <TabsContent value="context" className="mt-3">
-          {context.error ? <FailureNotice failure={context.error} onRetry={context.refetch} /> : null}
+          {context.error || context.data?.error ? <ProblemLink threadId={threadId} /> : null}
           {context.data === undefined ? (
             <LoadingRows label="Loading thread context" />
           ) : (
             <div className="flex flex-col gap-3">
-              <ContextOverview context={context.data} canPrepare showActions={false} />
+              {!context.data.error ? <ContextOverview context={context.data} canPrepare showActions={false} /> : null}
               {bound ? <NextContext context={context.data} compact /> : null}
               <div className="flex flex-wrap items-center gap-1.5">
                 <ContextActions context={context.data} canPrepare />

@@ -60,16 +60,14 @@ export function workstreamConfiguration(
       tools: ["cortex_update"],
       instructions: "Cortex automatic context and recall are off. Existing cortex_update access is unchanged.",
     };
-  if (!cached || cached.status !== "ready" || cached.exactText.length > CONFIGURE_CONTEXT_MAX) {
-    const error =
-      cached?.exactText.length && cached.exactText.length > CONFIGURE_CONTEXT_MAX
-        ? "Cortex context exceeds the host's 4,096-character instruction limit; nothing was silently truncated."
-        : (cached?.error ?? MISSING_CONTEXT);
+  const startingText = cached?.startingText ?? cached?.exactText;
+  if (!cached || cached.status !== "ready" || !startingText || startingText.length > CONFIGURE_CONTEXT_MAX) {
+    const error = cached?.error ?? MISSING_CONTEXT;
     return { tools: ["cortex_update", "cortex_recall"], instructions: error };
   }
   return {
     tools: ["cortex_update", "cortex_recall", "cortex_propose_knowledge", "cortex_report_correction"],
-    instructions: `${boundedInstructions}\n\n${cached.exactText}`,
+    instructions: `${boundedInstructions}\n\n${startingText}`,
   };
 }
 
@@ -92,15 +90,8 @@ export function registerWorkstreamAgents(
       // A New thread card's changes become this thread's overrides before its context is prepared.
       const refused = await pending?.admit(ctx);
       if (refused) return refused;
-      const decision = await service.predispatch(ctx);
-      const view = service.peek(ctx.thread.id);
-      if (view?.binding && view.exactText.length > CONFIGURE_CONTEXT_MAX)
-        return {
-          action: "reject",
-          message:
-            "Cortex context exceeds the host instruction limit. Reduce the context or budget before sending; required constraints were not truncated.",
-        };
-      return decision;
+      // A brief that cannot be delivered never blocks a message: the thread runs without it and is told why.
+      return await service.predispatch(ctx);
     } catch (error) {
       return {
         action: "reject",

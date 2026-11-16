@@ -14,7 +14,7 @@ const DELIVERY_STATUS: Record<Exclude<ThreadContext["status"], "ready">, string>
 };
 
 export function deliverySummary(status: ThreadContext["status"], readyText: string): string {
-  return status === "ready" ? readyText : `Sends nothing: ${DELIVERY_STATUS[status]}`;
+  return status === "ready" ? readyText : `Starts without a shared brief: ${DELIVERY_STATUS[status]}`;
 }
 
 export const STATE_LOOK: Record<DisplayState, { word: string; icon: string; tone: Tone }> = {

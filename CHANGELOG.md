@@ -2,6 +2,26 @@
 
 Cortex follows [semantic versioning](https://semver.org). Each release has a section below, newest first.
 
+## 0.109.0 - 2026-11-16
+
+- **A brief problem never blocks a message.** A brief too big for bb's starting instructions refused every message
+  in its section, including ones to running threads and plugin messages. Now the thread runs without the brief, and
+  Cortex says why.
+- **Problems are cards you can act on.** Needs you lists lasting problems above suggestions, blocking ones first,
+  and the sidebar count includes them. Each card says what is wrong, what it stops and offers the fix, such as
+  Archive the largest entry, Remove from required, Retry connection, or Retry and Dismiss for a failed takeaway or
+  draft. The same card replaces the red error text on the section page; the New thread row and the Memory tab link
+  to it.
+- **Approved entries that never reach a thread are listed.** An entry filed under a topic no section shares, or scoped
+  to a host or environment no section targets, now shows as a card naming why.
+- **Set where it applies.** An approved entry whose environment or host is unknown can be given one; Cortex saves a
+  corrected copy that replaces the entry. Only unknown values can be filled in this way.
+- **Briefs fit and chain.** Briefs drop bookkeeping fields agents don't use, so about twice as much knowledge fits.
+  bb's starting instructions carry whole entries, required ones first, and an index of the rest; Pi, Claude Code and
+  Codex get the full brief with your first message, and other agents load entries by id.
+- **Budgets have no upper limit.** Set any budget from 128 tokens up; saved budgets are never changed by a reload.
+- **Memory summaries stop retrying removed worktrees,** instead of logging the same failure again and again.
+
 ## 0.108.2 - 2026-11-16
 
 - **Queued messages no longer fail as a turn ends.** bb sends a queued message as soon as the thread's turn finishes,

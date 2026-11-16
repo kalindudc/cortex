@@ -1,3 +1,5 @@
+import { ProblemCard } from "./problem-card";
+import { useProblems } from "./data";
 import { type KeyboardEvent, type RefObject, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { useBbNavigate } from "@get-bb/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
@@ -317,7 +319,19 @@ function Decision({ item, onDone, onOpen, now, keysRef }: {
   );
 }
 
+function ProblemList({ read, suggestions }: { read: ReturnType<typeof useProblems>; suggestions?: number }) {
+  return <section aria-label="Problems" className="max-h-[45%] shrink-0 overflow-y-auto px-4 py-3">
+    <p className="text-[13px]">{plural(read.data?.problems.length ?? 0, "problem")} · {suggestions === undefined ? "suggestions not loaded" : plural(suggestions, "suggestion")}</p>
+    {read.error ? <FailureNotice failure={read.error} onRetry={read.refetch} /> : null}
+    {[true, false].map(blocking => {
+      const rows = read.data?.problems.filter(problem => problem.blocking === blocking) ?? [];
+      return rows.length ? <div key={String(blocking)}><h2 className="mt-2 text-[13px] font-semibold">{blocking ? "Blocking work" : "Getting in the way"}</h2>{rows.map(problem => <ProblemCard key={problem.id} problem={problem} />)}</div> : null;
+    })}
+  </section>;
+}
+
 export function NeedsYou() {
+  const problems = useProblems();
   const read = useReviewQueue();
   const navigate = useBbNavigate();
   const now = Date.now();
@@ -354,11 +368,12 @@ export function NeedsYou() {
       keysRef.current?.confirm();
     }
   };
-  if (read.error && read.data === undefined) return <div className="p-4"><FailureNotice failure={read.error} onRetry={read.refetch} /></div>;
-  if (read.data === undefined) return <div className="p-4"><LoadingRows label="Loading what needs you" /></div>;
+  if (read.error && read.data === undefined) return <div className="p-4"><ProblemList read={problems} /><FailureNotice failure={read.error} onRetry={read.refetch} /></div>;
+  if (read.data === undefined) return <div className="p-4"><ProblemList read={problems} /><LoadingRows label="Loading what needs you" /></div>;
   const oldest = visible[0];
   return (
     <div data-cortex data-part="ReviewQueue" role="region" aria-label="Review queue" tabIndex={0} className="cortex-review flex h-full min-h-0 flex-col focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" onKeyDown={keys}>
+      <ProblemList read={problems} suggestions={read.data.total} />
       {read.error ? <FailureNotice failure={read.error} onRetry={read.refetch} /> : null}
       <div className="cortex-master-detail" data-show-detail={showDetail || undefined}>
         <div data-cortex-scroll="list" className="cortex-master border-r border-border-seam">

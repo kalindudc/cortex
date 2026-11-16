@@ -59,7 +59,7 @@ test.each(["over-budget", "missing-required", "unavailable", "unbound"] as const
   const original = backend.options.rpc.sectionDetail!;
   backend.options.rpc.sectionDetail = input => ({ ...original(input), eligibility: { computedAt: now, status, error: null, entries: [{ knowledge: { ...entry, state: "approved", approval: { actor, at: now } }, text: entry.text, estimatedTokens: 50, origin: "canonical", overrideActor: null }], notices: [], exclusions: [], exactText: entry.text, estimatedTokens: 50, budgetTokens: 400 } });
   const page = renderSlot({ component: SectionPage }, { id: "sec_envoy" }, backend.options);
-  await page.findByRole("heading", { name: /Sends nothing:/ });
+  await page.findByRole("heading", { name: /Starts without a shared brief:/ });
   expect(page.queryByRole("list", { name: "Goes to new threads" })).toBeNull();
 });
 
@@ -146,14 +146,31 @@ test.each([true, false])("target chip tooltip reflects unknown targets only (unk
 });
 
 describe("section ledger", () => {
+  test("budget editor preserves 20,000 and accepts any integer from 128 upward", async () => {
+    const backend = fixture();
+    backend.sections[0]!.binding.binding!.budgetTokens = 20000;
+    const page = renderSlot({ component: SectionPage }, { id: "sec_envoy" }, backend.options);
+    fireEvent.click(await page.findByRole("button", { name: "Environment ?" }));
+    const dialog = await page.findByRole("dialog", { name: "Connect section Envoy cluster-service" });
+    const input = within(dialog).getByLabelText("Budget (tokens)") as HTMLInputElement;
+    expect(input.hasAttribute("max")).toBe(false);
+    expect(input.value).toBe("20000");
+    expect(dialog.textContent).toContain("the rest goes with the first message");
+    fireEvent.change(input, { target: { value: "100000" } });
+    expect(input.getAttribute("aria-invalid")).toBe("false");
+    fireEvent.change(input, { target: { value: "128.5" } });
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    fireEvent.change(input, { target: { value: "127" } });
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+  });
   test("over-budget refusal comes from eligibility status, including scope overhead", async () => {
     const backend = fixture();
     const original = backend.options.rpc.sectionDetail!;
     backend.options.rpc.sectionDetail = input => ({ ...original(input), eligibility: { computedAt: now, status: "over-budget", error: "Nothing was silently truncated.", entries: [], notices: [], exclusions: [], exactText: "Scope overhead", estimatedTokens: 500, budgetTokens: 400 } });
     const page = renderSlot({ component: SectionPage }, { id: "sec_envoy" }, backend.options);
-    expect(await page.findByText(/New threads get no brief until it fits/)).toBeTruthy();
-    fireEvent.click(page.getByRole("button", { name: "Raise budget" }));
-    expect(await page.findByRole("dialog", { name: "Connect section Envoy cluster-service" })).toBeTruthy();
+    expect(await page.findByText("New threads in this section start without the shared brief.")).toBeTruthy();
+    fireEvent.click(page.getByRole("button", { name: "Open the brief" }));
+    expect(page.inspection.navigateCalls.at(-1)).toMatchObject({ options: { subPath: "sections/sec_envoy/brief" } });
     expect(page.container.querySelector('[data-part="BriefList"]')?.textContent).not.toContain("cut");
   });
   test("binding dialog Disconnect Undo restores the original binding at the returned revision", async () => {
@@ -399,11 +416,11 @@ describe("approved section-first flow", () => {
     backend.options.rpc.sectionCaptureDismiss = ({ requestId }) => ({ requestId, dismissed: true });
     const slot = renderSlot(app.navPanels[0]!, { subPath: "sections/sec_envoy" }, backend.options);
     const recovery = await slot.findByRole("region", { name: "Unfinished takeaway saves" });
-    fireEvent.click(within(recovery).getByRole("button", { name: "Retry save" }));
+    fireEvent.click(within(recovery).getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(calls(slot, "sectionCaptureRetry")).toHaveLength(1));
     expect(calls(slot, "sectionCaptureRetry")[0]!.input).toEqual({ requestId });
     expect(await within(recovery).findByRole("button", { name: /Save confirmed/ })).toBeTruthy();
-    fireEvent.click(within(recovery).getByRole("button", { name: "Dismiss retry" }));
+    fireEvent.click(within(recovery).getByRole("button", { name: "Dismiss" }));
     await waitFor(() => expect(calls(slot, "sectionCaptureDismiss")).toHaveLength(1));
     expect(calls(slot, "knowledgeTransition")).toHaveLength(0);
   });

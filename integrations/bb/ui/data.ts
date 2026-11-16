@@ -219,6 +219,7 @@ function invalidateShared(store: ReadStore, payload: unknown) {
   const sectionId = Reflect.get(payload, "sectionId");
   const workstreamId = Reflect.get(payload, "workstreamId");
   store.invalidate((key, scope) => {
+    if (key.startsWith("problems:")) return true;
     if (typeof threadId === "string" && (scope === threadId || scope === "visibility")) return true;
     if (typeof sectionId === "string" && (scope === `section:${sectionId}` || key.startsWith("sectionList:") || key.startsWith("sectionBindings:"))) return true;
     if (typeof workstreamId !== "string") return false;
@@ -237,7 +238,8 @@ function useSignalHandlers(store: ReadStore, lead: (run: (payload: unknown) => v
     const affected = new Set(threads.filter(thread => thread.sectionId === sectionId).map(thread => thread.id));
     store.invalidate((key, scope) => affected.has(scope ?? "") && key.startsWith("threadContext:"));
   }));
-  useRealtime("all", lead(() => store.invalidate(key => key.startsWith("threadState:") || key.startsWith("memory:"))));
+  useRealtime("drafts", lead(() => store.invalidate(key => key.startsWith("problems:"))));
+  useRealtime("all", lead(() => store.invalidate(key => key.startsWith("problems:") || key.startsWith("threadState:") || key.startsWith("memory:"))));
   useRealtime("memory", lead(payload => {
     const threadId = typeof payload === "object" && payload !== null ? Reflect.get(payload, "threadId") : null;
     store.invalidate((_, scope) => (typeof threadId === "string" ? scope === `memory:${threadId}` : scope?.startsWith("memory:") === true));
@@ -300,6 +302,7 @@ function useRead<M extends Method>(method: M, input: InputOf<M> | null): Read<Ou
   return useReadMany(method, inputs, input !== null)[0] ?? DISABLED;
 }
 
+export const useProblems = () => useReadMany("problems", [null])[0]!;
 export const useSections = () => useReadMany("sectionList", [null])[0]!;
 export const useSectionCaptureJobs = (sectionId: string, offset = 0) => useRead("sectionCaptureJobs", { sectionId, limit: 20, offset });
 export const useSectionDetail = (sectionId: string | null) => useRead("sectionDetail", sectionId === null ? null : { sectionId, limit: 50, offset: 0 });
@@ -496,6 +499,7 @@ export function useWorkstreamWrites() {
         everywhere("setSectionBinding", input),
       createWorkstream: (input: { name: string; description?: string }) => everywhere("workstreamCreate", input),
       editWorkstream: (input: InputOf<"workstreamEdit">) => everywhere("workstreamEdit", input),
+      setApplicability: (input: InputOf<"knowledgeSetApplicability">) => everywhere("knowledgeSetApplicability", input),
       propose: (input: InputOf<"knowledgePropose">) => everywhere("knowledgePropose", input),
       edit: (input: InputOf<"knowledgeEdit">) => everywhere("knowledgeEdit", input),
       evidence: (input: InputOf<"knowledgeEvidence">) => everywhere("knowledgeEvidence", input),

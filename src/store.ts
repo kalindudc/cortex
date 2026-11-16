@@ -1352,7 +1352,18 @@ export class Store {
           if (
             entry.id === other.id ||
             entry.workstreamId !== other.workstreamId ||
-            !sameApplicability(entry.applicability, other.applicability)
+            (!sameApplicability(entry.applicability, other.applicability) &&
+              !(
+                other.state === "approved" &&
+                Object.values(other.applicability).some(d => d.mode === "unknown") &&
+                (["environment", "host"] as const).every(name => {
+                  const before = other.applicability[name];
+                  const after = entry.applicability[name];
+                  return before.mode === "unknown"
+                    ? after.mode !== "unknown"
+                    : JSON.stringify(before) === JSON.stringify(after);
+                })
+              ))
           )
             throw new WorkstreamError(
               "Relation requires different entries in the same workstream and applicability",

@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import os from "node:os";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { z } from "zod";
@@ -298,6 +299,7 @@ export function createCortexState(
   const streams = new Map<string, Cached<Array<z.infer<typeof streamRowSchema>>>>();
   const primers = new Map<string, { lane: string; primer: string; primerIds: number[]; cwd: string }>();
   const warming = new Map<string, Promise<void>>();
+  const missingDirectories = new Map<string, string>();
   const locks = new Map<string, Promise<unknown>>();
   const pendingLanes = new Set<string>();
   const pendingTasks = new Set<number>();
@@ -638,6 +640,23 @@ export function createCortexState(
     });
   }
 
+  function directoryPresent(projectId: string, cwd: string): boolean {
+    try {
+      if (!fs.statSync(cwd).isDirectory()) throw Object.assign(new Error("Not a directory"), { code: "ENOTDIR" });
+      missingDirectories.delete(projectId);
+      return true;
+    } catch (cause) {
+      const code = (cause as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT" && code !== "ENOTDIR") throw cause;
+      primers.delete(projectId);
+      if (missingDirectories.get(projectId) !== cwd) {
+        missingDirectories.set(projectId, cwd);
+        bb.log.warn(`Stopped memory refresh for ${projectId}: directory is gone (${cwd}).`);
+      }
+      return false;
+    }
+  }
+
   async function loadPrimer(projectId: string, cwd: string): Promise<void> {
     const out = await runner.run(["memory", "context", "--json"], contextSchema, { cwd });
     primers.set(projectId, { lane: out.lane, primer: out.primer, primerIds: out.primerIds, cwd });
@@ -645,7 +664,7 @@ export function createCortexState(
 
   async function warmProject(threadId: string): Promise<void> {
     const { projectId, cwd } = await locate(threadId);
-    if (cwd === null || primers.has(projectId)) return;
+    if (cwd === null || primers.has(projectId) || !directoryPresent(projectId, cwd)) return;
     let running = warming.get(projectId);
     if (!running) {
       running = loadPrimer(projectId, cwd).finally(() => warming.delete(projectId));
@@ -665,6 +684,7 @@ export function createCortexState(
     for (const [projectId, primer] of primers) {
       // A primer also lists streams from other lanes, so one that names a changed task refreshes too.
       if (!all && !lanes.has(primer.lane) && !primer.primerIds.some(id => changed.has(id))) continue;
+      if (!directoryPresent(projectId, primer.cwd)) continue;
       loadPrimer(projectId, primer.cwd).catch(err => bb.log.warn(`primer refresh for ${projectId} failed: ${String(err)}`));
     }
   }

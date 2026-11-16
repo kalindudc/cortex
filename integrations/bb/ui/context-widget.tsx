@@ -1,3 +1,4 @@
+import { ProblemLink } from "./problem-card";
 import { type RefObject, useLayoutEffect, useRef, useState } from "react";
 import {
   type ExperimentalThreadContextCardProps,
@@ -113,7 +114,7 @@ function summaryLabel(widget: Widget): string {
   const state = context === undefined ? "Cortex context could not load" : context.status === "unbound" ? "Cortex memory. Not connected to a workstream" : `Cortex context: ${context.workstream?.name ?? "workstream"}${context.binding?.topic ? `, ${context.binding.topic}` : ""}. ${STATUS_LOOK[context.status].word}, ${plural(context.entries.length, "takeaway")}, ${plural(context.notices.length, "held notice")}. ${tokens(context.estimatedTokens)} of ${context.budgetTokens} tokens. Preview, not a delivery receipt`;
   const memory = widget.showMemory ? `Memory: ${markerLook(widget.memory ?? null, widget.memoryFailure?.message ?? null).title}` : null;
   const task = widget.showTask && widget.task ? `Task #${widget.task.id}: ${widget.task.title}, ${STATUS_LABEL[widget.task.status]}` : null;
-  return [state, context?.error, widget.failure?.message, memory, task].filter(Boolean).join(". ");
+  return [state, memory, task].filter(Boolean).join(". ");
 }
 
 /** The icon plus the button's padding: the segment never shrinks below its icon. */
@@ -271,7 +272,7 @@ export function ContextSegmentDetails({ threadId, isExpanded }: ExperimentalThre
           ) : null}
           {context.status !== "ready" ? (
             <li className={TONE_TEXT[STATUS_LOOK[context.status].tone]}>
-              {STATUS_LOOK[context.status].word}. {context.error}
+              <ProblemLink threadId={context.threadId} />
             </li>
           ) : null}
         </ul>

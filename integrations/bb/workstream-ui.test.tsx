@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, waitFor, within } from "@testing-library/react
 import { loadPluginApp, type PluginRpcTestHandlers, renderSlot } from "@get-bb/plugin-sdk/testing/app";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import type { MemoryState } from "./memory";
-import type { rpcContract } from "./server";
+import { rpcContract } from "./server";
 import type { CortexThreadState } from "./state";
 import type { DeliveryReceipt, Knowledge, ThreadContext, Workstream } from "./ui/types";
 import { workstreamRpcContract } from "./workstream-contract";
@@ -224,6 +224,7 @@ function handlers(backend: Backend, extra: Partial<Handlers> = {}): Handlers {
     if (failure) throw Object.assign(new Error(failure.message), failure);
   };
   const base: Partial<Handlers> = {
+    problems: () => ({ problems: [] }),
     threadState: () => threadState(),
     memory: () => memoryState(),
     taskRows: ({ ids }) => ({ tasks: ids.map(id => ({ id, title: `Task ${id}`, lane: "infrastructure", status: "open" as const })) }),
@@ -288,7 +289,7 @@ function handlers(backend: Backend, extra: Partial<Handlers> = {}): Handlers {
 
 const options = (backend: Backend, extra: Record<string, unknown> = {}) => ({
   rpc: handlers(backend),
-  experimental_rpcContract: workstreamRpcContract as unknown as typeof rpcContract,
+  experimental_rpcContract: rpcContract,
   settings: { contextWidget: backend.defaultHidden ? "hidden" : "shown", memoryChip: true, taskChip: true },
   ...extra,
 });
@@ -511,13 +512,12 @@ describe("sources are evidence, approval is separate", () => {
 });
 
 describe("states", () => {
-  test("a failed context read shows the error with Retry, never sample data", async () => {
+  test("a failed context read opens the problem without showing raw errors or sample data", async () => {
     const backend = makeBackend({ threadFailure: { code: "handler_error", message: "Cortex is unavailable: not found" } });
     const tab = renderMemoryTab(backend);
-    expect((await tab.findByRole("alert")).textContent).toMatch(/Cortex is unavailable/);
-    backend.threadFailure = null;
-    fireEvent.click(tab.getByRole("button", { name: "Retry" }));
-    expect(await tab.findByRole("tab", { name: "Section brief" })).toBeTruthy();
+    fireEvent.click(await tab.findByRole("button", { name: "Open the problem" }));
+    expect(tab.inspection.navigateCalls.at(-1)).toMatchObject({ options: { subPath: "review" } });
+    expect(tab.queryByText("Cortex is unavailable: not found")).toBeNull();
   });
 
   test("Context history labels each route without claiming use", async () => {

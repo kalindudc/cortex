@@ -298,6 +298,7 @@ export function createSections(bb: BbPluginApi, service: Workstreams) {
     sectionId: string,
     signal?: AbortSignal,
     overrides: Parameters<typeof composeThreadContext>[0]["overrides"] = [],
+    collect?: (entries: Knowledge[]) => void,
   ): Promise<SectionEligibility> {
     await native(sectionId, signal);
     const binding = store.section(sectionId).binding;
@@ -319,6 +320,7 @@ export function createSections(bb: BbPluginApi, service: Workstreams) {
         host: { mode: "unknown" as const },
       };
       const out = await cli.read(binding.workstreamId, binding.topic, applicability, signal);
+      collect?.(out.entries);
       if (out.workstream.id !== binding.workstreamId)
         throw new Error("Returned workstream does not match section binding");
       return {

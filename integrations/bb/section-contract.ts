@@ -59,6 +59,10 @@ export const sectionEligibilitySchema = z
     notices: threadContextSchema.shape.notices,
     exclusions: threadContextSchema.shape.exclusions,
     exactText: z.string(),
+    startingText: threadContextSchema.shape.startingText,
+    startingChars: threadContextSchema.shape.startingChars,
+    startingEntries: threadContextSchema.shape.startingEntries,
+    startingProblem: threadContextSchema.shape.startingProblem,
     estimatedTokens: revision,
     budgetTokens: z.number().int().positive(),
   })

@@ -9,6 +9,7 @@ import { useIsCompactViewport } from "@/components/ui/hooks/use-compact-viewport
 import { GrowingTextarea } from "./growing-textarea";
 import { cn } from "@/lib/utils";
 import { dimensionWord, ORIENTATION, STATUS_LOOK, tokens } from "./copy";
+import { HOST_BUDGET_TOKENS } from "../workstream-policy";
 import { isConflict, type RpcFailure, useKnowledgeEntries, useWorkstreamWrites } from "./data";
 import { type DiffOp, wordDiff } from "./model";
 import { Applicability, FailureNotice, Hint, KnowledgeText, Segmented, StateMark } from "./parts";
@@ -487,7 +488,7 @@ export function BindingDialog({
     setFailure(null);
   }, [open]);
   const budgetTokens = Number(budget);
-  const budgetOk = Number.isInteger(budgetTokens) && budgetTokens >= 128 && budgetTokens <= 6000;
+  const budgetOk = Number.isInteger(budgetTokens) && budgetTokens >= 128;
   const submit = async (binding: Binding | null) => {
     setBusy(true);
     setFailure(null);
@@ -536,9 +537,11 @@ export function BindingDialog({
         <Field label="Topic" htmlFor="cortex-binding-topic" hint="Leave blank to share the workstream basics only. Choose a topic to add its saved knowledge.">
           <Input id="cortex-binding-topic" value={topic} onChange={event => setTopic(event.target.value)} placeholder="mint" className="text-[13px]" />
         </Field>
-        <Field label="Budget (tokens)" htmlFor="cortex-binding-budget" hint="128 to 6,000. Cortex refuses rather than cutting required knowledge.">
+        <Field label="Budget (tokens)" htmlFor="cortex-binding-budget" hint={`128 or more. bb’s starting instructions hold about ${HOST_BUDGET_TOKENS} tokens; the rest goes with the first message on Pi, Claude Code and Codex, and other agents load it by id.`}>
           <Input
             id="cortex-binding-budget"
+            type="number"
+            min={128}
             inputMode="numeric"
             value={budget}
             aria-invalid={!budgetOk}

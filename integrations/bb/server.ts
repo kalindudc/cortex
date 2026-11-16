@@ -1,3 +1,6 @@
+import { problemRpcMethods } from "./problem-contract";
+import { createProblems } from "./problem-service";
+import { problemHandlers } from "./problem-rpc";
 import fs from "node:fs";
 import path from "node:path";
 import { type BbPluginApi, defineRpcContract, type PluginSettingDescriptors } from "@get-bb/plugin-sdk";
@@ -63,6 +66,7 @@ const taskRowsInputSchema = z.object({ ids: z.array(z.number().int().positive())
 const setMemoryModeInputSchema = threadIdInputSchema.extend({ mode: z.enum(MEMORY_MODES).nullable() });
 
 export const rpcContract = defineRpcContract({
+  ...problemRpcMethods,
   ...workstreamRpcMethods,
   ...sectionRpcMethods,
   ...draftRpcMethods,
@@ -287,6 +291,8 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
       throw new Error(reason);
     };
     bb.rpc.register(rpcContract, {
+      problems: unavailable,
+      knowledgeSetApplicability: unavailable,
       ...unavailableWorkstreamHandlers(reason),
       ...unavailableSectionHandlers(reason),
       ...unavailableDraftHandlers(reason),
@@ -410,6 +416,7 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
     return result;
   }
   bb.rpc.register(rpcContract, {
+    ...problemHandlers(createProblems(sections, workstreams, drafts), workstreams),
     ...workstreamHandlers(workstreams, sections),
     ...sectionHandlers(sections, drafts),
     ...draftHandlers(drafts),

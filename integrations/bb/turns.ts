@@ -285,7 +285,7 @@ export function registerMemoryTurns(
    * thread started by another gets only the tasks its request links to and the starting thread's own, never keyword
    * hits: its brief already carries the context. A connected section's brief goes first; ordinary hits still follow.
    */
-  async function matchTasks(threadId: string, start: RequestStart, limit: number, parent: string | null): Promise<void> {
+  async function matchTasks(threadId: string, start: RequestStart, limit: number | null, parent: string | null): Promise<void> {
     if (deps.workstreams && (deps.workstreams.store.hasBindings() || deps.workstreams.store.tracked(threadId))) {
       const context = await deps.workstreams.context(threadId);
       if (context.binding || context.bindingChanged) {
@@ -295,11 +295,13 @@ export function registerMemoryTurns(
         } else {
           const current = () => threads.get(threadId)?.start?.seq === start.seq && !threads.get(threadId)?.marked;
           if (!current() || (await bb.sdk.threads.get({ threadId })).status !== "active" || !current()) return;
+          // Configuration is preparation, not a delivery receipt; resend the full brief so this steer stands alone.
           await bb.sdk.threads.send({ threadId, mode: "steer", input: agentOnly(context.exactText) });
           deps.workstreams.record(context, "match", context.exactText);
         }
       }
     }
+    if (limit === null) return;
     const { cwd } = await state.locate(threadId);
     // As in pi, a stream the memory summary lists can still match: the hit says it fits this request.
     const seen =
@@ -470,8 +472,10 @@ export function registerMemoryTurns(
       const start = rows[0] ? readStart(rows[0]) : null;
       if (start === null || entry.marked) return;
       entry.start = start;
-      const limit = hitLimit({ mode: await deps.modeOf(thread), providerId: thread.providerId, start });
-      if (limit !== null) await matchTasks(thread.id, start, limit, startedBy(thread));
+      const mode = await deps.modeOf(thread);
+      const limit = hitLimit({ mode, providerId: thread.providerId, start });
+      const firstBrief = start.first && start.initiator === "user" && mode !== "off" && STEER_PROVIDERS.has(thread.providerId);
+      if (limit !== null || firstBrief) await matchTasks(thread.id, start, limit, startedBy(thread));
     } catch (err) {
       bb.log.warn(`reading the request of ${thread.id} failed: ${message(err)}`);
     }

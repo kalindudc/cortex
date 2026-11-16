@@ -65,12 +65,23 @@ afterEach(() => {
 test.each(["over-budget", "missing-required", "unavailable", "unbound"] as const)("strip never claims delivery when eligibility is %s", status => {
   const slot = renderSlot({ component: () => <BriefStrip data={{ ...input(200), status }} /> }, {});
   const image = slot.getByRole("img");
-  expect(image.getAttribute("aria-label")).toContain("Sends nothing:");
+  expect(image.getAttribute("aria-label")).toContain("Starts without a shared brief:");
   expect(image.getAttribute("aria-label")).not.toMatch(/go in|Within budget/);
   expect(image.textContent).not.toContain("go in");
   expect(image.textContent).toContain("selected");
 });
 
+test("a chained brief shows the starting split in one strip", () => {
+  const data = { ...input(3000), estimatedTokens: 2400, startingChars: 2860, startingEntries: 1 };
+  const slot = renderSlot({ component: () => <BriefStrip data={data} /> }, {});
+  const image = slot.getByRole("img");
+  expect(image.textContent).toContain("~715 in starting instructions");
+  expect(image.textContent).toContain("~2.4k with your first message");
+  expect(image.textContent).toContain("3,000 budget");
+  const marker = image.querySelector<HTMLElement>("[data-starting-boundary]");
+  expect(marker).not.toBeNull();
+  expect(parseFloat(marker!.style.left.slice(5))).toBeCloseTo(100 * 715 / 3000);
+});
 test("segments preserve entry order, then notice order, and cut only after the running total passes budget", () => {
   const result = briefSegments(input());
   expect(result).toEqual({
@@ -108,7 +119,7 @@ test("zero-token segments are preserved, including after the cut", () => {
 
 test("strip exposes the summary, token-proportional widths, cut marker, patterns and held count", () => {
   const slot = renderSlot({ component: () => <BriefStrip data={input()} heldCount={3} /> }, {});
-  const image = slot.getByRole("img", { name: "~150 of 100 tokens. 2 entries selected, 2 notices, Sends nothing: over budget" });
+  const image = slot.getByRole("img", { name: "~150 of 100 tokens. 2 entries selected, 2 notices, Starts without a shared brief: over budget" });
   expect(image.hasAttribute("data-cortex")).toBe(true);
   const segments = image.querySelectorAll<HTMLElement>("[data-segment-key]");
   expect(segments).toHaveLength(4);
@@ -124,7 +135,7 @@ test("strip exposes the summary, token-proportional widths, cut marker, patterns
   expect(image.textContent).toContain("2 selected");
   expect(image.textContent).toContain("2 notices selected");
   expect(image.textContent).toContain("3 held back");
-  expect(image.textContent).toContain("Over budget by ~50: nothing is sent until it fits");
+  expect(image.textContent).toContain("Over budget by ~50: no brief is sent until it fits");
 });
 
 test("compact strips accept computed data and keep the accessible summary without a legend", () => {

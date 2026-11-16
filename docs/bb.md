@@ -15,8 +15,7 @@ Workstreams keep knowledge independent of section names; the thread's Cortex and
 its npm dependencies and registers it with bb. Repeating it changes only what differs; `cortex agents status`
 shows those differences. `cortex agents reset` removes and replaces the plugin, resetting its settings.
 
-Workstreams need a Cortex build and daemon with `cortex workstream` support. When upgrading, stop an older daemon
-with `cortex stop`; never point the plugin at another production database to hide an unavailable command.
+When upgrading, stop an older daemon with `cortex stop`; never point the plugin at another production database.
 
 Settings stay in bb's plugin settings. `cortexPath` selects an executable (empty searches PATH, `~/bin` and
 `~/.local/bin`); reload the plugin after changing it. `memory` controls automatic lookup and saving, `taskChip` the task
@@ -51,10 +50,12 @@ waits until you confirm it for that draft. Provider-native tools and other plugi
 ## Review saved knowledge
 
 Save a message or selected passage as a takeaway, or write one from the thread's context controls. Message capture
-checks the source; a rendered selection that cannot be matched offers whole-message or manual recovery instead.
-Review wording, scope and sources before acceptance. Saving for review keeps the suggestion's identity and choices
-without approval; unknown scope still blocks acceptance. A human can explicitly adopt a Rule, never by quote alone.
-Source authorship and reachability are reported metadata, not authentication or proof that a claim is true now.
+checks the source; a rendered selection that cannot be matched offers whole-message or manual recovery instead. Review
+wording, scope and sources before acceptance. Saving for review keeps the suggestion's identity and choices without
+approval; unknown scope still blocks acceptance. A human can explicitly adopt a Rule, never by quote alone. Source
+authorship and reachability are reported metadata, not authentication or proof that a claim is true now. Needs you lists
+lasting problems as cards (what is wrong, what it stops, the fix) above suggestions; the same card shows in place. Set
+where it applies replaces an approved entry's unknown scope with a corrected copy.
 
 Agents' bounded suggestion allowance per active run counts no-save results and failures, not your reviews or updates.
 
@@ -74,24 +75,23 @@ Neither erases exports, backups or already-sent text. Read the Forget confirmati
 ## Inspect or change a thread's context
 
 The Memory tab shows the workstream, topic and targets, what is selected, what stays out and why, and the exact text
-prepared for the thread. The estimate is approximate; when required knowledge is missing or context exceeds its budget
-or the SDK's startup limit, the preview explains the refusal before sending, never silently truncating constraints.
+prepared for the thread. Budgets have no upper limit: bb's starting instructions hold whole entries, required first, and
+an index of the rest; Pi, Claude Code and Codex get the full brief with the first message. A brief problem never blocks
+sending.
 
-On bb's New thread screen, a Cortex chip on the left opens into a row previewing the picked section's brief and
-ordinary memory; it remembers whether you left it open, and a refused send opens it. A remembered pick is marked, not
-verified placement. Its menu files the draft in a section, unpinned, or clears it. Edit or leave entries out for this
-thread; removing the pill restores normal context, and Put back restores its section and changes. A send with changes
-is refused if the section or knowledge changed; the row offers recovery. Shared edits are separate and
-revision-checked; if someone changed it first, your input stays for review. The task action Exclude from automatic
-memory is task-wide, not thread-only. Reads by ID still work, and exclusion cannot take back text a session already has.
+On bb's New thread screen, a Cortex chip on the left opens into a row previewing the picked section's brief and ordinary
+memory; it remembers whether you left it open, and a refused send opens it. A remembered pick is marked, not verified
+placement. Its menu files the draft in a section, unpinned, or clears it. Edit or leave entries out for this thread;
+removing the pill restores normal context, and Put back restores its section and changes. A send with changes is refused
+if the section or knowledge changed; the row offers recovery. Shared edits are revision-checked. The task action Exclude
+from automatic memory is task-wide, not thread-only. Reads by ID still work, and exclusion cannot take back text a
+session already has.
 
-Prepare context inserts a visible draft for you to inspect and send. Preparing a draft is not delivery. A reference
-adds information; it cannot replace a running session's earlier text. Start a fresh thread when a clean context is
-needed. Context history preserves returned recall text and accepted reference sends; it never recomputes old text
-from today's budget or knowledge and never claims that an agent used something merely because it was offered.
+Prepare context inserts a visible draft for you to inspect and send. Preparing a draft is not delivery. A reference adds
+information; it cannot replace a running session's earlier text. Start a fresh thread when a clean context is needed.
+Context history keeps returned recall text and accepted sends, never recomputed and never proof an agent used them.
 
-A connected section adds its brief to ordinary Cortex memory; another workstream's knowledge needs an explicit human grant.
-Direct shell and Cortex CLI access remain outside this accidental-selection control.
+A connected section adds its brief to ordinary memory; other workstreams need a human grant (not a shell or CLI guard).
 
 ## Keep conversations clear
 
@@ -115,8 +115,8 @@ Every thread keeps Cortex's ordinary memory, including in connected sections. Un
 children look up without a general primer or automatic save turn. Look up only omits those writes; Off omits
 automatic lookup and recall. Existing explicit `cortex_update` access remains available in all modes.
 
-Startup context contains short claims, approval, scope and source references, not captured evidence excerpts.
-An explicit scoped recall can return the selected knowledge's full captured evidence within the output budget.
+Briefs carry human-approved claims, IDs, revisions and source refs; only nondefault scope, expiry and provenance add
+fields. Explicit ID recall keeps full metadata and captured evidence within its output budget.
 
 Bound threads also receive scoped context and can propose sourced findings or report corrections; they cannot approve
 or grant sharing through these agent tools. Their scope comes from the executing thread, not caller-supplied
@@ -132,11 +132,11 @@ It reads canonical tasks and workstream knowledge through the Cortex CLI, never 
 - `workstream-contract.ts` validates RPC and CLI boundaries. `workstream-cli.ts` uses the current-entry command for
   canonical knowledge, not the oldest history revision. JSON mutations use stdin and `--input=-`.
 - `workstream-store.ts` stores bindings, preferences, grants and frozen context history; `workstreams.ts` composes
-  eligible context. `sections.ts` and `section-store.ts` keep resumable connection/capture intent and legacy title-mark ownership,
+  eligible context using `workstream-policy.ts#HOST_BUDGET_TOKENS`. `sections.ts` and `section-store.ts` keep connection/capture intent and legacy title-mark ownership,
   not another canonical knowledge database. Intended IDs are persisted before cross-store writes.
 - `workstream-agents.ts` prepares scope at dispatch, caches configuration and registers read/propose tools. Dispatch
-  checks scope revisions, not cache identity; a run's late idle notice ends only older preparation, so no preview or
-  previous run rejects a queued message. Building a session is not delivery; no hot system-prompt update is claimed.
+  checks scope revisions, not cache identity; a run's late idle notice ends only older preparation. A brief that
+  cannot be delivered never blocks a message: the thread runs without it and its instructions say why.
 - `cli.ts` runs argument arrays with timeouts/cancellation, validates JSON and throws on tool failure. `state.ts`
   retains task links, source checks and the project primer cache; `watch.ts` invalidates reads.
 - `draft-service.ts` owns durable helper intent and recovery; `draft-validation.ts` verifies sources and suggestions.

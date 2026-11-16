@@ -1,3 +1,4 @@
+import { useProblems } from "./data";
 import { type ReactNode, useEffect, useState } from "react";
 import {
   type ExperimentalBadge,
@@ -211,6 +212,7 @@ export function CortexSidebar({ subPath }: PluginNavPanelProps) {
   const route = parseRoute(subPath);
   const navigate = useBbNavigate();
   const queue = useReviewQueue();
+  const problems = useProblems();
   const workstreams = useWorkstreams();
   const bindings = useBindings();
   const sidebar = experimental_useSidebarThreads();
@@ -231,7 +233,7 @@ export function CortexSidebar({ subPath }: PluginNavPanelProps) {
   };
   return (
     <nav data-cortex aria-label="Cortex" className="flex h-full min-w-0 flex-col gap-px overflow-y-auto p-2">
-      <NavRow icon="BellDot" label="Review" current={route.kind === "review"} count={queue.data?.total} attention onClick={() => go("review")} />
+      <NavRow icon="BellDot" label="Review" current={route.kind === "review"} count={(queue.data?.total ?? 0) + (problems.data?.problems.length ?? 0)} attention onClick={() => go("review")} />
       <NavRow icon="GridView" label="Overview" current={route.kind === "overview" || route.kind === "bindings"} onClick={() => go("overview")} />
       <Heading label="Sections" trailing={<TooltipProvider><Tooltip><TooltipTrigger asChild><Button size="icon" variant="ghost" aria-label="About sections" className={cn("size-6", "max-[576px]:size-11 [@media(pointer:coarse)]:size-11")}><Icon name="Info" className="size-3.5 text-muted-foreground" aria-hidden /></Button></TooltipTrigger><TooltipContent data-cortex>Sections come from bb. Connect one to share a brief.</TooltipContent></Tooltip></TooltipProvider>} />
       {bindings.error ? <FailureNotice failure={bindings.error} onRetry={bindings.refetch} /> : null}
@@ -248,9 +250,10 @@ export function CortexSidebar({ subPath }: PluginNavPanelProps) {
 
 export function useNeedsYouBadge(): ExperimentalBadge | null {
   const queue = useReviewQueue();
-  const total = queue.data?.total ?? 0;
+  const problems = useProblems();
+  const total = (queue.data?.total ?? 0) + (problems.data?.problems.length ?? 0);
   if (total <= 0) return null;
-  return { count: total, tone: "warning", label: `${plural(total, "entry", "entries")} waiting for your review` };
+  return { count: total, tone: "warning", label: `${total} problems and suggestions need you` };
 }
 
 export function useCortexPageTitle({ subPath }: PluginNavPanelProps): ExperimentalPageTitle | null {

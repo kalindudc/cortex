@@ -108,7 +108,7 @@ export const bindingSchema = z
   .object({
     workstreamId: workstreamIdSchema,
     topic: z.string().trim().min(1).max(200).nullable(),
-    budgetTokens: z.number().int().min(128).max(6000),
+    budgetTokens: z.number().int().min(128),
     requiredKnowledgeIds: z.array(knowledgeIdSchema).max(50),
     applicability: applicabilitySchema.optional(),
   })
@@ -174,6 +174,10 @@ export const threadContextSchema = z
     overrides: z.array(threadOverrideSchema),
     grants: z.array(threadGrantSchema),
     exactText: z.string(),
+    startingText: z.string().optional(),
+    startingChars: z.number().int().nonnegative().optional(),
+    startingEntries: z.number().int().nonnegative().optional(),
+    startingProblem: z.string().nullable().optional(),
     estimatedTokens: z.number().int().nonnegative(),
     budgetTokens: z.number().int().positive(),
     status: z.enum(["ready", "unbound", "over-budget", "missing-required", "unavailable"]),

@@ -211,6 +211,17 @@ test("opaque collision verifies provenance and cannot bind a foreign id", async 
   expect(s.ws.store.section("sec_one").binding).toBeNull();
 });
 
+test("section eligibility preserves stored budgets for all brief consumers", async () => {
+  const s = setup();
+  await s.call("sectionConnect", s.connect);
+  const row = s.ws.store.section("sec_one");
+  s.ws.store.setSection("sec_one", row.revision, { ...row.binding!, budgetTokens: 3000 });
+  expect(await s.call("sectionEligibility", { sectionId: "sec_one" })).toMatchObject({ status: "ready", budgetTokens: 3000 });
+  expect(s.ws.store.section("sec_one").binding?.budgetTokens).toBe(3000);
+  s.workstreams.clear();
+  expect(await s.call("sectionEligibility", { sectionId: "sec_one" })).toMatchObject({ status: "unavailable", budgetTokens: 3000 });
+});
+
 test("newer binding is never overwritten by partial-job recovery", async () => {
   const s = setup();
   s.mutate.mockImplementationOnce(async () => {

@@ -76,7 +76,7 @@ test.each(["over-budget", "missing-required", "unavailable", "unbound"] as const
   const data = sectionDetail();
   data.eligibility.status = status;
   const slot = mount({ sectionDetail: () => data }, state(), { sidebarThreads });
-  await slot.findByText(/Sends nothing:/);
+  await slot.findByText(/Starts without a shared brief:/);
   expect(slot.container.textContent).not.toContain("go in");
 });
 

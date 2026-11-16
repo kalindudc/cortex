@@ -7,7 +7,7 @@ import {
 } from "@get-bb/plugin-sdk/testing";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { CortexRunner } from "./cli";
-import { CONTEXT_CHANGED, createWorkstreams, PREPARATION_MAX_AGE_MS } from "./workstreams";
+import { CONTEXT_CHANGED, createWorkstreams, MISSING_CONTEXT, PREPARATION_MAX_AGE_MS } from "./workstreams";
 import { registerWorkstreamAgents, workstreamConfiguration } from "./workstream-agents";
 import { workstreamHandlers } from "./workstream-rpc";
 import { workstreamRpcContract, type Knowledge, type WorkstreamBinding } from "./workstream-contract";
@@ -242,6 +242,23 @@ const proposal = {
 };
 
 describe("workstream agent and user boundaries", () => {
+  test.each<[string, Partial<Knowledge>, WorkstreamBinding]>([
+    ["over bb's instruction limit", { text: "x".repeat(5000) }, binding],
+    ["over its budget", { text: "x".repeat(900) }, { ...binding, budgetTokens: 128 }],
+    ["missing a required entry", {}, { ...binding, requiredKnowledgeIds: ["kn_required"] }],
+  ])("a brief %s never blocks the message; the thread is told why it has none", async (_, change, section) => {
+    const s = setup();
+    s.service.store.setSection("sec_envoy", 1, section);
+    Object.assign(entry, change);
+    try {
+      expect(await s.dispatch()).toEqual({ action: "proceed" });
+      const instructions = workstreamConfiguration(s.service, s.config(), "read")?.instructions ?? "";
+      expect(instructions).not.toContain(entry.text);
+      expect(instructions.length).toBeGreaterThan(0);
+    } finally {
+      entry.text = "canonical finding";
+    }
+  });
   test.each([false, true])("concurrent preview does not reject valid dispatch (bound: %s)", async bound => {
     const s = setup();
     if (!bound) s.service.store.setSection("sec_envoy", 1, null);
@@ -645,7 +662,7 @@ describe("workstream agent and user boundaries", () => {
       { ...s.config(), pluginMetadata: { actor, approved: true, workstreamId: w.id } },
       "read",
     );
-    expect(out?.instructions).toContain("not resolved");
+    expect(out?.instructions).toBe(MISSING_CONTEXT);
     expect(out?.tools).not.toContain("cortex_propose_knowledge");
   });
   test("repeated configuration is deterministic; invalidated scope never substitutes the old payload", async () => {
@@ -656,7 +673,7 @@ describe("workstream agent and user boundaries", () => {
     s.move();
     s.service.invalidate();
     const unresolved = workstreamConfiguration(s.service, s.config(), "read");
-    expect(unresolved?.instructions).toContain("not resolved");
+    expect(unresolved?.instructions).toBe(MISSING_CONTEXT);
     expect(unresolved?.instructions).not.toContain(entry.text);
     const moved = await s.service.context(T);
     expect(moved.binding?.workstreamId).toBe("ws_foreign");
