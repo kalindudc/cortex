@@ -1,6 +1,6 @@
 ---
 name: cortex-research
-description: This skill should be used when the user asks to "research X", "investigate Y", "analyze Z", "spike on a problem", or wants a deep written analysis of an unknown before any implementation. Produces a single cortex task whose body holds a concise, evidence-backed analysis with actionable next steps. Do NOT use this skill to draft an implementation plan — use cortex-planner for that. Do NOT use this skill to execute code changes — use cortex-implementer for that.
+description: This skill should be used when the user asks to "research X", "investigate Y", "analyze Z", "spike on a problem", or wants a deep written analysis of an unknown before any implementation. Produces a single cortex task whose body holds a concise, evidence-backed analysis with actionable next steps. Do NOT use this skill to draft an implementation plan or to make code changes: it ends at the analysis and recommends them as next steps.
 ---
 
 # Cortex Research Skill
@@ -184,7 +184,7 @@ Use the following structure. Strip any section that has no content — do NOT sh
 
 ## Recommended next steps
 
-1. <Concrete action> — handoff to `cortex-planner` (design needed) | `cortex-implementer` (plan exists, just execute) | neither (no further work warranted).
+1. <Concrete action> — next: a plan (design needed) | implementation (the change is clear, just execute) | nothing (no further work warranted).
 2. ...
 
 ## References
@@ -204,10 +204,10 @@ NOTE: this template is a GUIDELINE, not a straitjacket. The analysis should be a
 
 What this template is NOT (anti-patterns):
 
-- NOT a plan. No FROM/TO blocks, no Low-Level Tasks, no CREATE/UPDATE file recipes. Those belong to `cortex-planner`.
-- NOT execution. No code changes, no test edits, no PR descriptions. Those belong to `cortex-implementer`.
+- NOT a plan. No FROM/TO blocks, no Low-Level Tasks, no CREATE/UPDATE file recipes. Planning is a separate step.
+- NOT execution. No code changes, no test edits, no PR descriptions. Those come after the analysis.
 - NOT a chronology. The Method section describes WHAT was consulted and the SCOPE — not "first I looked at X, then I tried Y".
-- NOT a wish list. Recommended next steps are 2-3 lines each, concrete, and each names a handoff target.
+- NOT a wish list. Recommended next steps are 2-3 lines each, concrete, and each names what comes next.
 - NOT a tutorial. The reader is an engineer who may not know this system: explain the unknown, define internal terms on first use, and skip what any engineer knows.
 
 ---
@@ -242,7 +242,7 @@ Anti-patterns (named so you can call them out in self-review):
 - "Wall of context" — an analysis that recapitulates the codebase without distilling a finding.
 - "Tutorial drift" — explaining the well-known to pad length.
 - "Naked claim" — a finding without a citation. Either cite or label as an open question.
-- "Phantom plan" — sneaking FROM/TO blocks or Low-Level Tasks into Recommended next steps. Hand off to `cortex-planner` instead.
+- "Phantom plan" — sneaking FROM/TO blocks or Low-Level Tasks into Recommended next steps. Recommend a plan as the next step instead.
 - "Decision laundering" — recommending an action whose tradeoffs were never examined in Findings.
 
 ---
@@ -263,7 +263,7 @@ STOP. Before persisting the analysis, complete every item:
    - [ ] Every claim in Findings has a citation (file:line | URL | command)
    - [ ] Negative findings recorded explicitly (or section deliberately omitted because none applied)
    - [ ] Counter-example check performed and recorded in Verification Notes
-   - [ ] Recommended next steps are concrete AND each names a handoff target (`cortex-planner`, `cortex-implementer`, or neither)
+   - [ ] Recommended next steps are concrete AND each names what comes next (a plan, implementation, or nothing)
    - [ ] Size respected (≤300 lines soft, ≤600 hard)
    - [ ] $SESSION_ID held in working memory
    - [ ] LANE resolved (the project the work belongs to; this checkout's lane by default, or user-specified)
@@ -278,7 +278,7 @@ Before `cortex add`, scan every section:
 - [ ] Method describes sources and scope — not chronology
 - [ ] Findings are decisive — each one resolves a sub-question, not "I noticed that"
 - [ ] Negative findings exist OR the omission is deliberate
-- [ ] Recommended next steps are ≤2-3 lines each and name a handoff skill
+- [ ] Recommended next steps are ≤2-3 lines each and name what comes next
 - [ ] Empty template sections removed (no `## Open questions` followed by nothing)
 - [ ] Headline at the top still matches the body
 
@@ -291,7 +291,7 @@ Before `cortex add`, scan every section:
 - ALWAYS persist the analysis via `cortex add --body-file`; NEVER inline `-b "..."` for multi-KB analyses.
 - ALWAYS attribute the analysis immediately after `cortex add` with `cortex_update` (preferred) or `cortex update <id> --as "$SESSION_ID" -m "research written"` (fallback).
 - ALWAYS pass `-t "research,<topic-slug>"` on every research task. The topic slug is auto-derived from the title — never prompt the user.
-- ONLY produce the analysis. NEVER draft an implementation plan inline (hand off to `cortex-planner`). NEVER make code changes (hand off to `cortex-implementer`). NEVER produce PR descriptions.
+- ONLY produce the analysis. NEVER draft an implementation plan inline or make code changes; recommend them as next steps. NEVER produce PR descriptions.
 - NEVER edit a `review`- or `done`-status cortex task without explicit user confirmation.
 - "I don't know" is a valid headline when honestly arrived at — prefer it over a fabricated answer.
 - Cite every claim; label every uncited statement as an assumption or open question.

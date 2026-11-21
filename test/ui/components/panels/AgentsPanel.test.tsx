@@ -37,7 +37,7 @@ function status(over: Partial<AgentsStatus> = {}): AgentsStatus {
     version: "0.2.0",
     skills: [
       { name: "cortex", dir: `${SKILLS}/cortex`, state: "installed", differs: [] },
-      { name: "cortex-planner", dir: `${SKILLS}/cortex-planner`, state: "outdated", differs: ["SKILL.md"] },
+      { name: "cortex-research", dir: `${SKILLS}/cortex-research`, state: "outdated", differs: ["SKILL.md"] },
     ],
     extensions: [{ name: "pi", dir: EXT, state: "missing", differs: ["index.ts", "memory-view.ts"] }],
     skipped: [],
@@ -50,7 +50,7 @@ function status(over: Partial<AgentsStatus> = {}): AgentsStatus {
 const UP_TO_DATE = status({
   skills: [
     { name: "cortex", dir: `${SKILLS}/cortex`, state: "installed", differs: [] },
-    { name: "cortex-planner", dir: `${SKILLS}/cortex-planner`, state: "installed", differs: [] },
+    { name: "cortex-research", dir: `${SKILLS}/cortex-research`, state: "installed", differs: [] },
   ],
   extensions: [{ name: "pi", dir: EXT, state: "installed", differs: [] }],
   suggest: "none",
@@ -59,7 +59,7 @@ const UP_TO_DATE = status({
 const INSTALLED: AgentsResult = {
   skills: [
     { name: "cortex", dir: `${SKILLS}/cortex` },
-    { name: "cortex-planner", dir: `${SKILLS}/cortex-planner` },
+    { name: "cortex-research", dir: `${SKILLS}/cortex-research` },
   ],
   extensions: [{ name: "pi", dir: EXT }],
   skipped: [],
@@ -128,8 +128,8 @@ describe("AgentsPanel", () => {
       "Install writes the versions cortex 0.2.0 ships.",
     );
     expect(badge(container, "cortex")).toBe("Up to date");
-    expect(badge(container, "cortex-planner")).toBe("Out of date");
-    expect(container.querySelector('[data-agent-tool="cortex-planner"]')?.textContent).toContain(
+    expect(badge(container, "cortex-research")).toBe("Out of date");
+    expect(container.querySelector('[data-agent-tool="cortex-research"]')?.textContent).toContain(
       "1 file missing or different from this version",
     );
     expect(badge(container, "pi extension")).toBe("Not installed");
@@ -259,7 +259,7 @@ describe("AgentsPanel", () => {
     if (!frame) throw new Error("expected the reset dialog");
     expect(Array.from(frame.querySelectorAll(".agents-reset-dirs li")).map(li => li.textContent)).toEqual([
       `${SKILLS}/cortex`,
-      `${SKILLS}/cortex-planner`,
+      `${SKILLS}/cortex-research`,
       EXT,
       BB_DIR,
     ]);

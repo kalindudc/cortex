@@ -19,7 +19,7 @@ cortex agents reset [--force] [--json]
 | Command | Behaviour |
 |---|---|
 | `status` | Compare what is installed with the files this binary ships, and say whether `install` or `reset` would change anything. Writes nothing; asks bb only for its plugin list and the plugin's settings. |
-| `install` | Write (overwrite) every skill, plus the pi extension when pi is detected and the bb plugin when bb is. Extra files already in those dirs are kept. |
+| `install` | Write (overwrite) every skill, plus the pi extension when pi is detected and the bb plugin when bb is. Extra files already in those dirs are kept. Skills earlier versions shipped and this one does not (`cortex-planner`, `cortex-implementer`) are deleted, from `~/.agents/skills` and from the bb plugin. |
 | `reset` | Wipe each cortex-owned skill dir and the extension dir, remove the bb plugin from bb and wipe its dir, then install. Requires typing `RESET` unless `--force`; `--json` REQUIRES `--force` (it refuses to prompt). |
 
 pi counts as present when any of these holds: `CORTEX_PI_EXTENSION_DIR` is set
@@ -61,17 +61,13 @@ shows this and runs `install` and `reset --force` for you.
 ```bash
 $ cortex agents install
 ✓ skill cortex → /Users/you/.agents/skills/cortex
-✓ skill cortex-planner → /Users/you/.agents/skills/cortex-planner
-✓ skill cortex-implementer → /Users/you/.agents/skills/cortex-implementer
 ✓ skill cortex-research → /Users/you/.agents/skills/cortex-research
 ✓ pi extension → /Users/you/.pi/agent/extensions/cortex/index.ts
 ✓ bb plugin installed → /Users/you/.config/cortex/bb-plugin (running)
 
 $ cortex agents status
 ✓ skill cortex → /Users/you/.agents/skills/cortex
-! skill cortex-planner differs from this version (1 file) → /Users/you/.agents/skills/cortex-planner
-✓ skill cortex-implementer → /Users/you/.agents/skills/cortex-implementer
-✓ skill cortex-research → /Users/you/.agents/skills/cortex-research
+! skill cortex-research differs from this version (1 file) → /Users/you/.agents/skills/cortex-research
 ✓ pi extension → /Users/you/.pi/agent/extensions/cortex
 ✓ bb plugin → /Users/you/.config/cortex/bb-plugin (running)
 → run `cortex agents install`

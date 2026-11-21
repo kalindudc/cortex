@@ -15,7 +15,7 @@ import { runCli, mkTmpEnv } from "../helpers.ts";
 
 // Hardcoded (not derived from listSkills()) so the test fails LOUD when a
 // skill is added or removed without a test update.
-const EXPECTED_SKILLS = ["cortex", "cortex-planner", "cortex-implementer", "cortex-research"] as const;
+const EXPECTED_SKILLS = ["cortex", "cortex-research"] as const;
 
 const REAL_SKILL = path.join(os.homedir(), ".agents", "skills", "cortex", "SKILL.md");
 const REAL_EXT = path.join(os.homedir(), ".pi", "agent", "extensions", "cortex", "index.ts");
@@ -58,6 +58,10 @@ describe("cortex agents install", () => {
   test("--json writes every shipped skill and the pi extension (explicit CORTEX_PI_EXTENSION_DIR target)", async () => {
     const { env, skillRoot, extRoot, cleanup } = mkAgentsEnv("agents-install");
     try {
+      for (const name of ["cortex-planner", "cortex-implementer", "someone-elses"]) {
+        fs.mkdirSync(path.join(skillRoot, name), { recursive: true });
+        fs.writeFileSync(skillFile(skillRoot, name), "an installed skill");
+      }
       const r = await runCli({ args: ["agents", "install", "--json"], env });
       expect(r.code).toBe(0);
       const out = JSON.parse(r.stdout);
@@ -65,6 +69,10 @@ describe("cortex agents install", () => {
       expect(out.extensions).toEqual([{ name: "pi", dir: path.join(extRoot, "cortex") }]);
       expect(out.skipped).toEqual([]);
       for (const name of EXPECTED_SKILLS) expect(fs.existsSync(skillFile(skillRoot, name))).toBe(true);
+      // Retired skills are deleted; a skill cortex never shipped is left alone.
+      expect(fs.existsSync(path.join(skillRoot, "cortex-planner"))).toBe(false);
+      expect(fs.existsSync(path.join(skillRoot, "cortex-implementer"))).toBe(false);
+      expect(fs.readFileSync(skillFile(skillRoot, "someone-elses"), "utf8")).toBe("an installed skill");
       expect(fs.statSync(extFile(extRoot)).size).toBeGreaterThan(200);
       // The memory status + /memory view, imported by index.ts as ./memory-view.ts.
       const view = path.join(extRoot, "cortex", "memory-view.ts");

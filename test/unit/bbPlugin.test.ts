@@ -78,7 +78,7 @@ describe("the embedded plugin", () => {
     const pkg = JSON.parse(bbPluginFiles()["package.json"] ?? "{}");
     expect(pkg.name).toBe("bb-plugin-cortex");
     expect(pkg.bb.skills).toEqual(["skills"]);
-    for (const skill of ["cortex", "cortex-planner"]) {
+    for (const skill of ["cortex", "cortex-research"]) {
       const source = fs.readFileSync(
         path.join(import.meta.dir, "..", "..", "src", "skills", skill, "SKILL.md"),
         "utf8",
@@ -106,6 +106,17 @@ describe("writeBbPluginFiles and needsNpm", () => {
     expect(fs.readFileSync(path.join(target, "app.tsx"), "utf8")).toBe(bbPluginFiles()["app.tsx"]);
     expect(fs.existsSync(path.join(target, "node_modules", "zod"))).toBe(true);
     expect(fs.readFileSync(path.join(target, "dist", "app.js"), "utf8")).toBe("built");
+  });
+
+  test("deletes retired skills and reports them changed, so bb reloads the plugin", () => {
+    const target = path.join(dir, "plugin-retired");
+    writeBbPluginFiles(target);
+    fs.mkdirSync(path.join(target, "skills", "cortex-planner"), { recursive: true });
+    fs.writeFileSync(path.join(target, "skills", "cortex-planner", "SKILL.md"), "retired");
+    expect(writeBbPluginFiles(target).changed).toEqual(["skills/cortex-planner/"]);
+    expect(fs.existsSync(path.join(target, "skills", "cortex-planner"))).toBe(false);
+    expect(fs.existsSync(path.join(target, "skills", "cortex-research", "SKILL.md"))).toBe(true);
+    expect(writeBbPluginFiles(target).changed).toEqual([]);
   });
 
   test("differingBbPluginFiles names every missing or changed file, and nothing once written", () => {

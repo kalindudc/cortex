@@ -42,7 +42,7 @@ const starter = (threadId: string) => ({
 });
 const PROJECT = "proj_1";
 /** The skills the plugin's install directory holds in these tests. */
-const SKILLS = ["cortex", "cortex-planner"];
+const SKILLS = ["cortex", "cortex-research"];
 const USER = "kalindu-test";
 
 function task(id: number, extra: Partial<FakeTask["task"]> = {}, rest: Partial<FakeTask> = {}): FakeTask {

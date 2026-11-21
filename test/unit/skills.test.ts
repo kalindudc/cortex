@@ -6,6 +6,7 @@ import {
   writeSkill,
   writeAllSkills,
   listSkills,
+  RETIRED_SKILLS,
   skillsRoot,
   skillDir,
   skillsStatus,
@@ -92,12 +93,11 @@ describe("skillsStatus", () => {
         expect(s).toEqual({ name: s.name, dir: path.join(root, s.name), state: "installed", differs: [] });
       }
 
-      fs.appendFileSync(path.join(root, "cortex-planner", "SKILL.md"), "\nhand edit");
+      fs.appendFileSync(path.join(root, "cortex-research", "SKILL.md"), "\nhand edit");
       fs.rmSync(path.join(root, "cortex", "cli", "agents.md"));
       const byName = new Map((await skillsStatus()).map(s => [s.name, s]));
-      expect(byName.get("cortex-planner")).toMatchObject({ state: "outdated", differs: ["SKILL.md"] });
+      expect(byName.get("cortex-research")).toMatchObject({ state: "outdated", differs: ["SKILL.md"] });
       expect(byName.get("cortex")).toMatchObject({ state: "outdated", differs: ["cli/agents.md"] });
-      expect(byName.get("cortex-research")?.state).toBe("installed");
     } finally {
       if (prev === undefined) delete process.env.CORTEX_SKILL_DIR;
       else process.env.CORTEX_SKILL_DIR = prev;
@@ -203,8 +203,28 @@ describe("writeExtension — every shipped extension", () => {
 // --- gap-closers: registry + path resolution + error branches --------------
 describe("skills: registry + path resolution", () => {
   test("listSkills() returns every shipped skill name (deterministic order)", () => {
-    const expected: SkillName[] = ["cortex", "cortex-planner", "cortex-implementer", "cortex-research"];
+    const expected: SkillName[] = ["cortex", "cortex-research"];
     expect(listSkills()).toEqual(expected);
+  });
+
+  test("writeAllSkills deletes the retired skills' dirs and leaves other skills alone", async () => {
+    const prev = process.env.CORTEX_SKILL_DIR;
+    const root = path.join(tmpDir, "retired-root");
+    try {
+      process.env.CORTEX_SKILL_DIR = root;
+      expect(RETIRED_SKILLS).toEqual(["cortex-planner", "cortex-implementer"]);
+      for (const name of [...RETIRED_SKILLS, "someone-elses"]) {
+        fs.mkdirSync(path.join(root, name), { recursive: true });
+        fs.writeFileSync(path.join(root, name, "SKILL.md"), "installed earlier");
+      }
+      await writeAllSkills();
+      for (const name of RETIRED_SKILLS) expect(fs.existsSync(path.join(root, name))).toBe(false);
+      expect(fs.readFileSync(path.join(root, "someone-elses", "SKILL.md"), "utf8")).toBe("installed earlier");
+      for (const name of listSkills()) expect(fs.existsSync(path.join(root, name, "SKILL.md"))).toBe(true);
+    } finally {
+      if (prev === undefined) delete process.env.CORTEX_SKILL_DIR;
+      else process.env.CORTEX_SKILL_DIR = prev;
+    }
   });
 
   test("writeSkill('not-a-real-skill') throws /unknown skill/", async () => {

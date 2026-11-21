@@ -53,7 +53,7 @@ Top-level subdirectories of `src/` (hand-written; update in the same PR when you
 - src/desktop/   — the desktop main process's Node-side half: socket transport, daemon connection, IPC contract and guards, live bridge, UI file lookup, resume and launch links (never imports Electron)
 - src/extensions/   — pi extension(s) embedded as Bun file assets
 - src/lib/   — helpers shared by the CLI, daemon and desktop renderer (task search/ordering, status constants, time formatting, @id/#tag grammar, the user's author name, agent tool status)
-- src/skills/   — embedded agent skills (cortex, cortex-planner, cortex-implementer, cortex-research)
+- src/skills/   — embedded agent skills (cortex, cortex-research)
 - src/ui/   — the desktop renderer, bundled for the browser and loaded only over the app's `cortex://` scheme
 
 Other notable single-file modules (curated; the full ownership list is in [docs/architecture.md](docs/architecture.md#module-ownership)):

@@ -39,7 +39,7 @@ describe("installSummary", () => {
   const result = (over: Partial<AgentsResult>): AgentsResult => ({
     skills: [
       { name: "cortex", dir: "/s/cortex" },
-      { name: "cortex-planner", dir: "/s/cortex-planner" },
+      { name: "cortex-research", dir: "/s/cortex-research" },
     ],
     extensions: [{ name: "pi", dir: "/e/cortex" }],
     skipped: [],

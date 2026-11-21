@@ -18,6 +18,7 @@ import path from "node:path";
 import { embeddedBbPlugin } from "./bbPluginSource.ts" with { type: "macro" };
 import type { BbPluginState, BbResult, BbStatus } from "./lib/agentTools.ts";
 import { configDir } from "./paths.ts";
+import { RETIRED_SKILLS } from "./skills.ts";
 
 const FILES: Record<string, string> = embeddedBbPlugin();
 
@@ -167,11 +168,18 @@ const sha256 = (text: string): string => createHash("sha256").update(text).diges
 
 /**
  * Write the embedded files into `dir`, rewriting only files whose content
- * differs; `node_modules/` and `dist/` are left alone. Files that are no
- * longer shipped stay until `reset`, as with the skills.
+ * differs; `node_modules/` and `dist/` are left alone. Retired skills are
+ * deleted, as in `~/.agents/skills`; other files that are no longer shipped
+ * stay until `reset`.
  */
 export function writeBbPluginFiles(dir: string = bbPluginDir()): { changed: string[] } {
   const changed: string[] = [];
+  for (const name of RETIRED_SKILLS) {
+    const retired = path.join(dir, "skills", name);
+    if (!fs.existsSync(retired)) continue;
+    fs.rmSync(retired, { recursive: true, force: true });
+    changed.push(`skills/${name}/`);
+  }
   for (const [rel, content] of Object.entries(FILES)) {
     const target = path.join(dir, rel);
     let current: string | null = null;
