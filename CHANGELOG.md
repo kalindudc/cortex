@@ -2,6 +2,17 @@
 
 Cortex follows [semantic versioning](https://semver.org). Each release has a section below, newest first.
 
+## 0.109.2 - 2026-11-21
+
+- **Two bundled skills instead of four.** Cortex no longer ships the `cortex-planner` and `cortex-implementer`
+  skills; `cortex` and `cortex-research` remain. `cortex agents install` deletes the installed copies from
+  `~/.agents/skills` and from the bb plugin, and leaves other skills alone.
+- **Needs you does less work on busy threads.** The bb plugin no longer re-reads Needs you and its badge every time a
+  run ends, a message is sent or a title changes. It reads again only when a section, workstream or draft changes,
+  and callers share one read.
+- **Opening a thread's Cortex panel is quicker.** The context chip no longer forces the browser to lay out the page
+  on every render, which was the largest single frame when the panel opened.
+
 ## 0.109.1 - 2026-11-16
 
 - **Problems sit in the review list.** Needs you lists problems as rows in "to review", blocking ones first, before
