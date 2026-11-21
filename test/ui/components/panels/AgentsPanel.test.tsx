@@ -35,10 +35,7 @@ const BB_DIR = "/home/you/.config/cortex/bb-plugin";
 function status(over: Partial<AgentsStatus> = {}): AgentsStatus {
   return {
     version: "0.2.0",
-    skills: [
-      { name: "cortex", dir: `${SKILLS}/cortex`, state: "installed", differs: [] },
-      { name: "cortex-research", dir: `${SKILLS}/cortex-research`, state: "outdated", differs: ["SKILL.md"] },
-    ],
+    skills: [{ name: "cortex", dir: `${SKILLS}/cortex`, state: "outdated", differs: ["SKILL.md"] }],
     extensions: [{ name: "pi", dir: EXT, state: "missing", differs: ["index.ts", "memory-view.ts"] }],
     skipped: [],
     bb: { state: "installed", dir: BB_DIR, plugin: { status: "running", cortexPath: "/usr/local/bin/cortex" } },
@@ -48,19 +45,13 @@ function status(over: Partial<AgentsStatus> = {}): AgentsStatus {
 }
 
 const UP_TO_DATE = status({
-  skills: [
-    { name: "cortex", dir: `${SKILLS}/cortex`, state: "installed", differs: [] },
-    { name: "cortex-research", dir: `${SKILLS}/cortex-research`, state: "installed", differs: [] },
-  ],
+  skills: [{ name: "cortex", dir: `${SKILLS}/cortex`, state: "installed", differs: [] }],
   extensions: [{ name: "pi", dir: EXT, state: "installed", differs: [] }],
   suggest: "none",
 });
 
 const INSTALLED: AgentsResult = {
-  skills: [
-    { name: "cortex", dir: `${SKILLS}/cortex` },
-    { name: "cortex-research", dir: `${SKILLS}/cortex-research` },
-  ],
+  skills: [{ name: "cortex", dir: `${SKILLS}/cortex` }],
   extensions: [{ name: "pi", dir: EXT }],
   skipped: [],
   bb: { status: "unchanged", dir: BB_DIR, plugin: { status: "running" } },
@@ -127,9 +118,8 @@ describe("AgentsPanel", () => {
     expect(container.querySelector(".agents-detail")?.textContent).toBe(
       "Install writes the versions cortex 0.2.0 ships.",
     );
-    expect(badge(container, "cortex")).toBe("Up to date");
-    expect(badge(container, "cortex-research")).toBe("Out of date");
-    expect(container.querySelector('[data-agent-tool="cortex-research"]')?.textContent).toContain(
+    expect(badge(container, "cortex")).toBe("Out of date");
+    expect(container.querySelector('[data-agent-tool="cortex"]')?.textContent).toContain(
       "1 file missing or different from this version",
     );
     expect(badge(container, "pi extension")).toBe("Not installed");
@@ -201,7 +191,7 @@ describe("AgentsPanel", () => {
     await act(flush);
     expect(actions).toEqual(["status", "install", "status"]);
     expect(container.querySelector(".agents-outcome-info")?.textContent).toBe(
-      "Installed 2 skills and the pi extension; bb plugin up to date",
+      "Installed 1 skill and the pi extension; bb plugin up to date",
     );
     expect(container.querySelector(".agents-headline")?.textContent).toBe("Every agent tool is up to date");
     expect(showError).not.toHaveBeenCalled();
@@ -219,7 +209,7 @@ describe("AgentsPanel", () => {
     fireEvent.click(button(container, "Install"));
     await act(flush);
     expect(container.querySelector(".agents-outcome-error")?.textContent).toBe(
-      "Installed 2 skills and the pi extension; the bb plugin failed: npm not found",
+      "Installed 1 skill and the pi extension; the bb plugin failed: npm not found",
     );
     expect((showError.mock.calls[0]?.[0] as Error | undefined)?.message).toContain("npm not found");
   });
@@ -259,7 +249,6 @@ describe("AgentsPanel", () => {
     if (!frame) throw new Error("expected the reset dialog");
     expect(Array.from(frame.querySelectorAll(".agents-reset-dirs li")).map(li => li.textContent)).toEqual([
       `${SKILLS}/cortex`,
-      `${SKILLS}/cortex-research`,
       EXT,
       BB_DIR,
     ]);
@@ -279,7 +268,7 @@ describe("AgentsPanel", () => {
     expect(modal.value).toBeNull();
     expect(actions).toEqual(["status", "reset", "status"]);
     expect(panel.container.querySelector(".agents-outcome-info")?.textContent).toBe(
-      "Installed 2 skills and the pi extension; bb plugin up to date",
+      "Installed 1 skill and the pi extension; bb plugin up to date",
     );
   });
 
@@ -296,7 +285,7 @@ describe("AgentsPanel", () => {
     });
     const dialog = render(<ModalRoot />);
     const frame = dialog.container.querySelector('dialog[aria-label="Reset agent tools"]') as Element;
-    expect(frame.querySelectorAll(".agents-reset-dirs li").length).toBe(3);
+    expect(frame.querySelectorAll(".agents-reset-dirs li").length).toBe(2);
     expect(frame.textContent).not.toContain("resets its settings");
   });
 });

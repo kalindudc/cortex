@@ -2,6 +2,26 @@
 
 Cortex follows [semantic versioning](https://semver.org). Each release has a section below, newest first.
 
+## 0.110.0 - 2026-11-21
+
+- **Agents keep notes in cortex.** In bb, agents can save and revise documents with `cortex_note` (a note, plan,
+  research or decision) and keep memory tidy with `cortex_curate`, which excludes a task from memory or includes it
+  again, with a reason. Threads started by another thread get both tools under Automatic memory, and a child thread
+  that starts its own threads now gets the automatic save turn. Choosing Look up only or Off still withholds them.
+- **Guarded against runaway memory.** Each thread may save two new documents an hour (one in a thread another
+  thread started), ten revisions and five curations, and each lane lets at most ten new agent documents into memory
+  a day; past that, documents are saved excluded with the reason. Saving lists similar tasks, an exact repeat is not
+  saved twice, documents in review or done are not edited, and only a git checkout or the project's known lane names
+  the lane. The new Agent documents in memory setting pauses agent documents entering memory.
+- **Exclusions say who and why.** `cortex memory exclude|include <id> -m "<reason>"` records the author and reason in
+  the same write, `cortex add --memory-excluded` saves a task already out of memory, and `cortex memory excluded` and
+  the task JSON show who excluded a task, when and why.
+- **Cortex in bb chat.** Cortex tool rows get their own icons, labels and colours, and each write ends with a task
+  card showing its kind, status, memory state and the latest action with its reason, with buttons to exclude or
+  include it, change its status or open it. `::cortex{ids="…"}` shows several tasks, grouped by what the thread did.
+- **One bundled skill.** The cortex skill teaches the new tools and how to write a research note. `cortex-research`
+  is retired, and `cortex agents install` deletes installed copies.
+
 ## 0.109.2 - 2026-11-21
 
 - **Two bundled skills instead of four.** Cortex no longer ships the `cortex-planner` and `cortex-implementer`

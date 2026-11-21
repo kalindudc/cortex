@@ -195,9 +195,18 @@ describe("memory exclusions travel with the data", () => {
     try {
       const kept = source.store.addTask({ title: "kept out" });
       source.store.addTask({ title: "still in memory" });
-      source.store.setMemoryExcluded(kept.id, true);
+      const { task } = source.store.setMemoryExcluded(kept.id, true, undefined, {
+        author: "agent-1",
+        reason: "Superseded by another document",
+      });
+      const metadata = {
+        excluded_by: "agent-1",
+        reason: "Superseded by another document",
+        excluded_at: expect.any(Number),
+      };
+      expect(task.memory_exclusion).toMatchObject(metadata);
       const doc = await exportData(source.dbPath);
-      expect(doc.memory_exclusions).toEqual([{ task_id: kept.id }]);
+      expect(doc.memory_exclusions).toEqual([{ task_id: kept.id, ...metadata }]);
       expect(doc.stats.memory_exclusions).toBe(1);
 
       dest.store.addTask({ title: "takes id 1" });
@@ -207,7 +216,10 @@ describe("memory exclusions travel with the data", () => {
       const result = await restoreBackup({ backupPath: outPath, liveStore: dest.store });
       const remapped = result.idMap.get(kept.id) as number;
       expect(remapped).not.toBe(kept.id);
-      expect(dest.store.getTask(remapped)?.memory_excluded).toBe(true);
+      expect(dest.store.getTask(remapped)).toMatchObject({
+        memory_excluded: true,
+        memory_exclusion: task.memory_exclusion,
+      });
       expect(dest.store.getTask(1)?.memory_excluded).toBe(false);
       expect(result.counts.memoryExclusions).toBe(1);
 
@@ -348,7 +360,7 @@ describe("backup excludes private metadata", () => {
         ["updates", ["id", "task_id", "author", "summary", "body", "severity", "created"], "id"],
         ["task_tags", ["task_id", "tag_name"], null],
         ["notifications", ["id", "task_id", "author", "status", "title", "message", "read", "created"], "id"],
-        ["memory_exclusions", ["task_id"], null],
+        ["memory_exclusions", ["task_id", "excluded_by", "reason", "excluded_at"], null],
         ["workstreams", ["id", "revision", "data"], null],
         ["knowledge", ["id", "workstream_id", "revision", "data"], null],
         ["workstream_revisions", ["id", "revision", "data"], null],

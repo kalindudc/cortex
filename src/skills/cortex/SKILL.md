@@ -9,6 +9,14 @@ Cortex is a single-binary, single-user task tracker designed for one human super
 
 Humans usually work in the desktop app: plain `cortex` in an interactive terminal, the same as `cortex app`. It starts the daemon when none runs, and quitting it leaves that daemon running. Agents should NOT launch it (it opens a window): use the CLI with `--json`, whose writes every open app window shows live.
 
+## In a bb thread
+
+- Use `cortex_note` before handing off or finishing when a verified finding, plan, decision or explanation should outlive the thread. Revise the matching task with its id, an exact anchor and a one-line summary rather than creating a duplicate. Use `cortex_update` instead for tasks in review or done.
+- Use `cortex_update` for progress and status on an existing task. Use `cortex_recall` to read; check what still applies against the source. Use `cortex_curate` with a reason to exclude stale, duplicate or transient tasks, or include a verified task again.
+- Documents enter memory by default. Cite sources and when they apply. Leave briefs, raw logs, per-run status and reports, and drafts another document replaces in thread storage or save them excluded.
+- The hourly thread budget is two new documents if a person started the thread, one otherwise, ten revisions and five curations. The daily lane budget is ten inclusions, counting new documents and curations. An over-budget new document is still saved excluded. If refused, revise a matching task, post progress or report to the lead. NEVER fall back to the shell to bypass a refusal or a mode that withholds the tools.
+- Outside bb, use `cortex add --body-file` to save and `cortex memory exclude <id> -m "<reason>"` (or `include`) with your author tag to curate. See the [memory recipe](recipes/memory.md).
+
 ## Key Principles
 
 - **Single-user, local-only, no auth.** The daemon listens only on a private Unix socket. Anyone with shell access as your user has full CRUD. Do not expose the socket. There are no bearer tokens.
@@ -29,7 +37,7 @@ Humans usually work in the desktop app: plain `cortex` in an interactive termina
 | `cortex update <id> -m <msg> --as <id>` | Post an update on a task; optionally flip status. | [cli/update.md](cli/update.md) |
 | `cortex schema` | Print the data model + command grammar (agent orientation, DB-free). | [schema.md](cli/schema.md) |
 | `cortex doctor` | Report version, db path, daemon state, pending migrations, counts (read-only; never starts a daemon). | [doctor.md](cli/doctor.md) |
-| `cortex memory search\|show\|context\|streams\|lane\|exclude\|include\|excluded` | Agent memory, including author-touched streams and the tasks the user keeps out of memory. | [memory.md](cli/memory.md) |
+| `cortex memory search\|show\|context\|streams\|lane\|exclude\|include\|excluded` | Agent memory, including author-touched streams and the tasks kept out of memory. | [memory.md](cli/memory.md) |
 | `cortex watch --json` | Follow changes; refetch after ready or resync. | [watch.md](cli/watch.md) |
 | `cortex app [id]` | Open the desktop app, at task `id` when given (for humans; agents never launch it). Plain `cortex` in an interactive terminal does the same. | `cortex app --help` |
 | `cortex serve` | Run this database's daemon (private socket). | [serve.md](cli/serve.md) |
@@ -51,8 +59,8 @@ Every mutating command (`add`, `edit`, `update`, `mv`, `rm`, `tag add|edit|rm`, 
 ## Memory
 
 Tasks double as memory streams across sessions: the body is the current state, updates are breadcrumbs, the lane is the project (derived from the ask; recipes/persistence.md §2).
-Under pi, relevant memory is injected automatically; in bb, the Cortex plugin gives every provider the memory primer. Both offer `cortex_recall`, which loads a stream with its staleness check.
-In bb with the Cortex plugin, a line `::cortex{id="<id>"}` in your reply shows that task as a card that opens it in the Cortex tab.
+Pi and bb can inject relevant memory automatically; the primer depends on the memory mode. Recall by id loads a stream with its staleness check.
+In bb, put `::cortex{id="<id>"}` on its own line to show one task card, or `::cortex{ids="42,43"}` to show several.
 When to read, trust, write and re-sync memory: [recipes/memory.md](recipes/memory.md).
 
 ## Recipes

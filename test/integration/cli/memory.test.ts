@@ -63,6 +63,21 @@ describe("cortex memory (compiled binary)", () => {
     expect(r.stdout.trim()).toBe("myproj");
   });
 
+  test("the checkout probe and cached lane distinguish a git checkout from a plain folder", async () => {
+    const scratch = path.join(path.dirname(repo), "scratch-notes");
+    fs.mkdirSync(scratch, { recursive: true });
+    expect((await cli(["memory", "lane", "--checkout"])).stdout.trim()).toBe("myproj");
+    expect((await cli(["memory", "lane"], { cwd: scratch })).stdout.trim()).toBe("scratch-notes");
+    const shortcut = await cli(["memory", "lane", "--checkout"], { cwd: scratch });
+    expect(shortcut.code).toBe(0);
+    expect(shortcut.stdout.trim()).toBe("");
+    expect(await json(["memory", "context", "--json"], scratch)).toMatchObject({
+      lane: "scratch-notes",
+      checkoutLane: null,
+    });
+    expect(await json(["memory", "context", "--json"])).toMatchObject({ lane: "myproj", checkoutLane: "myproj" });
+  });
+
   test("memory search ranks a stream and ignores punctuation", async () => {
     const created = await json<{ id: number }>([
       "add",
@@ -215,6 +230,106 @@ describe("cortex memory (compiled binary)", () => {
     const r = await cli(["memory", "show", "999"]);
     expect(r.code).toBe(1);
     expect(r.stderr).toContain("task 999 not found");
+  });
+
+  test("add can start excluded and memory curation reports attribution and no-ops", async () => {
+    const author = "agent-42";
+    const added = await json<{ id: number; memory_excluded: boolean; memory_exclusion: object }>([
+      "add",
+      "unique temporary zircon notes",
+      "--memory-excluded",
+      "--as",
+      author,
+      "--json",
+    ]);
+    expect(added).toMatchObject({
+      memory_excluded: true,
+      memory_exclusion: { excluded_by: author, reason: null, excluded_at: expect.any(Number) },
+    });
+    const id = String(added.id);
+    const missingAuthor = await cli(["memory", "include", id, "-m", "Verified against source"]);
+    expect(missingAuthor.code).toBe(1);
+    expect(missingAuthor.stderr).toContain("--as is required outside a bb thread");
+    const curate = (action: string, reason: string) =>
+      json<{ changed: boolean }>(["memory", action, id, "-m", reason, "--as", author, "--json"]);
+    expect(await curate("include", "Verified against source")).toMatchObject({ changed: true, memory_excluded: false });
+    expect(await curate("include", "Already visible")).toMatchObject({ changed: false, memory_excluded: false });
+    expect(await curate("exclude", "Temporary draft only")).toMatchObject({ changed: true, memory_excluded: true });
+    const listed = await json<{ id: number; memory_exclusion: object }[]>(["memory", "excluded", "--json"]);
+    expect(listed.find(t => t.id === added.id)?.memory_exclusion).toMatchObject({
+      excluded_by: author,
+      reason: "Temporary draft only",
+      excluded_at: expect.any(Number),
+    });
+    const show = await json<{ updates: { author: string; summary: string }[] }>(["show", id, "--json"]);
+    expect(show.updates).toEqual([
+      expect.objectContaining({ author, summary: "created" }),
+      expect.objectContaining({ author, summary: "Included in memory again: Verified against source" }),
+      expect.objectContaining({ author, summary: "Excluded from memory: Temporary draft only" }),
+    ]);
+    expect((await cli(["memory", "include", id])).code).toBe(0);
+  });
+
+  test("an add can persist its initial exclusion reason, but only with memory-excluded", async () => {
+    const author = "bb-thr_aaaaaaaa";
+    const reason = "Saved excluded: the lane's daily memory budget is used";
+    const cmd = ["add", "Test budget excluded document", `--as=${author}`, `--memory-exclusion-reason=${reason}`];
+    const invalid = await cli(cmd);
+    expect(invalid.code).toBe(1);
+    expect(invalid.stderr).toContain("requires --memory-excluded");
+    for (const invalidReason of ["", "two\nlines", "x".repeat(301)]) {
+      const bad = await cli([
+        "add",
+        "Invalid exclusion reason",
+        "--memory-excluded",
+        `--memory-exclusion-reason=${invalidReason}`,
+      ]);
+      expect(bad.code).toBe(1);
+    }
+    const task = await json<{ id: number }>([...cmd, "--memory-excluded", "--json"]);
+    try {
+      expect(task).toMatchObject({ memory_excluded: true, memory_exclusion: { reason, excluded_by: author } });
+      expect((await cli(["memory", "excluded"])).stdout).toContain(reason);
+      expect(await json(["show", String(task.id), "--json"])).toMatchObject({
+        task: { memory_exclusion: { excluded_by: author, reason, excluded_at: expect.any(Number) } },
+      });
+    } finally {
+      await cli(["memory", "include", String(task.id)]);
+    }
+  });
+
+  test("the plugin's argv form keeps a dash-leading title literal and reads the body from stdin", async () => {
+    const body = "## State\nVerifiable zircon evidence from the isolated fixture.\n";
+    const added = await cli(
+      [
+        "add",
+        "--lane=project",
+        "--as=agent-42",
+        "--body-file=-",
+        "--memory-excluded",
+        "--json",
+        "--",
+        "--no-memory-excluded",
+      ],
+      { stdin: body },
+    );
+    expect(added.code).toBe(0);
+    const task = JSON.parse(added.stdout) as { id: number };
+    expect(task).toMatchObject({ title: "--no-memory-excluded", memory_excluded: true, lane: "project", body });
+    const hits = await json<{ hits: { id: number }[] }>([
+      "memory",
+      "search",
+      "--boost=project",
+      "--limit=3",
+      "--json",
+      "--",
+      "--zircon",
+    ]);
+    expect(hits.hits.some(hit => hit.id === task.id)).toBe(false);
+    expect(await json(["edit", String(task.id), "--json", "--bodySearch=zircon ", "--bodyReplace="])).toMatchObject({
+      body: body.replace("zircon ", ""),
+    });
+    expect((await cli(["memory", "include", String(task.id)])).code).toBe(0);
   });
 
   test("memory exclude keeps a task out of recall; reading it by id still works", async () => {

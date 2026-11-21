@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import { createDraftStore, DRAFT_MIGRATIONS } from "./draft-store";
+import { createMemoryWriteStore, MEMORY_WRITE_MIGRATIONS } from "./memory-write-store";
 import {
   actorSchema,
   bindingRowSchema,
@@ -44,6 +45,7 @@ export const WORKSTREAM_MIGRATIONS = [
   ...DRAFT_MIGRATIONS,
   ...PENDING_CONTEXT_MIGRATIONS,
   `CREATE TABLE IF NOT EXISTS workstream_problem_dismissals (section_id TEXT NOT NULL, entry_id TEXT NOT NULL, revision INTEGER NOT NULL, PRIMARY KEY(section_id, entry_id, revision))`,
+  ...MEMORY_WRITE_MIGRATIONS,
 ];
 
 export function createWorkstreamStore(bb: BbPluginApi) {
@@ -91,6 +93,7 @@ export function createWorkstreamStore(bb: BbPluginApi) {
       db.prepare("DELETE FROM workstream_problem_dismissals WHERE section_id=? AND entry_id=? AND revision=?").run(sectionId, id, revision);
     },
     drafts: createDraftStore(db),
+    memoryWrites: createMemoryWriteStore(db),
     connectJob(record: Extract<JobRecord, { kind: "connect" }>, binding: WorkstreamBinding) {
       return db.transaction(() => {
         const current = section(record.input.sectionId);

@@ -59,8 +59,8 @@ small talk never pull in streams; a repo-relative file like `src/server.ts` stil
 this one first. The session's own streams come back only when the ask names them, and finished digests (a past journal)
 or streams long out of sync rank last. A long body opens with Next, open questions, Decisions and State, and lists the
 rest; an older stream names the newer one continuing it as its "latest linked". `cortex memory exclude <id>`, the
-desktop app's "Keep out of agent memory" command or bb's More menu keep a task out of all of this; reading it by id
-still works, and a running pi session keeps its primer until compaction or `/memory refresh`.
+desktop app's "Keep out of agent memory" command or bb's task controls keep a task out of all of this. An agent
+can curate with an attributed reason. Reading by id still works; a live pi primer stays until refresh or compaction.
 
 ## When is memory stale?
 
@@ -108,8 +108,9 @@ FTS5 is SQLite's full-text search engine. Its tables (`_memory_sections`, `_memo
   built without FTS5 then breaks only memory search, loudly, not the tracker.
 - `src/store.ts#reconcileMemoryIndex` runs inside the read's transaction and re-indexes any task whose signature
   (its revision token, or `updated` if never stamped) changed. A hit always reflects the current task, and no
-  write path knows the index exists. A task in `memory_exclusions` (the user's choice, backed up) gets no
-  sections, keeping its links. Why not a `no-memory` tag? Tag renames and `--set-tags` would undo it silently.
+  write path knows the index exists. The backed-up `memory_exclusions` table carries attribution, reason and time.
+  `src/store.ts#createTask` can exclude at creation; `src/store.ts#setMemoryExcluded` commits the audit with the change.
+  Why not a `no-memory` tag? Tag changes would undo exclusion silently. Attributed writes refuse an older daemon.
 - The unit is a section (`src/memory.ts#memorySections`): body and update log split at headings and a size cap,
   each row carrying title and tags; the log skips status audits and `created` rows. Why not whole documents? Terms
   scattered across a long body qualified it for every broad query.
@@ -187,9 +188,8 @@ pure functions of state and theme in `src/extensions/memory-view.ts`, installed 
 - Staleness runs in the CLI, never the daemon, and git never inside `withClient`: `src/commands/memory.ts`,
   exercised on a real checkout by `test/integration/cli/memory.test.ts`.
 - The lane boosts, never filters by default: `test/unit/store-memory.test.ts`, `test/unit/memory-eval.test.ts`.
-- Automation never edits a stream body, reading a stream never makes it focus, and a `review` stream's body changes
-  only with the user's say-so: `test/unit/extensions-pi.test.ts` (focus, breadcrumbs, checkpoint prompt),
-  `integrations/bb/turns.test.ts`, `src/skills/cortex/recipes/memory.md`.
+- Reading a stream never makes it focus; bb agent revisions refuse tasks in review or done:
+  `test/unit/extensions-pi.test.ts`, `integrations/bb/memory-writes.test.ts`.
 - Bounded spawns (one lookup per prompt, one checkpoint turn per request, one `cortex ls --json` per `/memory`), a
   byte-identical primer, and tool failures that throw: `test/unit/extensions-pi.test.ts`.
 - The footer and `/memory` render only through `src/extensions/memory-view.ts`, stored text passing

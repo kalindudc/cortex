@@ -1,12 +1,7 @@
 /**
- * Embedded multi-skill registry — written into ~/.agents/skills/{cortex,
- * cortex-research}/ by `cortex agents install` (and wiped+rewritten by
- * `cortex agents reset`).
- *
- * Why embedded: the CLI binary ships everything an agent needs to learn
- * cortex — the base vocabulary skill plus the research methodology skill
- * (cortex-research) — without a separate install step
- * or external download. Each markdown file is imported with
+ * Embedded Cortex skill registry — installed under ~/.agents/skills/cortex/
+ * and in the bb plugin. The CLI binary ships the task and memory vocabulary
+ * without a separate download. Each Markdown file is imported with
  * `with { type: "file" }`, which `bun build --compile` rewrites to a
  * `/$bunfs/...` virtual path; we read the bytes via `Bun.file(path)`.
  *
@@ -42,16 +37,13 @@ import cortexRecipeSession from "./skills/cortex/recipes/session-id.md" with { t
 import cortexRecipePersistence from "./skills/cortex/recipes/persistence.md" with { type: "file" };
 import cortexRecipeMemory from "./skills/cortex/recipes/memory.md" with { type: "file" };
 
-// --- Methodology skills --------------------------------------------------
-import researchSkillMd from "./skills/cortex-research/SKILL.md" with { type: "file" };
-
-export type SkillName = "cortex" | "cortex-research";
+export type SkillName = "cortex";
 
 /**
  * Skills earlier versions installed and this one no longer ships. Install and
  * reset delete their dirs, here and in the bb plugin, so agents stop loading them.
  */
-export const RETIRED_SKILLS: readonly string[] = ["cortex-planner", "cortex-implementer"];
+export const RETIRED_SKILLS: readonly string[] = ["cortex-planner", "cortex-implementer", "cortex-research"];
 
 // Map relative path inside the skill dir → embedded blob path. The relPath
 // becomes the on-disk name under skillDir(name).
@@ -76,9 +68,6 @@ const SKILLS: Record<SkillName, Manifest> = {
     "recipes/persistence.md": cortexRecipePersistence,
     "recipes/memory.md": cortexRecipeMemory,
   },
-  "cortex-research": {
-    "SKILL.md": researchSkillMd,
-  },
 };
 
 /**
@@ -87,9 +76,7 @@ const SKILLS: Record<SkillName, Manifest> = {
  * `CORTEX_DB` in paths.ts so the integration test never clobbers the user's
  * real ~/.agents/skills/ tree.
  *
- * Note: when CORTEX_SKILL_DIR is set, it is used as the ROOT (containing
- * subdirs cortex/, cortex-research/), preserving the
- * Plan-3 single-skill override semantics in spirit while supporting N skills.
+ * CORTEX_SKILL_DIR names the root, not the cortex/ subdirectory.
  */
 export function skillsRoot(): string {
   return process.env.CORTEX_SKILL_DIR ?? path.join(os.homedir(), ".agents", "skills");

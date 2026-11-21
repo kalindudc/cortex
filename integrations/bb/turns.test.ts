@@ -193,21 +193,22 @@ describe("shouldCheckpoint", () => {
 describe("checkpointPrompt", () => {
   test("the title, at most 10 files, the four choices, the stream template and the closing line", () => {
     const edited = Array.from({ length: 12 }, (_, i) => `f${i}.ts`);
-    const attach = checkpointPrompt({ kind: "attach", edited, focus: [], candidates: "", author: "bb-thr_x" });
+    const attach = checkpointPrompt({ kind: "attach", edited, focus: [], candidates: "" });
     expect(attach.startsWith("Memory checkpoint (automatic, once per request)")).toBe(true);
     for (const option of ["UPDATE", "ATTACH", "CREATE", "NOTHING"]) expect(attach).toContain(`- ${option}:`);
     for (const heading of ["## Goal", "## State", "## Decisions", "## Next", "## Files", "Verified: YYYY-MM-DD"]) {
       expect(attach).toContain(heading);
     }
-    expect(attach).toContain("--as bb-thr_x");
+    expect(attach).toContain("call cortex_note");
+    expect(attach).toContain("never use the shell");
     expect(attach).toContain("- f9.ts");
     expect(attach).not.toContain("- f10.ts");
     expect(attach).toContain("- \u2026 and 2 more");
     expect(attach).toContain("Candidate streams (one memory search):\n(none found)");
     expect(attach.endsWith("Reply with one short line naming your choice.")).toBe(true);
-    const found = checkpointPrompt({ kind: "attach", edited, focus: [], candidates: "- [3] x", author: "a" });
+    const found = checkpointPrompt({ kind: "attach", edited, focus: [], candidates: "- [3] x" });
     expect(found).toContain("Candidate streams (one memory search):\n- [3] x");
-    const update = checkpointPrompt({ kind: "update", edited: ["a.ts"], focus: [9, 5], candidates: "", author: "a" });
+    const update = checkpointPrompt({ kind: "update", edited: ["a.ts"], focus: [9, 5], candidates: "" });
     expect(update).toContain("Focus streams (most recent first): @9, @5");
     expect(update).not.toContain("and 0 more");
   });

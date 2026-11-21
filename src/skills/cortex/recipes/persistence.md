@@ -5,6 +5,8 @@ analysis, PR review, PR description) as the BODY of a cortex task. Role
 skills define their own tags and status flows; the mechanics below are
 shared and MUST NOT be re-specified per skill.
 
+For research, ask one question in one sentence and lead with the answer. Give each finding a source and when it applies; include negative findings, open questions, recommended next steps, and what you verified and how. Keep it to about 300 lines at most. Split two questions into two notes. In bb, save verified analysis with `cortex_note` and kind `research`; do not use the CLI to bypass a mode or refusal.
+
 ## 1. Author identity
 
 Use the `cortex_update` tool when registered; otherwise generate ONE

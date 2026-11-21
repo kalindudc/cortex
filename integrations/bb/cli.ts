@@ -29,7 +29,10 @@ export const DEFAULT_TIMEOUT_MS = 5_000;
 const MAX_BUFFER = 16 * 1024 * 1024;
 
 const errorEnvelope = z.object({ error: z.object({ message: z.string() }).passthrough() });
-const schemaCommands = z.object({ commands: z.array(z.object({ name: z.string() }).passthrough()) }).passthrough();
+const schemaCommands = z.object({
+  commands: z.array(z.object({ name: z.string() })),
+  tables: z.object({ memory_exclusions: z.object({ columns: z.array(z.string()) }).optional() }).optional(),
+});
 
 function isExecutableFile(file: string): boolean {
   try {
@@ -149,7 +152,7 @@ export async function createCortexRunner(
  * Throws `outdated` unless this cortex has `watch` and author streams (both
  * added for bb). Read-only: one schema call and one bounded streams query.
  */
-export async function verifyCortexFeatures(runner: CortexRunner): Promise<void> {
+export async function verifyCortexFeatures(runner: CortexRunner): Promise<{ memoryWrites: boolean }> {
   const schema = await runner.run(["schema", "--json"], schemaCommands);
   if (!schema.commands.some(command => command.name === "watch")) {
     throw new CortexCliError("outdated", `${runner.binary} has no \`cortex watch\`; install a newer cortex`);
@@ -160,4 +163,5 @@ export async function verifyCortexFeatures(runner: CortexRunner): Promise<void> 
     const detail = err instanceof Error ? err.message : String(err);
     throw new CortexCliError("outdated", `${runner.binary} cannot list author streams (${detail}); install a newer cortex`);
   }
+  return { memoryWrites: schema.tables?.memory_exclusions?.columns.includes("excluded_at") === true };
 }

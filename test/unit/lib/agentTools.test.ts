@@ -37,10 +37,7 @@ describe("suggestion", () => {
 
 describe("installSummary", () => {
   const result = (over: Partial<AgentsResult>): AgentsResult => ({
-    skills: [
-      { name: "cortex", dir: "/s/cortex" },
-      { name: "cortex-research", dir: "/s/cortex-research" },
-    ],
+    skills: [{ name: "cortex", dir: "/s/cortex" }],
     extensions: [{ name: "pi", dir: "/e/cortex" }],
     skipped: [],
     bb: { status: "unchanged", dir: "/b", plugin: { status: "running" } },
@@ -50,19 +47,19 @@ describe("installSummary", () => {
   test("one line per bb outcome; only a failed plugin is an error", () => {
     expect(installSummary(result({}))).toEqual({
       level: "info",
-      text: "Installed 2 skills and the pi extension; bb plugin up to date",
+      text: "Installed 1 skill and the pi extension; bb plugin up to date",
     });
     expect(installSummary(result({ bb: { status: "installed", dir: "/b", plugin: { status: "error" } } }))).toEqual({
       level: "info",
-      text: "Installed 2 skills and the pi extension; bb plugin installed but it is error",
+      text: "Installed 1 skill and the pi extension; bb plugin installed but it is error",
     });
     expect(installSummary(result({ bb: { status: "skipped", reason: "bb not found" } }))).toEqual({
       level: "info",
-      text: "Installed 2 skills and the pi extension; skipped the bb plugin: bb not found",
+      text: "Installed 1 skill and the pi extension; skipped the bb plugin: bb not found",
     });
     expect(installSummary(result({ bb: { status: "failed", reason: "npm ci failed (exit 1)" } }))).toEqual({
       level: "error",
-      text: "Installed 2 skills and the pi extension; the bb plugin failed: npm ci failed (exit 1)",
+      text: "Installed 1 skill and the pi extension; the bb plugin failed: npm ci failed (exit 1)",
     });
   });
 

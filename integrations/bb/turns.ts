@@ -5,8 +5,7 @@ import type { MemoryMode, MemoryTracker } from "./memory";
 import type { CortexRealtimeChannel, CortexState } from "./state";
 import type { Workstreams } from "./workstreams";
 
-// The cue, limits, patterns and checkpoint text copy src/extensions/pi.ts (injectMemory, shouldCheckpoint,
-// focusFromBash, checkpointPrompt), since the plugin imports no cortex source: change them together.
+// The cue, limits and shell patterns mirror src/extensions/pi.ts. The bb checkpoint uses its native tools.
 export const TURN_LIMITS = {
   pages: 20,
   pageSize: 100,
@@ -41,7 +40,7 @@ const LOAD_HINT = 'cortex_recall "@<id>"';
 const PLUGIN_HEADER = /^\[(?![A-Z0-9]+\])[A-Za-z][A-Za-z0-9-]+(?:[ :\u00b7][^\]\n]{0,300})?\](?!\()/;
 /** Commands that write to a stream the thread works on (`cortex add` ids come from its output); reads never count. */
 const FOCUS_COMMAND = /\bcortex\s+(?:edit|update|mv)\s+(\d+)\b/g;
-/** Commands that count as writing memory (the cortex_update tool counts too). */
+/** Shell writes recovered from the timeline; native memory writes call wrote() directly. */
 const MEMORY_WRITE = /\bcortex\s+(?:edit|add|update)\b/;
 
 export type EventRow = { seq: number; type: string; createdAt: number; data: unknown };
@@ -177,7 +176,6 @@ export function checkpointPrompt(input: {
   edited: string[];
   focus: number[];
   candidates: string;
-  author: string;
 }): string {
   const files = input.edited.slice(0, TURN_LIMITS.files).map(path => `- ${path}`);
   const more = input.edited.length - TURN_LIMITS.files;
@@ -195,27 +193,20 @@ export function checkpointPrompt(input: {
     streams,
     "",
     "Do EXACTLY ONE of:",
-    "- UPDATE: re-sync a listed stream: anchored edits of its ## State, ## Decisions and ## Next and its `Verified:` line " +
-      '(`cortex edit <id> --body-search "<exact old text>" --body-replace "<new text>"`), then ONE cortex_update. ' +
-      "A `review`-status stream gets the cortex_update only, never a body edit.",
+    "- UPDATE: use cortex_note with task_id and summary, and an exact search/replace anchor to re-sync State, Decisions, Next or the Verified line. Use cortex_update only for tasks in review or done.",
     "- ATTACH: ONE cortex_update on a listed stream naming this work.",
-    "- CREATE: only when no listed stream fits (at most one new stream per request):",
-    `  cortex add "<title>" --lane "$(cortex memory lane)" --status open --as ${input.author} --body-file - <<'EOF'`,
-    "  ## Goal",
-    "  ## State",
-    "  ## Decisions",
-    "  ## Next",
-    "  ## Files",
-    "  Verified: YYYY-MM-DD",
-    "  EOF",
+    "- CREATE: call cortex_note with title, kind and Markdown body only when no listed stream fits. Create at most one. " +
+      "Keep one topic, add sources and when they apply, and exclude transient work.",
+    "  Suggested headings: ## Goal, ## State, ## Decisions, ## Next, ## Files; add Verified: YYYY-MM-DD when relying on files.",
     "- NOTHING: no durable knowledge (a typo, formatting, throwaway work).",
     "",
+    "If a tool refuses the write, follow its advice and never use the shell to bypass it.",
     "Reply with one short line naming your choice.",
   ].join("\n");
 }
 
 export type MemoryTurns = {
-  /** cortex_update wrote memory for the thread, so its current request needs no save turn. */
+  /** The thread already wrote memory, so its current request needs no save turn. */
   wrote(threadId: string): void;
 };
 
@@ -223,7 +214,7 @@ export type MemoryTurns = {
 type ThreadTurn = {
   /** The newest request's start, until an idle evaluates it or the checkpoint mark clears. */
   start: RequestStart | null;
-  /** When cortex_update last wrote for the thread. */
+  /** When a native memory tool last wrote for the thread. */
   wroteAt: number;
   /** The plugin's save turn was sent and has not ended yet. */
   marked: boolean;
@@ -256,6 +247,7 @@ export function registerMemoryTurns(
     tracker: MemoryTracker;
     workstreams?: Workstreams;
     restricted?: (thread: TurnThread) => boolean;
+    checkpoints?: boolean;
     publish: (channel: CortexRealtimeChannel, payload: unknown) => void;
     modeOf(thread: TurnThread): Promise<MemoryMode>;
   },
@@ -399,7 +391,7 @@ export function registerMemoryTurns(
   async function checkpoint(thread: TurnThread, entry: ThreadTurn, start: RequestStart): Promise<void> {
     const threadId = thread.id;
     const mode = await deps.modeOf(thread);
-    if (mode !== "write" || (await bb.sdk.threads.queuedMessages.list({ threadId })).length > 0) return;
+    if (deps.checkpoints === false || mode !== "write" || (await bb.sdk.threads.queuedMessages.list({ threadId })).length > 0) return;
     const facts = readRequest(await requestRows(threadId, start.seq));
     if (facts.focus.length > 0) {
       tracker.focused(threadId, facts.focus);
@@ -443,7 +435,7 @@ export function registerMemoryTurns(
     }
     // A newer request began while this one was evaluated: its own idle decides, and this save turn is stale.
     if (entry.start !== null) return;
-    const prompt = checkpointPrompt({ kind, edited: facts.edited, focus, candidates, author: `bb-${threadId}` });
+    const prompt = checkpointPrompt({ kind, edited: facts.edited, focus, candidates });
     tracker.checkpointing(threadId);
     changed(threadId);
     entry.marked = true;

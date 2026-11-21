@@ -18,6 +18,7 @@ export type FakeTask = {
     updated?: number;
     /** Absent for a cortex that predates memory exclusion. */
     memory_excluded?: boolean;
+    memory_exclusion?: { excluded_by: string | null; reason: string | null; excluded_at: number | null };
   };
   updates: Array<{ id: number; task_id: number; author: string; summary: string; body: string | null; created: number }>;
   synced?: number;
@@ -33,6 +34,8 @@ export type FakeTask = {
 
 export type FakeFixture = {
   commands?: string[];
+  oldMemoryWrites?: boolean;
+  memoryLane?: string | null;
   streamsProbeFails?: boolean;
   /** Fails `memory streams` for agents (neither the feature probe nor the user's `--with-excluded` view). */
   streamsFails?: boolean;
@@ -77,8 +80,18 @@ const json = argv.includes("--json");
 const [a, b, c] = argv;
 const taskOf = id => (fixture.tasks || {})[id] || fail("task " + id + " not found");
 const taskJson = t => ({ ...t.task, priority: null, updated: t.task.updated ?? t.task.created });
+const save = () => fs.writeFileSync(fixtureFile, JSON.stringify(fixture));
+const post = (t, author, summary) => {
+  const id = 900 + (fixture.posted || 0);
+  fixture.posted = (fixture.posted || 0) + 1;
+  t.updates.push({ id, task_id: t.task.id, author, summary, body: null, created: 2000000000000 + id });
+};
 if (a === "schema") {
-  out({ version: "0.0.0", commands: (fixture.commands || ["watch", "memory"]).map(name => ({ name, summary: "" })) });
+  out({
+    version: "0.0.0",
+    commands: (fixture.commands || ["watch", "memory"]).map(name => ({ name, summary: "" })),
+    tables: { memory_exclusions: { columns: fixture.oldMemoryWrites ? ["task_id"] : ["task_id", "excluded_by", "reason", "excluded_at"] } },
+  });
 } else if (a === "doctor") {
   if (fixture.doctorFails) fail("doctor broke");
   out({ version: "0.0.0", ...(fixture.author === undefined ? {} : { author: fixture.author }) });
@@ -86,6 +99,37 @@ if (a === "schema") {
   if (flag("limit") === "1" && fixture.streamsProbeFails) fail("Unknown command streams");
   if (fixture.streamsFails && flag("limit") !== "1" && !argv.includes("--with-excluded")) fail("daemon down");
   out((fixture.streams || {})[flag("author")] || []);
+} else if (a === "memory" && b === "lane") {
+  out(fixture.memoryLane === null && argv.includes("--checkout") ? "" : (fixture.memoryLane ?? fixture.context?.lane ?? "lane") + "\n");
+} else if (a === "add") {
+  const tasks = fixture.tasks ??= {};
+  const id = Math.max(0, ...Object.keys(tasks).map(Number)) + 1;
+  const title = argv.at(-1);
+  const task = {
+    id, title, lane: flag("lane"), status: flag("status") ?? "open", tags: (flag("tags") || "").split(",").filter(Boolean),
+    body: flag("body-file") === "-" ? fs.readFileSync(0, "utf8") : null,
+    created: Date.now(), memory_excluded: argv.includes("--memory-excluded"),
+  };
+  if (task.memory_excluded) task.memory_exclusion = {
+    excluded_by: flag("as") ?? fixture.author ?? null,
+    reason: flag("memory-exclusion-reason") ?? null,
+    excluded_at: task.created,
+  };
+  const t = tasks[id] = { task, updates: [] };
+  if (flag("as")) post(t, flag("as"), "created");
+  save();
+  out(taskJson(t));
+} else if (a === "edit") {
+  const t = taskOf(b);
+  const search = flag("bodySearch"), replace = flag("bodyReplace");
+  if (search !== undefined) {
+    if ((t.task.body ?? "").split(search).length !== 2) fail("body-search anchor must match exactly once");
+    const i = t.task.body.indexOf(search);
+    t.task.body = t.task.body.slice(0, i) + replace + t.task.body.slice(i + search.length);
+  }
+  if (flag("title") !== undefined) t.task.title = flag("title");
+  save();
+  out(taskJson(t));
 } else if (a === "show") {
   const t = taskOf(b);
   out({ task: taskJson(t), updates: t.updates.map(u => ({ ...u, severity: "progress" })) });
@@ -112,13 +156,28 @@ if (a === "schema") {
   });
 } else if (a === "memory" && (b === "exclude" || b === "include")) {
   const t = taskOf(c);
-  t.task.memory_excluded = b === "exclude";
-  fs.writeFileSync(fixtureFile, JSON.stringify(fixture));
-  out(taskJson(t));
+  const excluded = b === "exclude";
+  const changed = (t.task.memory_excluded ?? false) !== excluded;
+  t.task.memory_excluded = excluded;
+  const reason = flag("message") ?? null;
+  if (changed) {
+    if (excluded) t.task.memory_exclusion = { excluded_by: flag("as") ?? fixture.author ?? null, reason, excluded_at: Date.now() };
+    else delete t.task.memory_exclusion;
+    if (reason) post(t, flag("as"), (excluded ? "Excluded from memory: " : "Included in memory again: ") + reason);
+  }
+  save();
+  out({ ...taskJson(t), changed });
 } else if (a === "memory" && b === "search") {
-  out("TEXT memory search " + c + (flag("boost") ? " boost=" + flag("boost") : "") + "\n");
+  if (json) {
+    const terms = (argv.at(-1) ?? "").toLowerCase().split(/\s+/);
+    const hits = Object.values(fixture.tasks || {}).map(taskJson)
+      .filter(t => !t.memory_excluded && terms.some(term => t.title.toLowerCase().includes(term)))
+      .sort((a, b) => Number(b.lane === flag("boost")) - Number(a.lane === flag("boost")))
+      .slice(0, Number(flag("limit") ?? 5));
+    out({ terms, hits, recent: false });
+  } else out("TEXT memory search " + c + (flag("boost") ? " boost=" + flag("boost") : "") + "\n");
 } else if (a === "memory" && b === "context") {
-  out({ lane: fixture.context?.lane ?? "lane", primer: fixture.context?.primer ?? "", primerIds: fixture.context?.primerIds ?? [], terms: [], recent: false, hits: (fixture.context?.hits ?? []).map(id => ({ id })), hitsText: fixture.context?.hitsText ?? "" });
+  out({ lane: fixture.context?.lane ?? "lane", checkoutLane: fixture.memoryLane === null ? null : fixture.context?.lane ?? "lane", primer: fixture.context?.primer ?? "", primerIds: fixture.context?.primerIds ?? [], terms: [], recent: false, hits: (fixture.context?.hits ?? []).map(id => ({ id })), hitsText: fixture.context?.hitsText ?? "" });
 } else if (a === "search") {
   const q = (b || "").toLowerCase();
   out(Object.values(fixture.tasks || {}).map(taskJson).filter(t => t.title.toLowerCase().includes(q)));

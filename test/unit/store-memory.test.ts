@@ -570,6 +570,37 @@ describe("memory exclusion (memory_exclusions)", () => {
     expect(s.memoryStream(a.id)?.latest?.id).toBe(b.id);
   });
 
+  test("curation commits attribution and the update together, but does not audit no-ops", () => {
+    const s = open();
+    const t = s.addTask({ title: "curated document" });
+    const options = { author: "agent-1", reason: "This document is stale" };
+    at(4_000);
+    expect(s.setMemoryExcluded(t.id, true, undefined, options)).toMatchObject({
+      changed: true,
+      update: { author: "agent-1", summary: "Excluded from memory: This document is stale" },
+      task: { memory_exclusion: { excluded_by: "agent-1", reason: options.reason, excluded_at: 4_000 } },
+    });
+    expect(s.setMemoryExcluded(t.id, true, undefined, { ...options, reason: "Different reason" })).toMatchObject({
+      changed: false,
+      update: null,
+      task: { memory_exclusion: { reason: options.reason } },
+    });
+    s.runInTransaction(raw => {
+      raw.run("CREATE TRIGGER fail_audit BEFORE INSERT ON updates BEGIN SELECT RAISE(ABORT, 'audit failed'); END;");
+    });
+    expect(() => s.setMemoryExcluded(t.id, false, undefined, options)).toThrow("audit failed");
+    expect(s.getTask(t.id)?.memory_excluded).toBe(true);
+    expect(s.listUpdates(t.id)).toHaveLength(1);
+    s.runInTransaction(raw => raw.run("DROP TRIGGER fail_audit;"));
+    expect(s.setMemoryExcluded(t.id, false, undefined, { ...options, reason: "Verified again" })).toMatchObject({
+      changed: true,
+      update: { author: "agent-1", summary: "Included in memory again: Verified again" },
+    });
+    expect(s.getTask(t.id)?.memory_exclusion).toBeUndefined();
+    expect(s.setMemoryExcluded(t.id, false, undefined, options)).toMatchObject({ changed: false, update: null });
+    expect(s.listUpdates(t.id)).toHaveLength(2);
+  });
+
   test("exclusion is idempotent, survives tag rewrites, and goes with its task", () => {
     const s = open();
     const t = s.addTask({ title: "t", tags: ["topic"] });

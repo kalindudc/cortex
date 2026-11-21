@@ -19,9 +19,12 @@ export type Task = {
   created: number;
   updated: number;
   tags: string[];
-  /** The user keeps this task out of what agent memory offers (`memory_exclusions`); a load by id ignores it. */
+  /** Whether agent memory offers the task; a load by id ignores this flag. */
   memory_excluded: boolean;
+  memory_exclusion?: MemoryExclusion;
 };
+
+export type MemoryExclusion = { excluded_by: string | null; reason: string | null; excluded_at: number | null };
 
 /**
  * Internal SQL row shape: a `Task` with `tags` replaced by the
@@ -29,7 +32,8 @@ export type Task = {
  * `memory_excluded` as SQLite's 0/1. Lives module-scope (not exported) so
  * the public `Task` type stays clean.
  */
-type TaskRow = Omit<Task, "tags" | "memory_excluded"> & { tag_csv: string | null; memory_excluded: number };
+type TaskRow = Omit<Task, "tags" | "memory_excluded" | "memory_exclusion"> &
+  MemoryExclusion & { tag_csv: string | null; memory_excluded: number };
 
 export type Update = {
   id: number;
@@ -204,6 +208,8 @@ type AddTaskFields = {
   tags?: string[];
   /** Attribution (`cortex add --as`): records the first `created` update by this author in the same transaction. */
   author?: string;
+  memoryExcluded?: boolean;
+  memoryExclusionReason?: string;
   /**
    * Also persist the `created` notification (attributed to
    * `author`) in the insert's transaction, as the daemon's create route does.
@@ -464,6 +470,15 @@ export function validateAuthorTag(s: string): AuthorTag {
   return s.trim();
 }
 
+export function validateInitialExclusionReason(value: unknown, excluded: boolean): string | undefined {
+  if (value === undefined) return undefined;
+  if (!excluded) throw new Error("an initial exclusion reason requires --memory-excluded");
+  if (typeof value !== "string" || !value.trim() || value.length > 300 || /[\r\n\x00]/.test(value)) {
+    throw new Error("the initial exclusion reason must be one non-blank line of at most 300 characters");
+  }
+  return value.trim();
+}
+
 export type AddLaneInput = {
   name: string;
   color?: string | null;
@@ -618,8 +633,7 @@ export class Store {
   private cachedDatabaseId: string | null = null;
   /** Mutation id of the innermost runIdempotent call currently executing its write. */
   private activeMutationId: string | null = null;
-  /** How task reads compute `memory_excluded`, decided once per Store (see taskExcludedColumn). */
-  private cachedExcludedColumn: string | null = null;
+  private cachedMemoryProjection?: { select: string; join: string };
 
   private constructor(
     private readonly db: Database,
@@ -766,16 +780,23 @@ export class Store {
           PRIMARY KEY(task_id, tag_name)
         );
       `);
-      // The tasks the user keeps out of agent memory. A side table, not a
-      // tag, so no tag rename, forced delete or set-replace can switch it
-      // off; public (backed up) because it is the user's choice, not derived
-      // data. Additive under the notifications precedent; cascades with its
-      // task like `task_tags`.
+      // A side table rather than a tag so catalog or tag changes cannot turn exclusion off.
       this.db.run(`
         CREATE TABLE IF NOT EXISTS memory_exclusions (
-          task_id INTEGER PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE
+          task_id INTEGER PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+          excluded_by TEXT,
+          reason TEXT,
+          excluded_at INTEGER
         );
       `);
+      const exclusionColumns = this.memoryExclusionColumns();
+      for (const [name, type] of [
+        ["excluded_by", "TEXT"],
+        ["reason", "TEXT"],
+        ["excluded_at", "INTEGER"],
+      ]) {
+        if (!exclusionColumns.has(name)) this.db.run(`ALTER TABLE memory_exclusions ADD COLUMN ${name} ${type};`);
+      }
       // Notifications: server-persisted notification feed. New table,
       // follows the `tags`/`task_tags` precedent — a `CREATE TABLE IF NOT
       // EXISTS` block, no entry in pendingMigrations()/applyMigrations()
@@ -1664,14 +1685,27 @@ export class Store {
     return applied;
   }
 
-  /**
-   * MEMORY_EXCLUDED_SQL for task reads, or a constant 0 on a database that
-   * predates `memory_exclusions` and is read without migrate()
-   * (Store.readSnapshot), where nothing can be excluded yet.
-   */
-  private taskExcludedColumn(): string {
-    this.cachedExcludedColumn ??= this.hasTable("memory_exclusions") ? MEMORY_EXCLUDED_SQL : "0";
-    return this.cachedExcludedColumn;
+  private memoryExclusionColumns(): Set<string> {
+    return new Set(
+      this.db
+        .query<{ name: string }, []>("PRAGMA table_info(memory_exclusions);")
+        .all()
+        .map(row => row.name),
+    );
+  }
+
+  /** A readonly snapshot may predate either the side table or the attribution columns. */
+  private taskMemoryProjection(): { select: string; join: string } {
+    if (this.cachedMemoryProjection) return this.cachedMemoryProjection;
+    const columns = this.memoryExclusionColumns();
+    const hasTable = columns.has("task_id");
+    const metadata = ["excluded_by", "reason", "excluded_at"].map(name =>
+      columns.has(name) ? `mx.${name}` : `NULL AS ${name}`,
+    );
+    return (this.cachedMemoryProjection = {
+      select: [`${hasTable ? "(mx.task_id IS NOT NULL)" : "0"} AS memory_excluded`, ...metadata].join(", "),
+      join: hasTable ? "LEFT JOIN memory_exclusions mx ON mx.task_id = t.id" : "",
+    });
   }
 
   /** Whether the schema has table `name` (older databases lack the tables later releases added). */
@@ -2168,11 +2202,12 @@ export class Store {
    * deterministic, and the CLI/UI never re-sort.
    */
   private rowToTask(row: TaskRow): Task {
-    const { tag_csv, memory_excluded, ...rest } = row;
+    const { tag_csv, memory_excluded, excluded_by, reason, excluded_at, ...rest } = row;
     return {
       ...rest,
       tags: splitTags(tag_csv),
       memory_excluded: memory_excluded === 1,
+      ...(memory_excluded === 1 ? { memory_exclusion: { excluded_by, reason, excluded_at } } : {}),
     };
   }
 
@@ -2203,6 +2238,7 @@ export class Store {
     const tags = Array.from(new Set((input.tags ?? []).map(name => validateTagName(name))));
     const author = input.author === undefined ? undefined : validateAuthorTag(input.author);
     const notification = input.notification;
+    const exclusionReason = validateInitialExclusionReason(input.memoryExclusionReason, input.memoryExcluded === true);
     this.parseGuard(guard, "a new task", [], []);
     const ts = now();
     return this.db.transaction((): CreatedTask => {
@@ -2232,6 +2268,14 @@ export class Store {
           )
           .get(row.id, author, ts);
         if (!created) throw new Error("failed to insert created update");
+      }
+      if (input.memoryExcluded) {
+        this.db.run("INSERT INTO memory_exclusions (task_id, excluded_by, reason, excluded_at) VALUES (?, ?, ?, ?);", [
+          row.id,
+          author ?? notification?.author ?? null,
+          exclusionReason ?? null,
+          ts,
+        ]);
       }
       // The body as created is the stream's first sync (agent memory).
       this.recordBodySync(row.id, ts);
@@ -2322,12 +2366,14 @@ export class Store {
     // null-priority rows AFTER all prioritized rows while preserving the
     // created-time tie-break inside each group. COALESCE turns the empty
     // join (no tags) into '' so `splitTags` produces [] uniformly.
+    const memory = this.taskMemoryProjection();
     const sql = `
       SELECT t.*,
              COALESCE(GROUP_CONCAT(tt.tag_name, ','), '') AS tag_csv,
-             ${this.taskExcludedColumn()} AS memory_excluded
+             ${memory.select}
         FROM tasks t
         LEFT JOIN task_tags tt ON tt.task_id = t.id
+        ${memory.join}
         ${where}
        GROUP BY t.id
        ORDER BY (t.priority IS NULL), t.priority ASC, t.created ASC;
@@ -2337,13 +2383,15 @@ export class Store {
   }
 
   getTask(id: number): Task | null {
+    const memory = this.taskMemoryProjection();
     const row = this.db
       .query<TaskRow, [number]>(
         `SELECT t.*,
                 COALESCE(GROUP_CONCAT(tt.tag_name, ','), '') AS tag_csv,
-                ${this.taskExcludedColumn()} AS memory_excluded
+                ${memory.select}
            FROM tasks t
            LEFT JOIN task_tags tt ON tt.task_id = t.id
+           ${memory.join}
           WHERE t.id = ?
           GROUP BY t.id;`,
       )
@@ -2886,18 +2934,45 @@ export class Store {
    * change advances the task's `entity`. Memory reads pick it up on their
    * next reconcile; a load by id is never affected.
    */
-  setMemoryExcluded(id: number, excluded: boolean, guard?: WriteGuard): Task {
+  setMemoryExcluded(
+    id: number,
+    excluded: boolean,
+    guard?: WriteGuard,
+    options: { author?: string; reason?: string } = {},
+  ): { task: Task; changed: boolean; update: Update | null } {
+    const author = options.author === undefined ? null : validateAuthorTag(options.author);
+    if (author === "") throw new Error("author cannot be empty");
+    const reason = options.reason?.trim();
+    if (reason === "") throw new Error("reason cannot be blank");
+    if (reason !== undefined && author === null) throw new Error("a reason requires an author");
     const expected = this.parseGuard(guard, "a task", TASK_SCOPES, []);
     return this.db.transaction(() => {
-      if (!this.getTask(id)) throw new Error(`task ${id} not found`);
+      const before = this.getTask(id);
+      if (!before) throw new Error(`task ${id} not found`);
       this.assertVersions("task", id, expected);
-      const changed = excluded
-        ? this.db.run(`INSERT OR IGNORE INTO memory_exclusions (task_id) VALUES (?);`, [id]).changes
-        : this.db.run(`DELETE FROM memory_exclusions WHERE task_id = ?;`, [id]).changes;
-      if (changed > 0) this.bump("task", id, ["entity"]);
-      const full = this.getTask(id);
-      if (!full) throw new Error(`task ${id} not found`);
-      return full;
+      if (before.memory_excluded === excluded) return { task: before, changed: false, update: null };
+      if (excluded) {
+        this.db.run("INSERT INTO memory_exclusions (task_id, excluded_by, reason, excluded_at) VALUES (?, ?, ?, ?);", [
+          id,
+          author,
+          reason ?? null,
+          now(),
+        ]);
+      } else {
+        this.db.run("DELETE FROM memory_exclusions WHERE task_id = ?;", [id]);
+      }
+      const update =
+        author !== null && reason !== undefined
+          ? this.addUpdate({
+              task_id: id,
+              author,
+              summary: `${excluded ? "Excluded from memory" : "Included in memory again"}: ${reason}`,
+            })
+          : null;
+      if (!update) this.bump("task", id, ["entity"]);
+      const task = this.getTask(id);
+      if (!task) throw new Error(`task ${id} not found`);
+      return { task, changed: true, update };
     })();
   }
 

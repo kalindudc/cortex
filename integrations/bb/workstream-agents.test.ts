@@ -284,6 +284,9 @@ describe("workstream agent and user boundaries", () => {
       "cortex_report_correction",
     ]);
     expect(first?.instructions).toContain(entry.text);
+    expect(workstreamConfiguration(s.service, s.config(), "read", true)?.tools).toEqual([
+      "cortex_update", "cortex_recall", "cortex_note", "cortex_curate", "cortex_propose_knowledge", "cortex_report_correction",
+    ]);
     expect(workstreamConfiguration(s.service, s.config(), "read")).toEqual(first);
     expect(s.service.store.receipts(T, 50, 0).total).toBe(0);
   });

@@ -89,7 +89,7 @@ describe("cortex serve / stop are scoped to one database", () => {
     expect(identity).toMatchObject({ protocol: 1, databasePath: db, pid: daemon.proc.pid });
     expect(identity.instanceId).toMatch(/^[0-9a-f-]{36}$/);
     expect(identity.databaseId).toMatch(/^[0-9a-f-]{36}$/);
-    expect(identity.capabilities).toEqual(["control.shutdown"]);
+    expect(identity.capabilities).toEqual(["control.shutdown", "memory.attributed-writes"]);
     expect(Object.keys(identity)).not.toContain("webUrl");
     expect(identity.endpoint.kind).toBe("unix");
     const socketPath = identity.endpoint.kind === "unix" ? identity.endpoint.socketPath : "";

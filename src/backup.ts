@@ -98,7 +98,12 @@ export const TABLES: ReadonlyArray<TableSpec> = [
     optional: true,
   },
   // The user's memory choices travel with the data; an older database or archive has none.
-  { name: "memory_exclusions", columns: ["task_id"], idColumn: null, optional: true },
+  {
+    name: "memory_exclusions",
+    columns: ["task_id", "excluded_by", "reason", "excluded_at"],
+    idColumn: null,
+    optional: true,
+  },
   { name: "workstreams", columns: ["id", "revision", "data"], idColumn: null, optional: true },
   { name: "knowledge", columns: ["id", "workstream_id", "revision", "data"], idColumn: null, optional: true },
   { name: "workstream_revisions", columns: ["id", "revision", "data"], idColumn: null, optional: true },

@@ -72,7 +72,7 @@ export interface DaemonIdentity {
   databasePath: string;
   endpoint: Endpoint;
   pid: number;
-  /** Optional protocol-1 features (`control.shutdown`); always present in published metadata. */
+  /** Optional protocol-1 features, including control and attributed memory writes. */
   capabilities?: string[];
   /** The daemon's cortex version, from its health answer; never read from or written to metadata. */
   version?: string;
@@ -146,6 +146,11 @@ export interface TaskWriteResult {
   versions: Versions;
   /** True when a mutationId matched a committed receipt: nothing was written or published again. */
   replayed: boolean;
+}
+
+export interface MemoryWriteResult extends TaskWriteResult {
+  changed: boolean;
+  update: Update | null;
 }
 
 /** Versioned result of POST /api/tasks/:id/updates; `audit` is the `status → x` row when the post set a status. */
@@ -296,6 +301,8 @@ export interface MemoryStreamsQuery {
 /** PATCH /api/tasks/:id/memory: keep the task out of what agent memory offers, or let memory offer it again. */
 export interface MemoryRequest {
   excluded: boolean;
+  author?: string;
+  reason?: string;
 }
 
 type CreateTaskFields = {
@@ -304,6 +311,8 @@ type CreateTaskFields = {
   priority?: number | null;
   status?: TaskStatus;
   tags?: string[];
+  memoryExcluded?: boolean;
+  memoryExclusionReason?: string;
   /** Attribute the task: its first `created` update row, in the create's transaction. */
   author?: string;
 };
@@ -426,7 +435,7 @@ export interface VersionedWrites {
   setStatus(id: number, request: StatusRequest, guard?: WriteGuard): Promise<TaskWriteResult>;
   moveTask(id: number, lane: string, guard?: WriteGuard): Promise<TaskWriteResult>;
   changeTags(id: number, request: TagChangeRequest, guard?: WriteGuard): Promise<TaskWriteResult>;
-  setMemory(id: number, request: MemoryRequest, guard?: WriteGuard): Promise<TaskWriteResult>;
+  setMemory(id: number, request: MemoryRequest, guard?: WriteGuard): Promise<MemoryWriteResult>;
   removeTask(id: number, guard?: WriteGuard): Promise<RemoveResult>;
   postUpdate(id: number, request: PostUpdateRequest, guard?: WriteGuard): Promise<PostUpdateResult>;
   addLane(request: CreateLaneRequest, guard?: WriteGuard): Promise<LaneWriteResult>;

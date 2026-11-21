@@ -886,6 +886,27 @@ describe("Store.readSnapshot", () => {
   beforeEach(pinFileEnv);
   afterEach(restoreFileEnv);
 
+  test("old memory exclusions still read and migrate with unknown attribution", () => {
+    const s = Store.open(fileDb);
+    const task = s.addTask({ title: "Old excluded task" });
+    s.runInTransaction(raw => {
+      raw.run("DROP TABLE memory_exclusions;");
+      raw.run("CREATE TABLE memory_exclusions (task_id INTEGER PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE);");
+      raw.run("INSERT INTO memory_exclusions (task_id) VALUES (?);", [task.id]);
+    });
+    s.close();
+    expect(Store.readSnapshot(fileDb, old => old.getTask(task.id)?.memory_excluded)).toBe(true);
+    const migrated = Store.open(fileDb);
+    try {
+      expect(migrated.getTask(task.id)).toMatchObject({
+        memory_excluded: true,
+        memory_exclusion: { excluded_by: null, reason: null, excluded_at: null },
+      });
+    } finally {
+      migrated.close();
+    }
+  });
+
   test("a missing database throws DatabaseNotFoundError and creates nothing (file, parent or config dir)", () => {
     for (const missing of [path.join(fileRoot, "absent.db"), path.join(fileRoot, "no-dir", "cortex.db")]) {
       let caught: unknown = null;
@@ -1957,6 +1978,30 @@ describe("Store: createTask persists the created notification in the insert's tr
     expect(s.listNotifications()).toEqual([created.notification as never]);
     expect(s.createTask({ title: "quiet" })).toMatchObject({ created: null, notification: null });
     expect(s.listNotifications().length).toBe(1);
+    s.close();
+  });
+
+  test("creates an attributed task already excluded and rolls back if exclusion fails", () => {
+    const s = open();
+    const reason = "Saved excluded: the memory pause is on";
+    const created = s.createTask({
+      title: "hidden gizmo",
+      author: "agent-1",
+      memoryExcluded: true,
+      memoryExclusionReason: reason,
+    });
+    expect(created.task).toMatchObject({
+      memory_excluded: true,
+      memory_exclusion: { excluded_by: "agent-1", reason, excluded_at: created.task.created },
+    });
+    expect(s.searchMemory(["gizmo"])).toEqual([]);
+    const before = snapshot(s);
+    const restore = failOn(s, "fail_exclusion", "BEFORE INSERT ON memory_exclusions");
+    expect(() =>
+      s.createTask({ title: "doomed", author: "agent-1", memoryExcluded: true, memoryExclusionReason: reason }),
+    ).toThrow(/injected/);
+    restore();
+    expect(snapshot(s)).toEqual(before);
     s.close();
   });
 

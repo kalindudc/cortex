@@ -5,6 +5,7 @@ import type { Workstreams } from "./workstreams";
 import { MISSING_CONTEXT } from "./workstreams";
 import type { DraftService } from "./draft-service";
 import type { PendingContext } from "./pending-context";
+import { type MemoryMode, ordinaryMemoryTools } from "./memory";
 
 import { CONFIGURE_CONTEXT_MAX, WORKSTREAM_INSTRUCTIONS as boundedInstructions } from "./workstream-policy";
 export { CONFIGURE_CONTEXT_MAX } from "./workstream-policy";
@@ -35,7 +36,8 @@ const correctionParameters = z
 export function workstreamConfiguration(
   service: Workstreams,
   ctx: PluginAgentConfigurationContext,
-  mode: "write" | "read" | "off",
+  mode: MemoryMode,
+  notes = mode === "write",
 ) {
   const cached = service.prepared(ctx);
   const observed = cached ?? service.peek(ctx.thread.id);
@@ -55,18 +57,19 @@ export function workstreamConfiguration(
     !untrustedScopeHint
   )
     return null;
+  const tools = ordinaryMemoryTools(mode, notes);
   if (mode === "off")
     return {
-      tools: ["cortex_update"],
+      tools,
       instructions: "Cortex automatic context and recall are off. Existing cortex_update access is unchanged.",
     };
   const startingText = cached?.startingText ?? cached?.exactText;
   if (!cached || cached.status !== "ready" || !startingText || startingText.length > CONFIGURE_CONTEXT_MAX) {
     const error = cached?.error ?? MISSING_CONTEXT;
-    return { tools: ["cortex_update", "cortex_recall"], instructions: error };
+    return { tools, instructions: error };
   }
   return {
-    tools: ["cortex_update", "cortex_recall", "cortex_propose_knowledge", "cortex_report_correction"],
+    tools: [...tools, "cortex_propose_knowledge", "cortex_report_correction"],
     instructions: `${boundedInstructions}\n\n${startingText}`,
   };
 }

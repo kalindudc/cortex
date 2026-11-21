@@ -20,14 +20,14 @@ const COMMANDS: { name: string; summary: string }[] = [
     summary:
       "agents status|install|reset: the skills + pi extension (when pi is present) + bb plugin (when bb is); status compares, reset wipes first",
   },
-  { name: "add", summary: "create a task (--json, --as, --body-file -)" },
+  { name: "add", summary: "create a task (--json, --as, --body-file -, --memory-excluded, --memory-exclusion-reason)" },
   { name: "ls", summary: "list tasks (--json omits body; --full includes it)" },
   { name: "show", summary: "show one task + its updates (--json)" },
   { name: "search", summary: "fuzzy task finder via fzf (--json for scripted use)" },
   {
     name: "memory",
     summary:
-      "agent memory: search|show|context|streams|lane|exclude|include|excluded (ranked recall, staleness, breadcrumbs; --json)",
+      "agent memory: search|show|context|streams|lane|exclude|include|excluded (ranked recall, staleness, breadcrumbs; exclude|include accept -m <reason> with --as or bb attribution; --json)",
   },
   {
     name: "update",
@@ -88,7 +88,7 @@ export default defineCommand({
         notifications: {
           columns: ["id", "task_id", "author", "status", "title", "message", "read", "created"],
         },
-        memory_exclusions: { columns: ["task_id"] },
+        memory_exclusions: { columns: ["task_id", "excluded_by", "reason", "excluded_at"] },
         workstreams: { columns: ["id", "revision", "data"] },
         knowledge: { columns: ["id", "workstream_id", "revision", "data"] },
         workstream_revisions: { columns: ["id", "revision", "data"] },

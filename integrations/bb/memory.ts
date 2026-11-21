@@ -71,6 +71,8 @@ export type MemoryState = {
   /** The thread's own choice, or null to follow the setting. */
   override: MemoryMode | null;
   mode: MemoryMode;
+  /** Whether ordinary document tools are enabled by the memory policy. */
+  notes?: boolean;
   /** Started by another thread. */
   child: boolean;
   view: MemoryView | null;
@@ -81,6 +83,7 @@ export const memoryStateSchema: z.ZodType<MemoryState> = z.object({
   setting: z.enum(MEMORY_SETTINGS),
   override: z.enum(MEMORY_MODES).nullable(),
   mode: z.enum(MEMORY_MODES),
+  notes: z.boolean().optional(),
   child: z.boolean(),
   view: memoryViewSchema.nullable(),
 });
@@ -90,11 +93,23 @@ export function memorySetting(value: string): MemorySetting {
   return (MEMORY_SETTINGS as readonly string[]).includes(value) ? (value as MemorySetting) : "auto";
 }
 
-/** The thread's choice wins; `auto` saves only in a thread you started, never one started by another thread. */
-export function effectiveMode(setting: MemorySetting, override: MemoryMode | null, child: boolean): MemoryMode {
+/** Automatic saves run only for a person's own thread or a child lead. */
+export function effectiveMode(setting: MemorySetting, override: MemoryMode | null, child: boolean, childLead = false): MemoryMode {
   if (override !== null) return override;
-  if (setting === "auto") return child ? "read" : "write";
+  if (setting === "auto") return child && !childLead ? "read" : "write";
   return setting;
+}
+
+export function memoryPolicy(setting: MemorySetting, override: MemoryMode | null, child: boolean, childLead = false) {
+  const mode = effectiveMode(setting, override, child, childLead);
+  return { mode, notes: mode === "write" || (setting === "auto" && override === null) };
+}
+
+export function ordinaryMemoryTools(mode: MemoryMode, notes: boolean): string[] {
+  if (mode === "off") return ["cortex_update"];
+  const tools = ["cortex_update", "cortex_recall"];
+  if (notes) tools.push("cortex_note", "cortex_curate");
+  return tools;
 }
 
 export type MemoryTracker = {

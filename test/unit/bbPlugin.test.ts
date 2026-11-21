@@ -78,13 +78,15 @@ describe("the embedded plugin", () => {
     const pkg = JSON.parse(bbPluginFiles()["package.json"] ?? "{}");
     expect(pkg.name).toBe("bb-plugin-cortex");
     expect(pkg.bb.skills).toEqual(["skills"]);
-    for (const skill of ["cortex", "cortex-research"]) {
-      const source = fs.readFileSync(
-        path.join(import.meta.dir, "..", "..", "src", "skills", skill, "SKILL.md"),
-        "utf8",
-      );
-      expect(bbPluginFiles()[`skills/${skill}/SKILL.md`]).toBe(source);
+    expect(Object.keys(pkg.bb.branding.experimental_icons).sort()).toEqual(["curate", "note", "recall", "update"]);
+    for (const file of Object.values(pkg.bb.branding.experimental_icons)) {
+      expect(bbPluginFiles()[String(file).replace(/^\.\//, "")]).toContain("<svg");
     }
+    const source = fs.readFileSync(
+      path.join(import.meta.dir, "..", "..", "src", "skills", "cortex", "SKILL.md"),
+      "utf8",
+    );
+    expect(bbPluginFiles()["skills/cortex/SKILL.md"]).toBe(source);
   });
 
   test("lives in cortex's config dir, never bb's state dir", () => {
@@ -113,9 +115,11 @@ describe("writeBbPluginFiles and needsNpm", () => {
     writeBbPluginFiles(target);
     fs.mkdirSync(path.join(target, "skills", "cortex-planner"), { recursive: true });
     fs.writeFileSync(path.join(target, "skills", "cortex-planner", "SKILL.md"), "retired");
-    expect(writeBbPluginFiles(target).changed).toEqual(["skills/cortex-planner/"]);
+    fs.mkdirSync(path.join(target, "skills", "cortex-research"), { recursive: true });
+    fs.writeFileSync(path.join(target, "skills", "cortex-research", "SKILL.md"), "retired");
+    expect(writeBbPluginFiles(target).changed).toEqual(["skills/cortex-planner/", "skills/cortex-research/"]);
     expect(fs.existsSync(path.join(target, "skills", "cortex-planner"))).toBe(false);
-    expect(fs.existsSync(path.join(target, "skills", "cortex-research", "SKILL.md"))).toBe(true);
+    expect(fs.existsSync(path.join(target, "skills", "cortex-research"))).toBe(false);
     expect(writeBbPluginFiles(target).changed).toEqual([]);
   });
 

@@ -16,6 +16,7 @@ import {
   publishDaemonMetadata,
   recoverStaleDaemonState,
   removeDaemonMetadata,
+  requireMemoryWrites,
   stopDaemon,
   withClient,
 } from "../../src/daemon.ts";
@@ -224,6 +225,14 @@ function leaseIsFree(databasePath: string): boolean {
 function taskCount(databasePath: string): number {
   return Store.readSnapshot(databasePath, s => s.listTasks({}).length);
 }
+
+test("memory writes refuse a verified daemon without the feature, but allow the current daemon or the local Store", () => {
+  expect(() => requireMemoryWrites({ daemon: identityFor(db, { capabilities: ["control.shutdown"] }) })).toThrow(
+    "run `cortex stop`",
+  );
+  expect(() => requireMemoryWrites({ daemon: identityFor(db) })).not.toThrow();
+  expect(() => requireMemoryWrites({ daemon: null })).not.toThrow();
+});
 
 // ---------- discovery ----------
 

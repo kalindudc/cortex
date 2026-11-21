@@ -11,7 +11,13 @@
     "name": "Cortex",
     "description": "Shared briefs and reviewed takeaways for bb sections, with Cortex task and memory controls.",
     "branding": {
-      "icon": "Brain"
+      "icon": "Brain",
+      "experimental_icons": {
+        "note": "./icons/note.svg",
+        "curate": "./icons/curate.svg",
+        "update": "./icons/update.svg",
+        "recall": "./icons/recall.svg"
+      }
     },
     "server": "./server.ts",
     "app": "./app.tsx",

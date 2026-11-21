@@ -401,8 +401,8 @@ export function repoInfo(cwd: string): { lane: string; root: string } | null {
 }
 
 /** The memory lane for `cwd`: the repo name from git's common dir, else the directory name. */
-export function memoryLane(cwd: string): string {
-  return repoInfo(cwd)?.lane ?? path.basename(path.resolve(cwd));
+export function memoryLane(cwd: string, checkout = repoInfo(cwd)): string {
+  return checkout?.lane ?? path.basename(path.resolve(cwd));
 }
 
 /**

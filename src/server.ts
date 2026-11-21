@@ -13,6 +13,7 @@ import {
   type Task,
   type TaskStatus,
   validateAuthorTag,
+  validateInitialExclusionReason,
   validateTagName,
   WriteGuardError,
 } from "./store.ts";
@@ -405,6 +406,8 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
         priority?: number | null;
         status?: TaskStatus;
         tags?: string[];
+        memoryExcluded?: unknown;
+        memoryExclusionReason?: unknown;
         author?: unknown;
         guard?: unknown;
       },
@@ -446,7 +449,24 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
         return c.json({ error: (e as Error).message }, 400);
       }
     }
-    const fields = { lane: body.lane, body: body.body, priority: body.priority, status: body.status, tags: body.tags };
+    if (body.memoryExcluded !== undefined && typeof body.memoryExcluded !== "boolean") {
+      return c.json({ error: "memoryExcluded must be a boolean" }, 400);
+    }
+    let exclusionReason: string | undefined;
+    try {
+      exclusionReason = validateInitialExclusionReason(body.memoryExclusionReason, body.memoryExcluded === true);
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 400);
+    }
+    const fields = {
+      lane: body.lane,
+      body: body.body,
+      priority: body.priority,
+      status: body.status,
+      tags: body.tags,
+      memoryExcluded: body.memoryExcluded,
+      memoryExclusionReason: exclusionReason,
+    };
     const input: AddTaskInput = untitled
       ? { ...fields, untitled: true, author }
       : { ...fields, title: title as string, author };
@@ -654,15 +674,29 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
   // Memory exclusion is a task write, so the /api/memory/ routes stay read-only.
   app.patch("/api/tasks/:id/memory", async c => {
     const id = Number(c.req.param("id"));
-    const { guard, fields: body } = splitGuard((await lenientBody(c)) as { excluded?: unknown; guard?: unknown });
-    if (typeof body.excluded !== "boolean") return c.json({ error: "excluded must be a boolean" }, 400);
-    const excluded = body.excluded;
+    const { guard, fields: body } = splitGuard(
+      (await lenientBody(c)) as {
+        excluded?: unknown;
+        author?: unknown;
+        reason?: unknown;
+        guard?: unknown;
+      },
+    );
+    const { excluded, author, reason } = body;
+    if (typeof excluded !== "boolean") return c.json({ error: "excluded must be a boolean" }, 400);
+    if (author !== undefined && typeof author !== "string") return c.json({ error: "author must be a string" }, 400);
+    if (reason !== undefined && typeof reason !== "string") return c.json({ error: "reason must be a string" }, 400);
+    if (reason !== undefined && author === undefined) return c.json({ error: "a reason requires an author" }, 400);
     try {
+      const attribution = { author: author ?? resolveAuthor(), reason };
       const { result, replayed } = mutate(guard, "task.memory", { id, body }, () => {
-        const task = store.setMemoryExcluded(id, excluded, guard as WriteGuard);
-        return { task, versions: versionsOf("task", id) };
+        const change = store.setMemoryExcluded(id, excluded, guard as WriteGuard, attribution);
+        return { ...change, versions: versionsOf("task", id) };
       });
-      if (!replayed) publish("task.updated", result.task);
+      if (!replayed && result.changed) {
+        publish("task.updated", result.task);
+        if (result.update) publish("update.posted", result.update);
+      }
       return answer(c, result.task, { ...result, replayed });
     } catch (err) {
       const failure = guardFailure(c, err);

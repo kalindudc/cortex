@@ -82,16 +82,22 @@ export function StatusPill({
   canWrite,
   onChoose,
   track = false,
+  action = false,
+  disabled = false,
 }: {
   status: CortexStatus;
   canWrite: boolean;
   onChoose: (status: CortexStatus) => void;
   track?: boolean;
+  action?: boolean;
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const className = track
     ? "inline-flex min-h-7 flex-1 items-center justify-center gap-1 border border-primary bg-primary px-2 text-xs font-semibold text-primary-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-    : pillClass(status);
+    : action
+      ? "inline-flex h-7 items-center gap-1.5 rounded-[var(--radius)] border border-border-seam px-2.5 text-xs hover:bg-state-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:min-h-11 max-[480px]:min-h-11 disabled:opacity-50"
+      : pillClass(status);
   if (!canWrite) {
     return (
       <span className={className} data-testid="status-pill" aria-current={track ? "step" : undefined}>
@@ -107,9 +113,9 @@ export function StatusPill({
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
-        <button type="button" className={cn(className, track ? "hover:bg-primary/90" : "hover:bg-state-hover")} aria-current={track ? "step" : undefined} aria-label={`Status: ${STATUS_LABEL[status]}. Change status`}>
-          {track ? null : <StatusDot status={status} />}
-          {STATUS_LABEL[status]}
+        <button type="button" disabled={disabled} className={cn(className, track ? "hover:bg-primary/90" : "hover:bg-state-hover")} aria-current={track ? "step" : undefined} aria-label={`Status: ${STATUS_LABEL[status]}. Change status`}>
+          {track || action ? null : <StatusDot status={status} />}
+          {action ? `Status: ${STATUS_LABEL[status]}` : STATUS_LABEL[status]}
           <Icon name="ChevronDown" className="size-3.5 opacity-80" aria-hidden />
         </button>
       </DropdownMenuTrigger>

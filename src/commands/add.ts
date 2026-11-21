@@ -1,8 +1,14 @@
 import { defineCommand } from "citty";
 import type { CreateTaskRequest } from "../contracts.ts";
-import { withClient } from "../daemon.ts";
+import { requireMemoryWrites, withClient } from "../daemon.ts";
 import { authorForBbThread } from "../lib/bbAuthor.ts";
-import { validateAuthorTag, validateTagName, type Task, type TaskStatus } from "../store.ts";
+import {
+  validateAuthorTag,
+  validateInitialExclusionReason,
+  validateTagName,
+  type Task,
+  type TaskStatus,
+} from "../store.ts";
 import { emitError, emitOk, resolveBody } from "../output.ts";
 
 /** Parse a comma-separated tag list and validate each name. Empty/blank entries
@@ -69,6 +75,16 @@ export default defineCommand({
       valueHint: "a,b,c",
       description: "comma-separated tag names; auto-creates missing tags",
     },
+    "memory-excluded": {
+      type: "boolean",
+      default: false,
+      description: "create the task already excluded from agent memory",
+    },
+    "memory-exclusion-reason": {
+      type: "string",
+      valueHint: "text",
+      description: "why the task starts excluded; requires --memory-excluded",
+    },
     json: {
       type: "boolean",
       default: false,
@@ -106,6 +122,12 @@ export default defineCommand({
         emitError(json, e);
       }
     }
+    let exclusionReason: string | undefined;
+    try {
+      exclusionReason = validateInitialExclusionReason(args["memory-exclusion-reason"], args["memory-excluded"]);
+    } catch (err) {
+      emitError(json, err);
+    }
     // ONE create request: tags and the optional `created` attribution row
     // commit in the task's own transaction, through the verified daemon
     // or, without one, the same handler in-process.
@@ -113,6 +135,7 @@ export default defineCommand({
       title: args.title,
       lane: args.lane,
       body,
+      ...(args["memory-excluded"] ? { memoryExcluded: true, memoryExclusionReason: exclusionReason } : {}),
       ...(args.priority !== undefined ? { priority: parsePriority(args.priority) } : {}),
       ...(args.status ? { status: args.status as TaskStatus } : {}),
       ...(tagNames.length > 0 ? { tags: tagNames } : {}),
@@ -120,7 +143,10 @@ export default defineCommand({
     };
     let task: Task;
     try {
-      task = await withClient(client => client.addTask(payload));
+      task = await withClient((client, target) => {
+        if (payload.memoryExcluded) requireMemoryWrites(target);
+        return client.addTask(payload);
+      });
     } catch (err) {
       emitError(json, err);
     }

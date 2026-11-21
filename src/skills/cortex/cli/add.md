@@ -5,7 +5,7 @@ Create a new task. Returns `[<id>] <title>` on success — capture the id for la
 ## Usage
 
 ```bash
-cortex add "<title>" [-l <lane>] [-p <priority>] [-b <body> | --body-file <path>|-] [-s <status>] [-t <tags>] [--as <id>] [--json]
+cortex add "<title>" [-l <lane>] [-p <priority>] [-b <body> | --body-file <path>|-] [-s <status>] [-t <tags>] [--as <id>] [--memory-excluded [--memory-exclusion-reason <text>]] [--json]
 ```
 
 ## Args
@@ -19,6 +19,8 @@ cortex add "<title>" [-l <lane>] [-p <priority>] [-b <body> | --body-file <path>
 | `--body-file` | — | — | Read the body from a file. `--body-file -` (or `--body-file=-`) reads stdin. Mutually exclusive with `-b`. ALWAYS prefer this over `-b` for KB-scale markdown (shell escaping is a footgun). |
 | `--status` | `-s` | `open` | One of `draft`, `open`, `review`, `blocked`, `done`. Set the initial status of the task. |
 | `--tags` | `-t` | — | Comma-separated tag names (e.g. `-t "plan,my-feature"`). Auto-creates missing tags. Tag names match `[a-z0-9_@-]{1,32}`. |
+| `--memory-excluded` | — | `false` | Save the task already excluded from agent memory, in the create transaction. Reading by id still works. |
+| `--memory-exclusion-reason` | — | — | Store a one-line reason (up to 300 characters) with the exclusion. Requires `--memory-excluded`. |
 | `--as` | `--author` | `bb-<thread id>` in a bb thread, else — | Optional attribution tag. When set or defaulted, records the first `created` update so the task isn't anonymous (create + attribute in ONE call). |
 | `--json` | — | `false` | Emit the created task as JSON on stdout instead of `[<id>] <title>`. On failure emits `{ "error": { "code", "message" } }` and exits 1. |
 

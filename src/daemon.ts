@@ -50,7 +50,8 @@ import {
 /** The wire/metadata protocol this cortex speaks. */
 export const DAEMON_PROTOCOL = 1 as const;
 /** Optional protocol-1 features every daemon of this version offers (published in its identity). */
-export const DAEMON_CAPABILITIES: readonly string[] = ["control.shutdown"];
+const MEMORY_WRITE_CAPABILITY = "memory.attributed-writes";
+export const DAEMON_CAPABILITIES: readonly string[] = ["control.shutdown", MEMORY_WRITE_CAPABILITY];
 
 /** How long one identity probe may take before its endpoint counts as not answering. */
 const PROBE_TIMEOUT_MS = 2_000;
@@ -380,6 +381,15 @@ export interface WithClientOptions extends ClaimOptions {
 /** Which path withClient took: the verified daemon serving the requests, or null for the owned offline path. */
 export interface ClientTarget {
   daemon: DaemonIdentity | null;
+}
+
+/** Older daemons ignore the new fields, which would expose a task or drop its audit reason. */
+export function requireMemoryWrites({ daemon }: ClientTarget): void {
+  if (daemon && !daemon.capabilities?.includes(MEMORY_WRITE_CAPABILITY)) {
+    throw new Error(
+      "the running daemon cannot save attributed memory changes; run `cortex stop` and restart it with this version",
+    );
+  }
 }
 
 /**

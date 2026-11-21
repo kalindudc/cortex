@@ -5,6 +5,7 @@ import {
   MEMORY_SETTINGS,
   type MemoryView,
   memorySetting,
+  memoryPolicy,
   memoryViewSchema,
 } from "./memory";
 
@@ -51,6 +52,15 @@ describe("modes", () => {
     }
     expect(effectiveMode("auto", null, false)).toBe("write");
     expect(effectiveMode("auto", null, true)).toBe("read");
+  });
+
+  test("automatic delegates can write without a save turn; explicitly read-only threads cannot", () => {
+    expect(memoryPolicy("auto", null, true)).toEqual({ mode: "read", notes: true });
+    expect(memoryPolicy("auto", null, true, true)).toEqual({ mode: "write", notes: true });
+    expect(memoryPolicy("auto", "read", true, true)).toEqual({ mode: "read", notes: false });
+    expect(memoryPolicy("read", null, true, true)).toEqual({ mode: "read", notes: false });
+    expect(memoryPolicy("off", null, false)).toEqual({ mode: "off", notes: false });
+    expect(memoryPolicy("write", null, true)).toEqual({ mode: "write", notes: true });
   });
 
   test("memorySetting keeps the four options and reads anything else as auto", () => {

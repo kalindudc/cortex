@@ -93,11 +93,10 @@ describe("skillsStatus", () => {
         expect(s).toEqual({ name: s.name, dir: path.join(root, s.name), state: "installed", differs: [] });
       }
 
-      fs.appendFileSync(path.join(root, "cortex-research", "SKILL.md"), "\nhand edit");
+      fs.appendFileSync(path.join(root, "cortex", "SKILL.md"), "\nhand edit");
       fs.rmSync(path.join(root, "cortex", "cli", "agents.md"));
       const byName = new Map((await skillsStatus()).map(s => [s.name, s]));
-      expect(byName.get("cortex-research")).toMatchObject({ state: "outdated", differs: ["SKILL.md"] });
-      expect(byName.get("cortex")).toMatchObject({ state: "outdated", differs: ["cli/agents.md"] });
+      expect(byName.get("cortex")).toMatchObject({ state: "outdated", differs: ["SKILL.md", "cli/agents.md"] });
     } finally {
       if (prev === undefined) delete process.env.CORTEX_SKILL_DIR;
       else process.env.CORTEX_SKILL_DIR = prev;
@@ -116,6 +115,8 @@ describe("skillsStatus", () => {
 const CORTEX_TERMS = new Set([
   "cortex_update",
   "cortex_recall",
+  "cortex_note",
+  "cortex_curate",
   "not_found",
   "bad_request",
   "body_search_not_found",
@@ -123,6 +124,7 @@ const CORTEX_TERMS = new Set([
   "task_tags",
   "task_count",
   "memory_excluded",
+  "memory_exclusion",
 ]);
 
 /** Every reference in `text` to something cortex does not ship. */
@@ -203,7 +205,7 @@ describe("writeExtension — every shipped extension", () => {
 // --- gap-closers: registry + path resolution + error branches --------------
 describe("skills: registry + path resolution", () => {
   test("listSkills() returns every shipped skill name (deterministic order)", () => {
-    const expected: SkillName[] = ["cortex", "cortex-research"];
+    const expected: SkillName[] = ["cortex"];
     expect(listSkills()).toEqual(expected);
   });
 
@@ -212,7 +214,7 @@ describe("skills: registry + path resolution", () => {
     const root = path.join(tmpDir, "retired-root");
     try {
       process.env.CORTEX_SKILL_DIR = root;
-      expect(RETIRED_SKILLS).toEqual(["cortex-planner", "cortex-implementer"]);
+      expect(RETIRED_SKILLS).toEqual(["cortex-planner", "cortex-implementer", "cortex-research"]);
       for (const name of [...RETIRED_SKILLS, "someone-elses"]) {
         fs.mkdirSync(path.join(root, name), { recursive: true });
         fs.writeFileSync(path.join(root, name, "SKILL.md"), "installed earlier");

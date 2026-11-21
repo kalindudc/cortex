@@ -46,9 +46,12 @@ export type CortexUpdate = {
   kind: "note" | "status" | "created";
   /** The status a `status` row moved to. */
   to?: CortexStatus;
+  /** The attributed update posted by cortex_note after its anchored edit. */
+  revision?: boolean;
 };
 
 export type CortexTaskDetail = {
+  canWrite?: boolean;
   task: {
     id: number;
     title: string;
@@ -60,6 +63,7 @@ export type CortexTaskDetail = {
     updated: number;
     /** Kept out of what agent memory offers; null when this cortex predates memory exclusion. */
     memoryExcluded: boolean | null;
+    memoryExclusion?: z.infer<typeof exclusionSchema>;
   };
   /** Oldest first, as cortex stores them. */
   updates: CortexUpdate[];
@@ -107,7 +111,7 @@ export type CortexState = {
   primerFor(projectId: string): string | null;
   /** The task ids of the project's cached primer; [] when nothing is cached. */
   primerIdsFor(projectId: string): number[];
-  laneFor(projectId: string): string | null;
+  laneFor(projectId: string, checkoutOnly?: boolean): string | null;
   /** The thread's own memory mode (plugin metadata), or null to follow the setting. */
   memoryOverride(threadId: string): Promise<MemoryMode | null>;
   /** Sets the thread's memory mode; null removes it. */
@@ -123,6 +127,11 @@ export type CortexRealtimeChannel = "thread" | "task" | "all" | "memory" | "work
 
 const taskId = z.number().int().positive();
 const statusSchema = z.enum(STATUSES);
+const exclusionSchema = z.object({
+  excluded_by: z.string().nullable(),
+  reason: z.string().nullable(),
+  excluded_at: z.number().nullable(),
+});
 
 export const threadStateSchema: z.ZodType<CortexThreadState> = z.object({
   threadId: z.string(),
@@ -152,6 +161,7 @@ export const taskRowSchema: z.ZodType<CortexTaskRow> = z.object({
 });
 
 export const taskDetailSchema: z.ZodType<CortexTaskDetail> = z.object({
+  canWrite: z.boolean().optional(),
   task: z.object({
     id: taskId,
     title: z.string(),
@@ -162,6 +172,7 @@ export const taskDetailSchema: z.ZodType<CortexTaskDetail> = z.object({
     created: z.number(),
     updated: z.number(),
     memoryExcluded: z.boolean().nullable(),
+    memoryExclusion: exclusionSchema.optional(),
   }),
   updates: z.array(
     z.object({
@@ -172,6 +183,7 @@ export const taskDetailSchema: z.ZodType<CortexTaskDetail> = z.object({
       created: z.number(),
       kind: z.enum(["note", "status", "created"]),
       to: statusSchema.optional(),
+      revision: z.boolean().optional(),
     }),
   ),
   staleness: z.object({ verdict: z.enum(["fresh", "stale", "unverifiable"]), reason: z.string().optional() }),
@@ -207,6 +219,7 @@ export const cliTaskSchema = z.object({
   updated: z.number(),
   /** Absent from a cortex that predates memory exclusion. */
   memory_excluded: z.boolean().optional(),
+  memory_exclusion: exclusionSchema.optional(),
 });
 export const cliUpdateSchema = z.object({
   id: z.number(),
@@ -246,7 +259,9 @@ export const memoryShowSchema = z.object({
   sections: z.array(z.object({ heading: z.string().nullable(), slug: z.string(), text: z.string() })).optional(),
 });
 export type MemoryShow = z.infer<typeof memoryShowSchema>;
-const contextSchema = z.object({ lane: z.string(), primer: z.string(), primerIds: z.array(taskId) });
+const contextSchema = z.object({
+  lane: z.string(), checkoutLane: z.string().nullable().optional(), primer: z.string(), primerIds: z.array(taskId),
+});
 
 /** This plugin's thread metadata; each field falls back on its own, so one bad value never wipes the other. */
 const metadataSchema = z.object({
@@ -290,14 +305,14 @@ type Cached<T> = { at: number; value: Promise<T> };
 export function createCortexState(
   bb: BbPluginApi,
   runner: CortexRunner,
-  options: { userAuthor: string | null } = { userAuthor: null },
+  options: { userAuthor: string | null; noteRevision?: (taskId: number, taskCreated: number) => number | undefined } = { userAuthor: null },
 ): CortexState {
   const { userAuthor } = options;
   const canWrite = userAuthor !== null;
   const tasks = new Map<string, Cached<TaskEntry>>();
   const titles = new Map<string, Cached<string>>();
   const streams = new Map<string, Cached<Array<z.infer<typeof streamRowSchema>>>>();
-  const primers = new Map<string, { lane: string; primer: string; primerIds: number[]; cwd: string }>();
+  const primers = new Map<string, { lane: string; checkoutLane: string | null; primer: string; primerIds: number[]; cwd: string }>();
   const warming = new Map<string, Promise<void>>();
   const missingDirectories = new Map<string, string>();
   const locks = new Map<string, Promise<unknown>>();
@@ -383,13 +398,16 @@ export function createCortexState(
         memory.synced,
         ...shown.updates.filter(u => u.summary !== "created" && !STATUS_AUDIT.test(u.summary)).map(u => u.created),
       );
+      const revision = options.noteRevision?.(id, task.created);
       const updates = shown.updates.map((u): CortexUpdate => {
         const kind = updateKind(u.summary);
         const row = { id: u.id, author: u.author, summary: u.summary, body: u.body, created: u.created };
+        if (u.id === revision) return { ...row, kind: "note", revision: true };
         return kind.kind === "status" ? { ...row, kind: "status", to: kind.to } : { ...row, kind: kind.kind };
       });
       const { staleness: s } = memory;
       const detail: CortexTaskDetail = {
+        canWrite,
         task: {
           id: task.id,
           title: task.title,
@@ -400,6 +418,7 @@ export function createCortexState(
           created: task.created,
           updated: task.updated,
           memoryExcluded: task.memory_excluded ?? null,
+          ...(task.memory_exclusion ? { memoryExclusion: task.memory_exclusion } : {}),
         },
         updates,
         staleness,
@@ -416,7 +435,10 @@ export function createCortexState(
           task.body,
           shown.updates.map(u => u.summary),
         ),
-        authors: await authorsOf(shown.updates.map(u => u.author)),
+        authors: await authorsOf([
+          ...shown.updates.map(u => u.author),
+          ...(task.memory_exclusion?.excluded_by ? [task.memory_exclusion.excluded_by] : []),
+        ]),
       };
       return { detail, activity };
     });
@@ -659,7 +681,7 @@ export function createCortexState(
 
   async function loadPrimer(projectId: string, cwd: string): Promise<void> {
     const out = await runner.run(["memory", "context", "--json"], contextSchema, { cwd });
-    primers.set(projectId, { lane: out.lane, primer: out.primer, primerIds: out.primerIds, cwd });
+    primers.set(projectId, { lane: out.lane, checkoutLane: out.checkoutLane ?? null, primer: out.primer, primerIds: out.primerIds, cwd });
   }
 
   async function warmProject(threadId: string): Promise<void> {
@@ -747,7 +769,10 @@ export function createCortexState(
     refreshAll,
     primerFor: projectId => primers.get(projectId)?.primer ?? null,
     primerIdsFor: projectId => primers.get(projectId)?.primerIds ?? [],
-    laneFor: projectId => primers.get(projectId)?.lane ?? null,
+    laneFor: (projectId, checkoutOnly) => {
+      const primer = primers.get(projectId);
+      return (checkoutOnly ? primer?.checkoutLane : primer?.lane) ?? null;
+    },
     locate,
     memoryOverride,
     setMemoryOverride,

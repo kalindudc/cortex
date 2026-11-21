@@ -1289,9 +1289,11 @@ describe("::cortex card", () => {
   test("shows the task with its status dot and opens it in the Cortex tab", async () => {
     const slot = card({ id: "4" }, () => true);
     expect(await slot.findByText("Title 4")).toBeTruthy();
-    expect(slot.getByText("Open · cortex")).toBeTruthy();
+    expect(slot.getByText("Open", { exact: true })).toBeTruthy();
+    expect(slot.getByText("cortex")).toBeTruthy();
+    expect(slot.getByText("In memory")).toBeTruthy();
     expect(slot.container.querySelector("[data-status=open]")).toBeTruthy();
-    fireEvent.click(slot.getByRole("button", { name: "Open" }));
+    fireEvent.click(slot.getByRole("button", { name: "Open task" }));
     expect(slot.inspection.experimental_panelCalls).toEqual([openCall()]);
     expect(slot.queryByText(/could not open/)).toBeNull();
   });
@@ -1300,7 +1302,7 @@ describe("::cortex card", () => {
     for (const openTab of [undefined, () => false]) {
       const slot = card({ id: "4" }, openTab);
       await slot.findByText("Title 4");
-      fireEvent.click(slot.getByRole("button", { name: "Open" }));
+      fireEvent.click(slot.getByRole("button", { name: "Open task" }));
       expect(await slot.findByText(/could not open the Cortex tab/)).toBeTruthy();
       expect(slot.inspection.experimental_panelCalls).toEqual([openCall()]);
       slot.lifecycle.unmount();
@@ -1348,7 +1350,7 @@ describe("one Cortex tab", () => {
     expect(await tab.findByRole("heading", { name: "Title 1" })).toBeTruthy();
 
     const fromCard = card(4);
-    fireEvent.click(await fromCard.findByRole("button", { name: "Open" }));
+    fireEvent.click(await fromCard.findByRole("button", { name: "Open task" }));
     expect(await tab.findByRole("heading", { name: "Title 4" })).toBeTruthy();
 
     const fromMemory = memory();
@@ -1368,7 +1370,7 @@ describe("one Cortex tab", () => {
   });
 
   test("a tab bb opens for the click shows the chosen task", async () => {
-    fireEvent.click(await card(4).findByRole("button", { name: "Open" }));
+    fireEvent.click(await card(4).findByRole("button", { name: "Open task" }));
     const tab = panel();
     expect(await tab.findByRole("heading", { name: "Title 4" })).toBeTruthy();
   });
@@ -1377,19 +1379,19 @@ describe("one Cortex tab", () => {
     const tab = panel();
     await tab.findByRole("heading", { name: "Title 1" });
     const fromCard = card(4);
-    fireEvent.click(await fromCard.findByRole("button", { name: "Open" }));
+    fireEvent.click(await fromCard.findByRole("button", { name: "Open task" }));
     await tab.findByRole("heading", { name: "Title 4" });
     await openMenu(tab.getByRole("button", { name: "Thread tasks (2)" }));
     fireEvent.click(within(await tab.findByRole("menu")).getByText("Second task"));
     expect(await tab.findByRole("heading", { name: "Title 2" })).toBeTruthy();
-    fireEvent.click(fromCard.getByRole("button", { name: "Open" }));
+    fireEvent.click(fromCard.getByRole("button", { name: "Open task" }));
     expect(await tab.findByRole("heading", { name: "Title 4" })).toBeTruthy();
   });
 
   test("a declined open leaves the tab's task alone", async () => {
     const tab = panel();
     await tab.findByRole("heading", { name: "Title 1" });
-    fireEvent.click(await card(4, () => false).findByRole("button", { name: "Open" }));
+    fireEvent.click(await card(4, () => false).findByRole("button", { name: "Open task" }));
     await act(async () => {});
     expect(tab.getByRole("heading", { name: "Title 1" })).toBeTruthy();
   });

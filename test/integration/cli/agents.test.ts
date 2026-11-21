@@ -15,7 +15,7 @@ import { runCli, mkTmpEnv } from "../helpers.ts";
 
 // Hardcoded (not derived from listSkills()) so the test fails LOUD when a
 // skill is added or removed without a test update.
-const EXPECTED_SKILLS = ["cortex", "cortex-research"] as const;
+const EXPECTED_SKILLS = ["cortex"] as const;
 
 const REAL_SKILL = path.join(os.homedir(), ".agents", "skills", "cortex", "SKILL.md");
 const REAL_EXT = path.join(os.homedir(), ".pi", "agent", "extensions", "cortex", "index.ts");
@@ -58,7 +58,7 @@ describe("cortex agents install", () => {
   test("--json writes every shipped skill and the pi extension (explicit CORTEX_PI_EXTENSION_DIR target)", async () => {
     const { env, skillRoot, extRoot, cleanup } = mkAgentsEnv("agents-install");
     try {
-      for (const name of ["cortex-planner", "cortex-implementer", "someone-elses"]) {
+      for (const name of ["cortex-planner", "cortex-implementer", "cortex-research", "someone-elses"]) {
         fs.mkdirSync(path.join(skillRoot, name), { recursive: true });
         fs.writeFileSync(skillFile(skillRoot, name), "an installed skill");
       }
@@ -72,6 +72,7 @@ describe("cortex agents install", () => {
       // Retired skills are deleted; a skill cortex never shipped is left alone.
       expect(fs.existsSync(path.join(skillRoot, "cortex-planner"))).toBe(false);
       expect(fs.existsSync(path.join(skillRoot, "cortex-implementer"))).toBe(false);
+      expect(fs.existsSync(path.join(skillRoot, "cortex-research"))).toBe(false);
       expect(fs.readFileSync(skillFile(skillRoot, "someone-elses"), "utf8")).toBe("an installed skill");
       expect(fs.statSync(extFile(extRoot)).size).toBeGreaterThan(200);
       // The memory status + /memory view, imported by index.ts as ./memory-view.ts.
@@ -176,10 +177,10 @@ describe("cortex agents status", () => {
       expect(r.stdout).toContain(`✓ skill cortex → ${path.join(skillRoot, "cortex")}`);
       expect(r.stdout).toContain(`✓ every agent tool matches cortex ${out.version}`);
 
-      fs.appendFileSync(skillFile(skillRoot, "cortex-research"), "\nhand edit");
+      fs.appendFileSync(skillFile(skillRoot, "cortex"), "\nhand edit");
       r = await runCli({ args: ["agents", "status"], env });
       expect(r.stdout).toContain(
-        `! skill cortex-research differs from this version (1 file) → ${path.join(skillRoot, "cortex-research")}`,
+        `! skill cortex differs from this version (1 file) → ${path.join(skillRoot, "cortex")}`,
       );
       expect(fs.existsSync(env.CORTEX_DB ?? "")).toBe(false);
     } finally {

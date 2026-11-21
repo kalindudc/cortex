@@ -1,7 +1,8 @@
 import { defineCommand } from "citty";
 import { HttpError } from "../api.ts";
-import type { MemorySearchResult } from "../contracts.ts";
-import { withClient } from "../daemon.ts";
+import type { MemorySearchResult, MemoryWriteResult } from "../contracts.ts";
+import { requireMemoryWrites, withClient } from "../daemon.ts";
+import { authorForBbThread } from "../lib/bbAuthor.ts";
 import {
   breadcrumbs,
   checkStaleness,
@@ -13,9 +14,10 @@ import {
   renderHits,
   renderPrimer,
   renderStream,
+  repoInfo,
 } from "../memory.ts";
 import { emitError, printJson } from "../output.ts";
-import type { MemoryStream, MemoryStreamRow, Task } from "../store.ts";
+import { type MemoryStream, type MemoryStreamRow, type Task, validateAuthorTag } from "../store.ts";
 
 /**
  * `cortex memory` — agent memory over cortex tasks. A task is a memory
@@ -27,7 +29,7 @@ import type { MemoryStream, MemoryStreamRow, Task } from "../store.ts";
  *   context         the one call a harness makes per prompt: primer + hits (this lane boosted)
  *   streams         the streams one author posted updates to (e.g. a bb thread's tasks)
  *   lane            the lane of the current checkout (git's common dir)
- *   exclude <id>    keep a task out of what memory offers (the user's call); reading it by id still works
+ *   exclude <id>    keep a task out of what memory offers; reading it by id still works
  *   include <id>    let memory offer it again
  *   excluded        the tasks kept out of memory
  *
@@ -194,7 +196,9 @@ const context = defineCommand({
     const limit = positiveInt(args.limit, "limit", json);
     const exclude = taskIds(args.exclude, json);
     // git runs before withClient takes the lease.
-    const lane = args.lane || memoryLane(process.cwd());
+    const cwd = process.cwd();
+    const checkout = args.lane ? null : repoInfo(cwd);
+    const lane = args.lane || memoryLane(cwd, checkout);
     const author = args.author || undefined;
     const parent = args.parent?.trim() || undefined;
     const query = (args.query ?? "").trim();
@@ -238,7 +242,16 @@ const context = defineCommand({
       // The ids of exactly the streams the primer lists (the pi extension's /memory ledger).
       const rows = args.primer ? primerRows(input) : null;
       const primerIds = rows ? [...rows.touched, ...rows.active, ...rows.elsewhere].map(row => row.id) : [];
-      printJson({ lane, terms: found.terms, recent: found.recent, primer, primerIds, hits: found.hits, hitsText });
+      printJson({
+        lane,
+        checkoutLane: checkout?.lane ?? null,
+        terms: found.terms,
+        recent: found.recent,
+        primer,
+        primerIds,
+        hits: found.hits,
+        hitsText,
+      });
       return;
     }
     console.log([primer, hitsText].filter(Boolean).join("\n\n") || `(no memory in lane ${lane})`);
@@ -297,7 +310,7 @@ const streams = defineCommand({
 
 const EXCLUDED_NOTE = " \u00b7 excluded from memory";
 
-/** `exclude` and `include`: one idempotent write each way; the CLI never asks, so agents run it only for the user. */
+/** `exclude` and `include` commit the change and optional audit update together. */
 function exclusionCommand(excluded: boolean) {
   return defineCommand({
     meta: {
@@ -308,20 +321,38 @@ function exclusionCommand(excluded: boolean) {
     },
     args: {
       id: { type: "positional", required: true, valueHint: "task-id", description: "task id (see `cortex ls`)" },
+      message: {
+        type: "string",
+        alias: "m",
+        valueHint: "reason",
+        description: "post an attributed reason for the change",
+      },
+      as: { type: "string", valueHint: "id", description: "author tag; defaults to bb-<thread id> with --message" },
       json: jsonArg,
     },
     async run({ args }) {
       const json = args.json;
       const id = taskId(args.id, json);
-      let task: Task;
+      let result: MemoryWriteResult;
       try {
-        task = (await withClient(client => client.versioned.setMemory(id, { excluded }))).task;
+        const reason = args.message;
+        const selected = reason === undefined ? args.as : authorForBbThread(args.as, process.env.BB_THREAD_ID);
+        if (reason !== undefined && selected === undefined) throw new Error("--as is required outside a bb thread");
+        const author = selected === undefined ? undefined : validateAuthorTag(selected);
+        result = await withClient((client, target) => {
+          if (author !== undefined || reason !== undefined) requireMemoryWrites(target);
+          return client.versioned.setMemory(id, { excluded, author, reason });
+        });
       } catch (err) {
         if (err instanceof HttpError && err.status === 404) emitError(json, new Error(`task ${id} not found`));
         emitError(json, err);
       }
       if (json) {
-        printJson(task);
+        printJson({ ...result.task, changed: result.changed });
+        return;
+      }
+      if (result.changed === false) {
+        console.log(`\u2713 @${id} already ${excluded ? "excluded from" : "included in"} memory; no change`);
         return;
       }
       console.log(
@@ -356,14 +387,29 @@ const excludedCmd = defineCommand({
       console.log("(no tasks are excluded from memory)");
       return;
     }
-    for (const row of rows) console.log(`[${row.id}] ${row.status} \u00b7 ${row.lane} \u00b7 ${row.title}`);
+    for (const row of rows) {
+      const { excluded_by, excluded_at, reason } = row.memory_exclusion ?? {};
+      const details = [excluded_by, excluded_at == null ? null : isoDay(excluded_at), reason].filter(Boolean);
+      console.log(
+        `[${row.id}] ${row.status} \u00b7 ${row.lane} \u00b7 ${row.title}${details.length ? ` \u00b7 ${details.join(" \u00b7 ")}` : ""}`,
+      );
+    }
   },
 });
 
 const laneCmd = defineCommand({
   meta: { name: "lane", description: "print this checkout's memory lane (git's common dir; worktrees share it)" },
-  run() {
-    console.log(memoryLane(process.cwd()));
+  args: {
+    checkout: { type: "boolean", default: false, description: "only print a lane inside a Git checkout" },
+  },
+  run({ args }) {
+    const cwd = process.cwd();
+    if (!args.checkout) {
+      console.log(memoryLane(cwd));
+      return;
+    }
+    const checkout = repoInfo(cwd);
+    if (checkout) console.log(checkout.lane);
   },
 });
 

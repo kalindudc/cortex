@@ -102,8 +102,8 @@ the next command or daemon takes over and cleans up after it. For you, this mean
   shell, from opening the file.
 - Upgrading from a binary older than the database-scoped daemon? Stop its daemon with the old binary first. This
   cortex no longer looks for one (every current daemon publishes its metadata), so one left running goes unnoticed.
-- A daemon keeps running across an upgrade, so commands warn when it runs another cortex version; `cortex stop`
-  restarts it (the install script does), and the desktop app should be upgraded too, because it starts the daemon.
+- A daemon can outlive an upgrade. Commands warn on a version mismatch; attributed memory writes refuse a daemon
+  without support rather than risk losing an exclusion or audit. Stop the old daemon and upgrade the desktop app too.
 
 ## Under the hood
 

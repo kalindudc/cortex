@@ -16,11 +16,8 @@ its npm dependencies and registers it with bb. Repeating it changes only what di
 shows those differences. `cortex agents reset` removes and replaces the plugin, resetting its settings.
 
 When upgrading, stop an older daemon with `cortex stop`; never point the plugin at another production database.
-
-Settings stay in bb's plugin settings. `cortexPath` selects an executable (empty searches PATH, `~/bin` and
-`~/.local/bin`); reload the plugin after changing it. `memory` controls automatic lookup and saving, `taskChip` the task
-shortcut, `memoryChip` the memory status and `contextWidget` whether context shows beside conversations by default.
-Appearance settings do not grant sharing or erase existing context.
+Settings stay in bb. Reload the plugin after changing its executable path. Appearance settings do not grant
+sharing or erase existing context. Agent documents in memory pauses new inclusions and revisions to included documents.
 
 ## Connect a section to a workstream
 
@@ -105,15 +102,17 @@ Open the Cortex tab from the thread panel, task shortcut or a `::cortex{id="529"
 tasks the thread updated and any manually linked by search or ID. Pin a focus task or follow the most active one.
 A task the thread posted to cannot be unlinked; removing a manual link does not delete the task.
 
-Overview folds the body at headings; Activity shows updates and source threads. Change status with Undo or post
-a note with optional status, using your Cortex author. More copies the body or desktop command and controls
-task-wide memory exclusion. Plan progress and source checks remain; Files unchanged is not factual verification.
+Overview folds the body; Activity shows updates and source threads. Cards in agent replies show who saved, revised
+or curated a task and when. Open a task, change status, or exclude or include it without supplying a reason.
+The task tab still shows progress and source checks; Files unchanged is not factual verification.
 
 ## What agents receive
 
-Every thread keeps Cortex's ordinary memory, including in connected sections. Under Automatic, threads you start look up and save;
-children look up without a general primer or automatic save turn. Look up only omits those writes; Off omits
-automatic lookup and recall. Existing explicit `cortex_update` access remains available in all modes.
+Ordinary memory works in connected sections too. Under Automatic, threads you start and child leads (threads that
+started other threads) get a primer and save turns. Other delegates can save and curate manually. Explicit Look up
+only omits document tools and save turns; Off also omits recall. Progress updates remain available in all modes.
+Document tools save verified, sourced material, revise it by exact text and curate with a reason. A new document
+over the lane budget is still saved excluded with the reason. Excluded tasks can still be opened by id.
 
 Briefs carry human-approved claims, IDs, revisions and source refs; only nondefault scope, expiry and provenance add
 fields. Explicit ID recall keeps full metadata and captured evidence within its output budget.
@@ -137,8 +136,9 @@ It reads canonical tasks and workstream knowledge through the Cortex CLI, never 
 - `workstream-agents.ts` prepares scope at dispatch, caches configuration and registers read/propose tools. Dispatch
   checks scope revisions, not cache identity; a run's late idle notice ends only older preparation. A brief that
   cannot be delivered never blocks a message: the thread runs without it and its instructions say why.
-- `cli.ts` runs argument arrays with timeouts/cancellation, validates JSON and throws on tool failure. `state.ts`
-  retains task links, source checks and the project primer cache; `watch.ts` invalidates reads.
+- `cli.ts` validates CLI output; `state.ts` retains task links, source checks and project primers;
+  `watch.ts` invalidates reads. `memory-writes.ts` reserves hourly thread slots; `memory-write-store.ts` persists
+  rolling lane slots and exact replay receipts in plugin storage, not in the Cortex database.
 - `draft-service.ts` owns durable helper intent and recovery; `draft-validation.ts` verifies sources and suggestions.
 - `turns.ts` retains cued/first-user lookup, the narrower starting-thread path for children, and at most one save turn
   per eligible request. Workstream routing does not rewrite generic Cortex memory ranking.

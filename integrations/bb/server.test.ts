@@ -35,6 +35,8 @@ const GONE = "thr_ffffffff";
 const CHILD = "thr_qqqqqqqq";
 /** A workflow agent THREAD owns: no parent thread, only a lifecycle owner. */
 const WORKFLOW = "thr_wwwwwwww";
+const GRANDCHILD = "thr_gggggggg";
+const WRITE_TOOLS = ["cortex_curate", "cortex_note", "cortex_recall", "cortex_update"];
 /** The starter fields bb reports for a test thread. */
 const starter = (threadId: string) => ({
   parentThreadId: threadId === CHILD ? THREAD : null,
@@ -42,7 +44,7 @@ const starter = (threadId: string) => ({
 });
 const PROJECT = "proj_1";
 /** The skills the plugin's install directory holds in these tests. */
-const SKILLS = ["cortex", "cortex-research"];
+const SKILLS = ["cortex"];
 const USER = "kalindu-test";
 
 function task(id: number, extra: Partial<FakeTask["task"]> = {}, rest: Partial<FakeTask> = {}): FakeTask {
@@ -94,7 +96,10 @@ afterEach(async () => {
 });
 
 async function setup(
-  options: { fixture?: FakeFixture; running?: string[]; cortexPath?: string; skillsDir?: boolean; problemSection?: boolean } = {},
+  options: {
+    fixture?: FakeFixture; running?: string[]; cortexPath?: string; skillsDir?: boolean; problemSection?: boolean;
+    knownThreads?: ReturnType<typeof makeThreadResponse>[];
+  } = {},
 ) {
   const cortex: FakeCortex = createFakeCortex(options.fixture ?? baseFixture());
   disposers.push(cortex.cleanup);
@@ -119,7 +124,8 @@ async function setup(
   const sdk = {
     threadSections: { list: async () => options.problemSection ? [{ id: "sec_one", name: "Payments", createdAt: 0, updatedAt: 0 }] : [] },
     threads: {
-      list: async () => [],
+      list: async ({ archived }: { archived?: boolean } = {}) =>
+        (options.knownThreads ?? []).filter(thread => Boolean(thread.archivedAt) === Boolean(archived)),
       get: async ({ threadId }: { threadId: string }) => {
         if (threadId === GONE || broken.has(threadId)) throw new Error("HTTP 404: thread not found");
         return makeThreadResponse({
@@ -194,6 +200,7 @@ async function setup(
     settings: { cortexPath: options.cortexPath ?? cortex.binary },
     sdk: sdk as never,
     agentSkillIds: SKILLS,
+    experimental_declaredIconNames: ["note", "curate", "update", "recall"],
   });
   await plugin(bb);
   disposers.push(() => harness.lifecycle.dispose());
@@ -332,12 +339,12 @@ test("imports only the public SDK, zod, Node, the vendored UI and test tooling; 
 });
 
 describe("agent configuration", () => {
-  test("pi and codex get both tools and the usage block, and no skills", async () => {
+  test("pi and codex get the memory tools and the usage block, and no skills", async () => {
     const s = await setup();
     await vi.waitFor(() => expect(s.listed()).toBe(1));
     for (const provider of ["pi", "codex"]) {
       const config = await s.resolve(provider);
-      expect(names(config.tools)).toEqual(["cortex_recall", "cortex_update"]);
+      expect(names(config.tools)).toEqual(WRITE_TOOLS);
       expect(config.skills).toEqual([]);
       // A cold cache contributes only the usage block and never runs the CLI.
       expect(config.instructions).toBe(USAGE);
@@ -349,7 +356,7 @@ describe("agent configuration", () => {
     const s = await setup();
     await vi.waitFor(async () => expect((await s.resolve("claude-code")).skills).toEqual(SKILLS));
     const config = await s.resolve("claude-code");
-    expect(names(config.tools)).toEqual(["cortex_recall", "cortex_update"]);
+    expect(names(config.tools)).toEqual(WRITE_TOOLS);
     expect(config.instructions).toBe(USAGE);
   });
 
@@ -359,18 +366,18 @@ describe("agent configuration", () => {
     await new Promise(resolve => setTimeout(resolve, 10));
     const config = await s.resolve("claude-code");
     expect(config.skills).toEqual([]);
-    expect(names(config.tools)).toEqual(["cortex_recall", "cortex_update"]);
+    expect(names(config.tools)).toEqual(WRITE_TOOLS);
   });
 
   test("pluginSkillNames lists directories holding a SKILL.md; skillsFor gives them only to claude-code", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-bb-skills-"));
     disposers.push(() => fs.rmSync(root, { recursive: true, force: true }));
     expect(pluginSkillNames(root)).toEqual([]);
-    writeSkills(root, ["cortex-research", "cortex"]);
+    writeSkills(root, ["example", ...SKILLS]);
     fs.mkdirSync(path.join(root, "skills", "notes"));
     fs.mkdirSync(path.join(root, "skills", "empty", "SKILL.md"), { recursive: true });
     fs.writeFileSync(path.join(root, "skills", "README.md"), "");
-    expect(pluginSkillNames(root)).toEqual(["cortex", "cortex-research"]);
+    expect(pluginSkillNames(root)).toEqual(["cortex", "example"]);
     expect([...PLUGIN_SKILL_PROVIDERS]).toEqual(["claude-code"]);
     expect(skillsFor("claude-code", ["cortex"])).toEqual(["cortex"]);
     for (const provider of ["pi", "codex", "cursor", "opencode"]) expect(skillsFor(provider, ["cortex"])).toEqual([]);
@@ -423,6 +430,91 @@ describe("agent configuration", () => {
   });
 });
 
+describe("agent document tools", () => {
+  test("note creates via stdin in the verified lane, reports similar tasks and suppresses the save turn", async () => {
+    const fixture = noStreams();
+    fixture.memoryLane = "local-lane";
+    fixture.tasks!["4"].task.title = "Other helper behavior";
+    const s = await setup({ fixture });
+    await s.request(THREAD, "rename the helpers");
+    const body = "Evidence: helper output was checked against release 1.2.3 in the compiler fixture. This paragraph is stored.";
+    const result = await s.harness.behavior.callAgentTool("cortex_note", { title: "Verified helper behavior", body, kind: "note" }, { threadId: THREAD });
+    expect(result).toContain("@5");
+    expect(result).toMatch(/Write on its own line: ::cortex\{id="5"\}$/);
+    expect(result).toContain("local-lane");
+    expect(result).toContain("@4 Other helper behavior");
+    expect(s.cortex.calls()).toContainEqual({ argv: ["memory", "lane", "--checkout"], cwd: s.checkout });
+    const add = s.argvs().find(argv => argv[0] === "add");
+    expect(add).toContain("--body-file=-");
+    expect(add).not.toContain(body);
+    expect(s.cortex.fixture().tasks?.["5"]).toMatchObject({
+      task: { body, lane: "local-lane", tags: ["note"] },
+      updates: [{ author: `bb-${THREAD}`, summary: "created" }],
+    });
+    await s.finish(THREAD, THREE_FILES);
+    expect(s.sent).toHaveLength(0);
+    expect(await memoryOf(s, THREAD)).toMatchObject({ focus: [5] });
+  });
+
+  test("a plain-folder primer does not supply a write lane", async () => {
+    const fixture = noStreams();
+    fixture.memoryLane = null;
+    const s = await setup({ fixture });
+    await warm(s);
+    await expect(s.harness.behavior.callAgentTool("cortex_note", {
+      title: "Verified helper behavior", body: "Observed in an isolated fixture. ".repeat(3), kind: "note",
+    }, { threadId: THREAD })).rejects.toThrow("no lane for this thread's project; ask the lead");
+    expect(s.argvs().some(argv => argv[0] === "add")).toBe(false);
+  });
+
+  test("revision and curation receipts reach the existing task RPC", async () => {
+    const fixture = baseFixture();
+    fixture.tasks!["1"].task.memory_excluded = false;
+    const s = await setup({ fixture });
+    const revised = await s.harness.behavior.callAgentTool("cortex_note", {
+      task_id: 1, search: "body 1", replace: "verified body", summary: "Checked recent evidence",
+    }, { threadId: THREAD });
+    expect(revised).toMatch(/Write on its own line: ::cortex\{id="1"\}$/);
+    const curated = await s.harness.behavior.callAgentTool("cortex_curate", {
+      task_id: 1, memory: "exclude", reason: "This was a temporary document",
+    }, { threadId: CHILD });
+    expect(curated).toMatch(/Write on its own line: ::cortex\{id="1"\}$/);
+    expect(await s.harness.behavior.callRpc("task", { threadId: THREAD, taskId: 1 })).toMatchObject({
+      task: {
+        body: "verified body", memoryExcluded: true,
+        memoryExclusion: { excluded_by: `bb-${CHILD}`, reason: "This was a temporary document", excluded_at: expect.any(Number) },
+      },
+      updates: [
+        { author: `bb-${THREAD}`, summary: "Checked recent evidence", revision: true },
+        { author: `bb-${CHILD}`, summary: "Excluded from memory: This was a temporary document" },
+      ],
+    });
+  });
+
+  test("an older CLI retains recall and updates without exposing an unsafe write", async () => {
+    const fixture = { ...baseFixture(), oldMemoryWrites: true };
+    const s = await setup({ fixture });
+    expect(names((await s.resolve("codex")).tools)).toEqual(["cortex_recall", "cortex_update"]);
+    await expect(s.harness.behavior.callAgentTool("cortex_note", {
+      title: "Verified helper behavior", body: "Observed in an isolated fixture. ".repeat(3), kind: "note",
+    }, { threadId: THREAD })).rejects.toThrow(/Update Cortex/);
+    expect(s.argvs().some(argv => argv[0] === "add")).toBe(false);
+  });
+
+  test("runtime refuses both tools when explicit read or off, and leaves a draft worker tool-free", async () => {
+    const s = await setup();
+    const note = { title: "Verified helper behavior", body: "Observed in an isolated fixture. ".repeat(3), kind: "note" };
+    for (const mode of ["read", "off"]) {
+      s.metadata.set(THREAD, { memoryMode: mode });
+      await expect(s.harness.behavior.callAgentTool("cortex_note", note, { threadId: THREAD })).rejects.toThrow(/mode/);
+      await expect(s.harness.behavior.callAgentTool("cortex_curate", { task_id: 1, memory: "exclude", reason: "A duplicate document" }, { threadId: THREAD })).rejects.toThrow(/mode/);
+    }
+    s.metadata.set(THREAD, { cortexDraftWorker: { forged: true } });
+    await expect(s.harness.behavior.callAgentTool("cortex_note", note, { threadId: THREAD })).rejects.toThrow(/draft/i);
+    expect(s.argvs().some(argv => argv[0] === "add" || argv[1] === "exclude")).toBe(false);
+  });
+});
+
 describe("cortex_update", () => {
   test("posts as bb-<thread>, in attached flag form, and signals the thread and task", async () => {
     const s = await setup();
@@ -431,7 +523,7 @@ describe("cortex_update", () => {
       { task_id: 4, message: "-did things", status: "review", body: "- a\n- b" },
       { threadId: THREAD },
     );
-    expect(out).toBe("\u2713 update [900] posted on task 4\n\u2713 status \u2192 review");
+    expect(out).toBe("\u2713 update [900] posted on task 4\n\u2713 status \u2192 review\nWrite on its own line: ::cortex{id=\"4\"}");
     expect(s.argvs()).toContainEqual([
       "update",
       "4",
@@ -622,11 +714,12 @@ async function setupProblemRpc() {
 
 test("concurrent problems RPCs spawn the fake executable only once per input", async () => {
   const s = await setupProblemRpc();
+  const before = s.harness.inspection.sdk.callsTo("threads.list").length;
   const results = await Promise.all(Array.from({ length: 5 }, s.problems));
   expect(results).toEqual(Array(5).fill({ problems: [] }));
   expect(s.problemSpawns().map(([, verb]) => verb)).toEqual(["read", "knowledge"]);
   expect(s.harness.inspection.sdk.callsTo("threadSections.list")).toHaveLength(2);
-  expect(s.harness.inspection.sdk.callsTo("threads.list")).toHaveLength(1);
+  expect(s.harness.inspection.sdk.callsTo("threads.list").slice(before)).toHaveLength(1);
 });
 
 test.each(["workstream.changed", "resync"])("a %s watch frame invalidates a warm problems read", async kind => {
@@ -1084,7 +1177,10 @@ describe("memory", () => {
   test("retains four settings and adds the context default; a change applies to the next configure and signals every thread", async () => {
     const s = await setup();
     const descriptors = s.harness.inspection.registrations.settingsDescriptors;
-    expect(Object.keys(descriptors)).toEqual(["cortexPath", "memory", "contextWidget", "memoryChip", "taskChip"]);
+    expect(Object.keys(descriptors)).toEqual(["cortexPath", "memory", "agentDocuments", "contextWidget", "memoryChip", "taskChip"]);
+    expect(descriptors.agentDocuments).toMatchObject({
+      type: "select", label: "Agent documents in memory", options: ["budget", "excluded"], default: "budget",
+    });
     expect(descriptors.contextWidget).toMatchObject({ type: "select", default: "shown", options: ["shown", "hidden"] });
     expect(descriptors.memory).toMatchObject({
       type: "select",
@@ -1097,7 +1193,7 @@ describe("memory", () => {
     await warm(s);
     await s.harness.behavior.setSettings({ memory: "read" });
     expect(memorySignals(s)).toContainEqual({ channel: "memory", payload: null });
-    expect((await s.resolve("codex")).instructions).toBe(USAGE);
+    expect((await s.resolve("codex")).instructions).toBe(usageFor(true));
   });
 
   test("configure: the summary only when saving, no recall when off, child threads look up only, the thread's choice wins", async () => {
@@ -1105,14 +1201,18 @@ describe("memory", () => {
     await warm(s);
     const write = await s.resolve("codex");
     expect(write.instructions).toContain("<cortex_memory>");
-    expect(names(write.tools)).toEqual(["cortex_recall", "cortex_update"]);
-    const child = await s.resolve("codex", { thread: { parentThreadId: THREAD } });
+    expect(names(write.tools)).toEqual(WRITE_TOOLS);
+    const child = await s.resolve("codex", { thread: { id: CHILD, parentThreadId: THREAD } });
     expect(child.instructions).toBe(USAGE);
-    expect(names(child.tools)).toEqual(["cortex_recall", "cortex_update"]);
+    expect(child.instructions).not.toContain("<cortex_memory>");
+    expect(names(child.tools)).toEqual(WRITE_TOOLS);
+    const explicit = await s.resolve("codex", { thread: { id: CHILD, parentThreadId: THREAD }, pluginMetadata: { memoryMode: "read" } });
+    expect(names(explicit.tools)).toEqual(["cortex_recall", "cortex_update"]);
 
     await s.harness.behavior.setSettings({ memory: "read" });
     const read = await s.resolve("codex");
-    expect(read.instructions).toBe(USAGE);
+    expect(read.instructions).toBe(usageFor(true));
+    expect(read.instructions).not.toContain("cortex_note");
     expect(names(read.tools)).toEqual(["cortex_recall", "cortex_update"]);
 
     await s.harness.behavior.setSettings({ memory: "off" });
@@ -1130,8 +1230,29 @@ describe("memory", () => {
       "cortex_update",
     ]);
     const pi = await s.resolve("pi", { pluginMetadata: { memoryMode: "write" } });
-    expect(names(pi.tools)).toEqual(["cortex_recall", "cortex_update"]);
+    expect(names(pi.tools)).toEqual(WRITE_TOOLS);
     expect(pi.instructions).toContain("<cortex_memory>");
+  });
+
+  test("child leads by parent or lifecycle owner get save turns at their next configure", async () => {
+    const workflow = makeThreadResponse({ id: WORKFLOW, projectId: PROJECT, lifecycleOwnerThreadId: THREAD });
+    const s = await setup({ fixture: noStreams(), knownThreads: [workflow] });
+    await warm(s);
+    expect((await s.resolve("codex", { thread: { id: WORKFLOW } })).instructions).not.toContain("<cortex_memory>");
+    expect(await memory(s, WORKFLOW)).toMatchObject({ child: true, mode: "read" });
+    await s.harness.behavior.emitThreadEvent("thread.created", {
+      thread: makeThreadResponse({ id: GRANDCHILD, projectId: PROJECT, lifecycleOwnerThreadId: WORKFLOW }),
+    });
+    await s.request(WORKFLOW, "rename the helpers");
+    await s.finish(WORKFLOW, THREE_FILES);
+    expect(s.sent).toHaveLength(0);
+    const lead = await s.resolve("codex", { thread: { id: WORKFLOW } });
+    expect(lead.instructions).toContain("<cortex_memory>");
+    expect(names(lead.tools)).toEqual(WRITE_TOOLS);
+    expect(await memory(s, WORKFLOW)).toMatchObject({ child: true, mode: "write", view: { role: "writer" } });
+    await s.request(WORKFLOW, "rename the helpers");
+    await s.finish(WORKFLOW, THREE_FILES);
+    expect(s.sent).toHaveLength(1);
   });
 
   test("another provider's view: the summary, recalls, a stale or failed recall, and thread.active clears stale", async () => {
@@ -1264,7 +1385,8 @@ describe("save turn", () => {
     ]);
     const prompt = String(s.sent[0]?.input[0]?.text);
     expect(prompt).toContain("- src/a.ts\n- src/b.ts\n- src/c.ts\n");
-    expect(prompt).toContain(`--as bb-${THREAD}`);
+    expect(prompt).toContain("- CREATE: call cortex_note");
+    expect(prompt).not.toContain("cortex add");
     expect(prompt).toContain("Candidate streams (one memory search):\n(none found)");
     // No focus in this process, so cortex is asked which streams the thread wrote to before (none here).
     expect(s.argvs()).toContainEqual(["memory", "streams", `--author=bb-${THREAD}`, "--limit=3", "--json"]);
@@ -1389,6 +1511,7 @@ describe("save turn", () => {
 
   test("a workflow agent's attach candidates link its owner's streams with --parent, never keyword hits", async () => {
     const s = await setup({ fixture: noStreams() });
+    s.metadata.set(WORKFLOW, { memoryMode: "write" });
     await s.request(WORKFLOW, "rename the helpers");
     await s.finish(WORKFLOW, THREE_FILES);
     expect(s.sent).toHaveLength(1);
@@ -1612,7 +1735,7 @@ describe("matching tasks", () => {
     for (const provider of ["codex", "claude-code", "pi"]) expect((await s.resolve(provider)).instructions).toBe(USAGE);
     expect(USAGE).toContain("hidden cortex memory message");
     const acp = (await s.resolve("acp-opencode")).instructions;
-    expect(acp).toBe(usageFor(true, false));
+    expect(acp).toBe(usageFor(true, false, true));
     expect(acp).not.toContain("hidden cortex memory message");
     expect(acp).toContain("No matching tasks arrive on their own");
     expect(usageFor(false, true)).not.toContain("matching tasks");
