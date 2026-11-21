@@ -301,7 +301,7 @@ const action = (id: string) => app.threadActions.find(entry => entry.id === id)!
 const calls = (slot: { inspection: { rpcCalls: Array<{ method: string; input: unknown }> } }, method: string) =>
   slot.inspection.rpcCalls.filter(call => call.method === method).map(call => call.input);
 
-function renderSegment(backend: Backend, expanded = true) {
+function renderSegment(backend: Backend, expanded = true, extra: Record<string, unknown> = {}) {
   const props = { threadId: THREAD, projectId: "proj_1", environment: null, segments: [], isExpanded: expanded, onToggle: vi.fn() };
   const reg = segment();
   const Both = () => {
@@ -315,7 +315,7 @@ function renderSegment(backend: Backend, expanded = true) {
       </div>
     );
   };
-  return { slot: renderSlot({ component: Both }, {}, options(backend)), props };
+  return { slot: renderSlot({ component: Both }, {}, options(backend, extra)), props };
 }
 
 function renderMemoryTab(backend: Backend, extra: Record<string, unknown> = {}) {
@@ -643,60 +643,146 @@ describe("crowded composer allocation", () => {
 });
 
 describe("summary fits without clipping text", () => {
-  test("shows the widest summary that fits, then the icon alone, and widens again", async () => {
-    const observers = new Map<Element, ResizeObserverCallback>();
+  const observers = new Map<Element, ResizeObserverCallback>();
+  let constructed: number;
+  let allocated: number;
+  let delivering: boolean;
+  let requireObserver: boolean;
+  const reads = { clientWidth: [] as Array<string | null>, scrollWidth: [] as Array<string | null> };
+  const fit = (button: Element) => button.getAttribute("data-cortex-fit");
+  // jsdom has no layout: model the button's content width from what it renders, and its box from its share.
+  const contentWidth = (el: Element) => {
+    const visible = el.cloneNode(true) as Element;
+    for (const hidden of Array.from(visible.querySelectorAll(".sr-only"))) hidden.remove();
+    return 12 + 7 * (visible.textContent ?? "").length + 20 * visible.querySelectorAll("[data-icon]").length;
+  };
+
+  beforeEach(() => {
+    constructed = 0;
+    allocated = 400;
+    delivering = false;
+    requireObserver = true;
     vi.stubGlobal("ResizeObserver", class {
-      constructor(private callback: ResizeObserverCallback) {}
-      observe(target: Element) { observers.set(target, this.callback); }
-      disconnect() { observers.clear(); }
+      private target?: Element;
+      constructor(private callback: ResizeObserverCallback) { constructed++; }
+      observe(target: Element) {
+        this.target = target;
+        observers.set(target, this.callback);
+      }
+      disconnect() {
+        if (this.target && observers.get(this.target) === this.callback) observers.delete(this.target);
+      }
     });
-    let allocated = 400;
-    // jsdom has no layout: model the button's content width from what it renders, and its box from its share.
-    const contentWidth = (el: Element) => {
-      const visible = el.cloneNode(true) as Element;
-      for (const hidden of Array.from(visible.querySelectorAll(".sr-only"))) hidden.remove();
-      return 12 + 7 * (visible.textContent ?? "").length + 20 * visible.querySelectorAll("[data-icon]").length;
-    };
-    const client = Object.getOwnPropertyDescriptor(Element.prototype, "clientWidth")!;
-    const scroll = Object.getOwnPropertyDescriptor(Element.prototype, "scrollWidth")!;
-    Object.defineProperty(HTMLElement.prototype, "clientWidth", { configurable: true, get(this: HTMLElement) { return this.hasAttribute("data-cortex-summary") ? allocated : client.get!.call(this); } });
-    Object.defineProperty(HTMLElement.prototype, "scrollWidth", { configurable: true, get(this: HTMLElement) { return this.hasAttribute("data-cortex-summary") ? Math.max(allocated, contentWidth(this)) : scroll.get!.call(this); } });
-    try {
-      const { slot } = renderSegment(makeBackend(), false);
-      const button = await slot.findByRole("button", { name: /Cortex context.*Show details/ });
-      const resize = async (width: number) => {
-        allocated = width;
-        await act(async () => observers.get(button)?.([{ target: button, contentRect: { width } } as unknown as ResizeObserverEntry], {} as ResizeObserver));
-      };
-      const noClipping = () => expect(button.querySelector(".truncate")).toBeNull();
-
-      await resize(400);
-      expect(button.getAttribute("data-cortex-fit")).toBe("full");
-      expect(button.textContent).toContain("Envoy");
-      noClipping();
-      const full = contentWidth(button);
-
-      await resize(full - 1);
-      expect(button.getAttribute("data-cortex-fit")).toBe("short");
-      expect(button.textContent).toBe("Cortex");
-      noClipping();
-      const short = contentWidth(button);
-
-      await resize(short - 1);
-      expect(button.getAttribute("data-cortex-fit")).toBe("icon");
-      expect(button.textContent).toBe("");
-      expect(button.querySelectorAll("[data-icon]")).toHaveLength(1);
-      expect(button.style.minWidth).toBe("28px");
-
-      await resize(full);
-      expect(button.getAttribute("data-cortex-fit")).toBe("full");
-      expect(button.textContent).toContain("Envoy");
-      expect(button.getAttribute("title")).toBe(button.getAttribute("aria-label"));
-    } finally {
-      delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth;
-      delete (HTMLElement.prototype as { scrollWidth?: number }).scrollWidth;
-      vi.unstubAllGlobals();
+    for (const property of ["clientWidth", "scrollWidth"] as const) {
+      reads[property].length = 0;
+      const original = Object.getOwnPropertyDescriptor(Element.prototype, property)?.get;
+      if (!original) throw new Error(`Missing ${property} getter`);
+      vi.spyOn(Element.prototype, property, "get").mockImplementation(function (this: Element) {
+        if (!this.hasAttribute("data-cortex-summary")) return original.call(this);
+        if (requireObserver && !delivering) throw new Error(`${property} read outside ResizeObserver`);
+        reads[property].push(fit(this));
+        return property === "clientWidth" ? allocated : Math.max(allocated, contentWidth(this));
+      });
     }
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  function resize(button: Element, width = allocated) {
+    allocated = width;
+    let settled: string | null = null;
+    act(() => {
+      const callback = observers.get(button);
+      if (!callback) throw new Error("Cortex summary has no observer");
+      delivering = true;
+      try {
+        callback([{ target: button, contentRect: { width } } as unknown as ResizeObserverEntry], {} as ResizeObserver);
+        settled = fit(button);
+      } finally {
+        delivering = false;
+      }
+    });
+    return settled;
+  }
+
+  test("one notification fits the widest summary, steps down to the icon, and widens again", async () => {
+    const { slot } = renderSegment(makeBackend(), false);
+    const button = await slot.findByRole("button", { name: /Cortex context.*Show details/ });
+
+    expect(resize(button)).toBe("full");
+    expect(button.textContent).toContain("Envoy");
+    expect(button.querySelector(".truncate")).toBeNull();
+    const full = contentWidth(button);
+
+    expect(resize(button, full - 1)).toBe("short");
+    expect(button.textContent).toBe("Cortex");
+    expect(button.querySelector(".truncate")).toBeNull();
+    const short = contentWidth(button);
+
+    reads.scrollWidth.length = 0;
+    expect(resize(button, short - 1)).toBe("icon");
+    expect(reads.scrollWidth).toEqual(["full", "short"]);
+    expect(button.textContent).toBe("");
+    expect(button.querySelectorAll("[data-icon]")).toHaveLength(1);
+    expect(button.style.minWidth).toBe("28px");
+
+    expect(resize(button, full)).toBe("full");
+    expect(button.textContent).toContain("Envoy");
+    expect(button.getAttribute("title")).toBe(button.getAttribute("aria-label"));
+  });
+
+  test("refreshing unchanged content neither reads layout nor recreates the observer", async () => {
+    requireObserver = false;
+    const { slot } = renderSegment(makeBackend(), false);
+    const button = await slot.findByRole("button", { name: /Cortex context.*Show details/ });
+    resize(button);
+    const label = button.getAttribute("aria-label");
+    const initialObservers = constructed;
+    reads.clientWidth.length = 0;
+    reads.scrollWidth.length = 0;
+
+    for (let i = 0; i < 3; i++) {
+      await slot.behavior.emitRealtime("workstreams", { threadId: THREAD });
+      await waitFor(() => expect(calls(slot, "threadContext")).toHaveLength(i + 2));
+    }
+
+    expect(button.getAttribute("aria-label")).toBe(label);
+    expect(constructed).toBe(initialObservers);
+    expect(reads).toEqual({ clientWidth: [], scrollWidth: [] });
+  });
+
+  test("new content gets a new observer and retries full at the same width", async () => {
+    const backend = makeBackend();
+    let name = workstream.name;
+    const { slot } = renderSegment(backend, false, {
+      rpc: handlers(backend, { threadContext: ({ threadId }) => ({ ...contextFor(backend, threadId), workstream: { ...workstream, name } }) }),
+      settings: { memoryChip: false, taskChip: false },
+    });
+    const button = await slot.findByRole("button", { name: /Cortex context: Envoy/ });
+    expect(resize(button, contentWidth(button) - 1)).toBe("short");
+
+    for (const [nextName, expected] of [["Envoy Gateway", "short"], ["X", "full"]] as const) {
+      const previous = constructed;
+      name = nextName;
+      await slot.behavior.emitRealtime("workstreams", { threadId: THREAD });
+      expect(await slot.findByRole("button", { name: new RegExp(`Cortex context: ${name},`) })).toBe(button);
+      expect(constructed).toBe(previous + 1);
+      reads.scrollWidth.length = 0;
+      expect(resize(button)).toBe(expected);
+      expect(reads.scrollWidth[0]).toBe("full");
+    }
+  });
+
+  test("without ResizeObserver it stays full without reading layout", async () => {
+    vi.stubGlobal("ResizeObserver", undefined);
+    allocated = 28;
+    const { slot } = renderSegment(makeBackend(), false);
+    const button = await slot.findByRole("button", { name: /Cortex context.*Show details/ });
+    expect(fit(button)).toBe("full");
+    expect(reads).toEqual({ clientWidth: [], scrollWidth: [] });
   });
 });
 

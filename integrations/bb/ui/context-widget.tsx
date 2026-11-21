@@ -1,5 +1,6 @@
 import { ProblemLink } from "./problem-card";
 import { type RefObject, useLayoutEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import {
   type ExperimentalThreadContextCardProps,
   type ExperimentalThreadContextSegmentInput,
@@ -130,27 +131,38 @@ const NARROWER: Record<SummaryFit, SummaryFit> = { full: "short", short: "icon",
  * measures. A wider row or new content starts again from the full line.
  */
 export function useFittedTier(root: RefObject<HTMLElement | null>, content: string): SummaryFit {
-  const [width, setWidth] = useState<number | null>(null);
+  const [measured, setMeasured] = useState<{ width: number; key: string; fit: SummaryFit } | null>(null);
+  const width = measured?.width ?? null;
   const key = `${width ?? ""}\u0000${content}`;
-  const [measured, setMeasured] = useState<{ key: string; fit: SummaryFit } | null>(null);
   const fit: SummaryFit =
     measured?.key === key ? measured.fit : width !== null && width < SHORT_MIN_WIDTH ? "icon" : "full";
+  const rendered = useRef({ key, fit });
+  useLayoutEffect(() => {
+    rendered.current = { key, fit };
+  }, [key, fit]);
   useLayoutEffect(() => {
     const target = root.current;
     if (!target || typeof ResizeObserver === "undefined") return;
+    let lastWidth: number | null = null;
     const observer = new ResizeObserver(entries => {
       const entry = entries.find(entry => entry.target === target);
-      if (entry) setWidth(entry.borderBoxSize?.[0]?.inlineSize ?? entry.contentRect.width);
+      if (!entry) return;
+      const width = entry.borderBoxSize?.[0]?.inlineSize ?? entry.contentRect.width;
+      const observedKey = `${width}\u0000${content}`;
+      if (width !== lastWidth) {
+        lastWidth = width;
+        flushSync(() => setMeasured({ width, key: observedKey, fit: width < SHORT_MIN_WIDTH ? "icon" : "full" }));
+      }
+      // The observer runs after layout, so unrelated commits never have to lay out the panel to fit this button.
+      for (let steps = 0; steps < 2; steps++) {
+        const { key, fit } = rendered.current;
+        if (root.current !== target || key !== observedKey || fit === "icon" || target.scrollWidth <= target.clientWidth) break;
+        flushSync(() => setMeasured({ width, key, fit: NARROWER[fit] }));
+      }
     });
     observer.observe(target);
     return () => observer.disconnect();
-  }, [root]);
-  useLayoutEffect(() => {
-    const target = root.current;
-    if (!target) return;
-    const next = fit !== "icon" && target.scrollWidth > target.clientWidth ? NARROWER[fit] : fit;
-    if (measured?.key !== key || measured.fit !== next) setMeasured({ key, fit: next });
-  });
+  }, [root, content]);
   return fit;
 }
 
