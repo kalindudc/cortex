@@ -23,7 +23,7 @@ async function setup() {
   vi.spyOn(service.cli, "read").mockResolvedValue({ workstream: ws, entries: [], notices: [], applicability, topic: null });
   vi.spyOn(service.cli, "show").mockResolvedValue({ workstream: ws, entries: [], total: 0, limit: 1, offset: 0 });
   service.store.setSection("sec_one", 0, { workstreamId: ws.id, topic: null, applicability, requiredKnowledgeIds: [], budgetTokens: 3000 });
-  const read = createProblems(createSections(host.bb, service), service, { jobs: () => ({ jobs: [], total: 0 }) } as unknown as DraftService);
+  const read = createProblems(host.bb, createSections(host.bb, service), service, { jobs: () => ({ jobs: [], total: 0 }) } as unknown as DraftService);
   host.bb.rpc.register(problemRpcMethods, problemHandlers(read, service));
   return { host, service, read, set: (value: Knowledge) => { current = value; } };
 }
@@ -37,6 +37,7 @@ test("Ignore here removes the problem, revision changes re-raise it, and Undo on
     expect((await read()).problems).toEqual([]);
     expect(service.store.problemDismissed("sec_other", entry.id, entry.revision)).toBe(false);
     set({ ...entry, revision: 3 });
+    service.invalidateScope({ workstreamId: ws.id });
     expect((await read()).problems[0]?.entries?.[0]?.revision).toBe(3);
     set(entry);
     await host.harness.behavior.callRpc("problemEntryUndo", input);

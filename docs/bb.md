@@ -56,7 +56,8 @@ approval; unknown scope still blocks acceptance. A human can explicitly adopt a 
 authorship and reachability are reported metadata, not authentication or proof that a claim is true now. Needs you lists
 lasting problems as review rows before suggestions, one per unreached entry, with reasons and fixes also in All
 knowledge and entry detail: archive duplicates, move unshared topics to shared basics, or Ignore here, with Undo. Set where it
-applies replaces an approved entry's unknown scope with a corrected copy.
+applies replaces an approved entry's unknown scope with a corrected copy. The list and badge refresh on shared changes
+and reconnect. Requests reuse healthy results for up to 30 seconds; Ignore here always checks the latest entry revision.
 
 Agents' bounded suggestion allowance per active run counts no-save results and failures, not your reviews or updates.
 Keep one accepted source rather than saving another summary for each thread. Attach repeated evidence to existing knowledge.
@@ -74,10 +75,9 @@ Neither erases exports, backups or already-sent text. Read the Forget confirmati
 
 ## Inspect or change a thread's context
 
-The Memory tab shows the workstream, topic and targets, what is selected, what stays out and why, and the exact text
-prepared for the thread. Budgets have no upper limit: bb's starting instructions hold whole entries, required first, and
-an index of the rest; Pi, Claude Code and Codex get the full brief with the first message. A brief problem never blocks
-sending.
+The Memory tab shows the workstream, topic and targets, what is selected, what stays out and why, and the exact text for
+the thread. Budgets have no upper limit: bb's starting instructions hold whole entries, required first, and an index of
+the rest; Pi, Claude Code and Codex get the full brief with the first message. A brief problem never blocks sending.
 
 On bb's New thread screen, a Cortex chip on the left opens into a row previewing the picked section's brief and ordinary
 memory; it remembers whether you left it open, and a refused send opens it. A remembered pick is marked, not verified

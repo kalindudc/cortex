@@ -44,7 +44,7 @@ export function createSections(bb: BbPluginApi, service: Workstreams) {
     }
   }
   function publish(sectionId: string, workstreamId?: string, requestId?: string) {
-    bb.realtime.publish("sections", {
+    service.publish("sections", {
       sectionId,
       ...(workstreamId ? { workstreamId } : {}),
       ...(requestId ? { requestId } : {}),
@@ -259,7 +259,9 @@ export function createSections(bb: BbPluginApi, service: Workstreams) {
           bindingRevision: null,
           error: null,
         };
+        const replacingFailure = jobs.latest(input.sectionId)?.status === "failed";
         jobs.put(record);
+        if (replacingFailure) service.invalidateProblems();
       }
       return resumeConnect(record as ConnectRecord, signal);
     });

@@ -219,7 +219,7 @@ function invalidateShared(store: ReadStore, payload: unknown) {
   const sectionId = Reflect.get(payload, "sectionId");
   const workstreamId = Reflect.get(payload, "workstreamId");
   store.invalidate((key, scope) => {
-    if (key.startsWith("problems:")) return true;
+    if (key.startsWith("problems:")) return typeof sectionId === "string" || typeof workstreamId === "string";
     if (typeof threadId === "string" && (scope === threadId || scope === "visibility")) return true;
     if (typeof sectionId === "string" && (scope === `section:${sectionId}` || key.startsWith("sectionList:") || key.startsWith("sectionBindings:"))) return true;
     if (typeof workstreamId !== "string") return false;

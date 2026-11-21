@@ -24,6 +24,7 @@ import plugin, {
 import { REMOTE_REASON } from "./state";
 import type { EventRow } from "./turns";
 import { routeCortexEvent } from "./watch";
+import type { Knowledge, Workstream } from "./workstream-contract";
 
 const THREAD = "thr_aaaaaaaa";
 const REMOTE = "thr_bbbbbbbb";
@@ -93,7 +94,7 @@ afterEach(async () => {
 });
 
 async function setup(
-  options: { fixture?: FakeFixture; running?: string[]; cortexPath?: string; skillsDir?: boolean } = {},
+  options: { fixture?: FakeFixture; running?: string[]; cortexPath?: string; skillsDir?: boolean; problemSection?: boolean } = {},
 ) {
   const cortex: FakeCortex = createFakeCortex(options.fixture ?? baseFixture());
   disposers.push(cortex.cleanup);
@@ -116,7 +117,9 @@ async function setup(
   // environments.get waits for this, so a test can hold a lookup at `state.locate`.
   let gate: Promise<void> = Promise.resolve();
   const sdk = {
+    threadSections: { list: async () => options.problemSection ? [{ id: "sec_one", name: "Payments", createdAt: 0, updatedAt: 0 }] : [] },
     threads: {
+      list: async () => [],
       get: async ({ threadId }: { threadId: string }) => {
         if (threadId === GONE || broken.has(threadId)) throw new Error("HTTP 404: thread not found");
         return makeThreadResponse({
@@ -593,6 +596,73 @@ describe("rpc", () => {
     const memoryShow = s.cortex.calls().find(call => call.argv[1] === "show" && call.cwd !== s.checkout);
     expect(memoryShow?.cwd).toBe(fs.realpathSync(os.tmpdir()));
   });
+});
+
+async function setupProblemRpc() {
+  const at = "2026-01-01T00:00:00.000Z";
+  const actor = { id: "human", type: "human" } as const;
+  const applicability = { environment: { mode: "not-applicable" }, host: { mode: "not-applicable" } } as const;
+  const workstream: Workstream = { id: "ws_one", revision: 1, name: "Payments", description: "", archived: false, actor, createdAt: at, updatedAt: at };
+  const entry: Knowledge = {
+    id: "kn_extra", workstreamId: workstream.id, subject: "deploy", title: "Deploy to staging", text: "Check the rollout",
+    kind: "finding", state: "approved", facet: "another-topic", applicability, sources: [], revision: 1,
+    actor, createdAt: at, updatedAt: at, expiresAt: null, approval: { actor, at }, supersedes: [], conflicts: [], supersededBy: null,
+  };
+  const fixture = (approved: Knowledge[], watch?: FakeFixture["watch"]): FakeFixture => ({
+    ...baseFixture(), author: actor.id, workstreams: { [workstream.id]: { workstream, approved } }, watch,
+  });
+  const s = await setup({ problemSection: true, fixture: fixture([]) });
+  await s.harness.behavior.callRpc("setSectionBinding", { sectionId: "sec_one", expectedRevision: 0, binding: {
+    workstreamId: workstream.id, topic: null, budgetTokens: 3000, requiredKnowledgeIds: [], applicability,
+  } });
+  const problems = () => s.harness.behavior.callRpc("problems", null);
+  const problemSpawns = () => s.argvs().filter(([cmd, verb]) => cmd === "workstream" && ["read", "knowledge"].includes(verb!));
+  return { ...s, entry, fixture, problems, problemSpawns };
+}
+
+test("concurrent problems RPCs spawn the fake executable only once per input", async () => {
+  const s = await setupProblemRpc();
+  const results = await Promise.all(Array.from({ length: 5 }, s.problems));
+  expect(results).toEqual(Array(5).fill({ problems: [] }));
+  expect(s.problemSpawns().map(([, verb]) => verb)).toEqual(["read", "knowledge"]);
+  expect(s.harness.inspection.sdk.callsTo("threadSections.list")).toHaveLength(2);
+  expect(s.harness.inspection.sdk.callsTo("threads.list")).toHaveLength(1);
+});
+
+test.each(["workstream.changed", "resync"])("a %s watch frame invalidates a warm problems read", async kind => {
+  const s = await setupProblemRpc();
+  expect(await s.problems()).toEqual({ problems: [] });
+  const channel = kind === "resync" ? "all" : "workstreams";
+  const frame = { kind, payload: { outcome: "updated", entry: s.entry } };
+  s.cortex.setFixture(s.fixture([s.entry], { lines: [JSON.stringify(frame)] }));
+  const signals = s.harness.inspection.realtimeSignals.filter(signal => signal.channel === channel).length;
+  const watch = s.harness.behavior.runService("watch");
+  try {
+    await vi.waitFor(() => expect(s.harness.inspection.realtimeSignals.filter(signal => signal.channel === channel)).toHaveLength(signals + 1));
+    expect(await s.problems()).toMatchObject({ problems: [{ kind: "unreached", entries: [{ id: s.entry.id }] }] });
+    await s.problems();
+    expect(s.problemSpawns().map(([, verb]) => verb)).toEqual(["read", "knowledge", "read", "knowledge"]);
+  } finally {
+    watch.controller.abort();
+    await watch.done;
+  }
+});
+
+test("cortexPath changes neither invalidate problems nor change the runner before reload", async () => {
+  vi.useFakeTimers({ toFake: ["performance"] });
+  try {
+    const s = await setupProblemRpc();
+    expect(await s.problems()).toEqual({ problems: [] });
+    s.cortex.setFixture(s.fixture([s.entry]));
+    await s.harness.behavior.setSettings({ contextWidget: "hidden" });
+    expect(await s.problems()).toEqual({ problems: [] });
+    await s.harness.behavior.setSettings({ cortexPath: path.join(s.cortex.dir, "not-the-startup-binary") });
+    expect(await s.problems()).toEqual({ problems: [] });
+    expect(s.problemSpawns()).toHaveLength(2);
+    vi.advanceTimersByTime(30_000);
+    expect(await s.problems()).toMatchObject({ problems: [{ kind: "unreached" }] });
+    expect(s.problemSpawns()).toHaveLength(4);
+  } finally { vi.useRealTimers(); }
 });
 
 describe("watch", () => {

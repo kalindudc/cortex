@@ -6,6 +6,8 @@ import type { CortexRunner } from "./cli";
 import type { Knowledge, Workstream } from "./workstream-contract";
 import { createWorkstreams } from "./workstreams";
 import { createDraftService } from "./draft-service";
+import { createProblems } from "./problem-service";
+import { createSections } from "./sections";
 import { draftRpcContract } from "./draft-contract";
 import { draftHandlers } from "./draft-rpc";
 import { DRAFT_BOOTSTRAP, draftConsentMethods, draftRetryConsent } from "./draft-policy";
@@ -30,6 +32,8 @@ function setup() {
   });
   const runner: CortexRunner = { binary: "fake", async run(args, schema, options) {
     if (args[1] === "show") return schema.parse({ workstream: canonical, entries: [], total: 0, limit: 1, offset: 0 });
+    if (args[1] === "read") return schema.parse({ workstream: canonical, entries: [], notices: [], topic: null, applicability: { environment: { mode: "unknown" }, host: { mode: "unknown" } } });
+    if (args[1] === "knowledge") return schema.parse({ items: [], total: 0, limit: 100, offset: 0 });
     if (args[1] === "entry") { const e = entries.get(args[2]); if (!e) throw new Error("404 knowledge not found"); return schema.parse(e); }
     if (args[1] === "mutate") return schema.parse(await mutate(JSON.parse(options!.input!)));
     throw new Error(`Unexpected core read ${args.join(" ")}`);
@@ -461,6 +465,23 @@ test("bb refusing the worker ends the job without one, frees the section and sen
   s.state.spawnRefused = false;
   const again = await s.service.start({ ...(await s.intent()), requestId: randomUUID() });
   expect(again.status, again.error ?? undefined).toBe("running");
+});
+test("a draft failure refreshes the warm problems read", async () => {
+  const s = setup();
+  const read = createProblems(s.bb, createSections(s.bb, s.ws), s.ws, s.service);
+  expect((await read()).problems).toEqual([]);
+  const input = await s.intent();
+  const duringSetup = vi.fn();
+  s.harness.sdk.stub("threads.spawn", async () => {
+    duringSetup(s.service.store.get(input.requestId)?.status, (await read()).problems);
+    throw bbHttpError(400, "spawn refused");
+  });
+  expect((await s.service.start(input)).status).toBe("failed");
+  expect(duringSetup).toHaveBeenCalledExactlyOnceWith("setup-requested", []);
+  expect((await read()).problems).toMatchObject([{ id: `draft:${input.requestId}`, kind: "draft" }]);
+  const lists = s.harness.inspection.sdk.callsTo("threadSections.list").length;
+  await read();
+  expect(s.harness.inspection.sdk.callsTo("threadSections.list")).toHaveLength(lists);
 });
 test("a lost setup answer with no worker waits for one until Stop, which ends the job without a worker", async () => {
   const s = setup(); const input = await s.intent();

@@ -45,7 +45,7 @@ export function createDraftService(bb: BbPluginApi, workstreams: Workstreams) {
   function current(id: string): DraftRecord { const r = store.get(id); if (!r) throw new Error("Draft job not found."); return r; }
   function change(id: string, patch: Partial<DraftRecord>): DraftRecord {
     const r = current(id); const next = store.update({ ...r, ...patch }, r.revision);
-    bb.realtime.publish("drafts", { sectionId: next.sectionId, requestId: id, revision: next.revision }); return next;
+    workstreams.publish("drafts", { sectionId: next.sectionId, requestId: id, revision: next.revision }); return next;
   }
   function checkLive(r: DraftRecord) {
     if (r.cancellation.state !== "none") throw new Error("Draft cancellation is already requested; no new inference or write is allowed.");
@@ -141,7 +141,7 @@ export function createDraftService(bb: BbPluginApi, workstreams: Workstreams) {
       const deadlineAt = new Date(Math.min(Date.now() + DRAFT_DEADLINE_MS, Date.parse(source.expiresAt))).toISOString();
       const r = store.create(draftRecordSchema.parse({ requestId: parsed.requestId, revision: 1, sectionId: parsed.sectionId, sourceThreadId: parsed.sourceThreadId, sourceSnapshotId: parsed.sourceSnapshotId, bindingRevision: parsed.expectedBindingRevision, workstreamId: source.workstreamId, workstreamRevision: source.workstreamRevision, requestedAt: now, updatedAt: now, deadlineAt,
         status: "prepared", execution, worker: { threadId: null, state: "not-requested" }, cancellation: { state: "none", requestedAt: null, confirmedAt: null }, candidateResults: Array.from({ length: 3 }, () => ({ intendedId: `kn_${randomUUID()}`, canonicalId: null, status: "pending", error: null })), progress: "Checking the exact preview/source before native setup.", error: null, retry: "none", intent: parsed, fingerprint: draftHash(JSON.stringify(parsed)), source, requester: workstreams.human(), workerNonce: randomUUID(), bootstrapQueueId: null, activationQueueId: null, active: true, output: null, personalProjectId }));
-      bb.realtime.publish("drafts", { sectionId: r.sectionId, requestId: r.requestId, revision: r.revision });
+      workstreams.publish("drafts", { sectionId: r.sectionId, requestId: r.requestId, revision: r.revision });
       try {
         checkLive(current(r.requestId)); await verifySource(r, signal);
         const fresh = await resolver.resolve(r.sourceThreadId, signal, executionConfig(r), undefined, overrideOf(r));
@@ -372,7 +372,7 @@ export function createDraftService(bb: BbPluginApi, workstreams: Workstreams) {
   }
   async function cancel(input: z.infer<typeof draftRpcMethods.draftCancel.input>, signal?: AbortSignal) {
     workstreams.human(); const cancelled = store.cancel(input.sectionId, input.requestId, input.expectedRevision);
-    bb.realtime.publish("drafts", { sectionId: input.sectionId, requestId: input.requestId, revision: cancelled.revision });
+    workstreams.publish("drafts", { sectionId: input.sectionId, requestId: input.requestId, revision: cancelled.revision });
     if (cancelled.worker.state === "not-requested" || cancelled.worker.state === "stopped") return view(cancelled);
     return reconcile(input.requestId, signal);
   }
@@ -387,7 +387,7 @@ export function createDraftService(bb: BbPluginApi, workstreams: Workstreams) {
   }
   return { store, resolver, view, human: workstreams.human, sourcePreview, start, guard, restricted, configuration, reconcile, collect, failed, cancel, resumeSave,
     configGet: store.configGet,
-    configSet(input: z.infer<typeof draftRpcMethods.draftConfigSet.input>) { const next = store.configSet(input.expectedRevision, input.selection, workstreams.human()); bb.realtime.publish("drafts", { configRevision: next.revision }); return next; },
+    configSet(input: z.infer<typeof draftRpcMethods.draftConfigSet.input>) { const next = store.configSet(input.expectedRevision, input.selection, workstreams.human()); workstreams.publish("drafts", { configRevision: next.revision }); return next; },
     capabilities: () => ({ available: true, reason: null, maxActivePerSection: 1 as const, maxActiveGlobal: 3 as const, maxFindings: 3 as const, maxMessages: 12 as const, maxSourceChars: 16384 as const, maxQuoteChars: 8192 as const, maxOutputBytes: 32768 as const }),
     job(input: z.infer<typeof draftRpcMethods.draftJob.input>) { const r = store.get(input.requestId); if (!r || r.sectionId !== input.sectionId) throw new Error("Draft job not found in selected section."); return view(r); },
     jobs(input: z.infer<typeof draftRpcMethods.draftJobs.input>) { const page = store.list(input.sectionId, input.limit, input.offset); return { ...page, jobs: page.jobs.map(view) }; },

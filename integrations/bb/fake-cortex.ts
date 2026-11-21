@@ -4,6 +4,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { Knowledge, Workstream } from "./workstream-contract";
 
 export type FakeTask = {
   task: {
@@ -43,6 +44,7 @@ export type FakeFixture = {
   context?: { lane: string; primer: string; primerIds?: number[]; hits?: number[]; hitsText?: string };
   /** `cortex watch --json`: lines (or raw byte chunks) to print, then wait for SIGTERM unless `exitCode` is set. */
   watch?: { lines?: string[]; chunks?: number[][]; exitCode?: number };
+  workstreams?: Record<string, { workstream: Workstream; entries?: Knowledge[]; approved: Knowledge[] }>;
   /** Fails every `update` with this message. */
   updateFails?: string;
   /** Updates the fake has posted (it numbers them from 900). */
@@ -146,6 +148,19 @@ if (a === "schema") {
   }
   fs.writeFileSync(fixtureFile, JSON.stringify(fixture));
   out({ update: { ...update, severity: "progress" }, ...(status ? { status } : {}) });
+} else if (a === "workstream" && ["read", "show", "knowledge"].includes(b)) {
+  const id = b === "knowledge" ? flag("workstream") : c;
+  const data = fixture.workstreams?.[id] || fail("workstream " + id + " not found");
+  const { workstream, entries = [], approved } = data;
+  const limit = Number(flag("limit") ?? 100), offset = Number(flag("offset") ?? 0);
+  if (b === "read") {
+    out({ workstream, entries, notices: [], applicability: { environment: { mode: "not-applicable" }, host: { mode: "not-applicable" } }, topic: flag("topic") ?? null });
+  } else if (b === "show") {
+    out({ workstream, entries: entries.slice(offset, offset + limit), total: entries.length, limit, offset });
+  } else {
+    if (flag("states") !== "approved") fail("fixture only serves approved knowledge");
+    out({ items: approved.slice(offset, offset + limit).map(entry => ({ workstream, entry, hints: [] })), total: approved.length, limit, offset });
+  }
 } else if (a === "watch") {
   const w = fixture.watch || {};
   process.on("SIGTERM", () => { fs.writeFileSync(path.join(dir, "watch-terminated"), "yes"); process.exit(0); });

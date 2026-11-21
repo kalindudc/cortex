@@ -1,6 +1,7 @@
 import type { BbPluginApi, PluginAgentConfigurationContext, MessageDispatchHookContext } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import type { CortexRunner } from "./cli";
+import type { CortexRealtimeChannel } from "./state";
 import { createWorkstreamCli } from "./workstream-cli";
 import { createWorkstreamStore } from "./workstream-store";
 import { CONFIGURE_CONTEXT_MAX } from "./workstream-policy";
@@ -221,6 +222,14 @@ export function createWorkstreams(
   // The newest thread snapshot a dispatch was decided on. bb drains the queue as a run ends, so that run's idle
   // notice can arrive after the next message's dispatch began; it is about the earlier run and must not revoke it.
   const dispatchedAt = new Map<string, number>();
+  let problemsGeneration = 0;
+  function invalidateProblems() {
+    problemsGeneration++;
+  }
+  function publish(channel: CortexRealtimeChannel, payload: unknown) {
+    if (channel === "sections" || channel === "drafts" || channel === "all") invalidateProblems();
+    bb.realtime.publish(channel, payload);
+  }
   function invalidate(threadId?: string, notify = true) {
     if (threadId) {
       threadGenerations.set(threadId, (threadGenerations.get(threadId) ?? 0) + 1);
@@ -230,6 +239,7 @@ export function createWorkstreams(
       coldStarts.delete(threadId);
     } else {
       generation++;
+      invalidateProblems();
       threadGenerations.clear();
       environmentGenerations.clear();
       resolved.clear();
@@ -237,7 +247,7 @@ export function createWorkstreams(
       admissions.clear();
       coldStarts.clear();
     }
-    if (notify) bb.realtime.publish("workstreams", threadId ? { threadId } : null);
+    if (notify) publish("workstreams", threadId ? { threadId } : null);
   }
   function invalidateThreadTree(threadId: string) {
     const affected = new Set([threadId]);
@@ -248,6 +258,7 @@ export function createWorkstreams(
     for (const id of affected) invalidate(id);
   }
   function invalidateScope(scope: { sectionId?: string; workstreamId?: string }, notify = true) {
+    invalidateProblems();
     if (scope.workstreamId)
       canonicalGenerations.set(scope.workstreamId, (canonicalGenerations.get(scope.workstreamId) ?? 0) + 1);
     for (const [threadId, known] of scopes) {
@@ -260,7 +271,7 @@ export function createWorkstreams(
       )
         invalidate(threadId);
     }
-    if (notify) bb.realtime.publish("workstreams", scope);
+    if (notify) publish("workstreams", scope);
   }
   function environmentAttached(threadId?: string) {
     const cold = threadId ? coldStarts.get(threadId) : undefined;
@@ -547,6 +558,9 @@ export function createWorkstreams(
     prepared,
     invalidate,
     invalidateScope,
+    invalidateProblems,
+    problemsGeneration: () => problemsGeneration,
+    publish,
     invalidateThreadTree,
     invalidateEnvironment,
     environmentAttached,

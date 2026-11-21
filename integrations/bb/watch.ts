@@ -89,7 +89,7 @@ export function registerCortexWatch(
   state: CortexState,
   workstreams?: Workstreams,
 ): void {
-  const publish: Publish = (channel, payload) => bb.realtime.publish(channel, payload);
+  const publish: Publish = workstreams?.publish ?? ((channel, payload) => bb.realtime.publish(channel, payload));
   const scheduleRefresh: ScheduleRefresh = (taskId, lane) => {
     const work = taskId === null ? state.refreshAll() : state.refreshTask(taskId, lane);
     work.catch(err => bb.log.warn(`cortex refresh failed: ${String(err)}`));

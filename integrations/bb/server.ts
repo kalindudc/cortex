@@ -359,7 +359,7 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
   registerWorkstreamAgents(bb, workstreams, drafts, pendingContext);
   registerDraftEvents(bb, drafts);
   const tracker = createMemoryTracker(RECALL_BUDGET);
-  const publish = (channel: CortexRealtimeChannel, payload: unknown): void => bb.realtime.publish(channel, payload);
+  const publish = workstreams.publish;
   const turns = registerMemoryTurns(bb, {
     runner,
     state,
@@ -419,7 +419,7 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
     return result;
   }
   bb.rpc.register(rpcContract, {
-    ...problemHandlers(createProblems(sections, workstreams, drafts), workstreams),
+    ...problemHandlers(createProblems(bb, sections, workstreams, drafts), workstreams),
     ...workstreamHandlers(workstreams, sections),
     ...sectionHandlers(sections, drafts),
     ...draftHandlers(drafts),

@@ -20,7 +20,7 @@ export function problemHandlers(read: ReturnType<typeof createProblems>, service
     problemEntryDismiss: async (input, ctx) => {
       if (ctx.experimental_caller.kind !== "client") throw new experimental_PluginRpcRefusal({ code: "forbidden", message: "Only a human can ignore an entry here." });
       service.human();
-      const problem = (await read(ctx.experimental_signal)).problems.find(row => row.sectionId === input.sectionId && row.kind === "unreached");
+      const problem = (await read(ctx.experimental_signal, { fresh: true })).problems.find(row => row.sectionId === input.sectionId && row.kind === "unreached");
       if (!problem?.entries?.some(row => row.id === input.id && row.revision === input.expectedRevision)) throw new experimental_PluginRpcRefusal({ code: "conflict", message: "This entry changed. Review the refreshed warning before ignoring it." });
       service.store.dismissProblem(input.sectionId, input.id, input.expectedRevision);
       service.invalidateScope({ sectionId: input.sectionId });

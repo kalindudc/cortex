@@ -234,7 +234,7 @@ export function createPendingContext(
       return reject("These Cortex changes were made for another project. Remove the Cortex pill and send again.");
     if (ctx.thread.sectionId !== record.sectionId) {
       store.put({ ...record, refusedPlacement: { sectionId: ctx.thread.sectionId, at: new Date().toISOString() } });
-      bb.realtime.publish("sections", { sectionId: record.sectionId });
+      workstreams.publish("sections", { sectionId: record.sectionId });
       return reject(
         "bb is filing this thread in a different section from the one these Cortex changes were made for. Remove the Cortex pill to start with that section's brief, or pick the section again on the New thread screen.",
       );
