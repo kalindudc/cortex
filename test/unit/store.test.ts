@@ -104,6 +104,40 @@ function failOn(s: Store, name: string, event: string): () => void {
 }
 
 describe("Store: tasks", () => {
+  test("an edit and its attributed update commit together, or roll back together", () => {
+    const s = open();
+    const task = s.addTask({ title: "Before", body: "old" });
+    const fields = { title: "After", body: "new", note: { author: "agent-1", summary: "Verified source" } };
+    const restore = failOn(s, "fail_edit_summary", "BEFORE INSERT ON updates");
+    expect(() => s.editTask(task.id, fields)).toThrow("injected");
+    expect(s.getTask(task.id)).toEqual(task);
+    expect(s.listUpdates(task.id)).toEqual([]);
+    restore();
+    const edited = s.editTask(task.id, fields);
+    expect(edited).toMatchObject({
+      title: "After",
+      body: "new",
+      update: { author: "agent-1", summary: "Verified source" },
+    });
+    if (!edited.update) throw new Error("expected an update receipt");
+    expect(s.listUpdates(task.id)).toEqual([edited.update]);
+    s.close();
+  });
+
+  test.each(["review", "done"] as const)("an edit guarded against %s writes neither field nor update", status => {
+    const s = open();
+    const task = s.addTask({ title: "Before", status });
+    const fields = {
+      title: "After",
+      unlessStatus: ["review", "done"] as const,
+      note: { author: "agent-1", summary: "Refused" },
+    };
+    expect(() => s.editTask(task.id, fields)).toThrow(`task ${task.id} is ${status}`);
+    expect(s.getTask(task.id)).toEqual(task);
+    expect(s.listUpdates(task.id)).toEqual([]);
+    s.close();
+  });
+
   test("addTask + getTask + listTasks round-trip", () => {
     const s = open();
     const t = s.addTask({ title: "first" });

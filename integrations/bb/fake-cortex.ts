@@ -35,6 +35,7 @@ export type FakeTask = {
 export type FakeFixture = {
   commands?: string[];
   oldMemoryWrites?: boolean;
+  oldAtomicEdit?: boolean;
   memoryLane?: string | null;
   streamsProbeFails?: boolean;
   /** Fails `memory streams` for agents (neither the feature probe nor the user's `--with-excluded` view). */
@@ -90,6 +91,7 @@ if (a === "schema") {
   out({
     version: "0.0.0",
     commands: (fixture.commands || ["watch", "memory"]).map(name => ({ name, summary: "" })),
+    capabilities: fixture.oldAtomicEdit ? [] : ["task.atomic-edit"],
     tables: { memory_exclusions: { columns: fixture.oldMemoryWrites ? ["task_id"] : ["task_id", "excluded_by", "reason", "excluded_at"] } },
   });
 } else if (a === "doctor") {
@@ -121,6 +123,7 @@ if (a === "schema") {
   out(taskJson(t));
 } else if (a === "edit") {
   const t = taskOf(b);
+  if (flag("unless-status")?.split(",").includes(t.task.status)) fail("task " + b + " is " + t.task.status);
   const search = flag("bodySearch"), replace = flag("bodyReplace");
   if (search !== undefined) {
     if ((t.task.body ?? "").split(search).length !== 2) fail("body-search anchor must match exactly once");
@@ -128,8 +131,9 @@ if (a === "schema") {
     t.task.body = t.task.body.slice(0, i) + replace + t.task.body.slice(i + search.length);
   }
   if (flag("title") !== undefined) t.task.title = flag("title");
+  if (flag("message") !== undefined) post(t, flag("as"), flag("message"));
   save();
-  out(taskJson(t));
+  out({ ...taskJson(t), ...(flag("message") !== undefined ? { update: t.updates.at(-1) } : {}) });
 } else if (a === "show") {
   const t = taskOf(b);
   out({ task: taskJson(t), updates: t.updates.map(u => ({ ...u, severity: "progress" })) });

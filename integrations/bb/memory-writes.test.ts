@@ -22,8 +22,10 @@ function setup() {
   let local: string | null = "/verified/checkout";
   let localFails = false;
   let pause = false;
-  let addFails = false;
+  let addError: Error | null = null;
   let similarityFails = false;
+  let hits = [{ id: 77, lane: "other", title: "Similar subject" }];
+  let statusAtEdit: string | undefined;
   let next = 1;
   const calls: { args: readonly string[]; cwd?: string; input?: string }[] = [];
   const task = (id: number, fields: { status?: string; memory_excluded?: boolean; title?: string; lane?: string } = {}) => ({
@@ -47,14 +49,14 @@ function setup() {
       const [verb, sub, id] = args;
       const get = (flag: string) => args.find(arg => arg.startsWith(`--${flag}=`))?.slice(flag.length + 3);
       if (verb === "add") {
-        if (addFails) throw new Error("create rejected");
+        if (addError) throw addError;
         const added = task(next++, { title: args.at(-1), lane: get("lane"), memory_excluded: args.includes("--memory-excluded") });
         tasks.set(added.id, added);
         return schema.parse({ ...added, body: options?.input });
       }
       if (verb === "memory" && sub === "search") {
         if (similarityFails) throw new Error("search unavailable");
-        return schema.parse({ hits: [{ id: 77, lane: "other", title: "Similar subject" }] });
+        return schema.parse({ hits: hits.slice(0, Number(get("limit"))) });
       }
       if (verb === "show") {
         const found = tasks.get(Number(sub));
@@ -63,9 +65,13 @@ function setup() {
       }
       if (verb === "edit") {
         const found = tasks.get(Number(sub))!;
+        if (statusAtEdit) found.status = statusAtEdit;
+        if (get("unless-status")?.split(",").includes(found.status)) {
+          throw new CortexCliError("exit", `cortex edit ${sub} failed: task ${sub} is ${found.status}`);
+        }
         found.title = get("title") ?? found.title;
         if (get("bodySearch") !== undefined) found.body = found.body.replace(get("bodySearch")!, get("bodyReplace")!);
-        return schema.parse(found);
+        return schema.parse({ ...found, ...(get("message") !== undefined ? { update: { id: 90 } } : {}) });
       }
       if (verb === "update") return schema.parse({ update: { id: 90 } });
       if (verb === "memory" && (sub === "include" || sub === "exclude")) {
@@ -84,6 +90,7 @@ function setup() {
     runner,
     state: { async locate() { return { projectId: "proj_one", cwd: local }; }, laneFor: () => cached },
     paused: () => pause,
+    atomicEdit: true,
     changed: () => {},
     clock: () => now,
   };
@@ -92,7 +99,8 @@ function setup() {
     calls, tasks, task, restart, writes: restart(), advance: (ms: number) => { now += ms; },
     cached: (value: string | null) => { cached = value; }, local: (value: string | null) => { local = value; },
     localFails: () => { localFails = true; }, pause: () => { pause = true; },
-    addFails: (value: boolean) => { addFails = value; }, similarityFails: () => { similarityFails = true; },
+    addFails: (value: Error | null) => { addError = value; }, similarityFails: () => { similarityFails = true; },
+    setHits: (value: typeof hits) => { hits = value; }, statusAtEdit: (value: string) => { statusAtEdit = value; },
   };
 }
 
@@ -125,8 +133,7 @@ test("replays concurrent and persisted exact creates without spending another sl
   const input = note("Source verified twice");
   const [one, replay] = await Promise.all([s.writes.note(input, actor()), s.writes.note(input, actor())]);
   expect(one).toContain("@1");
-  expect(one).toContain("@77");
-  expect(one).toContain("revise it with cortex_note task_id");
+  expect(one).not.toContain("Similar tasks:");
   expect(replay).toContain("@1");
   expect(replay).toMatch(/already saved/i);
   expect(await s.restart().note(input, actor())).toContain("@1");
@@ -135,6 +142,39 @@ test("replays concurrent and persisted exact creates without spending another sl
   expect(await s.writes.note(input, actor())).toContain("@2");
   expect(actuallyAdded(s)).toHaveLength(2);
   expect(await s.writes.note({ ...input, body: `${BODY}\nMore evidence.` }, actor())).toContain("@3");
+});
+
+test.each(["deleted", "recreated"])("a %s task is not a replay of the earlier create", async kind => {
+  const s = setup();
+  const input = note("Original saved document");
+  expect(await s.writes.note(input, actor())).toContain("Saved @1");
+  s.advance(1);
+  if (kind === "deleted") s.tasks.delete(1);
+  else s.tasks.set(1, s.task(1, { title: "Different document on the old id" }));
+  expect(await s.restart().note(input, actor())).toContain("Saved @2");
+  expect(actuallyAdded(s)).toHaveLength(2);
+  expect(await s.restart().note(input, actor())).toContain("Already saved: @2");
+});
+
+test("offers only similar titles, favors the same lane, and still finds hits after noisy rows", async () => {
+  const s = setup();
+  s.setHits([
+    { id: 1, lane: "checkout", title: "Persistence daemon lease protocol" },
+    { id: 71, lane: "checkout", title: "The review for release 110" },
+    { id: 72, lane: "other", title: "Daemon protocol compatibility" },
+    { id: 73, lane: "checkout", title: "Lease" },
+    { id: 74, lane: "checkout", title: "Persistence daemon lease protocol tests" },
+    { id: 75, lane: "checkout", title: "Protocol for the changelog 110" },
+  ]);
+  const result = await s.writes.note(note("Persistence Daemon Lease Protocol for the 110"), actor());
+  expect(result).toContain("Similar tasks:");
+  expect(result.match(/^- @(\d+)/gm)).toEqual(["- @73", "- @74", "- @72"]);
+});
+
+test("stop words, short words, and numbers alone do not qualify a hit", async () => {
+  const s = setup();
+  s.setHits([{ id: 71, lane: "other", title: "The and it 110" }]);
+  expect(await s.writes.note(note("The and it 110"), actor())).not.toContain("Similar tasks:");
 });
 
 test("reserves rolling hourly creates before parallel calls and gives children one slot", async () => {
@@ -179,13 +219,38 @@ test("holds the persistent lane budget across parallel threads, falls back exclu
 test("an include spends a lane slot and a failed create releases its reservations", async () => {
   const s = setup();
   for (let i = 0; i < 9; i++) await s.writes.note(note(`Baseline document ${i}`), actor(`thr_base${i}`));
-  s.addFails(true);
+  s.addFails(new Error("create rejected"));
   await expect(s.writes.note(note("Not committed"), actor())).rejects.toThrow("create rejected");
-  s.addFails(false);
+  s.addFails(null);
   const draft = await s.writes.note(note("Temporary document", "exclude"), actor());
   expect(draft).toContain("excluded");
   expect(await s.writes.curate(curate(10), actor())).toContain("included");
   expect(await s.writes.note(note("Budget exhausted now"), actor())).toContain("daily lane budget");
+});
+
+test.each(["timeout", "json", "shape"] as const)("a %s after dispatch keeps the persistent lane slot", async code => {
+  const s = setup();
+  for (let i = 0; i < 9; i++) await s.writes.note(note(`Baseline document ${i}`), actor(`thr_base${i}`));
+  s.addFails(new CortexCliError(code, "write outcome unknown"));
+  await expect(s.writes.note(note("Possibly committed"), actor())).rejects.toThrow("write outcome unknown");
+  s.addFails(null);
+  expect(await s.restart().note(note("Next document"), actor("thr_other"))).toContain("daily lane budget");
+});
+
+test("an explicit exclusion records the author's choice with the create", async () => {
+  const s = setup();
+  expect(await s.writes.note(note("Excluded by choice", "exclude"), actor())).toContain("excluded");
+  expect(actuallyAdded(s)[0].args).toEqual(expect.arrayContaining([
+    "--memory-excluded", "--memory-exclusion-reason=Saved excluded by its author",
+  ]));
+});
+
+test.each(["", ".", "!", "?"])("curation ends its reason with just one punctuation mark (%s)", async punctuation => {
+  const s = setup();
+  s.tasks.set(1, s.task(1));
+  const { reason, ...input } = curate(1, "exclude");
+  const result = await s.writes.curate({ ...input, reason: reason + punctuation }, actor());
+  expect(result.split("\n")[0]).toMatch(new RegExp(`Reason: ${reason}\\${punctuation || "."}$`));
 });
 
 test("pausing still saves and refuses inclusions; advisory lookup failure does not resave", async () => {
@@ -215,9 +280,22 @@ test("revises only allowed statuses, supports anchored edit, and posts the suppl
   const result = await s.writes.note({ task_id: 6, search: "isolated", replace: "hermetic", summary: "Verified again" }, actor());
   expect(result).toContain("@6");
   expect(s.tasks.get(6)?.body).toContain("hermetic checkout");
-  expect(s.calls.filter(c => c.args[0] === "edit")).toHaveLength(1);
-  expect(s.calls.find(c => c.args[0] === "update")?.args).toEqual(["update", "6", "--message=Verified again", `--as=bb-${THREAD}`, "--json"]);
+  expect(s.calls.filter(c => c.args[0] === "edit" && c.args[1] === "6").map(c => c.args)).toEqual([[
+    "edit", "6", "--json", "--message=Verified again", `--as=bb-${THREAD}`, "--unless-status=review,done",
+    "--bodySearch=isolated", "--bodyReplace=hermetic",
+  ]]);
+  expect(s.calls.some(c => c.args[0] === "update")).toBe(false);
   await expect(s.writes.note({ task_id: 6, search: "hermetic", summary: "Missing replacement" }, actor())).rejects.toThrow(/together/);
+});
+
+test.each(["review", "done"])("a change to %s before the edit still refuses the revision", async status => {
+  const s = setup();
+  s.tasks.set(1, s.task(1));
+  s.statusAtEdit(status);
+  await expect(s.writes.note({ task_id: 1, title: "New title", summary: "Verified again" }, actor())).rejects.toThrow(
+    `@1 is ${status}; post a cortex_update instead of revising it.`,
+  );
+  expect(s.tasks.get(1)?.title).toBe("Similar subject 1");
 });
 
 test("pausing blocks edits to included tasks but lets excluded drafts be revised", async () => {

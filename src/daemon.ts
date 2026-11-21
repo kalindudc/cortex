@@ -51,7 +51,12 @@ import {
 export const DAEMON_PROTOCOL = 1 as const;
 /** Optional protocol-1 features every daemon of this version offers (published in its identity). */
 const MEMORY_WRITE_CAPABILITY = "memory.attributed-writes";
-export const DAEMON_CAPABILITIES: readonly string[] = ["control.shutdown", MEMORY_WRITE_CAPABILITY];
+export const ATOMIC_EDIT_CAPABILITY = "task.atomic-edit";
+export const DAEMON_CAPABILITIES: readonly string[] = [
+  "control.shutdown",
+  MEMORY_WRITE_CAPABILITY,
+  ATOMIC_EDIT_CAPABILITY,
+];
 
 /** How long one identity probe may take before its endpoint counts as not answering. */
 const PROBE_TIMEOUT_MS = 2_000;
@@ -388,6 +393,15 @@ export function requireMemoryWrites({ daemon }: ClientTarget): void {
   if (daemon && !daemon.capabilities?.includes(MEMORY_WRITE_CAPABILITY)) {
     throw new Error(
       "the running daemon cannot save attributed memory changes; run `cortex stop` and restart it with this version",
+    );
+  }
+}
+
+/** Older daemons would silently ignore an edit's note and status guard. */
+export function requireAtomicEdit({ daemon }: ClientTarget): void {
+  if (daemon && !daemon.capabilities?.includes(ATOMIC_EDIT_CAPABILITY)) {
+    throw new Error(
+      "the running daemon cannot apply attributed or status-guarded edits; run `cortex stop` and restart it with this version",
     );
   }
 }

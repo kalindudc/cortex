@@ -15,6 +15,9 @@ export const TURN_LIMITS = {
   minFiles: 3,
   firstHits: 5,
   laterHits: 3,
+  reportChars: 1000,
+  pendingReports: 10,
+  foldCooldownMs: 30 * 60_000,
 } as const;
 
 /** Providers whose bb bridge injects a steer into the running turn; an ACP bridge's steer cancels the prompt. */
@@ -170,13 +173,35 @@ export function shouldCheckpoint(s: {
   return null;
 }
 
+/** A member's final answer the starting thread received; `at` is when the member went idle. */
+type Report = { threadId: string; chars: number; at: number };
+const CHECKPOINT_TITLE = "Memory checkpoint (automatic, once per request)";
+const CHECKPOINT_END = [
+  "If a tool refuses the write, follow its advice and never use the shell to bypass it.",
+  "Reply with one short line naming your choice.",
+];
+
 /** The checkpoint message: what changed, the streams to consider, and exactly one choice to make. */
-export function checkpointPrompt(input: {
-  kind: "update" | "attach";
-  edited: string[];
-  focus: number[];
-  candidates: string;
-}): string {
+export function checkpointPrompt(input:
+  | { kind: "update" | "attach"; edited: string[]; focus: number[]; candidates: string }
+  | { kind: "fold"; reports: Report[]; focus: number[] }
+): string {
+  if (input.kind === "fold") {
+    return [
+      CHECKPOINT_TITLE,
+      "",
+      "Fold member reports: you already have these reports in context.",
+      ...input.reports.map(({ threadId, chars }) => `- @thread:${threadId} (${chars} characters)`),
+      ...(input.focus.length > 0 ? ["", `Focus streams: ${input.focus.map(id => `@${id}`).join(", ")}`] : []),
+      "",
+      "Do EXACTLY ONE of:",
+      "- UPDATE: fold durable findings into a matching stream listed in context or in your focus. Use cortex_note with task_id, a one-line summary and an exact search/replace anchor.",
+      "- CREATE: use one cortex_note only for durable findings no stream covers. Save verified findings with their sources and when they apply.",
+      "- NOTHING: routine reports, status, or findings already saved.",
+      "",
+      ...CHECKPOINT_END,
+    ].join("\n");
+  }
   const files = input.edited.slice(0, TURN_LIMITS.files).map(path => `- ${path}`);
   const more = input.edited.length - TURN_LIMITS.files;
   if (more > 0) files.push(`- \u2026 and ${more} more`);
@@ -185,7 +210,7 @@ export function checkpointPrompt(input: {
       ? `Focus streams (most recent first): ${input.focus.map(id => `@${id}`).join(", ")}`
       : `Candidate streams (one memory search):\n${input.candidates || "(none found)"}`;
   return [
-    "Memory checkpoint (automatic, once per request)",
+    CHECKPOINT_TITLE,
     "",
     "This request changed files and wrote no cortex memory. Files changed:",
     ...files,
@@ -200,8 +225,7 @@ export function checkpointPrompt(input: {
     "  Suggested headings: ## Goal, ## State, ## Decisions, ## Next, ## Files; add Verified: YYYY-MM-DD when relying on files.",
     "- NOTHING: no durable knowledge (a typo, formatting, throwaway work).",
     "",
-    "If a tool refuses the write, follow its advice and never use the shell to bypass it.",
-    "Reply with one short line naming your choice.",
+    ...CHECKPOINT_END,
   ].join("\n");
 }
 
@@ -222,6 +246,9 @@ type ThreadTurn = {
   busy: boolean;
   /** Cortex was asked which streams the thread posted to; later writes reach the tracker directly. */
   consulted: boolean;
+  idleReport?: { seq: number; starter: string; report: Report };
+  reports?: Map<string, Report>;
+  lastFoldAt?: number;
 };
 
 const contextSchema = z.object({ hits: z.array(z.object({ id: z.number().int().positive() })), hitsText: z.string() });
@@ -236,8 +263,8 @@ const agentOnly = (text: string) => [{ type: "text" as const, text, mentions: []
 
 /**
  * Around each request, as the pi extension does in plain pi: matching tasks steered into the running turn, and ONE
- * memory checkpoint turn after a request that changed files and saved nothing. Both read the request from bb's own
- * events, which bb records in one shape for every provider.
+ * memory checkpoint turn after a request that changed files or received member reports and saved nothing.
+ * Both read the request from bb's own events, which bb records in one shape for every provider.
  */
 export function registerMemoryTurns(
   bb: BbPluginApi,
@@ -390,14 +417,31 @@ export function registerMemoryTurns(
   /** Decides whether the request that just ended earns the save turn, and starts it. */
   async function checkpoint(thread: TurnThread, entry: ThreadTurn, start: RequestStart): Promise<void> {
     const threadId = thread.id;
+    if (deps.checkpoints === false) return;
+    const idleReport = entry.idleReport?.seq === start.seq ? entry.idleReport : undefined;
+    if (idleReport) delete entry.idleReport;
     const mode = await deps.modeOf(thread);
-    if (deps.checkpoints === false || mode !== "write" || (await bb.sdk.threads.queuedMessages.list({ threadId })).length > 0) return;
+    const hasQueued = async () => (await bb.sdk.threads.queuedMessages.list({ threadId })).length > 0;
+    const maySave = mode === "write" && !(await hasQueued());
+    if (!maySave && !idleReport) return;
     const facts = readRequest(await requestRows(threadId, start.seq));
+    if (idleReport && facts.outcome === "completed") {
+      const starter = turnOf(idleReport.starter);
+      const reports = (starter.reports ??= new Map());
+      reports.delete(threadId);
+      reports.set(threadId, idleReport.report);
+      if (reports.size > TURN_LIMITS.pendingReports) reports.delete(reports.keys().next().value!);
+    }
+    if (!maySave) return;
     if (facts.focus.length > 0) {
       tracker.focused(threadId, facts.focus);
       changed(threadId);
     }
     const wroteMemory = facts.wroteMemory || entry.wroteAt >= start.createdAt;
+    // A request that wrote memory handled the reports it could see, so a later fold would invite a duplicate.
+    if (wroteMemory && facts.outcome === "completed" && entry.reports) {
+      for (const [id, pending] of entry.reports) if (pending.at < start.createdAt) entry.reports.delete(id);
+    }
     // Only a request that changed files and saved nothing can earn the turn, so only it reads focus from cortex.
     const focus =
       facts.edited.length > 0 && !wroteMemory && facts.outcome === "completed"
@@ -411,7 +455,10 @@ export function registerMemoryTurns(
       edited: facts.edited.length,
       focus: focus.length,
     });
-    if (kind === null) return;
+    const reports = kind === null && facts.outcome === "completed" && !wroteMemory &&
+      (entry.lastFoldAt === undefined || Date.now() - entry.lastFoldAt >= TURN_LIMITS.foldCooldownMs)
+      ? [...(entry.reports?.values() ?? [])] : [];
+    if (kind === null && (reports.length === 0 || await hasQueued())) return;
     let candidates = "";
     if (kind === "attach" && contentWords(start.text) >= 2) {
       try {
@@ -435,13 +482,21 @@ export function registerMemoryTurns(
     }
     // A newer request began while this one was evaluated: its own idle decides, and this save turn is stale.
     if (entry.start !== null) return;
-    const prompt = checkpointPrompt({ kind, edited: facts.edited, focus, candidates });
+    const prompt = checkpointPrompt(kind === null
+      ? { kind: "fold", reports, focus }
+      : { kind, edited: facts.edited, focus, candidates });
     tracker.checkpointing(threadId);
     changed(threadId);
     entry.marked = true;
     try {
       // "start" fails on a busy thread, so the save turn never interrupts the user or queues ahead of them.
       await bb.sdk.threads.send({ threadId, mode: "start", input: agentOnly(prompt) });
+      if (kind === null) {
+        entry.lastFoldAt = Date.now();
+        for (const report of reports) {
+          if (entry.reports?.get(report.threadId) === report) entry.reports.delete(report.threadId);
+        }
+      }
     } catch (err) {
       entry.marked = false;
       tracker.saved(threadId);
@@ -473,7 +528,7 @@ export function registerMemoryTurns(
     }
   });
 
-  bb.events.on("thread.idle", async ({ thread }) => {
+  bb.events.on("thread.idle", async ({ thread, lastAssistantText }) => {
     if (deps.restricted?.(thread)) return;
     try {
       const entry = threads.get(thread.id);
@@ -482,11 +537,16 @@ export function registerMemoryTurns(
         settle(thread.id, entry);
         return;
       }
-      if (entry.busy) return;
-      // Evaluated at most once: bb can go idle again without a new request (an environment restore).
+      // bb can go idle again without a new request (an environment restore).
       const start = entry.start;
-      entry.start = null;
       if (start === null) return;
+      const starter = thread.visibility === "visible" ? startedBy(thread) : null;
+      const chars = lastAssistantText?.length ?? 0;
+      if (deps.checkpoints !== false && starter !== null && chars >= TURN_LIMITS.reportChars) {
+        entry.idleReport = { seq: start.seq, starter, report: { threadId: thread.id, chars, at: Date.now() } };
+      }
+      if (entry.busy) return;
+      entry.start = null;
       entry.busy = true;
       try {
         let next: RequestStart | null = start;
@@ -515,7 +575,10 @@ export function registerMemoryTurns(
     try {
       const entry = threads.get(thread.id);
       if (entry?.marked) settle(thread.id, entry);
-      else if (entry) entry.start = null;
+      else if (entry) {
+        entry.start = null;
+        delete entry.idleReport;
+      }
     } catch (err) {
       bb.log.warn(`ending the memory checkpoint of ${thread.id} failed: ${message(err)}`);
     }

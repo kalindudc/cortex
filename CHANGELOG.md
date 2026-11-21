@@ -2,6 +2,21 @@
 
 Cortex follows [semantic versioning](https://semver.org). Each release has a section below, newest first.
 
+## 0.110.1 - 2026-11-21
+
+- **Leads fold member reports.** Members rarely save on their own, so after a request that received a member's
+  final report and saved nothing, a lead gets one short save turn to fold the findings into a stream, save one note,
+  or do nothing; at most every 30 minutes, and never for a report the lead already handled.
+- **Sending a flare no longer makes a thread a child lead.** Only visible child threads count, so builders and
+  other members that send flares no longer get save turns.
+- **Document revisions are one write.** A revision's edit, its summary and the check that the task is not in review
+  or done now commit together (`cortex edit --message --as --unless-status`); an older daemon refuses them.
+- **Similar tasks are similar.** A new document lists only tasks whose titles match it, this lane first, instead of
+  tasks that share common words in their bodies.
+- **Clearer cards.** The several-tasks card groups only what the message's own thread did, keeps titles readable
+  and says "this thread"; a document saved excluded says so, and curation results no longer end in two full stops.
+- Curating memory no longer counts as saving the work, so a request that changed files still gets its save turn.
+
 ## 0.110.0 - 2026-11-21
 
 - **Agents keep notes in cortex.** In bb, agents can save and revise documents with `cortex_note` (a note, plan,

@@ -74,7 +74,7 @@ running daemon instead of writing the file beside it: a write the daemon did not
 
 Agents and app windows can write the same task at the same time. Cortex treats them differently on purpose:
 
-- CLI writes, which is what agents use, are last-writer-wins. If two agents change a title, the second one stays.
+- CLI writes, which agents use, are last-writer-wins; `cortex edit --message --unless-status` adds an update in one write.
 - Desktop app edits are guarded per field. Each field of a task (title, body, priority, lane, status) carries a
   version, and a save sends the version you last saw. If someone changed that field meanwhile, nothing is written:
   you see a conflict, your input is kept, and you choose to keep yours or take theirs. Lane and tag edits work the

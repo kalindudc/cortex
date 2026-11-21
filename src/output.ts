@@ -25,6 +25,7 @@ export const ErrCode = {
   CONFLICT: "conflict",
   BODY_SEARCH_NOT_FOUND: "body_search_not_found",
   BODY_SEARCH_AMBIGUOUS: "body_search_ambiguous",
+  EDIT_STATUS_REFUSED: "edit_status_refused",
   /** A guarded write's expected versions are stale (HTTP 412); nothing was written. */
   VERSION_CONFLICT: "version_conflict",
   /** A malformed or partial WriteGuard (HTTP 400). */

@@ -299,9 +299,10 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
 
   let runner: CortexRunner;
   let supportsWrites: boolean;
+  let atomicEdit: boolean;
   try {
     runner = await createCortexRunner(cortexPath);
-    supportsWrites = (await verifyCortexFeatures(runner)).memoryWrites;
+    ({ memoryWrites: supportsWrites, atomicEdit } = await verifyCortexFeatures(runner));
   } catch (err) {
     const reason = `Cortex is unavailable: ${message(err)}`;
     bb.status.needsConfiguration(
@@ -404,10 +405,12 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
     runner,
     state,
     paused: () => current.agentDocuments === "excluded",
+    atomicEdit,
     changed(threadId, task, focus) {
+      // Curating keeps memory tidy but saves nothing about the work, so only saves and revisions skip the save turn.
       if (focus) {
-        tracker.updated(threadId, task.id);
         turns.wrote(threadId);
+        tracker.updated(threadId, task.id);
         publish("memory", { threadId });
       }
       state.refreshTask(task.id, task.lane).catch(err => bb.log.warn(`cortex refresh failed: ${message(err)}`));

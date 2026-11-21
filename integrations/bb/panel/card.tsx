@@ -11,6 +11,7 @@ import { STATUS_LABEL, StatusDot, StatusPill } from "./status";
 import { absoluteTime, relativeTime } from "./time";
 
 const ROW_LIMIT = 12;
+const ACTOR_CHARS = 20;
 const CARD_BUTTON = "h-7 rounded-[var(--radius)] border-border-seam px-2.5 pointer-coarse:min-h-11 max-[480px]:min-h-11";
 const KINDS = {
   research: { label: "Research", glyph: "Search" },
@@ -37,10 +38,13 @@ function who(detail: CortexTaskDetail, author: string | null, threadId: string):
 
 function receiptOf(detail: CortexTaskDetail, documentOnly = false): Receipt {
   const { task, updates } = detail;
-  if (task.memoryExcluded) {
+  const exclusion = task.memoryExclusion;
+  const createdExcluded = documentOnly && exclusion?.excluded_at === task.created &&
+    updates.some(update => update.kind === "created" && update.author === exclusion?.excluded_by);
+  if (task.memoryExcluded && !createdExcluded) {
     return {
-      group: "Curated", action: "Excluded from memory", author: task.memoryExclusion?.excluded_by ?? null,
-      at: task.memoryExclusion?.excluded_at ?? null, reason: task.memoryExclusion?.reason,
+      group: "Curated", action: "Excluded from memory", author: exclusion?.excluded_by ?? null,
+      at: exclusion?.excluded_at ?? null, reason: exclusion?.reason,
     };
   }
   for (let i = updates.length - 1; i >= 0; i--) {
@@ -163,14 +167,17 @@ function TaskCards({ threadId, ids, many }: { threadId: string; ids: number[]; m
     {failure ? <p role="alert" className="break-words px-3 pb-2 text-xs">{failure}</p> : null}
   </>;
   if (many) {
-    const groups: Record<Group, CortexTaskDetail[]> = { Saved: [], Revised: [], Curated: [] };
+    const groups: Record<Group | "Other", { detail: CortexTaskDetail; receipt: Receipt }[]> = {
+      Saved: [], Revised: [], Curated: [], Other: [],
+    };
     const states: (boolean | null)[] = [];
     const unfinished: number[] = [];
     for (const id of visible) {
       const entry = entries.get(id);
       if (!entry || !("detail" in entry)) { unfinished.push(id); continue; }
       const { detail } = entry;
-      groups[receiptOf(detail, true).group].push(detail);
+      const receipt = receiptOf(detail, true);
+      groups[receipt.author === `bb-${threadId}` ? receipt.group : "Other"].push({ detail, receipt });
       states.push(detail.task.memoryExcluded);
     }
     const included = states.filter(state => state === false).length;
@@ -181,12 +188,12 @@ function TaskCards({ threadId, ids, many }: { threadId: string; ids: number[]; m
           <span aria-hidden className="inline-flex gap-0.5">{states.map((state, i) => <MemoryCell key={i} excluded={state} />)}</span>
           <span><b className="text-foreground">{ids.length} tasks</b> · {included} in memory · {excluded} not</span>
         </div>
-        {GROUPS.filter(group => groups[group].length > 0).map(group => (
-          <section key={group} aria-label={group}>
-            <h3 className="px-3 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{group} · {groups[group].length}</h3>
-            <ul>{groups[group].map(detail => {
+        {[...GROUPS, "Other" as const].filter(group => groups[group].length > 0).map(group => {
+          const list = <ul key={group}>{groups[group].map(({ detail, receipt }) => {
               const { task } = detail;
-              const author = who(detail, receiptOf(detail, true).author, threadId);
+              const author = who(detail, receipt.author, threadId);
+              const chars = author ? [...author] : [];
+              const actor = chars.length > ACTOR_CHARS ? `${chars.slice(0, ACTOR_CHARS - 1).join("")}…` : author;
               return (
                 <li key={task.id} className="grid min-h-[34px] grid-cols-[auto_auto_auto_minmax(0,1fr)_auto] items-center gap-2 px-3 py-0.5 text-xs hover:bg-state-hover max-[480px]:grid-cols-[auto_auto_auto_minmax(0,1fr)]">
                   <MemoryCell excluded={task.memoryExcluded} />
@@ -195,10 +202,10 @@ function TaskCards({ threadId, ids, many }: { threadId: string; ids: number[]; m
                     <span className="sr-only">{STATUS_LABEL[task.status]}</span>
                   </span>
                   <span className="text-muted-foreground">#{task.id}</span>
-                  <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-2">
+                  <div className="flex min-w-0 items-baseline justify-between gap-x-2">
                     <span className="min-w-0 flex-1 truncate text-foreground" title={task.title}>{task.title}</span>
-                    <span className="max-w-full truncate text-muted-foreground">
-                      {task.memoryExcluded ? "Excluded" : kindOf(task.tags).label}{author ? ` · ${author}` : ""}
+                    <span className="max-w-[40%] truncate text-muted-foreground" title={author ?? undefined}>
+                      {task.memoryExcluded ? "Excluded" : kindOf(task.tags).label}{actor ? ` · ${actor}` : ""}
                     </span>
                   </div>
                   <div className="flex items-center justify-end gap-1.5 max-[480px]:col-span-full">
@@ -211,9 +218,13 @@ function TaskCards({ threadId, ids, many }: { threadId: string; ids: number[]; m
                   </div>
                 </li>
               );
-            })}</ul>
-          </section>
-        ))}
+            })}</ul>;
+          if (group === "Other") return list;
+          return <section key={group} aria-label={group}>
+            <h3 className="px-3 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{group} · {groups[group].length}</h3>
+            {list}
+          </section>;
+        })}
         {unfinished.map(id => <TaskReadState key={id} id={id} entry={entries.get(id)} retry={() => read(id)} />)}
         {ids.length > ROW_LIMIT ? <p className="px-3 py-2 text-xs text-muted-foreground">{ids.length - ROW_LIMIT} more</p> : null}
         {feedback}

@@ -1,7 +1,8 @@
 import { defineCommand } from "citty";
-import type { CortexClient } from "../contracts.ts";
-import { withClient } from "../daemon.ts";
-import { validateTagName, type Task } from "../store.ts";
+import type { CortexClient, EditTaskRequest } from "../contracts.ts";
+import { requireAtomicEdit, withClient } from "../daemon.ts";
+import { STATUS } from "../lib/constants.ts";
+import { type EditedTask, validateEditNote, validateTagName, type Task } from "../store.ts";
 import { emitError, printJson, resolveBody } from "../output.ts";
 
 function parsePriority(raw: string): number {
@@ -75,6 +76,21 @@ export default defineCommand({
       valueHint: "name",
       description: "remove a single tag",
     },
+    message: {
+      type: "string",
+      valueHint: "text",
+      description: "post an update with this summary atomically with the title/body/priority edit (requires --as)",
+    },
+    as: {
+      type: "string",
+      valueHint: "id",
+      description: "author tag for the edit's --message",
+    },
+    "unless-status": {
+      type: "string",
+      valueHint: "review,done",
+      description: "refuse the title/body/priority edit if the task has any of these comma-separated statuses",
+    },
     json: {
       type: "boolean",
       default: false,
@@ -101,13 +117,7 @@ export default defineCommand({
     if (hasSearch && args.bodySearch === "") {
       emitError(json, new Error("--body-search cannot be empty"));
     }
-    const patch: {
-      title?: string;
-      body?: string | null;
-      bodySearch?: string;
-      bodyReplace?: string;
-      priority?: number | null;
-    } = {};
+    const patch: EditTaskRequest = {};
     if (args.title) patch.title = args.title;
     if (!hasSearch) {
       // --body-file (incl. "-" stdin) always sets the body, even empty (a
@@ -152,7 +162,8 @@ export default defineCommand({
     } catch (e) {
       emitError(json, e);
     }
-    if (Object.keys(patch).length === 0 && tagOp === null) {
+    const hasFields = Object.keys(patch).length > 0;
+    if (!hasFields && tagOp === null) {
       emitError(
         json,
         new Error(
@@ -160,15 +171,40 @@ export default defineCommand({
         ),
       );
     }
+    if (args["unless-status"] !== undefined) {
+      const unlessStatus = args["unless-status"]
+        .split(",")
+        .map(value => STATUS.find(status => status === value.trim()));
+      if (!unlessStatus.every(status => status !== undefined)) {
+        emitError(json, new Error("--unless-status needs valid task statuses"));
+      }
+      patch.unlessStatus = unlessStatus;
+    }
+    if ((args.message === undefined) !== (args.as === undefined)) {
+      emitError(json, new Error("--message and --as must be used together"));
+    }
+    try {
+      if (args.message !== undefined) patch.note = validateEditNote({ author: args.as, summary: args.message });
+    } catch (err) {
+      emitError(json, err);
+    }
+    const atomic = patch.note !== undefined || patch.unlessStatus !== undefined;
+    if (atomic && tagOp !== null) {
+      emitError(
+        json,
+        new Error("--message and --unless-status apply only to title, body, or priority edits; edit tags separately"),
+      );
+    }
     // Field edits, then the tag change as an atomic membership delta (or a
     // whole-set replace for --set-tags), through the verified daemon or,
     // without one, the same handlers in-process under one ownership lease.
     const tagChange = tagOp;
-    let task: Task;
+    let task: EditedTask;
     try {
-      task = await withClient(async client => {
-        let edited: Task | null = null;
-        if (Object.keys(patch).length > 0) edited = await client.editTask(id, patch);
+      task = await withClient(async (client, target) => {
+        if (atomic) requireAtomicEdit(target);
+        let edited: EditedTask | null = null;
+        if (hasFields) edited = await client.editTask(id, patch);
         if (tagChange) edited = await applyTagOp(client, id, tagChange);
         if (!edited) throw new Error("no fields changed");
         return edited;
@@ -181,13 +217,14 @@ export default defineCommand({
 });
 
 /** Emit an edited task: JSON object, or the human ✓ line(s). */
-function emitEdited(json: boolean, task: Task, showTags: boolean): void {
+function emitEdited(json: boolean, task: EditedTask, showTags: boolean): void {
   if (json) {
     printJson(task);
     return;
   }
   console.log(`✓ edited [${task.id}] ${task.title}`);
   if (showTags) console.log(`✓ tags: ${task.tags.join(",")}`);
+  if (task.update) console.log(`✓ update [${task.update.id}] posted on task ${task.id}`);
 }
 
 /**

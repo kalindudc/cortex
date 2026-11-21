@@ -1,33 +1,37 @@
-import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import type { BbPluginApi, PluginThreadEventPayloads } from "@get-bb/plugin-sdk";
 
 type Thread = { id: string; parentThreadId: string | null; lifecycleOwnerThreadId?: string | null };
 const PAGE = 100;
 
 /** Configure is synchronous and its context omits lifecycle ownership. */
 export async function cacheMemoryThreadRoles(bb: BbPluginApi) {
-  const starters = new Map<string, Set<string>>();
+  const starters = new Map<string, { owners: Set<string>; visible: boolean }>();
   const children = new Map<string, number>();
   const configured = new Map<string, boolean>();
   const observed = new Set<string>();
   let seeding = true;
 
-  function remember(id: string, owners: Set<string>): void {
-    for (const owner of starters.get(id) ?? []) {
-      const count = (children.get(owner) ?? 1) - 1;
-      if (count === 0) children.delete(owner);
-      else children.set(owner, count);
+  function remember(id: string, owners: Set<string>, visible: boolean): void {
+    const previous = starters.get(id);
+    if (previous?.visible) {
+      for (const owner of previous.owners) {
+        const count = (children.get(owner) ?? 1) - 1;
+        if (count === 0) children.delete(owner);
+        else children.set(owner, count);
+      }
     }
-    if (owners.size > 0) starters.set(id, owners);
+    if (owners.size > 0) starters.set(id, { owners, visible });
     else starters.delete(id);
-    for (const owner of owners) children.set(owner, (children.get(owner) ?? 0) + 1);
+    if (visible) for (const owner of owners) children.set(owner, (children.get(owner) ?? 0) + 1);
   }
 
-  const observe = ({ thread }: { thread: Thread }) => {
+  type Visibility = Pick<PluginThreadEventPayloads["thread.created"]["thread"], "visibility">;
+  const observe = ({ thread }: { thread: Thread & Visibility }) => {
     if (seeding) observed.add(thread.id);
     const owners = new Set<string>();
     if (thread.parentThreadId) owners.add(thread.parentThreadId);
     if (thread.lifecycleOwnerThreadId) owners.add(thread.lifecycleOwnerThreadId);
-    remember(thread.id, owners);
+    remember(thread.id, owners, thread.visibility === "visible");
   };
   bb.events.on("thread.created", observe);
   bb.events.on("thread.active", observe);
@@ -38,7 +42,7 @@ export async function cacheMemoryThreadRoles(bb: BbPluginApi) {
   });
   bb.events.on("thread.deleted", ({ thread }) => {
     if (seeding) observed.add(thread.id);
-    remember(thread.id, new Set());
+    remember(thread.id, new Set(), false);
     configured.delete(thread.id);
   });
 

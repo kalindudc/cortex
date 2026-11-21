@@ -5,6 +5,7 @@ import {
   type AddTaskInput,
   BodySearchError,
   ConflictError,
+  EditStatusError,
   MutationReuseError,
   mutationDigest,
   type ResourceKind,
@@ -13,6 +14,7 @@ import {
   type Task,
   type TaskStatus,
   validateAuthorTag,
+  validateEditNote,
   validateInitialExclusionReason,
   validateTagName,
   WriteGuardError,
@@ -519,6 +521,8 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
         bodySearch?: string;
         bodyReplace?: string;
         priority?: number | null;
+        note?: unknown;
+        unlessStatus?: unknown;
         guard?: unknown;
       },
     );
@@ -539,16 +543,39 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
     if (hasSearch && fields.bodySearch?.length === 0) {
       return c.json({ error: "bodySearch cannot be empty" }, 400);
     }
+    const { unlessStatus } = fields;
+    if (
+      unlessStatus !== undefined &&
+      (!Array.isArray(unlessStatus) ||
+        unlessStatus.length === 0 ||
+        !unlessStatus.every((v: unknown) => typeof v === "string" && isStatus(v)))
+    ) {
+      return c.json({ error: "unlessStatus must be a non-empty list of task statuses" }, 400);
+    }
+    let note: ReturnType<typeof validateEditNote>;
+    try {
+      note = validateEditNote(fields.note);
+      if (note && fields.title === undefined && !hasBody && !hasSearch && fields.priority === undefined) {
+        throw new Error("an edit note requires an editable field");
+      }
+    } catch (err) {
+      return c.json({ error: (err as Error).message }, 400);
+    }
     try {
       const { result, replayed } = mutate(guard, "task.edit", { id, body: fields }, () => {
-        const task = store.editTask(id, fields, guard as WriteGuard);
-        return { task, versions: versionsOf("task", id) };
+        const { update, ...task } = store.editTask(id, { ...fields, note, unlessStatus }, guard as WriteGuard);
+        return { task, ...(update ? { update } : {}), versions: versionsOf("task", id) };
       });
-      if (!replayed) publish("task.updated", result.task);
-      return answer(c, result.task, { ...result, replayed });
+      if (!replayed) {
+        publish("task.updated", result.task);
+        if (result.update) publish("update.posted", result.update);
+      }
+      const legacy = result.update ? { ...result.task, update: result.update } : result.task;
+      return answer(c, legacy, { ...result, replayed });
     } catch (err) {
       const failure = guardFailure(c, err);
       if (failure) return failure;
+      if (err instanceof EditStatusError) return c.json({ error: err.message, code: "edit_status_refused" }, 409);
       // Anchor-based partial edits surface as 409 Conflict so agents can
       // distinguish "my anchor is stale, re-read and retry" from "the task
       // doesn't exist" (404) or "my request is malformed" (400).
@@ -560,7 +587,9 @@ export function buildApp(store: Store, runtime: DaemonRuntime = createRuntime())
         if (err.matches !== undefined) payload.matches = err.matches;
         return c.json(payload, 409);
       }
-      return c.json({ error: (err as Error).message }, 404);
+      const msg = (err as Error).message;
+      if (!note || /^task \d+ not found$/.test(msg)) return c.json({ error: msg }, 404);
+      throw err;
     }
   });
 

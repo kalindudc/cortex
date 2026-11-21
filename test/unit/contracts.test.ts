@@ -170,7 +170,10 @@ describe("contracts: wire DTOs and clients (Task 5)", () => {
     expectTypeOf<CortexClient>().toMatchTypeOf<ApiClient>();
     expectTypeOf<ReturnType<CortexClient["workspace"]>>().toEqualTypeOf<Promise<WorkspaceSnapshot>>();
     expectTypeOf<ReturnType<CortexClient["taskState"]>>().toEqualTypeOf<Promise<TaskStateSnapshot>>();
-    expectTypeOf<ReturnType<CortexClient["versioned"]["editTask"]>>().toEqualTypeOf<Promise<TaskWriteResult>>();
+    expectTypeOf<Awaited<ReturnType<CortexClient["versioned"]["editTask"]>>>().toMatchTypeOf<TaskWriteResult>();
+    expectTypeOf<Awaited<ReturnType<CortexClient["versioned"]["editTask"]>>["update"]>().toEqualTypeOf<
+      Update | undefined
+    >();
     // Posting requires an author (the server has always rejected author-less posts).
     expectTypeOf<Parameters<ApiClient["postUpd"]>[1]["author"]>().toEqualTypeOf<string>();
   });

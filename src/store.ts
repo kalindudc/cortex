@@ -244,7 +244,25 @@ export type EditTaskFields = {
   bodySearch?: string;
   bodyReplace?: string;
   priority?: number | null;
+  note?: { author: string; summary: string };
+  unlessStatus?: readonly TaskStatus[];
 };
+
+export type EditedTask = Task & { update?: Update };
+
+export function validateEditNote(value: unknown): EditTaskFields["note"] {
+  if (value === undefined) return undefined;
+  if (value === null || typeof value !== "object" || !("author" in value) || !("summary" in value)) {
+    throw new Error("an edit note needs an author and summary");
+  }
+  const author = typeof value.author === "string" ? validateAuthorTag(value.author) : "";
+  if (!author) throw new Error("an edit note needs an author");
+  const { summary } = value;
+  if (typeof summary !== "string" || !summary.trim() || summary.length > 4096) {
+    throw new Error("an edit note summary must be non-blank and at most 4096 characters");
+  }
+  return { author, summary };
+}
 
 /**
  * `Store.readSnapshot` found no database file. Typed so callers decide what
@@ -420,6 +438,13 @@ export class BodySearchError extends Error {
     this.name = "BodySearchError";
     this.kind = kind;
     if (matches !== undefined) this.matches = matches;
+  }
+}
+
+export class EditStatusError extends Error {
+  constructor(id: number, status: TaskStatus) {
+    super(`task ${id} is ${status}`);
+    this.name = "EditStatusError";
   }
 }
 
@@ -2523,7 +2548,9 @@ export class Store {
    * calls stay last-writer-wins. Only values that actually change advance
    * their field token; any accepted write advances `entity`.
    */
-  editTask(id: number, fields: EditTaskFields, guard?: WriteGuard): Task {
+  editTask(id: number, fields: EditTaskFields, guard?: WriteGuard): EditedTask {
+    const note = validateEditNote(fields.note);
+    fields.unlessStatus?.forEach(assertTaskStatus);
     // Mutual-exclusion with `body` is enforced at the API layer (server.ts);
     // the store throws a generic Error too (defensive belt + braces).
     const anchored = fields.bodySearch !== undefined || fields.bodyReplace !== undefined;
@@ -2542,11 +2569,13 @@ export class Store {
     if (fields.title !== undefined) changed.push("title");
     if (fields.body !== undefined || anchored) changed.push("body");
     if (fields.priority !== undefined) changed.push("priority");
+    if (note && changed.length === 0) throw new Error("an edit note requires an editable field");
     const expected = this.parseGuard(guard, "a task", TASK_SCOPES, changed);
     return this.db.transaction(() => {
       const existing = this.getTask(id);
       if (!existing) throw new Error(`task ${id} not found`);
       this.assertVersions("task", id, expected);
+      if (fields.unlessStatus?.includes(existing.status)) throw new EditStatusError(id, existing.status);
       // Resolve bodySearch/bodyReplace into a concrete body string inside the
       // same transaction so the read-then-splice-then-write is atomic against
       // any concurrent writer.
@@ -2597,9 +2626,10 @@ export class Store {
       }
       if (fields.priority !== undefined && fields.priority !== existing.priority) bumped.push("priority");
       this.bump("task", id, bumped);
+      const update = note ? this.addUpdate({ task_id: id, ...note }) : undefined;
       const full = this.getTask(row.id);
       if (!full) throw new Error(`task ${id} not found`);
-      return full;
+      return update ? { ...full, update } : full;
     })();
   }
 

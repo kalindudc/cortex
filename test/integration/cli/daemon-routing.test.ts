@@ -250,6 +250,26 @@ describe("a verified daemon serves every command", () => {
       expect(listed.map(t => t.title)).toEqual(["via the daemon"]);
       const shown = JSON.parse(await ok(env, "show", String(created.id), "--json")) as { task: Task };
       expect(shown.task.status).toBe("blocked");
+
+      const edited = JSON.parse(
+        await ok(
+          env,
+          "edit",
+          String(created.id),
+          "--title=Atomic edit",
+          "--message=Verified on the daemon",
+          "--as=agent-1",
+          "--unless-status=review,done",
+          "--json",
+        ),
+      ) as Task & { update: { id: number; author: string; summary: string } };
+      await waitFor("the edit's task.updated", () =>
+        stream.frames.find(f => f.event === "task.updated" && (JSON.parse(f.data) as Task).title === edited.title),
+      );
+      const published = await waitFor("the edit's update.posted", () =>
+        stream.frames.find(f => f.event === "update.posted" && JSON.parse(f.data).id === edited.update.id),
+      );
+      expect(JSON.parse(published.data)).toMatchObject({ summary: "Verified on the daemon", author: "agent-1" });
       expect(leaseIsFree(db)).toBe(false);
       expect(isRunning(daemon)).toBe(true);
     } finally {

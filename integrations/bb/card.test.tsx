@@ -106,25 +106,60 @@ test("groups a bounded list by receipt and names the actor relative to the messa
   const slot = card({ ids: "3,2,1,4,5,6,7,8,9,10,11,12,13,14,1" }, {
     task: ({ taskId: id }) => {
       const d = detail(id, id === 2 ? OTHER : THREAD);
-      if (id === 2) d.updates.push({
-        id: 42, author: `bb-${OTHER}`, summary: "Verified again", body: null, kind: "note",
+      if (id === 2 || id === 4) d.updates.push({
+        id: 42, author: `bb-${id === 2 ? OTHER : THREAD}`, summary: "Verified again", body: null, kind: "note",
         created: Date.now() - 5000, revision: true,
       });
       if (id === 3) {
         d.task.memoryExcluded = true;
         d.task.memoryExclusion = { excluded_by: `bb-${THREAD}`, reason: "Just a temporary document", excluded_at: Date.now() };
       }
+      if (id === 5) {
+        d.task.memoryExcluded = true;
+        d.task.memoryExclusion = { excluded_by: `bb-${OTHER}`, reason: "Another thread curated this", excluded_at: Date.now() };
+      }
+      if (id === 6) {
+        d.updates[0].author = `bb-${OTHER}`;
+        d.updates.push({
+          id: 42, author: `bb-${THREAD}`, summary: "Ordinary update", kind: "note", body: null, created: Date.now(),
+        });
+      }
       return d;
     },
   });
   expect(await slot.findByText("14 tasks")).toBeTruthy();
-  expect(await slot.findByText("Saved · 10")).toBeTruthy();
+  expect(await slot.findByText("Saved · 7")).toBeTruthy();
   expect(slot.getByText("Revised · 1")).toBeTruthy();
   expect(slot.getByText("Curated · 1")).toBeTruthy();
-  expect(slot.getByText("Research · Other thread")).toBeTruthy();
   expect(slot.getByText("Excluded · this thread")).toBeTruthy();
+  const rows = slot.getAllByRole("listitem");
+  expect(rows.slice(-3).map(row => row.textContent)).toEqual([
+    expect.stringContaining("Title 2"), expect.stringContaining("Title 5"), expect.stringContaining("Title 6"),
+  ]);
+  expect(rows.at(-1)?.closest("section")).toBeNull();
   expect(slot.getByText("2 more")).toBeTruthy();
   expect(calls(slot, "task")).toHaveLength(12);
   fireEvent.click(slot.getByRole("button", { name: "Open task 3" }));
   expect(slot.inspection.experimental_panelCalls).toHaveLength(1);
+});
+
+test("caps the actor label and keeps the full title and actor available", async () => {
+  const actor = "An extremely long thread title that should not fill the whole task row";
+  const d = detail(7, OTHER);
+  d.authors[`bb-${OTHER}`]!.label = actor;
+  d.task.title = "Cortex ships only the cortex and cortex-research skills";
+  const slot = card({ ids: "7" }, { task: () => d });
+  const row = await slot.findByRole("listitem");
+  expect(row.textContent).toContain(d.task.title);
+  expect(row.textContent).not.toContain(actor);
+  expect(within(row).getByTitle(actor).textContent).toContain("…");
+});
+
+test("a task created excluded was saved, not curated", async () => {
+  const d = detail(7);
+  d.task.memoryExcluded = true;
+  d.task.memoryExclusion = { excluded_by: `bb-${THREAD}`, excluded_at: d.task.created, reason: "Saved excluded by its author" };
+  const slot = card({ ids: "7" }, { task: () => d });
+  expect(await slot.findByText("Saved · 1")).toBeTruthy();
+  expect(slot.queryByText(/Curated/)).toBeNull();
 });

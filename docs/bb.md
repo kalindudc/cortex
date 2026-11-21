@@ -102,31 +102,30 @@ Open the Cortex tab from the thread panel, task shortcut or a `::cortex{id="529"
 tasks the thread updated and any manually linked by search or ID. Pin a focus task or follow the most active one.
 A task the thread posted to cannot be unlinked; removing a manual link does not delete the task.
 
-Overview folds the body; Activity shows updates and source threads. Cards in agent replies show who saved, revised
-or curated a task and when. Open a task, change status, or exclude or include it without supplying a reason.
-The task tab still shows progress and source checks; Files unchanged is not factual verification.
+Overview folds the body; Activity shows source threads and updates. Cards show receipts and let you open a task,
+change status or curate without a reason. The task tab shows progress and source checks, not factual verification.
 
 ## What agents receive
 
-Ordinary memory works in connected sections too. Under Automatic, threads you start and child leads (threads that
-started other threads) get a primer and save turns. Other delegates can save and curate manually. Explicit Look up
-only omits document tools and save turns; Off also omits recall. Progress updates remain available in all modes.
-Document tools save verified, sourced material, revise it by exact text and curate with a reason. A new document
-over the lane budget is still saved excluded with the reason. Excluded tasks can still be opened by id.
+Under Automatic, threads you start and delegates with visible children get a primer and save turns. Hidden
+helpers do not make a lead. Other delegates save and curate manually. Look up only omits document tools and save
+turns; Off also omits recall. Progress updates work in all modes. Revisions commit their attributed summary
+with the edit and refuse tasks in review or done. Excluded saves record a reason; you can still open them by id.
+
+A lead may get a fold checkpoint without changing files. It names member reports already in context and asks
+the lead to revise a matching stream, create one verified stream, or save nothing for routine or saved findings.
 
 Briefs carry human-approved claims, IDs, revisions and source refs; only nondefault scope, expiry and provenance add
 fields. Explicit ID recall keeps full metadata and captured evidence within its output budget.
 
-Bound threads also receive scoped context and can propose sourced findings or report corrections; they cannot approve
-or grant sharing through these agent tools. Their scope comes from the executing thread, not caller-supplied
-workstream or actor fields. Claude Code receives the Cortex skills from the plugin; other providers read their
-installed skills. The pi extension steps aside in a bb thread so memory is not injected twice.
+Bound threads can propose sourced findings or corrections, not approve them or grant sharing. Scope comes from
+the thread, not tool arguments. Claude Code gets skills from the plugin; others read installed skills. The pi
+extension steps aside in bb to avoid injecting memory twice.
 
 ## Under the hood
 
-The independent npm package is `integrations/bb/`; it uses only the public SDK, Node and declared dependencies.
-It reads canonical tasks and workstream knowledge through the Cortex CLI, never through Cortex's database.
-`src/bbPluginSource.ts` embeds the plugin at build time; tests compare its bundled files with the source.
+The independent npm package `integrations/bb/` uses the public SDK, Node and declared dependencies. It reads tasks
+and knowledge only through the CLI. `src/bbPluginSource.ts` embeds it at build time; tests compare bundled files.
 
 - `workstream-contract.ts` validates RPC and CLI boundaries. `workstream-cli.ts` uses the current-entry command for
   canonical knowledge, not the oldest history revision. JSON mutations use stdin and `--input=-`.
@@ -136,12 +135,13 @@ It reads canonical tasks and workstream knowledge through the Cortex CLI, never 
 - `workstream-agents.ts` prepares scope at dispatch, caches configuration and registers read/propose tools. Dispatch
   checks scope revisions, not cache identity; a run's late idle notice ends only older preparation. A brief that
   cannot be delivered never blocks a message: the thread runs without it and its instructions say why.
-- `cli.ts` validates CLI output; `state.ts` retains task links, source checks and project primers;
-  `watch.ts` invalidates reads. `memory-writes.ts` reserves hourly thread slots; `memory-write-store.ts` persists
-  rolling lane slots and exact replay receipts in plugin storage, not in the Cortex database.
+- `cli.ts` validates CLI output, `state.ts` caches links, checks and primers, and `watch.ts` invalidates reads.
+  `memory-writes.ts` caps hourly writes; `memory-write-store.ts` stores lane slots and exact replay receipts.
 - `draft-service.ts` owns durable helper intent and recovery; `draft-validation.ts` verifies sources and suggestions.
-- `turns.ts` retains cued/first-user lookup, the narrower starting-thread path for children, and at most one save turn
-  per eligible request. Workstream routing does not rewrite generic Cortex memory ranking.
+- `memory-threads.ts` counts only visible children by parent or lifecycle owner. `turns.ts` keeps cued/first-user
+  lookup and the starting-thread path for children. One save turn may follow a successful writer request with no
+  memory write or queued message. File changes take priority over folding; `integrations/bb/turns.ts#TURN_LIMITS`
+  bounds pending report ids and lengths and sets the fold cooldown. Workstream routing leaves ordinary ranking alone.
 - `app.tsx`, `ui/` and `panel/` use host UI and theme. Shared reads use public host identity, not per-hook RPC clients;
   only affected views refresh, preserving successful content and in-progress edits.
 

@@ -67,6 +67,38 @@ describe("cortex agent JSON contract", () => {
     expect(out.status).toBe("review");
   });
 
+  test("edit --message and --unless-status bind the audit row and guard to the edit", async () => {
+    const task = JSON.parse((await cli("add", "Before atomic edit", "--json")).stdout);
+    const id = String(task.id);
+    const options = ["--message=- Confirmed the source", "--as=impl-abcd1234", "--unless-status=review,done", "--json"];
+    for (const flags of [
+      ["--message=No author"],
+      ["--as=impl-abcd1234"],
+      ["--unless-status=typo"],
+      ["--unless-status=review,done", "--add-tag=must-not-land"],
+    ]) {
+      expect((await cli("edit", id, "--title=Must not land", "--json", ...flags)).code).toBe(1);
+    }
+    const preEdit = JSON.parse((await cli("show", id, "--json")).stdout);
+    expect(preEdit).toMatchObject({ task: { title: "Before atomic edit", tags: [] }, updates: [] });
+    const edit = await cli("edit", id, "--title=After atomic edit", ...options);
+    expect(edit.code).toBe(0);
+    const { update } = JSON.parse(edit.stdout);
+    expect(update).toMatchObject({ summary: "- Confirmed the source", author: "impl-abcd1234" });
+
+    expect((await cli("update", id, "-s", "review", "-m", "Ready for review", "--as=impl-abcd1234")).code).toBe(0);
+    const before = JSON.parse((await cli("show", id, "--json")).stdout);
+    const refused = await cli("edit", id, "--title=Must not land", ...options);
+    expect(refused.code).toBe(1);
+    expect(JSON.parse(refused.stdout)).toMatchObject({
+      error: { code: "edit_status_refused", message: `task ${id} is review` },
+    });
+    const after = JSON.parse((await cli("show", id, "--json")).stdout);
+    expect(after).toEqual(before);
+    expect(after.task.title).toBe("After atomic edit");
+    expect(after.updates).toContainEqual(update);
+  });
+
   test("edit ambiguous anchor --json → body_search_ambiguous with matches", async () => {
     const a = JSON.parse((await cliIn("dup\ndup\n", "add", "amb", "--body-file", "-", "--json")).stdout);
     const r = await cli("edit", String(a.id), "--body-search", "dup", "--body-replace", "x", "--json");

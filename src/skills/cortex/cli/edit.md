@@ -23,7 +23,18 @@ cortex edit <id> -t "<new title>" --json   # prints the edited task as JSON
 
 # Combined: title + partial body edit in one atomic call
 cortex edit <id> -t "<new title>" --body-search "..." --body-replace "..."
+
+# Edit, post the attributed summary, and refuse if the task is in review or done:
+cortex edit <id> -t "<new title>" --message="<summary>" --as="<author>" --unless-status=review,done
 ```
+
+## Attributed and status-guarded edits
+
+`--message` and `--as` go together. The edit and its attributed update commit together or not at all. With
+`--json`, the edited task includes an `update` field when a summary was posted. `--unless-status` accepts a
+comma-separated list and checks the task's current status inside the edit's transaction. It also works without a
+message. These options apply to title, body, and priority; edit tags separately. If a running older daemon cannot
+enforce the options, Cortex refuses the command and asks you to stop and restart the daemon.
 
 ## Clearing priority
 
@@ -46,12 +57,14 @@ Anchor-based search/replace makes the existing body content part of the operatio
 | `--body-search` without `--body-replace` (or vice versa) | 400 | non-zero | `--body-search and --body-replace must be used together` |
 | Combined with `-b` or `--body-file` | 400 | non-zero | `--body-search/--body-replace cannot be combined with -b or --body-file` |
 | Empty `--body-search` | 400 | non-zero | `--body-search cannot be empty` |
+| Status blocked by `--unless-status` | 409 | non-zero | `task <id> is <status>` |
 | Task missing | 404 | non-zero | `task <id> not found` |
 
 On 409, the server response body includes a machine-readable `code`:
 
 - `body_search_not_found`
 - `body_search_ambiguous` (with `matches: N`)
+- `edit_status_refused` (nothing was written)
 
 The CLI surfaces the SAME codes with `--json`, on both the daemon and direct-store paths: a failed edit prints `{ "error": { "code": "body_search_ambiguous", "message": "...", "matches": 2 } }` to stdout and exits 1. Branch on `code` (not the exit code) to decide whether to re-read + refine the anchor (`body_search_not_found`) or broaden it (`body_search_ambiguous`).
 

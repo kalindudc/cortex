@@ -329,6 +329,8 @@ export interface EditTaskRequest {
   bodySearch?: string;
   bodyReplace?: string;
   priority?: number | null;
+  note?: { author: string; summary: string };
+  unlessStatus?: readonly TaskStatus[];
 }
 
 /** PATCH /api/tasks/:id/status. An `author` marks an attributed (agent) change, which notifies. */
@@ -406,7 +408,7 @@ export interface ApiClient {
   migrations(): Promise<{ pending: string[] }>;
   backup(request?: BackupRequest): Promise<BackupResult>;
   addTask(request: CreateTaskRequest): Promise<Task>;
-  editTask(id: number, request: EditTaskRequest): Promise<Task>;
+  editTask(id: number, request: EditTaskRequest): Promise<Task & { update?: Update }>;
   moveLane(id: number, lane: string): Promise<Task>;
   delTask(id: number): Promise<void>;
   postUpd(id: number, request: PostUpdateRequest): Promise<Update>;
@@ -431,7 +433,7 @@ export interface ApiClient {
 /** Writes that opt into versioned results (`Prefer: cortex-versioned`) and may carry a WriteGuard. */
 export interface VersionedWrites {
   addTask(request: CreateTaskRequest, guard?: WriteGuard): Promise<TaskWriteResult>;
-  editTask(id: number, request: EditTaskRequest, guard?: WriteGuard): Promise<TaskWriteResult>;
+  editTask(id: number, request: EditTaskRequest, guard?: WriteGuard): Promise<TaskWriteResult & { update?: Update }>;
   setStatus(id: number, request: StatusRequest, guard?: WriteGuard): Promise<TaskWriteResult>;
   moveTask(id: number, lane: string, guard?: WriteGuard): Promise<TaskWriteResult>;
   changeTags(id: number, request: TagChangeRequest, guard?: WriteGuard): Promise<TaskWriteResult>;

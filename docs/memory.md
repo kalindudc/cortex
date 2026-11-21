@@ -64,14 +64,13 @@ can curate with an attributed reason. Reading by id still works; a live pi prime
 
 ## When is memory stale?
 
-Only a body edit re-syncs a stream. Updates and status changes posted since are listed with it, for the agent to
-fold into State and Next. Each time a stream is loaded, cortex checks it against your checkout:
+Only a body edit re-syncs a stream. Later updates and status changes are listed for the agent to fold in.
+In bb, a revision commits its attributed summary with the edit and refuses tasks in review or done.
+Cortex checks a stream against your checkout each time you load it:
 
 - fresh: nothing it cites changed since the re-sync; the agent continues from Next.
-- stale: a file under Files changed or vanished, or the body has not been re-synced in a long time. The agent
-  re-reads those files, fixes the body and refreshes `Verified:` before relying on it.
-- unverifiable: there is no git checkout, or most cited files are not in it (the stream is about another repo).
-  The agent verifies in the right place first.
+- stale: a cited file changed or vanished, or the sync is old. Re-read files, fix the body and refresh `Verified:`.
+- unverifiable: no checkout or most cited files are missing. Verify in the right checkout first.
 
 ## What you see in pi
 
@@ -89,15 +88,15 @@ Only the session you type into writes memory; headless ones (delegated agents, `
 - At most one memory lookup per prompt, and none after the first unless the prompt asks about earlier work.
 - The primer stays byte-identical until compaction or `/memory refresh`, so your provider's prompt cache holds.
 - `cortex_recall` has a small per-request budget and answers a repeated query without searching again.
-- At most one extra "memory checkpoint" turn per request, only when the agent changed files and saved nothing.
+- At most one memory checkpoint per request: a writer saved nothing and changed files or, in bb, has reports to
+  fold from visible, non-draft children. See [bb memory modes and tools](bb.md#what-agents-receive).
 - Lookups grow with the number of streams, not with their updates: each task's updates are read through an index.
 - Nothing leaves your machine through cortex: search runs on the local database, and hits go only to your agent.
 
 ## Under the hood
 
-`src/memory.ts` holds the helpers and never opens the Store; the index and ranking live in `src/store.ts`; roles
-exist only in the pi extension. Budgets are named symbols: `src/memory.ts#MEMORY_LIMITS`, the constants atop
-`src/extensions/pi.ts`, and BM25 weights inline in `src/store.ts#searchMemory`.
+`src/memory.ts` never opens the Store. See `src/store.ts#searchMemory` for ranking and weights, and
+`src/memory.ts#MEMORY_LIMITS` and the constants atop `src/extensions/pi.ts` for budgets.
 
 ### The index: derived, lazy, reconciled on read
 
@@ -188,8 +187,9 @@ pure functions of state and theme in `src/extensions/memory-view.ts`, installed 
 - Staleness runs in the CLI, never the daemon, and git never inside `withClient`: `src/commands/memory.ts`,
   exercised on a real checkout by `test/integration/cli/memory.test.ts`.
 - The lane boosts, never filters by default: `test/unit/store-memory.test.ts`, `test/unit/memory-eval.test.ts`.
-- Reading a stream never makes it focus; bb agent revisions refuse tasks in review or done:
-  `test/unit/extensions-pi.test.ts`, `integrations/bb/memory-writes.test.ts`.
+- Reading a stream never makes it focus: `test/unit/extensions-pi.test.ts`. Revisions commit with their summary
+  and check status inside the write: `test/unit/store.test.ts`, `integrations/bb/memory-writes.test.ts`.
+- Hidden children cannot grant writer mode or supply fold reports: `integrations/bb/server.test.ts`.
 - Bounded spawns (one lookup per prompt, one checkpoint turn per request, one `cortex ls --json` per `/memory`), a
   byte-identical primer, and tool failures that throw: `test/unit/extensions-pi.test.ts`.
 - The footer and `/memory` render only through `src/extensions/memory-view.ts`, stored text passing

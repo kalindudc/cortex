@@ -16,6 +16,7 @@ import {
   publishDaemonMetadata,
   recoverStaleDaemonState,
   removeDaemonMetadata,
+  requireAtomicEdit,
   requireMemoryWrites,
   stopDaemon,
   withClient,
@@ -232,6 +233,13 @@ test("memory writes refuse a verified daemon without the feature, but allow the 
   );
   expect(() => requireMemoryWrites({ daemon: identityFor(db) })).not.toThrow();
   expect(() => requireMemoryWrites({ daemon: null })).not.toThrow();
+});
+
+test("atomic edits refuse an old daemon, even one that supports attributed memory exclusion", () => {
+  const older = identityFor(db, { capabilities: ["control.shutdown", "memory.attributed-writes"] });
+  expect(() => requireAtomicEdit({ daemon: older })).toThrow("run `cortex stop`");
+  expect(() => requireAtomicEdit({ daemon: identityFor(db) })).not.toThrow();
+  expect(() => requireAtomicEdit({ daemon: null })).not.toThrow();
 });
 
 // ---------- discovery ----------

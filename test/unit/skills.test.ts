@@ -121,6 +121,7 @@ const CORTEX_TERMS = new Set([
   "bad_request",
   "body_search_not_found",
   "body_search_ambiguous",
+  "edit_status_refused",
   "task_tags",
   "task_count",
   "memory_excluded",

@@ -237,18 +237,19 @@ async function setup(
       }),
     });
   };
+  type ReportFixture = { text: string; thread?: Partial<ReturnType<typeof makeThreadResponse>> };
   /** The request's completed items and its turn end, then the thread turns idle. */
-  const finish = (threadId: string, items: Array<Record<string, unknown>> = [], status = "completed") => {
+  const finish = (threadId: string, items: Array<Record<string, unknown>> = [], status = "completed", report?: ReportFixture) => {
     for (const item of items) push(threadId, "item/completed", { item });
     push(threadId, "turn/completed", { status });
     const providerId = live.get(threadId)?.providerId ?? "codex";
     live.set(threadId, { status: "idle", providerId });
-    return idle(threadId);
+    return idle(threadId, report);
   };
-  const idle = (threadId: string) =>
+  const idle = (threadId: string, report?: ReportFixture) =>
     harness.behavior.emitThreadEvent("thread.idle", {
-      thread: makeThreadResponse({ id: threadId, projectId: PROJECT, ...starter(threadId) }),
-      lastAssistantText: null,
+      thread: makeThreadResponse({ id: threadId, projectId: PROJECT, ...starter(threadId), ...report?.thread }),
+      lastAssistantText: report?.text ?? null,
     });
   /** Holds every environment lookup until the returned release is called. */
   const hold = (): (() => void) => {
@@ -489,6 +490,14 @@ describe("agent document tools", () => {
         { author: `bb-${CHILD}`, summary: "Excluded from memory: This was a temporary document" },
       ],
     });
+  });
+
+  test("a 0.110.0 CLI cannot silently drop the revision summary and guard", async () => {
+    const s = await setup({ fixture: { ...baseFixture(), oldAtomicEdit: true } });
+    await expect(s.harness.behavior.callAgentTool("cortex_note", {
+      task_id: 1, title: "Better title", summary: "Checked the source",
+    }, { threadId: THREAD })).rejects.toThrow(/Update Cortex/);
+    expect(s.argvs().some(argv => argv[0] === "edit")).toBe(false);
   });
 
   test("an older CLI retains recall and updates without exposing an unsafe write", async () => {
@@ -1234,9 +1243,15 @@ describe("memory", () => {
     expect(pi.instructions).toContain("<cortex_memory>");
   });
 
-  test("child leads by parent or lifecycle owner get save turns at their next configure", async () => {
+  test("only visible children by parent or lifecycle owner make a child lead at the next configure", async () => {
     const workflow = makeThreadResponse({ id: WORKFLOW, projectId: PROJECT, lifecycleOwnerThreadId: THREAD });
-    const s = await setup({ fixture: noStreams(), knownThreads: [workflow] });
+    const flare = makeThreadResponse({
+      id: "thr_flare123", providerId: "flare", visibility: "hidden", parentThreadId: WORKFLOW,
+    });
+    const s = await setup({ fixture: noStreams(), knownThreads: [workflow, flare] });
+    await s.harness.behavior.emitThreadEvent("thread.created", {
+      thread: makeThreadResponse({ id: "thr_draft123", visibility: "hidden", lifecycleOwnerThreadId: WORKFLOW }),
+    });
     await warm(s);
     expect((await s.resolve("codex", { thread: { id: WORKFLOW } })).instructions).not.toContain("<cortex_memory>");
     expect(await memory(s, WORKFLOW)).toMatchObject({ child: true, mode: "read" });
@@ -1374,6 +1389,139 @@ function noStreams(): FakeFixture {
   fixture.streams = {};
   return fixture;
 }
+
+describe("fold checkpoint", () => {
+  const evidence = "Verified source data. ".padEnd(1000, "x");
+  const report = async (
+    s: Setup,
+    threadId = CHILD,
+    text = evidence,
+    status = "completed",
+    thread?: Partial<ReturnType<typeof makeThreadResponse>>,
+  ) => {
+    await s.request(threadId, "Check the fixture", { initiator: "agent" });
+    await s.finish(threadId, [], status, { text, thread });
+  };
+  const completeLead = async (s: Setup, items: Array<Record<string, unknown>> = [], status = "completed") => {
+    await s.request(THREAD, "Read the member reports", { initiator: "agent" });
+    await s.finish(THREAD, items, status);
+  };
+  const prompts = (s: Setup) => s.sent.map(send => String(send.input[0]?.text));
+
+  test("folds visible parent and workflow reports once, without repeating their text", async () => {
+    const s = await setup({ fixture: noStreams() });
+    await report(s);
+    await report(s, WORKFLOW, evidence + "!");
+    expect(s.sent).toHaveLength(0);
+    await completeLead(s);
+    expect(s.sent).toEqual([{ threadId: THREAD, mode: "start", input: [agentOnlyText(expect.stringMatching(/^Memory checkpoint/))] }]);
+    const [prompt] = prompts(s);
+    expect(prompt).toContain(`@thread:${CHILD} (1000 characters)`);
+    expect(prompt).toContain(`@thread:${WORKFLOW} (1001 characters)`);
+    expect(prompt).toContain("already have");
+    expect(prompt).not.toContain(evidence);
+    expect(prompt.match(/^- (\w+):/gm)).toEqual(["- UPDATE:", "- CREATE:", "- NOTHING:"]);
+    expect(prompt).toContain("cortex_note");
+    await s.idle(THREAD);
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 31 * 60_000);
+    disposers.push(() => { clock.mockRestore(); });
+    await completeLead(s);
+    expect(s.sent).toHaveLength(1);
+  });
+
+  test("ignores short, hidden, private draft, failed and unowned answers and an idle without a new request", async () => {
+    const s = await setup({ fixture: noStreams() });
+    await report(s, CHILD, evidence.slice(1));
+    await s.idle(CHILD, { text: evidence });
+    await report(s, CHILD, evidence, "completed", { visibility: "hidden", providerId: "flare" });
+    await report(s, CHILD, evidence, "completed", { visibility: "hidden", originPluginId: "cortex" });
+    await report(s, CHILD, evidence, "failed");
+    await report(s, WORKFLOW, evidence, "interrupted");
+    await report(s, OTHER);
+    await completeLead(s);
+    expect(s.sent).toHaveLength(0);
+  });
+
+  test("defers while the lead is not writing, has queued messages, failed, wrote memory, or earned a file checkpoint", async () => {
+    const s = await setup({ fixture: noStreams() });
+    await report(s);
+    for (const memoryMode of ["read", "off"]) {
+      s.metadata.set(THREAD, { memoryMode });
+      await completeLead(s);
+    }
+    s.metadata.set(THREAD, { cortexDraftWorker: { forged: true } });
+    await completeLead(s);
+    s.metadata.delete(THREAD);
+    s.queued.set(THREAD, [{ id: "queued-1" }]);
+    await completeLead(s);
+    s.queued.delete(THREAD);
+    await completeLead(s, [], "failed");
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 1000);
+    disposers.push(() => { clock.mockRestore(); });
+    await completeLead(s, THREE_FILES);
+    expect(prompts(s)).toEqual([expect.stringContaining("This request changed files")]);
+    await s.idle(THREAD);
+    await completeLead(s);
+    expect(prompts(s)).toEqual([expect.stringContaining("This request changed files"), expect.stringContaining(`@thread:${CHILD}`)]);
+  });
+
+  test("a request that wrote memory clears the reports it could see and keeps one that arrived during it", async () => {
+    const s = await setup({ fixture: noStreams() });
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+    disposers.push(() => { clock.mockRestore(); });
+    await report(s);
+    clock.mockReturnValue(now + 1000);
+    await s.request(THREAD, "Read the member report");
+    clock.mockReturnValue(now + 2000);
+    await report(s, WORKFLOW);
+    await s.harness.behavior.callAgentTool("cortex_update", { task_id: 1, message: "Folded by hand" }, { threadId: THREAD });
+    await s.finish(THREAD);
+    expect(s.sent).toHaveLength(0);
+    clock.mockReturnValue(now + 3000);
+    await completeLead(s);
+    expect(prompts(s)).toHaveLength(1);
+    expect(prompts(s)[0]).toContain(`@thread:${WORKFLOW}`);
+    expect(prompts(s)[0]).not.toContain(`@thread:${CHILD}`);
+  });
+
+  test("curating alone does not count as saving the work", async () => {
+    const s = await setup({ fixture: noStreams() });
+    await s.request(THREAD, "Tidy memory and change three files");
+    await s.harness.behavior.callAgentTool(
+      "cortex_curate",
+      { task_id: 1, memory: "exclude", reason: "Stale fixture task for the test" },
+      { threadId: THREAD },
+    );
+    await s.finish(THREAD, THREE_FILES);
+    expect(prompts(s)).toEqual([expect.stringContaining("This request changed files")]);
+  });
+
+  test("keeps at most ten pending reports, only the latest from a thread, and waits 30 minutes between prompts", async () => {
+    const s = await setup({ fixture: noStreams() });
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+    disposers.push(() => { clock.mockRestore(); });
+    for (let i = 10; i < 21; i++) {
+      await report(s, `thr_member${i}`, evidence, "completed", { parentThreadId: THREAD });
+    }
+    await report(s, "thr_member11", evidence + "!", "completed", { parentThreadId: THREAD });
+    await completeLead(s);
+    const [first] = prompts(s);
+    expect(first).not.toContain("@thread:thr_member10");
+    expect(first.match(/@thread:thr_member/g)).toHaveLength(10);
+    expect(first).toContain("@thread:thr_member11 (1001 characters)");
+    await s.idle(THREAD);
+    await report(s);
+    clock.mockReturnValue(now + 30 * 60_000 - 1);
+    await completeLead(s);
+    expect(s.sent).toHaveLength(1);
+    clock.mockReturnValue(now + 30 * 60_000);
+    await completeLead(s);
+    expect(prompts(s).at(-1)).toContain(`@thread:${CHILD}`);
+    expect(s.sent).toHaveLength(2);
+  });
+});
 
 describe("save turn", () => {
   test("a writer request that changed three files and saved nothing gets ONE agent-only checkpoint turn", async () => {

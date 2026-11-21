@@ -53,6 +53,21 @@ const curatedTask = savedTask.extend({ changed: z.boolean() });
 const similarTasks = z.object({
   hits: z.array(z.object({ id: taskId, title: z.string(), lane: z.string() })),
 });
+const revisedTask = savedTask.extend({ update: z.object({ id: taskId }) });
+const TITLE_STOP_WORDS = new Set(
+  ("the and for are but not you your our its his her they their this that these those " +
+    "with from into onto over under about after before then than there here when where what which who why how " +
+    "all any both each few more most other some such only own same very too can could would should will may " +
+    "was were been being have has had does did just also now yet still please thanks").split(" "),
+);
+const titleWords = (title: string): Set<string> =>
+  new Set((title.toLowerCase().match(/\p{L}{3,}/gu) ?? []).filter(word => !TITLE_STOP_WORDS.has(word)));
+
+function similarTitle(words: ReadonlySet<string>, title: string): boolean {
+  const other = titleWords(title);
+  const shared = [...other].filter(word => words.has(word)).length;
+  return shared > 0 && (shared * 2 >= words.size || shared === other.size);
+}
 type SavedTask = z.infer<typeof savedTask>;
 type Call = { threadId: string; child: boolean; signal: AbortSignal };
 type Action = "create" | "revise" | "curate";
@@ -76,6 +91,7 @@ export function createMemoryWrites(
     runner: CortexRunner;
     state: Pick<CortexState, "locate" | "laneFor">;
     paused: () => boolean;
+    atomicEdit: boolean;
     changed: (threadId: string, task: SavedTask, focus: boolean) => void;
     clock?: () => number;
   },
@@ -176,7 +192,8 @@ export function createMemoryWrites(
         }
         const excluded = input.memory === "exclude" || why !== null;
         const exclusionReason = why === DAILY ? "Saved excluded: the lane's daily memory budget is used"
-          : why === PAUSED ? "Saved excluded: the memory pause is on" : null;
+          : why === PAUSED ? "Saved excluded: the memory pause is on"
+          : input.memory === "exclude" ? "Saved excluded by its author" : null;
         const tags = [...new Set([input.kind, ...(input.tags ?? [])])].join(",");
         // A dispatched write settles even if the requester leaves, so the receipt can be recorded.
         task = await runner.run(
@@ -196,13 +213,16 @@ export function createMemoryWrites(
       store.record(digest, task.id, task.created, clock(), why);
       changed(call.threadId, task, true);
       const result = `Saved ${describeState(task, why)}`;
+      const words = titleWords(input.title);
+      if (words.size === 0) return withTaskCard(result, task.id);
       try {
         const { hits } = await runner.run(
-          ["memory", "search", `--boost=${lane}`, "--limit=3", "--json", "--", input.title],
+          ["memory", "search", `--boost=${lane}`, "--limit=12", "--json", "--", input.title],
           similarTasks,
           { signal: call.signal },
         );
-        const others = hits.filter(hit => hit.id !== task.id).slice(0, 3);
+        const others = hits.filter(hit => hit.id !== task.id && similarTitle(words, hit.title))
+          .sort((a, b) => Number(b.lane === lane) - Number(a.lane === lane)).slice(0, 3);
         if (others.length === 0) return withTaskCard(result, task.id);
         return withTaskCard([
           result,
@@ -217,34 +237,37 @@ export function createMemoryWrites(
   }
 
   async function revise(input: z.infer<typeof reviseInput>, call: Call): Promise<string> {
-    return serialized(`task:${input.task_id}`, async () => {
-      const existing = await show(input.task_id, call.signal);
-      if (existing.status === "review" || existing.status === "done") {
-        throw new Error(`@${input.task_id} is ${existing.status}; post a cortex_update instead of revising it. ${NO_SHELL}`);
-      }
-      if (paused() && !existing.memory_excluded) {
-        throw new Error(`Cannot revise @${input.task_id} while memory is paused; post a cortex_update instead. ${NO_SHELL}`);
+    if (!deps.atomicEdit) {
+      throw new Error(`Update Cortex to revise tasks with an attributed summary. ${NO_SHELL}`);
+    }
+    const id = input.task_id;
+    return serialized(`task:${id}`, async () => {
+      const refusal = (status: string) => new Error(`@${id} is ${status}; post a cortex_update instead of revising it. ${NO_SHELL}`);
+      if (paused()) {
+        const existing = await show(id, call.signal);
+        if (existing.status === "review" || existing.status === "done") throw refusal(existing.status);
+        if (!existing.memory_excluded) {
+          throw new Error(`Cannot revise @${id} while memory is paused; post a cortex_update instead. ${NO_SHELL}`);
+        }
       }
       const release = reserveHour(call, "revise");
-      const args = ["edit", String(input.task_id), "--json"];
+      const args = ["edit", String(id), "--json", `--message=${input.summary}`, `--as=bb-${call.threadId}`, "--unless-status=review,done"];
       if (input.title !== undefined) args.push(`--title=${input.title}`);
       // citty coerces values on kebab-case spellings that are not its declared string keys.
       if (input.search !== undefined) args.push(`--bodySearch=${input.search}`, `--bodyReplace=${input.replace}`);
-      let task: SavedTask;
+      let task: z.infer<typeof revisedTask>;
       try {
-        task = await runner.run(args, savedTask);
+        task = await runner.run(args, revisedTask);
       } catch (err) {
         if (knowFailed(err)) release();
+        if (err instanceof CortexCliError && err.code === "exit") {
+          const status = new RegExp(`task ${id} is (review|done)$`).exec(err.message)?.[1];
+          if (status) throw refusal(status);
+        }
         throw err;
       }
       try {
-        const { update } = await runner.run(
-          ["update", String(input.task_id), `--message=${input.summary}`, `--as=bb-${call.threadId}`, "--json"],
-          z.object({ update: z.object({ id: taskId }) }),
-        ).catch(err => {
-          throw new Error(`Revised ${description(task)}, but posting its summary failed. Check the task and post a cortex_update if the summary is missing; do not repeat the edit. ${NO_SHELL}`, { cause: err });
-        });
-        store.recordRevision(task.id, task.created, update.id);
+        store.recordRevision(task.id, task.created, task.update.id);
       } finally {
         changed(call.threadId, task, true);
       }
@@ -285,7 +308,7 @@ export function createMemoryWrites(
         return existingState(task);
       }
       changed(call.threadId, task, false);
-      return withTaskCard(`Updated ${describeState(task)} Reason: ${input.reason}.`, task.id);
+      return withTaskCard(`Updated ${describeState(task)} Reason: ${input.reason}${/[.!?]$/.test(input.reason) ? "" : "."}`, task.id);
     });
   }
 

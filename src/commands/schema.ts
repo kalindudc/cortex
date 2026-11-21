@@ -1,5 +1,6 @@
 import { defineCommand } from "citty";
 import pkg from "../../package.json" with { type: "json" };
+import { ATOMIC_EDIT_CAPABILITY } from "../daemon.ts";
 import { TAG_NAME_RE } from "../store.ts";
 import { ErrCode, printJson } from "../output.ts";
 
@@ -39,7 +40,10 @@ const COMMANDS: { name: string; summary: string }[] = [
       "canonical saved knowledge: list|show|entry|read|history|knowledge; mutate --input JSON (--json); attributed, revision-guarded mutations, candidates require human approval",
   },
   { name: "watch", summary: "follow changes and reconnect markers (--json)" },
-  { name: "edit", summary: "edit title/body/priority/tags (--json; anchor body edits)" },
+  {
+    name: "edit",
+    summary: "edit title/body/priority/tags (--json; anchor body edits; --message with --as; --unless-status)",
+  },
   { name: "mv", summary: "move a task to a lane (--json)" },
   { name: "rm", summary: "remove a task (--json, --force)" },
   { name: "lane", summary: "manage lanes: add|ls|edit|rm (--json)" },
@@ -73,6 +77,7 @@ export default defineCommand({
   run({ args }) {
     const schema = {
       version: pkg.version,
+      capabilities: [ATOMIC_EDIT_CAPABILITY],
       tables: {
         tasks: {
           columns: ["id", "lane", "title", "body", "status", "priority", "created", "updated"],
