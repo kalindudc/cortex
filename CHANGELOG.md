@@ -2,6 +2,14 @@
 
 Cortex follows [semantic versioning](https://semver.org). Each release has a section below, newest first.
 
+## 0.110.2 - 2026-11-23
+
+- **`cortex_note` says which form a call is.** A call without a task id creates a document from a title, kind
+  and body; a call with one revises that task with a summary. Each field now says which form uses it, and a refused
+  call names the form it was read as and the fields that form takes, instead of a raw validation dump. Agents that
+  sent a revision summary with a new document read the old refusal as a dead end; now one retry fixes it.
+- The tool description and the lead's fold save turn list the fields a new document needs.
+
 ## 0.110.1 - 2026-11-21
 
 - **Leads fold member reports.** Members rarely save on their own, so after a request that received a member's

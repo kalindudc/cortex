@@ -212,4 +212,13 @@ describe("checkpointPrompt", () => {
     expect(update).toContain("Focus streams (most recent first): @9, @5");
     expect(update).not.toContain("and 0 more");
   });
+
+  test("both checkpoints name the fields each cortex_note form needs", () => {
+    const fold = checkpointPrompt({ kind: "fold", reports: [{ threadId: "thr_member01", chars: 10, at: 0 }], focus: [] });
+    const attach = checkpointPrompt({ kind: "attach", edited: ["a.ts"], focus: [], candidates: "" });
+    for (const prompt of [fold, attach]) {
+      expect(prompt).toContain("cortex_note with task_id");
+      expect(prompt).toContain("cortex_note with title, kind and Markdown body");
+    }
+  });
 });

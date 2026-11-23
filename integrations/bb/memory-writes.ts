@@ -15,23 +15,26 @@ const memory = z.enum(["include", "exclude"]);
 const line = (min: number, max: number) =>
   z.string().min(min).max(max).refine(s => !/[\r\n\0]/.test(s) && s.trim().length >= min, "must be one non-blank line").trim();
 const editText = z.string().max(BODY_LIMIT).refine(s => !s.includes("\0"), "cannot contain NUL");
-const title = line(8, 120).describe("Single-line document title");
+const title = line(8, 120).describe("Single-line document title: required to create; with task_id, an optional new title");
 
+// The advertised schema merges both forms, so each description names the form that uses the field.
 const createInput = z.object({
   title,
-  body: z.string().min(80).max(BODY_LIMIT).refine(s => s.trim().length >= 80, "provide at least 80 characters of Markdown"),
-  kind: z.enum(["note", "plan", "research", "decision"]),
-  tags: z.array(z.string().max(32).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)).max(5).optional(),
-  memory: memory.optional(),
-  status: z.enum(STATUSES).optional(),
+  body: z.string().min(80).max(BODY_LIMIT).refine(s => s.trim().length >= 80, "provide at least 80 characters of Markdown")
+    .describe("Create only: the Markdown document, at least 80 characters"),
+  kind: z.enum(["note", "plan", "research", "decision"]).describe("Create only: the kind of document"),
+  tags: z.array(z.string().max(32).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)).max(5).optional()
+    .describe("Create only: up to five lowercase tags"),
+  memory: memory.optional().describe("Create only: exclude keeps a transient document out of memory"),
+  status: z.enum(STATUSES).optional().describe("Create only: the starting status, open by default"),
 }).strict();
 const reviseFields = z.object({
-  task_id: taskId,
+  task_id: taskId.describe("The task to revise; leave out to create a new document"),
   title: title.optional(),
-  search: editText.refine(s => s.length > 0, "search cannot be empty").optional()
-    .describe("Exact anchor that occurs once in the current body"),
-  replace: editText.optional().describe("Replacement for the exact anchor; empty deletes it"),
-  summary: line(1, 4096).describe("One-line update explaining what changed"),
+  search: editText.refine(s => s.length > 0, "cannot be empty").optional()
+    .describe("Revise only: exact anchor that occurs once in the current body"),
+  replace: editText.optional().describe("Revise only: replacement for the exact anchor; empty deletes it"),
+  summary: line(1, 4096).describe("Revise only, required with task_id: one-line update explaining what changed"),
 }).strict();
 const reviseInput = reviseFields.superRefine(({ title, search, replace }, ctx) => {
   if ((search === undefined) !== (replace === undefined)) {
@@ -41,6 +44,36 @@ const reviseInput = reviseFields.superRefine(({ title, search, replace }, ctx) =
   }
 });
 export const noteParameters = createInput.partial().extend(reviseFields.partial().shape).strict();
+
+type NoteForm = "create" | "revise";
+const FORMS: Record<NoteForm, { verb: string; help: string }> = {
+  create: {
+    verb: "creating",
+    help: "Without task_id, cortex_note creates a new document from title, kind and body (tags, memory and status are optional). " +
+      "To revise an existing task instead, pass its task_id, a summary, and search with replace or a new title.",
+  },
+  revise: {
+    verb: "revising",
+    help: "With task_id, cortex_note revises that task: pass a one-line summary and either search with replace or a new title. " +
+      "To create a new document instead, leave out task_id and pass title, kind and body.",
+  },
+};
+
+/** Parses one form, turning a refusal into a sentence that names the form the call was read as and what it takes. */
+function parseForm<T>(schema: z.ZodType<T>, form: NoteForm, input: Record<string, unknown>): T {
+  const parsed = schema.safeParse(input);
+  if (parsed.success) return parsed.data;
+  const problems = parsed.error.issues.map(issue => {
+    if (issue.code === "unrecognized_keys") {
+      return `${issue.keys.join(", ")} ${issue.keys.length === 1 ? "is" : "are"} not used when ${FORMS[form].verb}`;
+    }
+    const field = issue.path.join(".");
+    // An absent field only raises an issue when it is required; zod reports a missing enum as invalid_value.
+    if (issue.path.length === 1 && input[field] === undefined) return `${field} is missing`;
+    return field ? `${field}: ${issue.message}` : issue.message;
+  });
+  throw new Error(`Not saved: ${problems.join("; ")}. ${FORMS[form].help} ${NO_SHELL}`);
+}
 export const curateParameters = z.object({
   task_id: taskId,
   memory,
@@ -314,8 +347,8 @@ export function createMemoryWrites(
 
   return {
     async note(input: z.infer<typeof noteParameters>, call: Call): Promise<string> {
-      if (input.task_id === undefined) return create(createInput.parse(input), call);
-      return revise(reviseInput.parse(input), call);
+      if (input.task_id === undefined) return create(parseForm(createInput, "create", input), call);
+      return revise(parseForm(reviseInput, "revise", input), call);
     },
     curate,
   };

@@ -196,7 +196,8 @@ export function checkpointPrompt(input:
       "",
       "Do EXACTLY ONE of:",
       "- UPDATE: fold durable findings into a matching stream listed in context or in your focus. Use cortex_note with task_id, a one-line summary and an exact search/replace anchor.",
-      "- CREATE: use one cortex_note only for durable findings no stream covers. Save verified findings with their sources and when they apply.",
+      "- CREATE: call cortex_note with title, kind and Markdown body only for durable findings no stream covers. Create at most one. " +
+        "Save verified findings with their sources and when they apply.",
       "- NOTHING: routine reports, status, or findings already saved.",
       "",
       ...CHECKPOINT_END,

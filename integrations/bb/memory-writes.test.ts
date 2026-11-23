@@ -1,8 +1,9 @@
 import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
 import { afterEach, expect, test } from "vitest";
+import { z } from "zod";
 import type { CortexRunner } from "./cli";
 import { CortexCliError } from "./cli";
-import { createMemoryWrites } from "./memory-writes";
+import { createMemoryWrites, noteParameters } from "./memory-writes";
 import { createWorkstreamStore } from "./workstream-store";
 
 const HOUR = 3_600_000;
@@ -286,6 +287,60 @@ test("revises only allowed statuses, supports anchored edit, and posts the suppl
   ]]);
   expect(s.calls.some(c => c.args[0] === "update")).toBe(false);
   await expect(s.writes.note({ task_id: 6, search: "hermetic", summary: "Missing replacement" }, actor())).rejects.toThrow(/together/);
+});
+
+test("a create carrying revision fields is refused with the create form, before any write or budget", async () => {
+  const s = setup();
+  const withSummary = s.writes.note({ ...note("Taxonomy of motifs"), summary: "Saved the taxonomy" }, actor());
+  await expect(withSummary).rejects.toThrow(
+    "Not saved: summary is not used when creating. Without task_id, cortex_note creates a new document from title, kind and body",
+  );
+  const summaryForTitle = s.writes.note({ body: BODY, kind: "note", summary: "Saved the taxonomy" }, actor());
+  await expect(summaryForTitle).rejects.toThrow("Not saved: title is missing; summary is not used when creating.");
+  await expect(summaryForTitle).rejects.toThrow(
+    /To revise an existing task instead, pass its task_id, a summary, and search with replace or a new title\. Never fall back to the shell\.$/,
+  );
+  const anchors = s.writes.note({ ...note("Taxonomy of motifs"), search: "a", replace: "b" }, actor());
+  await expect(anchors).rejects.toThrow("Not saved: search, replace are not used when creating.");
+  await expect(s.writes.note({ title: "Taxonomy of motifs", body: BODY }, actor())).rejects.toThrow("Not saved: kind is missing.");
+  // No lane lookup, CLI call or reservation: the hourly check below would fail if a refusal had spent a slot.
+  expect(s.calls).toEqual([]);
+  expect(await s.writes.note(note("First real document"), actor())).toContain("Saved @1");
+  expect(await s.writes.note(note("Second real document"), actor())).toContain("Saved @2");
+});
+
+test("a revision carrying create fields or no summary is refused with the revise form, before any edit", async () => {
+  const s = setup();
+  s.tasks.set(6, s.task(6));
+  const withBody = s.writes.note({ task_id: 6, search: "isolated", replace: "hermetic", summary: "Checked", body: BODY, kind: "note" }, actor());
+  await expect(withBody).rejects.toThrow(
+    "Not saved: body, kind are not used when revising. With task_id, cortex_note revises that task",
+  );
+  const noSummary = s.writes.note({ task_id: 6, search: "isolated", replace: "hermetic" }, actor());
+  await expect(noSummary).rejects.toThrow("Not saved: summary is missing.");
+  await expect(noSummary).rejects.toThrow(
+    /To create a new document instead, leave out task_id and pass title, kind and body\. Never fall back to the shell\.$/,
+  );
+  await expect(s.writes.note({ task_id: 6, summary: "Nothing to change" }, actor())).rejects.toThrow(
+    "Not saved: provide title or search and replace.",
+  );
+  await expect(s.writes.note({ task_id: 6, search: "", replace: "x", summary: "Checked" }, actor())).rejects.toThrow(
+    "Not saved: search: cannot be empty.",
+  );
+  expect(s.calls).toEqual([]);
+});
+
+test("the advertised schema says which form uses each field", () => {
+  const { properties } = z.toJSONSchema(noteParameters) as { properties: Record<string, { description?: string }> };
+  for (const field of ["body", "kind", "tags", "memory", "status"]) {
+    expect(properties[field]?.description, field).toMatch(/^Create only/);
+  }
+  for (const field of ["search", "replace", "summary"]) {
+    expect(properties[field]?.description, field).toMatch(/^Revise only/);
+  }
+  expect(properties.summary?.description).toContain("required with task_id");
+  expect(properties.task_id?.description).toContain("leave out to create");
+  expect(properties.title?.description).toContain("required to create");
 });
 
 test.each(["review", "done"])("a change to %s before the edit still refuses the revision", async status => {
