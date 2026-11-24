@@ -10,6 +10,7 @@ const BODY_LIMIT = 30_000;
 const NO_SHELL = "Never fall back to the shell.";
 const DAILY = "the daily lane budget is full";
 const PAUSED = "agent documents entering memory are paused";
+const LANE_CHOICES_MAX = 60;
 const taskId = z.number().int().positive();
 const memory = z.enum(["include", "exclude"]);
 const line = (min: number, max: number) =>
@@ -27,6 +28,8 @@ const createInput = z.object({
     .describe("Create only: up to five lowercase tags"),
   memory: memory.optional().describe("Create only: exclude keeps a transient document out of memory"),
   status: z.enum(STATUSES).optional().describe("Create only: the starting status, open by default"),
+  lane: line(1, 64).optional()
+    .describe("Create only: an existing lane, when the document belongs to another project or this thread has no lane of its own"),
 }).strict();
 const reviseFields = z.object({
   task_id: taskId.describe("The task to revise; leave out to create a new document"),
@@ -49,7 +52,7 @@ type NoteForm = "create" | "revise";
 const FORMS: Record<NoteForm, { verb: string; help: string }> = {
   create: {
     verb: "creating",
-    help: "Without task_id, cortex_note creates a new document from title, kind and body (tags, memory and status are optional). " +
+    help: "Without task_id, cortex_note creates a new document from title, kind and body (tags, memory, status and lane are optional). " +
       "To revise an existing task instead, pass its task_id, a summary, and search with replace or a new title.",
   },
   revise: {
@@ -87,6 +90,7 @@ const similarTasks = z.object({
   hits: z.array(z.object({ id: taskId, title: z.string(), lane: z.string() })),
 });
 const revisedTask = savedTask.extend({ update: z.object({ id: taskId }) });
+const laneRows = z.array(z.object({ name: z.string() }));
 const TITLE_STOP_WORDS = new Set(
   ("the and for are but not you your our its his her they their this that these those " +
     "with from into onto over under about after before then than there here when where what which who why how " +
@@ -174,7 +178,24 @@ export function createMemoryWrites(
     };
   }
 
-  async function laneOf(call: Call): Promise<string> {
+  async function existingLanes(signal: AbortSignal): Promise<string[]> {
+    return (await runner.run(["lane", "ls", "--json"], laneRows, { signal })).map(row => row.name).sort();
+  }
+
+  const laneChoices = (lanes: string[]): string => {
+    const more = lanes.length - LANE_CHOICES_MAX;
+    return lanes.slice(0, LANE_CHOICES_MAX).join(", ") + (more > 0 ? `, and ${more} more` : "");
+  };
+
+  async function laneOf(call: Call, requested: string | undefined): Promise<string> {
+    if (requested !== undefined) {
+      // Only an existing lane: `cortex add` would create any name it is given, and a new lane is the user's call.
+      const lanes = await existingLanes(call.signal);
+      if (lanes.includes(requested)) return requested;
+      throw new Error(
+        `Not saved: lane ${JSON.stringify(requested)} does not exist. Pass one of: ${laneChoices(lanes)}; ask the user for a new lane. ${NO_SHELL}`,
+      );
+    }
     const { projectId, cwd } = await state.locate(call.threadId);
     call.signal.throwIfAborted();
     if (cwd !== null) {
@@ -188,14 +209,22 @@ export function createMemoryWrites(
     }
     const cached = state.laneFor(projectId, true);
     if (cached) return cached;
-    throw new Error(`no lane for this thread's project; ask the lead. ${NO_SHELL}`);
+    let choices: string;
+    try {
+      choices = `one of: ${laneChoices(await existingLanes(call.signal))}`;
+    } catch (err) {
+      choices = `an existing lane (listing them failed: ${err instanceof Error ? err.message : String(err)})`;
+    }
+    throw new Error(
+      `Not saved: no lane for this thread's project (no git checkout or known lane). Pass lane with the existing lane the document belongs to, ${choices}. ${NO_SHELL}`,
+    );
   }
 
   const show = async (id: number, signal: AbortSignal) =>
     (await runner.run(["show", String(id), "--json"], shownTask, { signal })).task;
 
   async function create(input: z.infer<typeof createInput>, call: Call): Promise<string> {
-    const lane = await laneOf(call);
+    const lane = await laneOf(call, input.lane);
     const author = `bb-${call.threadId}`;
     const digest = createHash("sha256").update(JSON.stringify([author, lane, input.title, input.body])).digest("hex");
     return serialized(digest, async () => {

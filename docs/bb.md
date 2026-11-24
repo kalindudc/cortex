@@ -107,10 +107,10 @@ change status or curate without a reason. The task tab shows progress and source
 
 ## What agents receive
 
-Under Automatic, threads you start and delegates with visible children get a primer and save turns. Hidden
-helpers do not make a lead. Other delegates save and curate manually. Look up only omits document tools and save
-turns; Off also omits recall. Progress updates work in all modes. Revisions commit their attributed summary
-with the edit and refuse tasks in review or done. Excluded saves record a reason; you can still open them by id.
+Under Automatic, threads you start and delegates with visible children get a primer and save turns; hidden helpers
+don't make a lead. Other delegates save and curate manually. Look up only omits document tools and save turns; Off
+omits recall. Updates work in all modes. Revisions commit their summary with the edit and refuse review or done
+tasks. Excluded saves record a reason. New documents use the checkout's or project's lane, or an existing lane named.
 
 A lead may get a fold checkpoint without changing files. It names member reports already in context and asks
 the lead to revise a matching stream, create one verified stream, or save nothing for routine or saved findings.

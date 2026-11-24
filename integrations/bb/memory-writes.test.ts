@@ -27,6 +27,8 @@ function setup() {
   let similarityFails = false;
   let hits = [{ id: 77, lane: "other", title: "Similar subject" }];
   let statusAtEdit: string | undefined;
+  let lanes = ["cached", "checkout", "shell"];
+  let lanesFail = false;
   let next = 1;
   const calls: { args: readonly string[]; cwd?: string; input?: string }[] = [];
   const task = (id: number, fields: { status?: string; memory_excluded?: boolean; title?: string; lane?: string } = {}) => ({
@@ -49,6 +51,10 @@ function setup() {
       calls.push({ args, ...options });
       const [verb, sub, id] = args;
       const get = (flag: string) => args.find(arg => arg.startsWith(`--${flag}=`))?.slice(flag.length + 3);
+      if (verb === "lane" && sub === "ls") {
+        if (lanesFail) throw new Error("daemon down");
+        return schema.parse(lanes.map((name, sort) => ({ name, color: null, sort })));
+      }
       if (verb === "add") {
         if (addError) throw addError;
         const added = task(next++, { title: args.at(-1), lane: get("lane"), memory_excluded: args.includes("--memory-excluded") });
@@ -102,6 +108,7 @@ function setup() {
     localFails: () => { localFails = true; }, pause: () => { pause = true; },
     addFails: (value: Error | null) => { addError = value; }, similarityFails: () => { similarityFails = true; },
     setHits: (value: typeof hits) => { hits = value; }, statusAtEdit: (value: string) => { statusAtEdit = value; },
+    lanes: (value: string[]) => { lanes = value; }, lanesFail: () => { lanesFail = true; },
   };
 }
 
@@ -115,9 +122,39 @@ test("uses local lane before cached lane, then refuses rather than using the run
   expect(await s.writes.note(note("Verified cached behavior"), actor())).toContain("lane cached");
   s.local(null);
   s.cached(null);
-  await expect(s.writes.note(note("No lane available"), actor())).rejects.toThrow("no lane for this thread's project; ask the lead");
-  expect(s.calls.filter(c => c.args[1] === "lane").map(c => c.cwd)).toEqual(["/verified/checkout", "/verified/checkout"]);
+  await expect(s.writes.note(note("No lane available"), actor())).rejects.toThrow(
+    "no lane for this thread's project (no git checkout or known lane). Pass lane with the existing lane the document belongs to, one of: cached, checkout, shell.",
+  );
+  expect(s.calls.filter(c => c.args[0] === "memory" && c.args[1] === "lane").map(c => c.cwd))
+    .toEqual(["/verified/checkout", "/verified/checkout"]);
   expect(actuallyAdded(s)).toHaveLength(2);
+  s.lanesFail();
+  await expect(s.writes.note(note("No lane and no list"), actor())).rejects.toThrow(
+    "Pass lane with the existing lane the document belongs to, an existing lane (listing them failed: daemon down)",
+  );
+  expect(actuallyAdded(s)).toHaveLength(2);
+});
+
+test("an explicit lane must already exist; it wins over the thread's own lane and works without one", async () => {
+  const s = setup();
+  const filed = (title: string) => s.writes.note({ ...note(title), lane: "shell" }, actor());
+  expect(await filed("Verified shell behavior")).toContain("lane shell");
+  s.local(null);
+  s.cached(null);
+  expect(await filed("Verified shell behavior without a lane")).toContain("lane shell");
+  await expect(s.writes.note({ ...note("Made-up lane"), lane: "scratch-notes" }, actor())).rejects.toThrow(
+    'Not saved: lane "scratch-notes" does not exist. Pass one of: cached, checkout, shell; ask the user for a new lane.',
+  );
+  s.lanes(Array.from({ length: 62 }, (_, i) => `lane-${String(i).padStart(2, "0")}`));
+  await expect(s.writes.note({ ...note("Another made-up lane"), lane: "nope" }, actor())).rejects.toThrow(
+    /lane-59, and 2 more; ask the user/,
+  );
+  expect(actuallyAdded(s).map(c => c.args.find(arg => arg.startsWith("--lane=")))).toEqual(["--lane=shell", "--lane=shell"]);
+  // The explicit lane is never resolved from the thread's folder, and a revise does not take one.
+  expect(s.calls.filter(c => c.args[0] === "memory" && c.args[1] === "lane")).toHaveLength(0);
+  expect(() => noteParameters.parse({ task_id: 1, summary: "x", title: "Renamed document", lane: "shell" })).not.toThrow();
+  await expect(s.writes.note({ task_id: 1, summary: "Renamed it", title: "Renamed document", lane: "shell" }, actor()))
+    .rejects.toThrow("lane is not used when revising");
 });
 
 test("a plain local folder uses only a verified cached lane, never its basename", async () => {
@@ -125,7 +162,7 @@ test("a plain local folder uses only a verified cached lane, never its basename"
   s.local("/plain/scratch-notes");
   expect(await s.writes.note(note("Plain folder with cache"), actor())).toContain("lane cached");
   s.cached(null);
-  await expect(s.writes.note(note("Plain folder without a cache"), actor())).rejects.toThrow("no lane for this thread's project; ask the lead");
+  await expect(s.writes.note(note("Plain folder without a cache"), actor())).rejects.toThrow("no lane for this thread's project");
   expect(actuallyAdded(s).map(c => c.args.find(arg => arg.startsWith("--lane=")))).toEqual(["--lane=cached"]);
 });
 

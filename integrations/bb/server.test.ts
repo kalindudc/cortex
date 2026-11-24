@@ -464,8 +464,23 @@ describe("agent document tools", () => {
     await warm(s);
     await expect(s.harness.behavior.callAgentTool("cortex_note", {
       title: "Verified helper behavior", body: "Observed in an isolated fixture. ".repeat(3), kind: "note",
-    }, { threadId: THREAD })).rejects.toThrow("no lane for this thread's project; ask the lead");
+    }, { threadId: THREAD })).rejects.toThrow("no lane for this thread's project");
     expect(s.argvs().some(argv => argv[0] === "add")).toBe(false);
+  });
+
+  test("a thread without a lane files a document in an existing lane it names", async () => {
+    const fixture = noStreams();
+    fixture.memoryLane = null;
+    fixture.lanes = ["lane", "shell"];
+    const s = await setup({ fixture });
+    await warm(s);
+    const note = (lane: string) => s.harness.behavior.callAgentTool("cortex_note", {
+      title: "Verified helper behavior", body: "Observed in an isolated fixture. ".repeat(3), kind: "note", lane,
+    }, { threadId: THREAD });
+    await expect(note("journal")).rejects.toThrow('lane "journal" does not exist. Pass one of: lane, shell');
+    expect(await note("shell")).toContain("lane shell");
+    expect(s.argvs().filter(argv => argv[0] === "add").map(argv => argv.find(arg => arg.startsWith("--lane="))))
+      .toEqual(["--lane=shell"]);
   });
 
   test("revision and curation receipts reach the existing task RPC", async () => {

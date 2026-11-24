@@ -11,7 +11,7 @@ Humans usually work in the desktop app: plain `cortex` in an interactive termina
 
 ## In a bb thread
 
-- Use `cortex_note` before handing off or finishing when a verified finding, plan, decision or explanation should outlive the thread. Revise the matching task with its id, an exact anchor and a one-line summary rather than creating a duplicate. Use `cortex_update` instead for tasks in review or done.
+- Use `cortex_note` before handing off or finishing when a verified finding, plan, decision or explanation should outlive the thread. Revise the matching task with its id, an exact anchor and a one-line summary rather than creating a duplicate. Use `cortex_update` instead for tasks in review or done. A new document goes in this project's lane; pass `lane` (an existing lane) when it belongs to another project or the thread has no lane, such as a personal workspace.
 - Use `cortex_update` for progress and status on an existing task. Use `cortex_recall` to read; check what still applies against the source. Use `cortex_curate` with a reason to exclude stale, duplicate or transient tasks, or include a verified task again.
 - Documents enter memory by default. Cite sources and when they apply. Leave briefs, raw logs, per-run status and reports, and drafts another document replaces in thread storage or save them excluded.
 - When a fold checkpoint names member reports, the lead folds only their verified, durable findings into a matching stream or creates one if none fits. Routine reports, status, and findings already saved need no write.

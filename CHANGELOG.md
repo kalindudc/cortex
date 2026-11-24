@@ -2,6 +2,14 @@
 
 Cortex follows [semantic versioning](https://semver.org). Each release has a section below, newest first.
 
+## 0.110.3 - 2026-11-24
+
+- **`cortex_note` can save from a thread without a lane.** A thread in a personal workspace, with no git checkout
+  and no known lane for its project, could not save a document at all. An agent can now pass `lane` with an existing
+  lane, also when a document belongs to another project. A lane that does not exist is refused with the list of
+  existing lanes and nothing is written, so agents never create lanes. When no lane resolves, the refusal now says
+  to pass `lane` instead of ending at "ask the lead".
+
 ## 0.110.2 - 2026-11-23
 
 - **`cortex_note` says which form a call is.** A call without a task id creates a document from a title, kind

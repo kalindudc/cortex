@@ -37,6 +37,8 @@ export type FakeFixture = {
   oldMemoryWrites?: boolean;
   oldAtomicEdit?: boolean;
   memoryLane?: string | null;
+  /** The names `lane ls --json` lists. */
+  lanes?: string[];
   streamsProbeFails?: boolean;
   /** Fails `memory streams` for agents (neither the feature probe nor the user's `--with-excluded` view). */
   streamsFails?: boolean;
@@ -101,6 +103,8 @@ if (a === "schema") {
   if (flag("limit") === "1" && fixture.streamsProbeFails) fail("Unknown command streams");
   if (fixture.streamsFails && flag("limit") !== "1" && !argv.includes("--with-excluded")) fail("daemon down");
   out((fixture.streams || {})[flag("author")] || []);
+} else if (a === "lane" && b === "ls") {
+  out((fixture.lanes ?? ["lane"]).map((name, sort) => ({ name, color: null, sort })));
 } else if (a === "memory" && b === "lane") {
   out(fixture.memoryLane === null && argv.includes("--checkout") ? "" : (fixture.memoryLane ?? fixture.context?.lane ?? "lane") + "\n");
 } else if (a === "add") {
